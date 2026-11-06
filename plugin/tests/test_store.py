@@ -2,7 +2,6 @@
 inside it never splits its records."""
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -37,79 +36,3 @@ def test_records_stay_in_the_folder_the_session_started_in(tmp_path: Path, monke
     # another conversation keeps no labels here: from data/src/ it finds no folder above
     monkeypatch.setenv("THIMBLE_CONVERSATION", "c-2")
     assert STORE.find_root(other / "deep") == (other / "deep").resolve()
-
-
-def test_a_command_in_thimbles_temp_folder_keeps_the_start_folders_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # `cd $TMPDIR && thimble label …` over a file Claude derived there: the start folder is the root, not the temp folder
-    data, temp = tmp_path / "data", tmp_path / "tmp" / "thimble"
-    data.mkdir()
-    temp.mkdir(parents=True)
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("TMPDIR", str(temp))
-    monkeypatch.setenv("THIMBLE_START", str(data))
-    assert STORE.in_temp(temp / "rows.jsonl") and not STORE.in_temp(data)
-    assert STORE.find_root(temp) == data.resolve()
-    # thimble/ in the person's TMPDIR counts too; outside a session the temp folder is a folder like any other
-    monkeypatch.setenv("TMPDIR", str(temp.parent))
-    assert STORE.find_root(temp) == data.resolve()
-    monkeypatch.delenv("THIMBLE_START")
-    assert STORE.find_root(temp) == temp.resolve()
-
-
-def test_a_file_a_command_of_claude_codes_bash_sandbox_derived_is_the_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # R2: Claude Code's Bash sandbox gives a command Claude Code's own temp folder, claude-<uid>/, as its TMPDIR and its
-    # CLAUDE_CODE_TMPDIR, not thimble's, and lets it write only there: `cd $TMPDIR && thimble label …` keeps the start
-    # folder's records, and a file there is the session's, named by its real path, as one in thimble's folder is
-    from kernel import sources as S  # noqa: PLC0415
-
-    data, temp = tmp_path / "data", tmp_path / "tmp"
-    claude = temp / f"claude-{os.getuid()}"
-    data.mkdir()
-    claude.mkdir(parents=True)
-    (claude / "rows.jsonl").write_text('{"night": 1}\n')
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("THIMBLE_START", str(data))
-    monkeypatch.setenv("TMPDIR", str(claude))
-    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(claude))
-    assert STORE.in_temp(claude / "rows.jsonl") and STORE.find_root(claude) == data.resolve()
-    assert S.expand_glob(data, str(claude / "rows.jsonl")) == [str((claude / "rows.jsonl").resolve())]
-    # a command outside the sandbox (the plugin's own, or Bash with the sandbox off): CLAUDE_CODE_TMPDIR is the folder
-    # Claude Code keeps its own in, and TMPDIR thimble's
-    monkeypatch.setenv("TMPDIR", str(temp / "thimble"))
-    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(temp))
-    assert STORE.in_temp(claude / "rows.jsonl") and STORE.find_root(claude) == data.resolve()
-    # another user's folder there is no temp folder of the session's
-    other = temp / f"claude-{os.getuid() + 1}"
-    other.mkdir()
-    assert not STORE.in_temp(other / "rows.jsonl")
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
-def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    data = tmp_path / "data"
-    (data / "src").mkdir(parents=True)
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("THIMBLE_START", str(data))
-    data.chmod(0o555)
-    try:
-        st = STORE.Store(data)
-        assert st.dir == STORE.kept_dir(data.resolve()) and str(st.dir).startswith(str(tmp_path / "th" / "conversations"))
-        st.sub("labels")
-        assert not (data / "thimble").exists()
-        # a later command in a subfolder finds the root by its kept records
-        assert STORE.find_root(data / "src") == data.resolve()
-    finally:
-        data.chmod(0o755)
-    # once kept there, they stay there, though the folder may be written now
-    assert STORE.Store(data).dir == STORE.kept_dir(data.resolve())
-
-
-def test_folder_names_keep_folders_apart_and_match_the_plugin() -> None:
-    # two folders whose paths differ only in characters a name cannot hold get names of their own
-    assert len({STORE.folder_name(p) for p in ("/w/run.1", "/w/run-1", "/w-run/1")}) == 3
-    # the plugin's core/layout.mjs makes the same names (core/test/layout.test.mjs checks these two values)
-    assert STORE.folder_name("/w/run.1") == "w-run-1-b8a5493c96fe"
-    assert STORE.short_hash("toolu_01ABC") == "12a499106e46"

@@ -1494,7 +1494,7 @@ def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[
 # An error thimble quotes in a reason, a notice or a repair request (an exception's text, a fork's error) is thimble's
 # own words, never the records' nor the check's: each path of this machine in it is read where it leads, as a cited
 # file is (written_path), and named as a reason names one (error_words). The terminal's notices name them alike
-# (core/text.js errorWords); plugin/tests/error_paths.json holds the cases both answer.
+# (core/text.js errorWords).
 
 # a path in an error's text: one quoted whole (in straight or typographic quotes, backticks), which may hold spaces and
 # colons, else one in a run of the characters a path holds, not a URL, starting where the run does, right after a flag

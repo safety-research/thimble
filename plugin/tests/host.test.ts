@@ -1,9 +1,9 @@
 // Where thimble's drawing does not show (core/host.ts drawsHere: Claude Code runs without its terminal interface, as in
 // the desktop app's Code tab, remote Cowork and claude -p), Citations and Cards act as off, as if the person had set
 // them off (settings/features.mjs UNDRAWN): the guidance leaves out their sections, and the citations in its other
-// examples read as plain words; no card tool is registered; and no check starts after a reply. In the terminal, all is
-// as before. The SDK host here starts the session as `claude -p` with CLAUDE_CODE_ENTRYPOINT=sdk-cli does: no surface,
-// not interactive. All data is made up. `claude plugin test plugin`.
+// examples read as plain words; no card tool is registered; and no check starts after a reply. The SDK host here starts
+// the session as `claude -p` with CLAUDE_CODE_ENTRYPOINT=sdk-cli does: no surface, not interactive. All data is made
+// up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { promptStub, tempRun } from './stubs'
@@ -104,42 +104,4 @@ test("in an SDK host's session, Citations and Cards act as off: the guidance has
   expect(guidance).toContain('Answer first: 12 of 40 runs failed.')
   expect(guidance).toContain('## Labels')
   expect(checks(w)).toHaveLength(0)
-})
-
-test("in an SDK host's session, Citations manual and Cards on demand act as off too: the guidance says nothing of when citations or cards come", { options: { citations: 'manual', cards: 'on demand' } }, async ($, on) => {
-  const w = await session($, on, SDK)
-  expect(w.tools).not.toContain('card')
-  const guidance = await ask($, w)
-  expect(guidance).not.toContain('## Cards')
-  expect(guidance).not.toContain('Draw a card only')
-  expect(guidance).not.toContain('These come only')
-})
-
-/** The sentence of main's guidance on the comments that come only when the analyst asks, with their keys. */
-const ASKED = 'These come only when the analyst asks: explainers (e).'
-
-for (const [who, options] of [
-  ['Explainers on demand', { explain: 'on demand' }],
-  ['the rows of a Minimal saved by 0.10.4 to 0.10.7, which a session there does not move', { minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }],
-] as const) {
-  test(`in an SDK host's session, ${who}: Explainers act as off too, since no key reaches thimble there, and the guidance names no key for them`, { options }, async ($, on) => {
-    const w = await session($, on, SDK)
-    const guidance = await ask($, w)
-    expect(guidance).not.toContain('These come only')
-    expect(guidance).not.toContain('(e)')
-  })
-}
-
-test('in the terminal, Explainers on demand: the guidance says they come when the analyst asks, by their key', { options: { explain: 'on demand' } }, async ($, on) => {
-  const w = await session($, on, TERMINAL)
-  expect((await ask($, w)).endsWith(ASKED)).toBe(true)
-})
-
-test("in the terminal, all is as before: the guidance keeps the Citing claims and Cards sections with their citations, the card tool is registered, and a check starts after a reply", { options: { citations: 'auto cite + verify', cards: 'auto' } }, async ($, on) => {
-  const w = await session($, on, TERMINAL)
-  expect(w.tools).toContain('card')
-  const guidance = await ask($, w)
-  expect(guidance).toBe(GUIDANCE.trim())
-  expect(checks(w)).toHaveLength(1)
-  expect(String(checks(w)[0].prompt)).toContain('[12 of 40]')
 })

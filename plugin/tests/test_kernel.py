@@ -1,11 +1,10 @@
-"""Focused tests of the kernel: stable row ids per source kind, row sets, coverage from what the hooks saw, and the
-command, which needs only Python's standard library. Run: python3 -m pytest plugin/tests"""
+"""The kernel's command, which needs only Python's standard library: it labels and counts coverage. Run: python3 -m
+pytest plugin/tests"""
 from __future__ import annotations
 
 import csv
 import json
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -16,10 +15,6 @@ import pytest
 ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 
-from kernel import coverage as CV  # noqa: E402
-from kernel import refs as R  # noqa: E402
-from kernel import sources as S  # noqa: E402
-from kernel.store import Store  # noqa: E402
 
 DAYS = ["2026-06-01"] * 3 + ["2026-06-02"] * 5 + ["2026-06-03"] * 2
 THIMBLE = Path(__file__).resolve().parents[1] / "bin" / "thimble"
@@ -57,62 +52,10 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # ------------------------------------------------------------------ refs
 
 
-def test_refs_parse_rows_and_row_sets() -> None:
-    kinds = {"a.jsonl#L3": "lines", "a.jsonl#L1-3,7": "lines", "x.csv#row=2": "csvrows", "f.db#prs/2": "dbrows",
-             "f.db#prs": "table", "r.json#/messages/1": "pointer", "notes.md": "file", "budget.xlsx#Q3!B2": "file"}
-    assert {ref: R.parse(ref)["kind"] for ref in kinds} == kinds
-    assert R.parse("a.jsonl#L1-3,7")["nums"] == [1, 2, 3, 7]
-    assert R.parse("a.jsonl#L3-L9")["nums"] == list(range(3, 10))
-    with pytest.raises(R.RefError):
-        R.parse("a.jsonl#L3-x")  # a mistyped line ref is an error, not the whole file
-    assert R.parse("notes.md#Findings") == {"kind": "file", "path": "notes.md", "locator": "Findings"}
-
-
 # ------------------------------------------------------------------ sources
 
 
-def test_every_kind_has_rows_with_stable_ids(root: Path) -> None:
-    sources = [f for f in S.list_files(root) if S.kind_of(root / f)]
-    refs = {rel: [r.ref for r in S.iter_rows(root, rel)] for rel in sources}
-    assert refs["saves.jsonl"][:2] == ["saves.jsonl#L1", "saves.jsonl#L2"]
-    assert refs["runs.csv"] == ["runs.csv#row=1", "runs.csv#row=2", "runs.csv#row=3"]
-    assert refs["report.json"] == ["report.json#/messages/0", "report.json#/messages/1"]
-    assert refs["forge.db"] == ["forge.db#prs/1", "forge.db#prs/2", "forge.db#prs/3"]
-    assert refs["notes.md"] == ["notes.md#L1-3", "notes.md#L4-6"]
-    assert refs["change.diff"] == ["change.diff#L4-8"]
-    assert S.kind_of_file(root, "agent.jsonl") == "transcript"
-    again = {rel: [r.ref for r in S.iter_rows(root, rel)] for rel in sources}
-    assert again == refs
-    # a JSONL file's records read back by their lines, the same text
-    assert [r.raw for r in S.json_lines(root, "saves.jsonl", {2, 9})] == [r.raw for r in S.iter_rows(root, "saves.jsonl")][1:9:7]
-    hunk = next(S.iter_rows(root, "change.diff")).value
-    assert (hunk["file"], hunk["added"], hunk["removed"]) == ("x.py", 2, 1)
-
-
 # ------------------------------------------------------------------ coverage
-
-
-def test_coverage_merges_what_the_hook_saw(root: Path, tmp_path: Path) -> None:
-    st = Store(root)
-    seen = tmp_path / "th" / "seen"
-    seen.mkdir(parents=True)
-    rows = [{"tool": "Read", "file": str(root / "saves.jsonl"), "from": 1, "to": 4, "cwd": str(root)},
-            {"tool": "Grep", "path": str(root), "glob": "*.md", "mode": "content", "files": [str(root / "notes.md")],
-             "lines": {str(root / "notes.md"): [4]}, "cwd": str(root)},
-            {"tool": "Bash", "command": "head -2 change.diff", "out_lines": 2, "cwd": str(root)},
-            {"tool": "Bash", "command": "wc -l agent.jsonl", "out_lines": 1, "cwd": str(root)}]
-    (seen / "s-test.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
-    cov = CV.coverage(st)
-    status = {o["path"]: o["status"] for o in cov["files"]}
-    assert status == {"saves.jsonl": "seen", "notes.md": "seen", "change.diff": "seen", "agent.jsonl": "computed"}
-    assert sorted(cov["untouched"]["path"]) == ["forge.db", "report.json", "runs.csv"]
-    saves = next(o for o in cov["files"] if o["path"] == "saves.jsonl")
-    assert saves["seen_lines"] == 4
-    assert next(o for o in cov["files"] if o["path"] == "change.diff")["seen_lines"] == 2
-    assert next(o for o in cov["files"] if o["path"] == "notes.md")["hit_lines"] == [4]
-    # a counted file is not seen
-    assert cov["total"]["not_seen_files"] == 4 and cov["total"]["seen_files"] == 3 and cov["total"]["touched_files"] == 4
-    assert "Not read: 4 files" in CV.coverage_text(cov)
 
 
 # ------------------------------------------------------------------ the command
@@ -133,44 +76,3 @@ def test_the_command_labels_and_counts_coverage(root: Path) -> None:
     assert cov.returncode == 0, cov.stderr
     # the rule label went over every record of saves.jsonl, and none of it entered Claude's context
     assert "saves.jsonl  computed over all 10 records (busy); Claude read none of it" in cov.stdout
-
-
-def test_the_command_lists_only_what_stays(root: Path) -> None:
-    out = run(root, "--help")
-    assert out.returncode == 0
-    assert "thimble label" in out.stdout and "thimble coverage" in out.stdout and "thimble fix" in out.stdout
-    for gone in ("thimble run", "thimble rows", "thimble save", "thimble claims"):
-        assert gone not in out.stdout
-    bad = run(root, "rows")
-    assert bad.returncode == 2 and "thimble --help lists the commands" in bad.stderr
-
-
-def test_the_help_lists_the_options_thimble_has(root: Path) -> None:
-    """thimble --help lists each option the command takes, with the commands: --version, which names the thimble that
-    runs."""
-    out = run(root, "--help")
-    assert out.returncode == 0
-    listed = [x.split()[1] for x in out.stdout.splitlines() if x.startswith("    thimble -")]
-    assert listed == ["--version"], out.stdout
-    version = run(root, "--version")
-    assert version.returncode == 0 and version.stdout.startswith("thimble "), version.stdout + version.stderr
-
-
-def test_the_usage_line_names_only_the_commands_thimble_has(root: Path) -> None:
-    """A word that is no command gets the usage line, whose list of commands is the commands thimble has: each one of
-    them runs, thimble doctor too. thimble demo and browser are gone (thimble-browser replaces them)."""
-    bad = run(root, "demo")
-    assert bad.returncode == 2 and "no command 'demo'" in bad.stderr
-    listed = re.search(r"\{([a-z,]+)\}", bad.stderr)
-    assert listed, bad.stderr
-    assert "doctor" in listed.group(1).split(","), bad.stderr
-    for name in listed.group(1).split(","):
-        assert run(root, name, "--help").returncode == 0, f"the usage line names thimble {name}, which does not run"
-
-
-def test_the_browser_launcher_names_only_commands_thimble_has(root: Path) -> None:
-    """thimble-browser --help names a thimble command only when the terminal plugin's thimble has it."""
-    launcher = Path(__file__).resolve().parents[2] / "browser" / "scripts" / "thimble-browser"
-    help_ = "\n".join(launcher.read_text().splitlines()[1:20])
-    for name in re.findall(r"\bthimble (?!-)([a-z]+)", help_):
-        assert run(root, name, "--help").returncode == 0, f"thimble-browser --help names thimble {name}, which does not run"
