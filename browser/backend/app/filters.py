@@ -181,7 +181,7 @@ def canvas_view(c: str) -> dict | None:
 
 
 def describe(c: str, entry: dict) -> str:
-    """A filter in the chips' words: `claims a PR = yes; Kind · table; Group · Orientation; Text · "merge"`."""
+    """A filter in the chips' words: `claims a PR = yes; Kind · table; Group · Runs; Text · "merge"`."""
     from . import notebook
 
     ws = config.workspace_dir(c)

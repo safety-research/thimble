@@ -552,10 +552,6 @@ This card errored. Fix the code with `edit_card`.
 
 The code was stopped after {limit}. Make it faster and run it again with `edit_card`.
 
-## card-run
-
-The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
-
 ## card-tall
 
 card:{cid}'s body draws {height} px tall at the card's width, and about {limit} px of a card's body fit on the analyst's screen with its question and takeaway, so they never see the whole card at once.
@@ -680,14 +676,6 @@ The takeaway of its card card:{cid} was written for the run before; write it aga
 
 {cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
-## label-run
-
-The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
-
-## cards-stale
-
-{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
-
 ## show_label-not-files
 
 {label} is a label over {units}, which Files does not show. To show it, filter {where} by one of its values.
@@ -772,10 +760,6 @@ The analyst laid out no frame, so the shape is yours.
 
 {what}, so screenshot cannot take it. `read_ref` on it reads what the analyst sees.
 
-## screenshot-terminal
-
-screenshot cannot take this picture in terminal mode. There it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
-
 ## propose_view-proposed
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
@@ -843,10 +827,6 @@ thimble gave these words to the fork that is already fixing "{fix}". Tell the pe
 ## fix_thimble-failed
 
 thimble started no fix: {why} Tell the person in one short line.
-
-## ticket-terminal
-
-This call filed nothing: code tickets run only in browser mode for now, since the analyst allows each one on its card there. Tell the analyst so in one line: to file it, they quit, run `thimble mode browser`, start `thimble` again and ask again.
 
 ## view-media-unplayable
 
@@ -1277,7 +1257,7 @@ The session's calls above show what it read.
 
 ## agent-continue-earlier-session
 
-This agent ran in an earlier Claude Code session. To continue it, quit and run `thimble -r {session}` in this folder, or `claude -r {session}` and then /thimble.
+This agent ran in an earlier session of main, {session}, and cannot be continued from this one.
 
 ## agent-continue-earlier-version
 

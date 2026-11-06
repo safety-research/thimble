@@ -122,9 +122,9 @@ PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 # a shared fix goes through (fnmatch patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
-                     "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md",
+                     "plugin/prompts/fixer.md",
                      "browser/backend/app/dev.py",
-                     "browser/backend/app/fixes.py", "browser/backend/app/fix_share.py",
+                     "browser/backend/app/fixes.py",
                      "browser/frontend/src/chat/FixStrip.tsx", "browser/frontend/src/chat/fix.ts"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
 }

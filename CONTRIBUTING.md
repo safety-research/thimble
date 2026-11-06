@@ -113,7 +113,6 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | artifact | `prompts/artifact.md` | `cards/head.ts` | the prompt of the fork that p on a card starts, which publishes the card as a private claude.ai artifact |
 | fix request | `prompts/fix-request.md` | `fix/register.ts` | beside the person's words after `/thimble-fix <words>`: name the fix they change, or ask one short question |
 | fixer | `prompts/fixer.md` | `fix/fixer.ts`, `browser/backend/app/fixes.py` | the start of the first message of the fork that `/thimble-fix` starts |
-| fix draft | `prompts/fix-draft.md` | `browser/backend/app/fix_share.py` | one model call per fix shared from the browser: a public issue's title, what was wrong and how it was fixed |
 | reapply | `prompts/reapply.md` | `engine/kernel/fixes.py` | the first message of the session `thimble reapply` opens, which brings back the fixes an update set aside |
 | labels off | `prompts/labels-off.md` | `hooks/path.ts`, `browser/backend/app/labels_off.py` | the answer of `thimble label`, or of a label tool's call in the workbench, while Labels is off |
 
@@ -135,7 +134,7 @@ When the model does something you do not want, change the cause, not the symptom
 
 The browser workbench (`browser/`) keeps its own texts in `browser/prompts/`. Of these it
 reads the texts of what it runs as the terminal does, the citation checker, the look and the fixer (`checker.md`,
-`observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`, `fixer.md`), and `fix-draft.md`. Both modes read
+`observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`, `fixer.md`). Both modes read
 a text the same way: it may hold another text, `{{include:NAME}}`, and where the modes need different words it names
 them with a slot, `{{NAME}}`, whose words for each mode stand in `plugin/prompts/slots.json`: a name or a clause of at
 most one sentence. Its reader fills its other slots at each call (the registry's `fills`). A text of the workbench holds

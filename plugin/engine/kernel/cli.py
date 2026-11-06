@@ -758,7 +758,6 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     p.add_argument("id", nargs="?")
     p.add_argument("--json", action="store_true", help="issue: the whole record, as JSON")
     p.add_argument("--open", dest="open", action="store_true", help="issue: open the GitHub link in your browser too")
-    p.add_argument("--draft", help=argparse.SUPPRESS)  # issue: Claude's draft as JSON on stdin (-)
     p.add_argument("--yes", action="store_true", help="pr: open the pull request without asking (for scripts)")
     p.set_defaults(fn=cmd_file)
     p = sub.add_parser("update", help="the newest thimble release, for both modes", description=UPDATE_HELP,
@@ -802,10 +801,10 @@ def _named(args: list[str]) -> list[str]:
 
 def stdin_wait(argv: list[str]) -> float:
     """How long the command `argv` waits for its input on stdin, as its own code calls stdin_text: NEEDS_S for input it
-    cannot go on without (a label's code with no file, the model's answers, file issue's draft), stdin_text's own 1 s for
-    the rest that reads it (values as JSON for label --set, the words and records of the plugin's fix verbs), and 0 for a
-    command that reads none, or that does not parse. handoff.py reads stdin for as long before it hands the command to
-    the plugin, which gives the command what it read."""
+    cannot go on without (a label's code with no file, the model's answers), stdin_text's own 1 s for the rest that
+    reads it (values as JSON for label --set, the words and records of the plugin's fix verbs), and 0 for a command that
+    reads none, or that does not parse. handoff.py reads stdin for as long before it hands the command to the plugin,
+    which gives the command what it read."""
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             a = _parser()[0].parse_args(_named(list(argv)))
@@ -816,8 +815,6 @@ def stdin_wait(argv: list[str]) -> float:
         if a.answers == "-" or a.code in ("-", ""):
             return NEEDS_S
         return 1.0 if a.set_values == [] else 0.0
-    if cmd == "file":
-        return NEEDS_S if a.verb == "issue" and a.draft == "-" else 0.0
     if cmd == "fix":
         if a.verb in ("new", "round", "redo"):
             return 1.0

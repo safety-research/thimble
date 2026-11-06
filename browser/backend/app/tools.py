@@ -815,7 +815,7 @@ def _first_clause(text: str, cap: int = LINE_LIMIT) -> str:
 
 
 def _find_notebook(ws: Path, ref: str) -> dict | None:
-    """A group by id, path of titles (`Orientation / Final`, as add_card takes it; _group_at_path), exact title
+    """A group by id, path of titles (`Runs / Final`, as add_card takes it; _group_at_path), exact title
     (case-insensitive), title substring, or role name."""
     from . import notebook
 
@@ -843,9 +843,6 @@ def _find_notebook(ws: Path, ref: str) -> dict | None:
 # --------------------------------------------------------------------------- handlers: cells
 
 
-# The role a group made by title gets, by the title's last word: `Orientation` and the legacy `Final` are the
-# orientation's deck; anything else the analyst's.
-GROUP_ROLES_BY_TITLE = {"final": "exploration", "orientation": "exploration"}
 # How the canvas writes a group under another (canvas/layout.ts) and how a caller names one. The spaces are part of it:
 # a thread's group is titled `main/<slug>`, one title with a slash in it.
 GROUP_PATH_SEP = " / "
@@ -872,14 +869,8 @@ def _answer_request(ctx: "Ctx", request: str | None, cid: str) -> None:
         log.debug("card-request %s not announced off the event loop", request)
 
 
-def _role_by_title(title: str) -> str:
-    from . import notebook
-
-    return GROUP_ROLES_BY_TITLE.get(title.rsplit(" ", 1)[-1].casefold(), notebook.DEFAULT_ROLE)
-
-
 def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "builtins.list[str] | None" = None) -> str:
-    """The group a path of titles names (`Orientation / Final`, _walk_path). Where the path names none, one group is
+    """The group a path of titles names (`Runs / Final`, _walk_path). Where the path names none, one group is
     made, under the deepest group the path names, with the rest of the path as its title, so a path never makes a
     chain of empty groups around one card, and the same path finds the group again. The name made is appended to
     `made`. Under the groups' lock, so two processes that look for one path make it once."""
@@ -890,8 +881,7 @@ def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "bui
         hit, parent, rest = _walk_path(rows, path)
         if hit is not None:
             return str(hit["id"])
-        nb = notebook.create_notebook(ws, GROUP_PATH_SEP.join(rest), role=_role_by_title(rest[-1]), parent=parent,
-                                      created_by=created_by)
+        nb = notebook.create_notebook(ws, GROUP_PATH_SEP.join(rest), parent=parent, created_by=created_by)
         if made is not None:
             row = notebook.summary(nb)
             made.append(_group_name([*rows, row], row))
@@ -936,7 +926,7 @@ NO_GROUP = "Cards in no group"  # the loose cards' heading, as list_cards and co
 
 def _group_name(rows: "builtins.list[dict]", row: dict) -> str:
     """A group's name as add_card and list_cards take it: its title after the titles of the groups above it, joined
-    by GROUP_PATH_SEP, so `Final` under `Orientation` reads `Orientation / Final`."""
+    by GROUP_PATH_SEP, so `Final` under `Runs` reads `Runs / Final`."""
     by_id = {str(r["id"]): r for r in rows}
     names, seen, cur = [], set(), row
     while cur is not None and str(cur["id"]) not in seen:
@@ -974,7 +964,7 @@ def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
         if row is not None:
             return notebook.loose_group(ctx.ws) if _analysts(ctx.ws, str(row["id"])) else str(row["id"])
         with notebook.editing(ctx.ws):
-            nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), created_by=_group_author(ctx))
+            nb = notebook.create_notebook(ctx.ws, group, created_by=_group_author(ctx))
             nb[SESSION_KEY] = str(ctx.session)
             notebook.write_notebook(ctx.ws, nb)
         made.append(group)
@@ -984,7 +974,7 @@ def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
     row = _find_notebook(ctx.ws, group)
     if row is not None:
         return str(row["id"])
-    nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), created_by=_group_author(ctx))
+    nb = notebook.create_notebook(ctx.ws, group, created_by=_group_author(ctx))
     made.append(group)
     return str(nb["id"])
 

@@ -17,7 +17,6 @@ thimble changes none of Claude Code's settings files. The writers, view builds, 
   "sandbox": { "use": "when-available", "enforce": false },
   "browser": "system",
   "agents": {
-    "orientation": { "model": "claude-opus-5-5", "effort": "xhigh", "data": "ask" },
     "writer": { "web": "off" },
     "dev": { "web": "off" }
   }
@@ -42,8 +41,6 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 
 `agents` has one entry per agent:
 
-- **`orientation`**: the orientation. Its `subagentModel` and `subagentEffort` set `thimble:orient-helper`, the type the orientation starts its own subagents as
-- **`critic`**: the critique of the orientation, which runs when the orientation asks for a review of its analysis with its `critique` tool
 - **`writer`**: the report writers
 - **`checks`**: the report checks
 - **`dev`**: view builds, view reviews and code tickets, each a subagent of main, and `thimble fix`
@@ -52,6 +49,8 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 - **`suggest`**: the view proposals: the check for one after each of your messages and after a side thread answers, and the call that proposes a viewer for a file type
 - **`refusal`**: the model and effort a classifier's call runs again on when its own model refuses it
 
+A file that still holds `orientation` or `critic`, the entries of earlier versions' orientation and its critique, loads without an error.
+
 Each agent runs on exactly the model and effort its entry gives, the defaults included, unless a start tool names another model or effort for one run. None of them takes your own Claude Code model or effort. thimble's model calls run without `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so that none can change what runs. Your organization's managed settings rank above thimble's, so a variable an `env` block there sets still applies.
 
 `labels`, `cardCheck` and `suggest` are single model calls with no tools, so they take only `model`, `effort`, `fast` and `prompt`. Each runs at exactly the model, effort and fast mode Settings shows for its row (`labels`: Opus 5.5 at low effort, fast mode off; `cardCheck`: Opus 5.5 at high effort, fast mode on; `suggest`: Opus 5.5 at medium effort, with the 1M-token window when main's context needs it). When a call's model refuses it, it runs once more on the `refusal` entry's `model` and `effort` (Opus 4.8 at high effort), or not again when its `off` is `true`. The check for a view proposal after a turn does not run again: when Claude's safeguards block it, a notice says so, with Try again and Turn off view proposals.
@@ -59,19 +58,17 @@ Each agent runs on exactly the model and effort its entry gives, the defaults in
 
 | Key | Values | Default | What it does, and the risk |
 |---|---|---|---|
-| `model` | a model id, such as `"claude-opus-5-5"` | per agent: the orientation uses your own Claude Code `model`, else Opus 5.5 | The agent's model. |
-| `effort` | `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"` | per agent: `"xhigh"` for the orientation | Higher efforts use more tokens. A stored `"ultracode"` reads as `"xhigh"`. A model without effort levels, such as Haiku, runs with none. |
+| `model` | a model id, such as `"claude-opus-5-5"` | per agent: Opus 5.5, and Opus 4.8 for `refusal` | The agent's model. |
+| `effort` | `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"` | per agent | Higher efforts use more tokens. A stored `"ultracode"` reads as `"xhigh"`. A model without effort levels, such as Haiku, runs with none. |
 | `fast` | `true`, `false` | per agent: on for `cardCheck` and `dev` | Fast mode, on models that have it, for `labels`, `cardCheck` and `suggest`, and `dev`'s for `thimble fix`, the one job of thimble's server that runs Claude Code itself. A view build, a review and a code ticket run without it, since Claude Code gives a subagent no fast mode of its own. Read and ignored for the other agents, which run without a fast mode of their own. |
 | `permissionMode` | `"manual"`, `"auto"`, `"bypass"` | `null`: main's mode, but Manual while main runs in Bypass | Only for `dev`: the permission mode of `thimble fix` and of a code ticket's card. Manual asks you about each call that isn't already allowed. Auto lets Claude Code's classifier decide. Bypass allows every call that would otherwise ask you, except the ones `network` sends to you. It takes effect only where an earlier version's Settings recorded it as your choice, where Claude's file tools can't change it (`bypass.json` in thimble's home); `"bypass"` written into this file alone counts as Manual. Read and ignored for every other agent. |
-| `web` | `"ask"`, `"off"`, `"allow"` | `"ask"`; `"off"` for `dev` | WebFetch and WebSearch. The orientation's `"off"` refuses WebFetch and WebSearch to main and every agent; `"ask"` and `"allow"` both leave them to your permission mode. The dev agent's and the classifiers' own `web` keep their meaning. |
-| `network` | `"off"`, `"on"` | `"on"` | Network access for Bash. It doesn't apply to main or thimble's agents, which use your network as your Claude Code settings allow. `dev`'s sets it for `thimble fix`; a code ticket's agent has main's network. thimble's own critic, writers and checks don't read theirs. `"on"` lets Bash reach the network, as far as your own Claude Code sandbox settings allow. |
+| `web` | `"ask"`, `"off"`, `"allow"` | `"ask"`; `"off"` for `dev` | WebFetch and WebSearch. `"off"` keeps the agent off them; `"ask"` and `"allow"` both leave them to your permission mode. The dev agent's and the classifiers' own `web` keep their meaning. |
+| `network` | `"off"`, `"on"` | `"on"` | Network access for Bash. It doesn't apply to main or thimble's agents, which use your network as your Claude Code settings allow. `dev`'s sets it for `thimble fix`; a code ticket's agent has main's network. thimble's own writers and checks don't read theirs. `"on"` lets Bash reach the network, as far as your own Claude Code sandbox settings allow. |
 | `sandbox` | `"on"`, `"off"` | `"on"` | Only for `dev`: `"off"` runs `thimble fix`'s Bash outside the sandbox, so it can write anywhere you can, and `sandbox.enforce` then doesn't stop it. |
-| `data` | `"ask"`, `"allow"`, `"off"` | `"ask"` | Edits of files in the corpus. The orientation's `"off"` refuses edits of the corpus by the file tools of main and every agent; `"ask"` and `"allow"` leave them to your permission mode. Shell commands follow your permission mode either way. `dev`'s sets them for `thimble fix`. thimble's own critic, writers and checks don't read theirs. |
+| `data` | `"ask"`, `"allow"`, `"off"` | `"ask"` | Edits of files in the corpus. Shell commands follow your permission mode. `dev`'s sets them for `thimble fix`. thimble's own writers and checks don't read theirs. |
 | `memory` | `"inherit"`, `"on"`, `"off"` | `"inherit"` | Whether the agent reads CLAUDE.md files. `"off"` leaves them out of its context; `"on"` and `"inherit"` give it the CLAUDE.md files main reads. |
 | `prompt` | a file path, or `null` | `null` | Replaces the agent's prompt file from thimble's `prompts/` folder (`writer.md`, `check.md`, `dev.md`, `labels.md`, `card-check.md`). Copy the original and edit it. It is filled in the same way, and relative paths are resolved from the config file's folder. A replacement prompt can drop the rules that keep an agent within its task. |
 | `auto` | `true`, `false`, `null` | `null`: on | Only for `cardCheck`: whether the card check reads each new card by itself. With `false`, a card is checked only when you click Check the card or Check again in its details. A card shows the check only for a real problem it found, as a red ✕ at its takeaway; a fix is applied in place, with Undo in the card's details, and a fix that leaves all the card shows as it was is one more version in the card's History. |
-| `subagentModel` | a model id, or `null` | `null`: the orientation's model | Only for `orientation`: the model of `thimble:orient-helper`, the type the orientation starts its own subagents as. A subagent it starts as another type, such as general-purpose or Explore, runs on the orientation's own model and effort. |
-| `subagentEffort` | `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, or `null` | `null`: the orientation's effort | Only for `orientation`: the effort of `thimble:orient-helper`. |
 
 ## What stays as it is
 

@@ -668,8 +668,8 @@ def message_input(agent_id: str, text: str) -> dict[str, Any]:
 
 def unknown_agent_text(c: str, agent_id: str) -> str:
     """Why a follow-up cannot reach an agent that is not in the registry: the earlier-session text with the session its
-    chat last ran under, which `thimble -r` resumes; the earlier-version text when no chat of the workspace names a
-    session for it, since the earlier-session text needs one."""
+    chat last ran under; the earlier-version text when no chat of the workspace names a session for it, since the
+    earlier-session text needs one."""
     sid = ""
     if agent_id:
         for meta in agents.list_chats(c):
