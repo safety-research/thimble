@@ -33,10 +33,8 @@ import asyncio
 import contextlib
 import importlib
 import inspect
-import json
 import logging
 import re
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -49,15 +47,7 @@ from . import agents, config, nofollow, subagent_files as files, tools
 log = logging.getLogger("thimble.subagents")
 
 
-@contextlib.asynccontextmanager
-async def _lifespan(app: Any):
-    """At start, in a task: what an earlier version left running in each workspace is stopped (recover_old)."""
-    task = asyncio.get_running_loop().create_task(_recover_logged(), name="subagents-recover-old")
-    yield
-    task.cancel()
-
-
-router = APIRouter(lifespan=_lifespan)
+router = APIRouter()
 
 PLUGIN = files.PLUGIN
 ROLES = files.ROLES
@@ -1363,144 +1353,3 @@ async def request_route(c: str, rid: str) -> dict[str, Any]:
 
 
 CLICK_ROUTES: tuple[Callable[..., Any], ...] = (start_it_route, again_route)  # the module's routes here (a test walks them)
-
-
-# --------------------------------------------------------------------------- older workspaces
-
-
-OLD_BG_FILE = "bg-sessions.json"  # in the workspace: the background sessions thimble 0.5.0 started
-BG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # a background session's short id, as `claude stop` takes it
-UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")  # a Claude Code session's id
-ORPHAN_WAIT_S = 3.0  # after SIGTERM to a process an earlier version left, before SIGKILL
-EARLIER_VERSION = "earlier-version"  # a chat's `continue` when an earlier version of thimble ran its agent
-
-
-def _stop_background(short: str) -> None:
-    """`claude stop <short>`: the end of an earlier version's background session, with its conversation kept. Blocking;
-    never raises. A short id is read from the workspace, which a card's code writes: one that is not a session's
-    (BG_RE), such as one that starts with a dash, which `claude stop` would read as an option, stops nothing."""
-    import subprocess  # noqa: PLC0415
-
-    if not BG_RE.match(str(short)):
-        log.warning("background session %r: no session's id, so nothing was stopped", str(short)[:80])
-        return
-    try:
-        subprocess.run([config.CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=30,
-                       env=config.launch_environ())
-    except (OSError, subprocess.SubprocessError):
-        log.debug("background session %s was not stopped", short, exc_info=True)
-
-
-def stop_old_background(c: str) -> list[str]:
-    """The background sessions thimble 0.5.0 started in workspace `c` (OLD_BG_FILE, and the chats whose meta keeps a
-    `bg` short id) end with `claude stop`, their conversations kept, so an orientation or a writer that sat idle in
-    Claude Code's background service across the update does not run on beside a new one. The file is renamed once read,
-    so this runs once. Blocking; returns the short ids stopped."""
-    path = config.workspace_dir(c) / OLD_BG_FILE
-    shorts: list[str] = []
-    try:  # never through a link or a FIFO a card's code left there (nofollow)
-        rows = json.loads(nofollow.read_text(path))
-    except (OSError, ValueError):
-        rows = []
-    for row in rows if isinstance(rows, list) else []:
-        if isinstance(row, dict) and str(row.get("short") or "").strip():
-            shorts.append(str(row["short"]).strip())
-    chats = [m for m in agents.list_chats(c) if m.get("bg")]
-    shorts.extend(str(m["bg"]) for m in chats)
-    shorts = list(dict.fromkeys(shorts))
-    for short in shorts:
-        _stop_background(short)
-    for meta in chats:
-        with contextlib.suppress(Exception):
-            agents.update_agent(c, str(meta["id"]), bg=None)
-    if path.exists():
-        with contextlib.suppress(OSError):
-            path.rename(path.with_name(OLD_BG_FILE + ".stopped"))
-    if shorts:
-        log.info("%s: an earlier version's background sessions were stopped: %s", c, ", ".join(shorts))
-    return shorts
-
-
-def kill_left(meta: dict[str, Any]) -> None:
-    """End the process of a run an earlier version left (a chat whose meta keeps its `pid`), when it still runs and is
-    that session's own (its argv names the session id, so a reused pid is left alone): SIGTERM to its process group,
-    SIGKILL after ORPHAN_WAIT_S, then SIGKILL to what is left of the processes it started. Blocking."""
-    import os  # noqa: PLC0415
-    import signal  # noqa: PLC0415
-
-    from . import procs  # noqa: PLC0415
-
-    if meta.get("background") and meta.get("bg"):
-        _stop_background(str(meta["bg"]))
-    # the meta lies in the workspace, which a card's code writes: its process is one whose command line names its
-    # session's id, a Claude Code session's (UUID_RE), never any word of any process's command line
-    pid, sid = meta.get("pid"), str(meta.get("session") or "")
-    if not isinstance(pid, int) or pid <= 0 or not UUID_RE.match(sid) or not procs.alive(pid) \
-            or sid not in procs.argv(pid):
-        return
-    tree = procs.descendants(pid)
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pid, sig)
-        deadline = time.monotonic() + ORPHAN_WAIT_S
-        while procs.alive(pid) and time.monotonic() < deadline:
-            time.sleep(0.1)
-        if not procs.alive(pid):
-            break
-    for p in tree:
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(p, signal.SIGKILL)
-    log.info("session %s (pid %s), left running by an earlier version, was ended", sid, pid)
-
-
-def close_old(c: str) -> list[str]:
-    """The chats an earlier version's own sessions left running in workspace `c` (a `pid` on the meta and no
-    `route: subagent`) have their processes ended (kill_left) and end stopped, `continue: earlier-version`: a message to
-    such an orientation gets the earlier-version text (orient_session.latest). The chats closed. Blocking."""
-    closed = []
-    for meta in agents.list_chats(c):
-        if meta.get("route") == "subagent" or meta.get("status") != "running" or "pid" not in meta:
-            continue
-        try:
-            kill_left(meta)
-            agents.update_agent(c, str(meta["id"]), pid=None, parked=None, permissions=[],
-                                **{"continue": EARLIER_VERSION})
-            agents.finish_agent(c, str(meta["id"]), "stopped", QUIT_LINE)
-            closed.append(str(meta["id"]))
-        except Exception:  # noqa: BLE001 — never fails the start
-            log.exception("%s: chat %s, left running by an earlier version, was not closed", c, meta.get("id"))
-    return closed
-
-
-async def recover_old() -> list[str]:
-    """Server start: in every workspace, an earlier version's background sessions stop (stop_old_background) and the
-    chats its own sessions left running close (close_old). `<workspace>/<chat>` of each chat closed."""
-    out: list[str] = []
-    root = config.WORKSPACES_DIR
-    for folder in sorted(root.iterdir()) if root.is_dir() else []:
-        if not folder.is_dir() or folder.name.startswith("."):
-            continue
-        c = folder.name
-        try:
-            config.corpus_dir(c)
-        except ValueError:
-            continue
-        for fn in (stop_old_background, close_old):
-            try:
-                got = await asyncio.to_thread(fn, c)
-            except Exception:  # noqa: BLE001 — never fails the start
-                log.exception("%s: %s failed", c, fn.__name__)
-                continue
-            if fn is close_old:
-                out += [f"{c}/{x}" for x in got]
-    return out
-
-
-async def _recover_logged() -> None:
-    try:
-        closed = await recover_old()
-    except Exception:  # noqa: BLE001
-        log.exception("closing what an earlier version left running failed")
-        return
-    if closed:
-        log.info("chats an earlier version left running, closed: %s", ", ".join(closed))

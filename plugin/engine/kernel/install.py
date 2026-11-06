@@ -24,9 +24,7 @@ commands thimble and thimble-browser in ~/.local/bin.
 
 The dev install and the release install take turns in thimble's home: the one there goes aside, with its fixes, into a
 dated folder beside them (fixes-release-<date> or fixes-dev-<date>), and the newest one of the other kind that was set
-aside comes back (switch; release with --from). Each verb prints its lines as the script lays them out, and adds what
-does not work yet to the file --notes names, one line each, which the script prints last. --state names a file where a
-verb leaves what a later one says: where Claude Code loaded thimble from before, and the folders of the earlier install.
+aside comes back (switch; release with --from).
 
 Each verb prints its lines as the script lays them out, and adds what does not work yet to the file --notes names, one
 line each, which the script prints last. --state names a file where a verb leaves what a later one says: where Claude

@@ -49,13 +49,13 @@ def _text(cell: dict) -> str:
 
 
 async def test_create_and_run_print(client, corpus, workspaces_tmp):
-    r = await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(1+1)"})
+    r = await client.post(f"/api/ws/{corpus}/cells", json={"code": "print(1+1)"})
     assert r.status_code == 200
     cell = r.json()
     assert len(cell["id"]) == 8 and cell["status"] == "idle" and cell["exec_count"] is None
     assert cell["created_by"] == "user" and cell["outputs"] == []
 
-    r = await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")
+    r = await client.post(f"/api/ws/{corpus}/cells/{cell['id']}/run")
     assert r.status_code == 200
     ran = r.json()
     assert ran["id"] == cell["id"]
@@ -64,10 +64,9 @@ async def test_create_and_run_print(client, corpus, workspaces_tmp):
     assert ran["outputs"] == [{"text/plain": "2\n", "_stream": "stdout"}]
 
     # persisted as plain json in the workspace dir (notebooks/<id>.json)
-    on_disk = json.loads((workspaces_tmp / corpus / "notebooks" / "main.json").read_text())
-    assert on_disk["cells"][0]["outputs"] == ran["outputs"] and on_disk["id"] == "main"
-    assert ran["notebook"] == "main" and cell["notebook"] == "main"
-    assert (await client.get(f"/api/ws/{corpus}/notebooks/main")).json() == on_disk
+    assert ran["notebook"] == cell["notebook"]
+    on_disk = json.loads((workspaces_tmp / corpus / "notebooks" / f"{cell['notebook']}.json").read_text())
+    assert on_disk["cells"][0]["outputs"] == ran["outputs"] and on_disk["id"] == cell["notebook"]
 
 
 @pytest.mark.parametrize("wrap", ["none", "srt", "bwrap"])
@@ -98,8 +97,8 @@ async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_ne
 
     monkeypatch.setattr(notebook, "connection_info", first_port_taken)
     try:
-        cell = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(6 * 7)"})).json()
-        ran = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")).json()
+        cell = (await client.post(f"/api/ws/{corpus}/cells", json={"code": "print(6 * 7)"})).json()
+        ran = (await client.post(f"/api/ws/{corpus}/cells/{cell['id']}/run")).json()
     finally:
         ctx.destroy(linger=0)  # closes every socket it made first, so it never waits on one
     assert taken and ran["status"] == "ok" and _text(ran) == "42\n", ran["outputs"]

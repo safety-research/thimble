@@ -2,9 +2,9 @@
 // a chart before its text. What a card draws that a document can show as a figure (figureKind).
 import { compile } from 'vega-lite'
 import { describe, expect, test } from 'vitest'
-import { ERROR_MIME, figureKind, pickMime, primaryArtifact, responsive } from '../../src/components/Outputs.tsx'
+import { ERROR_MIME, figureKind, pickMime, primaryArtifact } from '../../src/components/Outputs.tsx'
 import { FRAME_MIME } from '../../src/lib/dataFrame.ts'
-import { fitAfterCompile } from '../../src/lib/vegaDraw.ts'
+import { fitAfterCompile, responsive } from '../../src/lib/vegaDraw.ts'
 import type { Cell, MimeBundle } from '../../src/lib/types.ts'
 import { cardShape } from '../../src/report/cards.ts'
 import { figureCandidates } from '../../src/report/model.ts'

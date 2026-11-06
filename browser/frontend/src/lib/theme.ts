@@ -9,8 +9,6 @@ export type Resolved = 'light' | 'dark'
 
 export const PAPER_KEY = 'thimble:paper'
 export const ACCENT_KEY = 'thimble:accent'
-/** the key the light/dark toggle used before the papers; a stored `dark` still opens on Dark */
-export const LEGACY_THEME_KEY = 'thimble:theme'
 
 export const PAPERS: readonly { id: Paper; label: string }[] = [
   { id: 'warm', label: 'Warm' },
@@ -36,11 +34,8 @@ export const DEFAULT_ACCENT: Accent = 'iris'
 const isPaper = (v: unknown): v is Paper => PAPERS.some((p) => p.id === v)
 const isAccent = (v: unknown): v is Accent => ACCENTS.some((a) => a.id === v)
 
-/** The paper from what storage holds: a stored paper, else Dark when the legacy key holds `dark`, else Warm. Pure. */
-export function readPaper(stored: string | null, legacy: string | null = null): Paper {
-  if (isPaper(stored)) return stored
-  return legacy === 'dark' ? 'dark' : DEFAULT_PAPER
-}
+/** The paper from what storage holds: a stored paper, else Warm. Pure. */
+export const readPaper = (stored: string | null): Paper => (isPaper(stored) ? stored : DEFAULT_PAPER)
 
 /** The accent from what storage holds, iris when nothing valid is stored. Pure. */
 export const readAccent = (stored: string | null): Accent => (isAccent(stored) ? stored : DEFAULT_ACCENT)
@@ -64,7 +59,7 @@ function write(key: string, value: string): void {
   }
 }
 
-export const getPaper = (): Paper => readPaper(read(PAPER_KEY), read(LEGACY_THEME_KEY))
+export const getPaper = (): Paper => readPaper(read(PAPER_KEY))
 export const getAccent = (): Accent => readAccent(read(ACCENT_KEY))
 export const getResolved = (): Resolved => paperScheme(getPaper())
 

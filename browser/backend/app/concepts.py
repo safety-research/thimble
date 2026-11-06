@@ -29,8 +29,7 @@ label shows as a version outside the workspace (card_values, label_versions.keep
 label through, as it was when the cited words were written (marks.session_cards). When a run of a label ends, not stopped, or a moment after
 the analyst's last correction of it (rerun_after_verdicts), thimble runs every card that read it again (rerun_readers),
 and main hears which of them it should write a takeaway for again
-(`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
-card runs on POST .../regenerate.
+(`rerun`, or inside `label_done`).
 The ask: a prompt label over more than label_asks.SAMPLE units does not start until the person chooses, in the page, to
 run it on all of them, on a sample, or not at all (ask_first, label_asks.py), whoever started it.
 Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
@@ -69,7 +68,6 @@ from typing import Any, Callable, Iterable, Iterator, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
-from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import capture, cite, concept_scan, config, corpus, label_asks, label_versions, labels_store, ledger, nofollow, records, refs
 from .kernel_thimble import LABEL_ORDER, palette_from
@@ -759,12 +757,9 @@ def _stats(ws: Path, concept_id: str) -> dict:
     return st.stats() if st is not None else label_stats([])
 
 
-def rows_for_path(ws: Path, concept_id: str, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
+def rows_for_path(ws: Path, concept_id: str, path: str | None) -> list[dict]:
     """The merged rows (latest classifier row per ref with the analyst's verdict) on one corpus path; every row when
-    `path` is None; with `lines` (a, b) those on lines a..b of the path and its whole-file rows, so the reader asks for
-    its page and never for every row of a large labelled file."""
-    if path is not None and lines is not None:
-        return rows_on_lines(ws, concept_id, path, [lines])
+    `path` is None."""
     st, building = _store(ws, concept_id)
     if st is not None:
         return st.rows_for_path(path)
@@ -1037,32 +1032,6 @@ def label_stats(rows: list[dict]) -> dict:
     for r in model.values():
         counts[str(r.get("label"))] = counts.get(str(r.get("label")), 0) + 1
     return {"n_labeled": len(model), "n_reviewed": sum(1 for ref in analyst if ref in model), "n_marked": len(analyst), "counts": counts}
-
-
-def _merged_rows(rows: list[dict], path: str | None = None) -> list[dict]:
-    """Latest classifier row per ref with the analyst's verdict attached (and the texts it marks), optionally only for
-    refs on `path`."""
-    model, analyst = latest_rows(rows)
-    out = []
-    for ref, r in model.items():
-        if path is not None and _ref_path(ref) != path:
-            continue
-        a = analyst.get(ref)
-        row = {"ref": ref, "label": r.get("label"), "confidence": r.get("confidence"), "rationale": r.get("rationale"),
-               "source": r.get("source"), "ts": r.get("ts"), "analyst": a.get("label") if a else None}
-        marked = labels_store.spans_field(r.get("spans"))
-        if marked:
-            row["spans"] = marked
-        out.append(row)
-    for ref, a in analyst.items():
-        if ref not in model and (path is None or _ref_path(ref) == path):
-            out.append({"ref": ref, "label": None, "confidence": None, "rationale": None, "source": None, "ts": a.get("ts"),
-                        "analyst": a.get("label")})
-    return out
-
-
-def _ref_path(ref: str) -> str | None:
-    return labels_store.ref_parts(ref)[0]
 
 
 def verdicts_applied(ws: Path, concept_id: str, counts: dict[str, int]) -> tuple[dict[str, int], int]:
@@ -1889,10 +1858,9 @@ def scope_units(c: str, unit: str) -> list[Unit]:
     raise ValueError(f"not a scope unit: {unit}")
 
 
-# --------------------------------------------------------------------------- progress (SSE)
+# --------------------------------------------------------------------------- progress
 
 _runs: dict[tuple[str, str], dict] = {}  # (workspace, concept id) -> the run record
-_subs: dict[tuple[str, str], set[asyncio.Queue]] = {}
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _cancels: dict[tuple[str, str], threading.Event] = {}
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
@@ -1963,24 +1931,11 @@ def _pool_reset(broken: ProcessPoolExecutor) -> ProcessPoolExecutor:
     return _pool_get()
 
 
-def _subscribe(c: str, concept_id: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    _subs.setdefault((c, concept_id), set()).add(q)
-    return q
-
-
-def _unsubscribe(c: str, concept_id: str, q: asyncio.Queue) -> None:
-    _subs.get((c, concept_id), set()).discard(q)
-
-
 def _progress(c: str, concept_id: str, **fields: Any) -> dict:
-    """Update the concept's run record and stream it (`done` once the status is done or error, `progress` before)."""
+    """Update the concept's run record (the `run` of GET /concepts/{id}); the record."""
     key = (c, concept_id)
     state = {**_runs.get(key, {"concept": concept_id, **RUN_FIELDS}), **fields, "ts": _now()}
     _runs[key] = state
-    event = "done" if state["status"] in ("done", "error") else "progress"
-    for q in _subs.get(key, ()):
-        q.put_nowait((event, json.dumps(state)))
     return state
 
 
@@ -3097,17 +3052,6 @@ def _parse_code_rows(lines: Iterator[str] | list[str]) -> tuple[list[dict], int,
     return rows, errors, message
 
 
-def parse_code_output(outputs: list[dict], rows_file: Path | None) -> tuple[list[dict], int, str | None]:
-    """(rows with the cover and clear lines among them, n_errors, message) for a code-kind run: the rows from
-    `rows_file` (none when the code never wrote it), the first error the kernel reported as the message."""
-    if rows_file is not None and rows_file.is_file():
-        with open(rows_file, "r", encoding="utf-8") as f:
-            rows, errors, message = _parse_code_rows(f)
-    else:
-        rows, errors, message = [], 0, None
-    return rows, errors, _kernel_error(outputs) or message
-
-
 def _kernel_error(outputs: list[dict]) -> str | None:
     """The first error the kernel reported for a code-kind run, as `<name>: <value>`."""
     for b in outputs or []:
@@ -4045,36 +3989,6 @@ async def answer_ask(c: str, ask_id: str, choice: str) -> dict:
         except HTTPException as e:
             log.info("%s: the %s event for concept:%s was not posted: %s", c, LABEL_ASK_KIND, cid, e.detail)
     return {"ok": True, "choice": choice, "concept": cid, "run": record}
-
-
-async def bring_current(c: str, concept_ids: list[str], created_by: str = "user") -> list[str]:
-    """Start a run of each label in `concept_ids` whose rows do not answer its definition as it stands (covered), so a card
-    run after them counts by each label as now defined (notebook.regenerate_cell). A running label is waited for; one that
-    is gone is left out. Returns the ids of the labels whose runs to wait for (wait_apply)."""
-    ws = _ws(c)
-    out: list[str] = []
-    for cid in dict.fromkeys(str(x) for x in concept_ids if x):
-        concept = read_concept(ws, cid)
-        if concept is None:
-            continue
-        if running_apply(c, cid) is not None:
-            out.append(cid)
-            continue
-        last = concept["applications"][-1] if concept["applications"] else {}
-        paths = (glob_patterns(concept["glob"]) or _patterns(last.get("paths"))) if concept["unit"] in FILE_UNITS else []
-        limit = last.get("limit") if concept["trial"] else None
-        if concept["unit"] in FILE_UNITS and not paths:
-            continue
-        if await asyncio.to_thread(covered, c, concept, paths, limit):
-            continue
-        if await ask_first(c, concept, paths, limit, created_by=created_by) is not None:
-            continue  # the run waits for the person's choice, and the card runs on the rows the label has
-        await start_apply(c, cid, paths, limit, created_by)
-        cards = await asyncio.to_thread(_label_cards, ws, cid)
-        tell_main(c, concept, dict(cards[0][1]) if cards else None)
-        _notify(c, cid, "applying")  # the canvas reads the run record again, so the label card shows its run meanwhile
-        out.append(cid)
-    return out
 
 
 def stale_cards(ws: Path, concept: dict) -> list[dict]:
@@ -5109,25 +5023,6 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
     return result
 
 
-@router.get("/ws/{c}/concepts/{concept_id}/apply/runs")
-def apply_runs_route(c: str, concept_id: str) -> list[dict]:
-    """The concept's run record this server knows: the running one, else the last one that ended here."""
-    load_concept(c, concept_id)
-    state = _runs.get((c, concept_id))
-    return [state] if state else []
-
-
-@router.post("/ws/{c}/concepts/{concept_id}/apply/cancel")
-def cancel_apply_route(c: str, concept_id: str) -> dict:
-    """Stop the concept's running apply after the current unit, chunk or batch; the rows written so far stay."""
-    load_concept(c, concept_id)
-    state = _runs.get((c, concept_id))
-    running = bool(state and state.get("status") == "running")
-    if running:
-        _cancel_event(c, concept_id).set()
-    return {"ok": True, "cancelling": running}
-
-
 class AskAnswerBody(BaseModel):
     choice: str  # all, sample or cancel
 
@@ -5142,26 +5037,6 @@ def label_asks_route(c: str) -> list[dict]:
 async def answer_ask_route(c: str, ask_id: str, body: AskAnswerBody) -> dict:
     """The person's choice for an ask: all, sample or cancel (answer_ask)."""
     return await answer_ask(c, ask_id, body.choice)
-
-
-@router.get("/ws/{c}/concepts/{concept_id}/events")
-async def events_route(c: str, concept_id: str) -> EventSourceResponse:
-    """SSE: the current run state first (if any), then `progress` events and a final `done`."""
-    load_concept(c, concept_id)
-    q = _subscribe(c, concept_id)
-
-    async def gen():
-        try:
-            state = _runs.get((c, concept_id))
-            if state is not None:
-                yield {"event": "done" if state["status"] in ("done", "error") else "progress", "data": json.dumps(state)}
-            while True:
-                event, data = await q.get()
-                yield {"event": event, "data": data}
-        finally:
-            _unsubscribe(c, concept_id, q)
-
-    return EventSourceResponse(gen(), ping=15, ping_message_factory=lambda: ServerSentEvent(data="{}", event="ping"))
 
 
 @router.post("/ws/{c}/concepts/{concept_id}/labels")
@@ -5203,22 +5078,6 @@ def parse_spans(lines: str | None) -> list[tuple[int, int]] | None:
     except HTTPException:
         raise HTTPException(400, "lines must be ranges a-b of 1-based line numbers with a <= b, comma-separated, e.g. "
                                  "lines=1-500,2001-2500") from None
-
-
-@router.get("/ws/{c}/concepts/{concept_id}/labels")
-def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | None = None) -> dict:
-    """Latest label per ref (with the analyst's verdict); `?path=` narrows to one file, `&lines=a-b` to the rows on
-    those lines of it (plus its whole-file rows), which is what a reader showing one page asks for."""
-    ws, concept = load_concept(c, concept_id)
-    span = parse_lines(lines)
-    if span is not None and path is None:
-        raise HTTPException(400, "lines needs path: the range is of one file's lines")
-    out = {"concept": {"id": concept["id"], "name": concept["name"], "labels": concept["labels"], "unit": concept["unit"]},
-           "rows": rows_for_path(ws, concept_id, path, span)}
-    if index_building(ws, concept_id):
-        out["building"] = True
-        out["note"] = INDEX_BUILDING
-    return out
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/coverage")

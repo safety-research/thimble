@@ -31,5 +31,3 @@ export function Kbd({ children, className, ...rest }: HTMLAttributes<HTMLElement
     </kbd>
   )
 }
-
-export default Mark

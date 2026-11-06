@@ -49,8 +49,7 @@ const SWEEP_MS = 10_000 // the most one choice of the sweep waits for its page
 const SWEEP_MAX = 40 // the choices one sweep tries
 const MIN_MS = 1200
 const HARD_MS = 25_000
-// a fetch or marks request still unanswered at HARD_MS is waited for this long, since a view's data calls have no time
-// limit (backend views.ANSWER_WAIT_S)
+// a fetch or marks request still unanswered at HARD_MS is waited for this long: a view's data calls have no time limit
 const ANSWER_MS = 600_000
 const READY_MS = 10_000
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page

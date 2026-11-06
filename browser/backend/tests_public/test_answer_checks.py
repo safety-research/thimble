@@ -3,7 +3,7 @@ its sentences, split from paragraphs and list items and never inside a link or a
 row's text; when main's turn ends with an answer each shown check that covers answers runs on it, a follow-on start
 through the fake module, and its add_comment stores the passage's quote and offsets and the words it is about; an
 explainer and a heads-up never share words; Heads up and Explainers cover
-answers by default and a stored copy of Heads up from before reads so, unless the analyst set its Show in; a check turned off, or whose Chat
+answers by default; a check turned off, or whose Chat
 is unchecked, leaves nothing in the chat; a run over answers tells main nothing when it ends and supersedes its
 check's earlier comments; the routes."""
 from __future__ import annotations
@@ -98,11 +98,6 @@ def test_heads_up_and_explainers_cover_the_chat_and_judgment_calls_does_not(boar
     assert checks.covers(checks.read(CORPUS, IMPORTANT), "answers")
     assert checks.covers(checks.read(CORPUS, "explainers"), "answers")
     assert not checks.covers(checks.read(CORPUS, "judgment"), "answers")
-    # a copy stored before the chat was covered reads as covering it, until the analyst sets its Show in
-    stored = {**checks.builtin(IMPORTANT), "covers": ["documents", "cards"], "shown": True}
-    checks._path(CORPUS, IMPORTANT).parent.mkdir(parents=True, exist_ok=True)
-    write_json(checks._path(CORPUS, IMPORTANT), stored)
-    assert checks.read(CORPUS, IMPORTANT)["covers"] == ["documents", "answers"]
     checks.edit(CORPUS, IMPORTANT, covers=["documents", "cards"])
     assert checks.read(CORPUS, IMPORTANT)["covers"] == ["documents", "cards"]
 
@@ -319,6 +314,17 @@ def test_the_routes_list_dismiss_and_reopen_a_comment(board):
                                                                                       p["text"])]
         assert client.post(f"/api/ws/{CORPUS}/answer-comments/{cm['id']}/dismiss").status_code == 200
         assert client.get(f"/api/ws/{CORPUS}/answer-comments").json()["comments"] == []
-        assert client.post(f"/api/ws/{CORPUS}/answer-comments/{cm['id']}/reopen").status_code == 200
-        assert len(client.get(f"/api/ws/{CORPUS}/answer-comments").json()["comments"]) == 1
         assert client.post(f"/api/ws/{CORPUS}/answer-comments/nope/dismiss").status_code == 404
+
+
+def test_a_stored_built_in_nobody_switched_is_on_as_its_built_in_is_now(board, monkeypatch):
+    """A built-in stored on when it ran, which nobody switched, is on as its built-in is now: off once a release turns
+    the built-in off. The analyst's switch stays."""
+    stored = {**checks.builtin("explainers"), "shown": True}
+    write_json(checks._path(CORPUS, "explainers"), stored)
+    assert checks.read(CORPUS, "explainers")["shown"] is True
+    off = {**checks.builtin("explainers"), "shown": False}
+    monkeypatch.setattr(checks, "builtin", lambda cid: dict(off) if cid == "explainers" else None)
+    assert checks.read(CORPUS, "explainers")["shown"] is False
+    write_json(checks._path(CORPUS, "explainers"), {**stored, "shown_set": True})
+    assert checks.read(CORPUS, "explainers")["shown"] is True

@@ -56,7 +56,6 @@ ANSWERS_PER_STATE = 2
 PHRASE_CHARS = 120  # of a problem, as the check mark's hover lists what was revised or is left
 AUTO_KEY = "view_review"  # settings.json: false turns the review off for the workspace
 REVIEWED_SUBDIR = ".reviewed"
-STATES = ("running", "done", "failed", "stopped")
 FONTS_NOTE = "The view's pictures were drawn without thimble's fonts"
 SHOTS_NOTE = "The view's pictures could not be taken: {why}"
 NO_BROWSER_NOTE = "The headless browser that takes the pictures is not installed, so there are no pictures to review."
@@ -115,11 +114,6 @@ def auto(c: str) -> bool:
 def running(c: str, slug: str) -> bool:
     """Whether a reviewer of the view runs (or waits for its own subagent)."""
     return subagents.running(c, key(slug))
-
-
-def revising(c: str, slug: str) -> bool:
-    """Whether a reviewer may be writing the view's files: while one runs."""
-    return running(c, slug)
 
 
 def _now() -> str:

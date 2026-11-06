@@ -19,7 +19,7 @@ import { mediaOf } from '../lib/media'
 import { fragmentIn, parseRef, refPath } from '../lib/refs'
 import { pressedPane, surfaceShown, useFilesViewsSlot, useShownSurfaces } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
-import type { ConceptRun, LabelDraft, SourceKind } from '../lib/types'
+import type { LabelDraft, SourceKind } from '../lib/types'
 import { findView } from '../lib/views'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
@@ -543,7 +543,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     },
     [used, toView, toBrowser],
   )
-  useEffect(() => bus.on('openIn', ({ path, ref, slug }) => openIn(path, ref, slug)), [openIn])
   // a quoted span the view did not show opens in the File browser, which highlights it
   const quoteMissing = useCallback(() => {
     if (viewAt?.quote) openTab({ path: viewAt.path, ref: viewAt.quote.span })

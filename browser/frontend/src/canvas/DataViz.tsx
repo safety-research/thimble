@@ -59,18 +59,6 @@ export function timeFormat(events: readonly { time?: unknown }[]): string {
   return ts.length && Math.max(...ts) - Math.min(...ts) < TWO_DAYS_MS ? '%H:%M' : '%b %d'
 }
 
-/** Where each event sits along the span, 0 to 1: dates and numbers by value, anything else by order. */
-export function timeFractions(events: readonly { time?: unknown }[], type: 'temporal' | 'quantitative' | 'ordinal'): number[] {
-  const n = events.length
-  const byOrder = (i: number) => (n > 1 ? i / (n - 1) : 0.5)
-  if (type === 'ordinal') return events.map((_, i) => byOrder(i))
-  const ts = events.map((e) => timeKey(e.time))
-  const finite = ts.filter((t) => Number.isFinite(t))
-  const min = Math.min(...finite)
-  const max = Math.max(...finite)
-  return ts.map((t, i) => (!Number.isFinite(t) ? byOrder(i) : max > min ? (t - min) / (max - min) : 0.5))
-}
-
 /** the month of the day thimble.timeline reads clock times on (backend kernel_thimble.CLOCK_DAY, 2000-01-01) */
 const CLOCK_MONTH = '2000-01-'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -977,8 +965,6 @@ export function withSizer(html: string): string {
   const at = html.search(/<\/body\s*>/i)
   return at >= 0 ? html.slice(0, at) + SIZER + html.slice(at) : html + SIZER
 }
-
-export { frameStyle, withFrameStyle } from '../lib/frame'
 
 export const clampCustomHeight = (h: number): number => Math.min(CUSTOM_MAX_H, Math.max(CUSTOM_MIN_H, Math.ceil(h)))
 

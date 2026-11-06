@@ -15,11 +15,11 @@ PATTERN = r"(?i)forge pr claim"  # 3 of the 8 board posts match
 
 @pytest.fixture(autouse=True)
 def _clean_state(workspaces_tmp):
-    for table in (concepts._runs, concepts._subs, concepts._locks, concepts._cancels, concepts._tasks):
+    for table in (concepts._runs, concepts._locks, concepts._cancels, concepts._tasks):
         table.clear()
     undo.forget()
     yield
-    for table in (concepts._runs, concepts._subs, concepts._tasks):
+    for table in (concepts._runs, concepts._tasks):
         table.clear()
     undo.forget()
 

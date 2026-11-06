@@ -1,8 +1,7 @@
 """The walks of the corpus. The kernels' scratch mirror (notebook.mirror_corpus): a link to each entry of the corpus
 folder, so every corpus file is read by its relative path, a pass lists the corpus folder alone however many files lie
-under it, a change below an entry shows at once, what a kernel wrote stays, and a folder the per-file mirror of earlier
-versions left becomes its link. Callers of a view's folder walk at the same time share one walk, and `thimble list` does
-not stat a workspace's mirror links."""
+under it, a change below an entry shows at once, and what a kernel wrote stays. Callers of a view's folder walk at the
+same time share one walk, and `thimble list` does not stat a workspace's mirror links."""
 from __future__ import annotations
 
 import os
@@ -198,25 +197,3 @@ def test_a_pass_does_not_follow_a_kernel_s_link(corpus, tmp_path):
     shutil.rmtree(corpus / "runs")
     notebook.mirror_corpus(corpus, scratch)
     assert os.path.lexists(outside / "dangling")
-
-
-def test_a_folder_the_per_file_mirror_of_earlier_versions_left_becomes_its_link_unless_a_kernel_wrote_in_it(
-        corpus, tmp_path):
-    """Earlier versions mirrored the corpus file by file: a folder in scratch for each corpus folder, a link for each
-    file, a million links for AI Village's screenshots. Such a folder goes at the next pass and its link takes its
-    place; one a cell wrote a file into is the kernel's, and keeps its links and the file."""
-    (corpus / "logs").mkdir()
-    (corpus / "logs" / "l.txt").write_text("l")
-    scratch = tmp_path / "scratch"
-    for d, ds, fs in os.walk(corpus):
-        ds[:] = [x for x in ds if x != ".git"]
-        here = scratch / os.path.relpath(d, corpus)
-        here.mkdir(parents=True, exist_ok=True)
-        for f in fs:
-            (here / f).symlink_to(Path(d) / f)
-    (scratch / "logs" / "made-by-a-cell.csv").write_text("x")
-    notebook.mirror_corpus(corpus, scratch)
-    assert os.readlink(scratch / "runs") == str(corpus / "runs")
-    assert (scratch / "runs/b/agents/agent-1.jsonl").read_text() == "{}\n"
-    assert (scratch / "logs" / "made-by-a-cell.csv").read_text() == "x"
-    assert os.readlink(scratch / "logs" / "l.txt") == str(corpus / "logs" / "l.txt")

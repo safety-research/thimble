@@ -121,7 +121,7 @@ async def test_the_kernel_a_card_names_in_its_group_s_file_names_no_file_outside
     notebook.clear_cache()
     mode = outside.stat().st_mode
     try:
-        stored = await notebook.run_cell(CORPUS, nb["id"], cell["id"])
+        stored = await notebook.run_cell_by_id(CORPUS, cell["id"])
     finally:
         await notebook.shutdown_all()
     assert sorted(os.listdir(outside)) == ["made-up-settings.json"] and outside.stat().st_mode == mode
@@ -470,32 +470,3 @@ def test_the_export_copies_a_chat_s_log_only_by_a_chat_s_id(tmp_path_factory, tm
     with zipfile.ZipFile(tmp_path / "made-up.zip") as z:
         assert not [n for n in z.namelist() if ".." in n.split("/")]
         assert all(b"OUTSIDE-SECRET" not in z.read(n) for n in z.namelist())
-
-
-def test_an_earlier_version_s_session_a_chat_names_ends_only_a_claude_code_session(tmp_path_factory):
-    """At its start the server ends the processes an earlier version's sessions left running, by the pid a chat's meta,
-    chats/<id>.meta.json, keeps, when that process's command line names the meta's session; a card's code writes the
-    meta, so a meta that named any process and a word of its command line had the server stop that process, and one
-    whose background session started with a dash gave `claude stop` an option."""
-    from app import agents, subagents
-
-    victim = _sleeper("made-up-victim")
-    ran: list = []
-    real_run = subprocess.run
-
-    def spy(argv, *a, **k):
-        ran.append(list(argv))
-        return real_run(["true"], *a, **k)
-
-    try:
-        chat = agents.new_agent(CORPUS, "orient", "made-up orientation", announce=False)
-        agents.update_agent(CORPUS, chat["id"], status="running", pid=victim.pid, session="made-up-victim",
-                            bg="--made-up-option")
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(subprocess, "run", spy)
-            subagents.stop_old_background(CORPUS)
-            subagents.close_old(CORPUS)
-        assert victim.poll() is None, "the server stopped a process a chat's meta named"
-        assert not [r for r in ran if "--made-up-option" in r]
-    finally:
-        _stop(victim)

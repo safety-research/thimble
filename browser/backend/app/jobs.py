@@ -136,20 +136,6 @@ def enqueue(kind: str, target: str, version: str, fn: Fn, *, workspace: str | No
     return True
 
 
-def status(target: str) -> dict[str, Any]:
-    """{status, attempts, note} of the newest job for `target`: a queued or running one first, else the latest
-    terminal one; {status: 'none', attempts: 0, note: ''} for a target no job in this process has touched."""
-    live = [j for j in _active.values() if j.target == target]
-    if live:
-        j = max(live, key=lambda x: x.queued_at)
-        return {"status": j.status, "attempts": j.attempt, "note": j.note}
-    done = [j for j in _terminal.values() if j.target == target]
-    if done:
-        j = done[-1]
-        return {"status": j.status, "attempts": j.attempt, "note": j.note}
-    return {"status": "none", "attempts": 0, "note": ""}
-
-
 def on_start(fn: Callable[[], Any]) -> None:
     """Register a rescan (sync or async, no arguments) that `start()` runs once the workers are up, deriving pending
     jobs from state."""

@@ -42,7 +42,7 @@ import { trayOffRow } from '../tray/seam'
 import { answerCards, applyCards, placeCatchUpCards, showCards, type Answer } from './cards'
 import {
   ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
-  fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
+  fromVersions, isOriginal, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
   setWords, settledNote, shownKey, termsOf,
 } from './chips.mjs'
 

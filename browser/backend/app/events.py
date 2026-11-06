@@ -40,12 +40,6 @@ BODY_CHARS = 12_000  # the event body's ceiling: an event stays in main's contex
 TAG = "thimble-event"  # the element an event is rendered as for the model (render), which the mirror reads back
 SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line)
 LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
-# 0.5.0's routes (module note) -> the route each answers as. A 0.5.0 shim's own relay of a channel's permission prompt
-# (/api/channel/permission) has none: the PermissionRequest hook relays the same prompt.
-OLD_PATHS = {"/api/channel": "/api/events", "/api/channel/pull": "/api/events/pull", "/api/channel/ack": "/api/events/ack",
-             "/api/channel/held": "/api/events/held", "/api/channel/mode": "/api/events/mode",
-             "/api/channel/main": "/api/events/main", "/api/channel/sessions": "/api/events/sessions",
-             "/api/channel/permission/hook": "/api/events/permission"}
 _KEY_RE = re.compile(r"[^A-Za-z0-9_]")
 _KIND_RE = re.compile(r"^- `([a-z_]+)`", re.M)
 

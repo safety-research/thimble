@@ -309,12 +309,6 @@ test('a resumed session draws the marks as their check left them; a check the se
   const second = await rowMarks(resumed, 'row-2')
   expect(second!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run. The session ended before it did.' })
   expect([second!.checking, second!.failed]).toEqual([0, 1])
-  // a mark an earlier thimble kept as unchecked is failed too
-  const key = [...files.keys()].find(k => k.endsWith('/marks/row-2.json'))!
-  files.set(key, JSON.stringify({ ...JSON.parse(files.get(key)!), key: 'row-2', items: [{ ...JSON.parse(files.get(key)!).items[0], status: 'unchecked', reason: 'old words' }] }))
-  const { $: again } = engine(VALIDATED, files)
-  await restoreMarks(again)
-  expect((await rowMarks(again, 'row-2'))!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run.' })
 })
 
 test('x on a wrong citation checks it again in a fork of its own; its answer corrects it in place and main reads how it ended', async () => {

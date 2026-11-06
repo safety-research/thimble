@@ -15,12 +15,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-
 from . import cite, config, heal, investigation, jobs, notebook, refs
 
 log = logging.getLogger("thimble.verify")
-router = APIRouter()
 
 ERROR_MIME = notebook.ERROR_MIME
 # THIMBLE_SKIP_KEY=1 is the tests' switch: the hooks still link deterministically, but no links job is enqueued and
@@ -174,12 +171,9 @@ def _apply_typed(typed: cite.Typed, resolved: list[dict]) -> tuple[list[dict], l
 
 
 def _links_version(cell: dict) -> str:
-    """The links job's version: the run, the takeaway's text, and the relink count (`_relink`), so a relink is a new
-    job."""
+    """The links job's version: the run and the takeaway's text."""
     h = hashlib.sha1(str(cell.get("takeaway") or "").encode("utf-8", "surrogatepass")).hexdigest()[:10]
-    v = cell.get("verification") if isinstance(cell.get("verification"), dict) else {}
-    n = v.get("relinks") if isinstance(v.get("relinks"), int) and not isinstance(v.get("relinks"), bool) else 0
-    return f"{cell.get('exec_count')}:{h}" + (f":r{n}" if n > 0 else "")
+    return f"{cell.get('exec_count')}:{h}"
 
 
 def _enqueue_links(c: str, cell: dict, version: str) -> bool:
@@ -368,7 +362,6 @@ async def _links_job(c: str, cid: str, version: str) -> None:
             cells += [x for x in (nb or {}).get("cells") or [] if isinstance(x, dict)]
         return heal.newest_first(cells)
 
-    relinks = v.get("relinks") if isinstance(v.get("relinks"), int) and not isinstance(v.get("relinks"), bool) else 0
     prior = stored.get("healed") if isinstance(stored.get("healed"), dict) else {}
     analyst = not heal.is_ai_author(cell.get("takeaway_author"))
     healed = await heal.heal(text, load=load, notebook=whole_notebook, analyst=analyst, external=external,
@@ -419,7 +412,7 @@ async def _links_job(c: str, cid: str, version: str) -> None:
                                      typed=typed_links), "resolved": resolved,
              "unresolved": still, "broken": broken, "quiet": quiet, "typed": typed_links, "checked": True, "shown": sorted(shown),
              "healed": {"version": heal.version(text, [x for x in (load(i) for i in heal.cited_cell_ids(text)) if x]),
-                        "relinks": relinks, "changes": changes, "ms": int((time.monotonic() - t0) * 1000)}}
+                        "changes": changes, "ms": int((time.monotonic() - t0) * 1000)}}
 
     def mutate(cell: dict) -> bool:
         if _links_version(cell) != version:
@@ -566,70 +559,3 @@ def rescan(c: str | None = None) -> int:
 
 jobs.on_start(rescan)
 
-
-# ----------------------------------------------------------------------------------------------------------
-# routes
-# ----------------------------------------------------------------------------------------------------------
-
-
-def _relink(c: str, cell_id: str) -> dict[str, Any]:
-    """Link the takeaway's numbers again: the deterministic pass runs at once (_link_now) and the links job is queued
-    under a
-    new version (the `relinks` count), so a finished check runs again and an earlier job lands stale."""
-    ws = notebook._ws(c)
-    with notebook.editing(ws):
-        return _relink_locked(c, ws, cell_id)
-
-
-def _relink_locked(c: str, ws: Path, cell_id: str) -> dict[str, Any]:
-    """_relink with the groups' lock held."""
-    hit = notebook._locate(ws, cell_id)
-    if hit is None:
-        raise HTTPException(404, f"no such card: {cell_id}")
-    nb, cell = hit
-    if not str(cell.get("takeaway") or "").strip():
-        raise HTTPException(409, "the card has no takeaway; nothing to link")
-    v = cell.get("verification") if isinstance(cell.get("verification"), dict) else None
-    if v is None or v.get("exec_count") != cell.get("exec_count"):
-        v = _fresh(cell)
-    prev = v.get("relinks") if isinstance(v.get("relinks"), int) and not isinstance(v.get("relinks"), bool) else 0
-    v["relinks"] = prev + 1
-    v["note"] = None
-    # an earlier pass re-pointed a ref and recorded where the text had cited it (`from`); the move is carried forward
-    stored = v.get("links") if isinstance(v.get("links"), dict) else {}
-    moved = {(str(e.get("value")), str(e.get("ref"))): e for e in (stored.get("resolved") or [])
-             if isinstance(e, dict) and e.get("from")}
-    cell["verification"] = v  # _links_version reads the count from the cell
-    _link_now(c, cell, v)
-    links_now = v.get("links") if isinstance(v.get("links"), dict) else {}
-    for entry in links_now.get("resolved") or []:
-        old = moved.get((str(entry.get("value")), str(entry.get("ref")))) if isinstance(entry, dict) else None
-        if old is not None and not entry.get("from"):
-            entry["how"], entry["from"] = old.get("how") or heal.CELL, old["from"]
-    cell["verification"] = _summarise(v)
-    links = v.get("links") if isinstance(v.get("links"), dict) else {}
-    notebook.write_notebook(ws, nb)
-    _emit_cell(c, cell, "verified")
-    return {"queued": links.get("status") == "pending", "status": str(links.get("status") or "unchecked")}
-
-
-@router.post("/ws/{c}/notebooks/{nb}/cells/{cell_id}/relink", status_code=202)
-async def relink_route(c: str, nb: str, cell_id: str) -> dict[str, Any]:
-    """Run the takeaway's linking again: the link glyph after the takeaway. 202."""
-    return _relink(c, cell_id)
-
-
-@router.post("/ws/{c}/cells/{cell_id}/relink", status_code=202)
-async def relink_route_short(c: str, cell_id: str) -> dict[str, Any]:
-    return _relink(c, cell_id)
-
-
-@router.get("/ws/{c}/cells/{cell_id}/verification")
-async def verification_route(c: str, cell_id: str) -> dict[str, Any]:
-    """The cell's verification record, plus the queue's view of its jobs."""
-    ws = notebook._ws(c)
-    hit = notebook.find_cell(ws, cell_id)
-    if hit is None:
-        raise HTTPException(404, f"no such card: {cell_id}")
-    _, cell = hit
-    return {"verification": cell.get("verification"), "job": jobs.status(f"card:{cell_id}")}

@@ -37,11 +37,8 @@ Under $THIMBLE_HOME/fixes:
                      before the first fix, the release commit (base) and its version
     state.json       {"on": false} while the person turned their fixes off (live then shows the release commit)
     off.sh           back to the plain release, also when thimble does not load: sh ~/.thimble/fixes/off.sh
-    asks/<id>.json   the sha256 of the secret of the person's key press for apply, send and keep, which the plugin
-                     writes at the press and gives the kernel on stdin; used once
-    drafts/<id>/     a submit's draft: draft.json (before the scan, never sent), scan.json, pr.md and fix.patch (the
-                     exact text that leaves), title
-    sent/<id>/       what left the machine, or what the person saved as files
+    asks/<id>.json   the sha256 of the secret of the person's key press for apply and merge, which the plugin writes at
+                     the press and gives the kernel on stdin; used once
 
 refs/thimble/fixes/<id> in live's repository keeps each fix's commit, on or off, so an undone fix can come back. A clone
 install's home that was deleted leaves mine and these refs in the person's clone; a new home that makes live moves them
@@ -82,7 +79,7 @@ cannot be done (done with `cannot`), which is the failure the person sees. Anoth
 line, or /thimble-fix N alone) goes on in its copy while the copy holds work that no check took, such as the change
 Claude made there in the person's session, so that the check takes it; else it starts in a new copy cut from mine, with
 the earlier change to start from. The quick tests run with no network, for one
-fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (run_tests).
+fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (_run_tests).
 They run in a process of their own (the runner), apart from the call that checks the fix, so that they may take longer
 than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what came of them,
 and done waits for that (_start_tests).
@@ -114,7 +111,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import privacy as P
 from .store import Store, thimble_home
 
 PLUGIN = Path(__file__).resolve().parents[2]
@@ -126,9 +122,9 @@ PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 # a shared fix goes through (fnmatch patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
-                     "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md", "plugin/prompts/fix-merge.md",
+                     "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md",
                      "browser/backend/app/dev.py",
-                     "browser/backend/app/fixes.py", "browser/backend/app/fix_share.py", "browser/frontend/src/fixes/share*",
+                     "browser/backend/app/fixes.py", "browser/backend/app/fix_share.py",
                      "browser/frontend/src/chat/FixStrip.tsx", "browser/frontend/src/chat/fix.ts"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
 }
@@ -1030,20 +1026,8 @@ SERVER_PROMPTS = ('(cd browser/backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m
 WORKBENCH_PACKAGES = (("frontend", "node_modules"), ("backend", ".venv"))
 
 
-def run_tests(fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox, with no network, as for a change to the terminal plugin (_checks).
-    They run for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails
-    runs once more before the tests count as failed. (passed, the log's last lines, which say when they passed only the
-    second time)."""
-    try:
-        argv = _tests_argv(fid)
-    except FixError as e:
-        return False, str(e)
-    return _run_tests(argv, fid)
-
-
 def _tests_argv(fid: int | str) -> list[str]:
-    """The command that runs the quick tests (run_tests) in the copy, in the sandbox, as for a change to the terminal
+    """The command that runs the quick tests (_run_tests) in the copy, in the sandbox, as for a change to the terminal
     plugin. done makes it before its guard, since making it may install the sandbox runtime, which takes minutes; once it
     committed the change, it runs the checks of what the change touched (_checks_argv)."""
     return _checks_argv(fid, ["plugin/"], "HEAD")
@@ -1125,7 +1109,10 @@ def _borrow(wt: Path) -> dict[str, list[str]]:
 
 
 def _run_tests(argv: list[str], fid: int | str) -> tuple[bool, str]:
-    """run_tests, with the command made already (_tests_argv): the runner gets it from the call that checks the fix."""
+    """The quick tests in the copy, in the sandbox, with no network, as for a change to the terminal plugin (_checks),
+    by the command _tests_argv made, which the runner gets from the call that checks the fix. They run for one fix at a
+    time, since two runs at once make the hooks tests run out of time, and a run that fails runs once more before the
+    tests count as failed. (passed, the log's last lines, which say when they passed only the second time)"""
     with Lock("tests.lock"):
         ok, log = _tests_once(argv, fid)
         if not ok:
@@ -1254,7 +1241,7 @@ def _new_log(p: Path) -> int:
 
 
 def tests_runner() -> None:
-    """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
+    """The runner (_start_tests), with its job on stdin: the tests as _run_tests runs them, then what came of them on the
     fix's record, as done writes it, marked as not shown yet (`unshown`) until the plugin's line shows it (shown): no
     session may wait for it any more. A record that went on without them (the fix was removed, a new round took the
     copy) stays as it is: each write looks again, under the fixes' lock, which a new round and a removal take too. The
@@ -3989,11 +3976,6 @@ def listing(carry_now: bool = False, say=None) -> dict[str, Any]:
             "carry_error": carry_error, "due": None if carried else carry_due()}
 
 
-def can_share() -> bool:
-    """Whether this thimble has `thimble file issue` and `thimble file pr` (kernel/share.py)."""
-    return (Path(__file__).resolve().parent / "share.py").is_file()
-
-
 class Paint:
     """Colors for a terminal (titles in bold purple, on in green, commands in purple, the rest dim), in the terminal's
     own palette so that they read on a light theme and a dark one, and plain text for a pipe, NO_COLOR, or Claude's
@@ -4087,16 +4069,15 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         nxt.append((f"thimble fix off {n}", f"turn a fix off; {c('cmd', f'thimble fix on {n}')} turns it back on"))
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
-    if can_share():
-        from .share import STATES  # noqa: PLC0415 — share imports this module
-        # the first fix that thimble file issue takes: one Claude still works on too, not one an update set aside
-        shared = [r["id"] for r in fixes if r.get("state") in STATES]
-        if shared:
-            nxt.append((f"thimble file issue {shared[0]}",
-                        f"a link to GitHub's new-issue form with fix {shared[0]}'s text, to read and submit"))
-        code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
-        if code:
-            nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
+    from .share import STATES  # noqa: PLC0415 — share imports this module
+    # the first fix that thimble file issue takes: one Claude still works on too, not one an update set aside
+    shared = [r["id"] for r in fixes if r.get("state") in STATES]
+    if shared:
+        nxt.append((f"thimble file issue {shared[0]}",
+                    f"a link to GitHub's new-issue form with fix {shared[0]}'s text, to read and submit"))
+    code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
+    if code:
+        nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
     nxt.append((f"thimble fix remove {first}", "delete a fix"))
     if not d["aside"]:
         nxt.append(("thimble update", "get the newest thimble and keep your fixes"))
@@ -4160,13 +4141,12 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     s = r.get("state")
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
-    if can_share():
-        from .share import STATES  # noqa: PLC0415 — share imports this module
-        # every state that thimble file issue takes, as the list's What next names it
-        if s in STATES:
-            acts.append((f"thimble file issue {r['id']}",
-                         "a link to GitHub's new-issue form with its text, to read and submit"))
-    if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
+    from .share import STATES  # noqa: PLC0415 — share imports this module
+    # every state that thimble file issue takes, as the list's What next names it
+    if s in STATES:
+        acts.append((f"thimble file issue {r['id']}",
+                     "a link to GitHub's new-issue form with its text, to read and submit"))
+    if s in ("on", "ready") and r.get("commit") and not r.get("pr"):
         acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():
         acts.append((f"thimble fix off {r['id']}", "turn it off"))
@@ -4183,30 +4163,6 @@ def _date(t: Any) -> str:
         return time.strftime("%m-%d", time.localtime(float(t)))
     except (TypeError, ValueError):
         return ""
-
-
-def note_of(r: dict[str, Any]) -> str:
-    s = r.get("state")
-    if s == "working":
-        return "Claude works on it"
-    if s == "ready":
-        rounds = int(r.get("rounds") or 1)
-        return ("waits for y" + (f" · {rounds} rounds" if rounds > 1 else "")) if r.get("tests") != "failed" else ""
-    if s == "failed":
-        return str(r.get("error") or "")
-    if s in ("redo", "pending"):
-        return str(r.get("error") or "did not fit")
-    if s == "request":
-        return "no code"
-    if s == "sent":
-        return str(r.get("pr") or "sent")
-    if s == "saved":
-        return "saved as files"
-    if s == "off":
-        return str(r.get("note") or "")
-    if s == "on" and int(r.get("rounds") or 1) > 1:
-        return f"{r['rounds']} rounds"
-    return ""
 
 
 def _tilde(p: str) -> str:
@@ -4469,99 +4425,6 @@ def _widen(terms: dict[str, list[str]], text: str, known, base: set[str]) -> dic
     return {k: sorted(v) for k, v in out.items()}
 
 
-def _parts(rec: dict[str, Any], title: str, summary: str) -> dict[str, str]:
-    files = rec.get("files") or []
-    tests = rec.get("tests")
-    said = "; ".join(f"{f['path']} +{f.get('add') or 0} −{f.get('del') or 0}" for f in files)
-    asked = "\n".join(f"> {line}" for w in rec.get("words") or [] for line in str(w).splitlines())
-    body = f"{title}\n\nRequested in thimble:\n{asked}\n\n{summary.strip()}\n"
-    if files:
-        body += f"\nTests: {'passed in the sandbox' if tests == 'passed' else tests or 'not run'}.\nFiles: {said}\n"
-    parts = {"pr": body}
-    if rec.get("commit"):
-        parts["diff"] = re.sub(r"^index [0-9a-f]+\.\.[0-9a-f]+.*\n", "", diff_of(rec), flags=re.M)
-    return parts
-
-
-def draft(fid: int | str, title: str, summary: str, st: Store | None) -> dict[str, Any]:
-    """Claude's title and summary for a fix, with the person's words and the diff, through the privacy scan: the exact
-    text that would leave, in drafts/<id>/. Nothing is sent."""
-    rec = get(fid)
-    if rec.get("state") not in ("on", "off", "ready", "request", "saved", "sent"):
-        raise FixError(f"fix {rec['id']} is {rec.get('state')}: there is nothing to submit yet")
-    title = short(title or rec["title"], 72)
-    parts = _parts(rec, title, summary or rec.get("summary") or "")
-    base = release().get("base") or rec.get("base") or "HEAD"
-    diff = parts.get("diff", "")
-    if diff and re.search(r"^Binary files ", diff, re.M):
-        raise FixError("the change has a binary file; a fix shares text changes only")
-    paths = _repo_paths(base, diff)
-    held_parts, _held = _protect(parts, paths)
-    base_files = _base_files(base)
-    known = _known(base)
-    found = session_terms(st)
-    text = "\n".join(held_parts.values())
-    # the diff keeps a file name that thimble's repository has (a test's made-up fixture), so that it still applies;
-    # the words the person and Claude wrote lose every name from the person's folder
-    terms = _widen(found, text, known, base_files)
-    words_terms = _widen(found, text, known, set())
-    added = sorted(set(re.findall(r"^\+\+\+ b/(\S+)$", diff, re.M)) - base_files)
-    if added:
-        named, _ = P.scan({"diff": "\n".join(added)}, {k: v for k, v in terms.items() if k != "path"}, known,
-                          use_gitleaks=False)
-        if named:
-            raise FixError("a new file of the fix is named after your data; ask Claude to give it a made-up name (r)")
-    repo_paths = [(str(live_dir()) + os.sep, ""), (str(PLUGIN) + os.sep, "plugin/")]
-    hits, notes = P.scan({k: v for k, v in held_parts.items() if k != "diff"}, words_terms, known, repo_paths, allow=[base])
-    if "diff" in held_parts:
-        more, notes2 = P.scan({"diff": held_parts["diff"]}, terms, known, repo_paths, allow=[base])
-        hits += more
-        notes += [n for n in notes2 if n not in notes]
-    for i, h in enumerate(hits, 1):
-        h["id"] = f"h{i}"
-    d = home() / "drafts" / str(rec["id"])
-    old = {(h["where"], h["found"]): h["kept"] for h in read_json(d / "scan.json") or []}
-    for h in hits:
-        h["kept"] = bool(old.get((h["where"], h["found"]))) and h["kind"] not in P.NEVER_KEPT
-    write_json(d / "draft.json", {"parts": parts, "notes": notes, "title": title})
-    _write_share(rec, d, parts, hits)
-    return {"id": rec["id"], "removed": sum(not h["kept"] for h in hits), "hits": hits, "notes": notes}
-
-
-def _write_share(rec: dict[str, Any], d: Path, parts: dict[str, str], hits: list[dict]) -> dict[str, str]:
-    held_parts, held = _protect(parts, _repo_paths(release().get("base") or "HEAD", parts.get("diff", "")))
-    out = _unprotect(P.apply(held_parts, hits), held)
-    removed = sum(not h["kept"] for h in hits)
-    rel = release()
-    foot = (f"\n---\nthimble {rel.get('version') or str(rel.get('base') or '?')[:7]} · {platform.system() or 'unknown OS'} · a "
-            f"{'change' if 'diff' in out else 'request'} from a person who uses thimble. The privacy scan removed "
-            f"{removed} detail{'' if removed == 1 else 's'}, and they read this text before it was sent.\n")
-    (d / "pr.md").write_text(out["pr"].rstrip() + "\n" + foot)
-    if "diff" in out:
-        (d / "fix.patch").write_text(out["diff"])
-    else:
-        (d / "fix.patch").unlink(missing_ok=True)
-    (d / "title").write_text(out["pr"].splitlines()[0].strip() + "\n")
-    write_json(d / "scan.json", hits)
-    return out
-
-
-def keep(fid: int | str, hit_id: str, secret: str | None) -> str:
-    """k: one detail the scan removed goes back in (never a key or a token)."""
-    rec = get(fid)
-    check_ask(rec["id"], secret)
-    d = home() / "drafts" / str(rec["id"])
-    hits = read_json(d / "scan.json") or []
-    h = next((h for h in hits if h["id"] == hit_id), None)
-    if not h:
-        raise FixError(f"no detail {hit_id} in the draft of fix {rec['id']}")
-    if h["kind"] in P.NEVER_KEPT:
-        raise FixError("keys and tokens are always removed")
-    h["kept"] = True
-    _write_share(rec, d, (read_json(d / "draft.json") or {}).get("parts") or {}, hits)
-    return f"kept {h['found']!r}"
-
-
 def upstream() -> str:
     try:
         repo = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text()).get("repository") or ""
@@ -4569,77 +4432,6 @@ def upstream() -> str:
         repo = ""
     m = re.search(r"github\.com[/:]([^/]+/[^/.]+)", str(repo))
     return m.group(1) if m else "safety-research/thimble"
-
-
-def _gh_json(*args: str) -> Any:
-    out = run([gh(), *args]).stdout
-    try:
-        return json.loads(out)
-    except ValueError:
-        raise FixError(f"gh {' '.join(args[:2])} gave no JSON")
-
-
-def _pull_request(rec: dict[str, Any], d: Path) -> str:
-    """One new commit on top of the release commit, with the scanned diff, authored by the person's GitHub noreply
-    address; pushed to their fork, and a draft pull request opened with gh."""
-    repo = upstream()
-    title = (d / "title").read_text().strip()
-    try:
-        user = _gh_json("api", "user")
-    except FixError as e:
-        raise FixError(f"{e}. Sign in to GitHub with `gh auth login`, or press w to save it as files")
-    login, uid = user.get("login"), user.get("id")
-    if not login or not uid:
-        raise FixError("gh gave no GitHub login; sign in with `gh auth login`")
-    if not (d / "fix.patch").exists():
-        # a request with no code: an issue, with the same text
-        out = run([gh(), "issue", "create", "--repo", repo, "--title", title, "--body-file", str(d / "pr.md")]).stdout.strip().splitlines()
-        return out[-1] if out else ""
-    base = release().get("base") or rec["base"]
-    noreply = f"{uid}+{login}@users.noreply.github.com"
-    run([gh(), "repo", "fork", repo, "--clone=false"])
-    live = live_dir()
-    with tempfile.TemporaryDirectory() as tmp:
-        env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index"), "GIT_AUTHOR_NAME": login,
-               "GIT_AUTHOR_EMAIL": noreply, "GIT_COMMITTER_NAME": login, "GIT_COMMITTER_EMAIL": noreply}
-        git("read-tree", base, cwd=live, env=env)
-        p = run(["git", "apply", "--cached", str(d / "fix.patch")], cwd=live, env=env, check=False)
-        if p.returncode != 0:
-            raise FixError("the scanned diff does not apply to the release; press esc and submit again")
-        tree = git("write-tree", cwd=live, env=env)
-        sha = run(["git", "commit-tree", tree, "-p", base, "-m", title], cwd=live, env=env).stdout.strip()
-    branch = f"thimble-fix-{rec['id']}-{secrets.token_hex(3)}"
-    name = repo.split("/", 1)[1]
-    url = (os.environ.get("THIMBLE_FIX_PUSH_URL") or "https://github.com/{login}/{name}.git").format(login=login, name=name)
-    run([push_git(), *NO_EXT, "-c", "credential.helper=", "-c",
-         f"credential.https://github.com.helper=!{gh()} auth git-credential",
-         "push", url, f"{sha}:refs/heads/{branch}"], cwd=live)
-    out = run([gh(), "pr", "create", "--repo", repo, "--draft", "--head", f"{login}:{branch}", "--title", title,
-               "--body-file", str(d / "pr.md")]).stdout.strip().splitlines()
-    return out[-1] if out else ""
-
-
-def send(fid: int | str, answer: str, secret: str | None) -> dict[str, Any]:
-    """The person's y (a pull request) or w (files): what the draft holds, exactly as previewed."""
-    rec = get(fid)
-    check_ask(rec["id"], secret)
-    d = home() / "drafts" / str(rec["id"])
-    if not (d / "pr.md").exists():
-        raise FixError(f"fix {rec['id']} has no draft; thimble file issue {rec['id']} posts it as an issue")
-    out_dir = home() / "sent" / str(rec["id"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("pr.md", "fix.patch", "title"):
-        if (d / name).exists():
-            shutil.copyfile(d / name, out_dir / name)
-    if answer == "file":
-        rec.update(state="saved" if rec.get("state") in ("request",) else rec["state"], saved=str(out_dir), saved_at=time.time())
-        put(rec)
-        return {"id": rec["id"], "saved": str(out_dir), "files": sorted(p.name for p in out_dir.iterdir())}
-    url = _pull_request(rec, d)
-    (out_dir / "pr-url").write_text(url + "\n")
-    rec.update(state="sent", pr=url, sent_at=time.time())
-    put(rec)
-    return {"id": rec["id"], "pr": url}
 
 
 # ------------------------------------------------------------------ the kernel's command
@@ -4669,7 +4461,7 @@ def _each(a, ids: list[str]) -> int:
     as_json = a.json and a.verb in ("show", "remove")  # the verbs whose --json is a record: one JSON list of them
     todo = list(dict.fromkeys(get(i)["id"] for i in ids))
     for n, fid in enumerate(todo):
-        one = argparse.Namespace(**{**vars(a), "id": str(fid), "hit": None, "more": [], "reloads": reloads})
+        one = argparse.Namespace(**{**vars(a), "id": str(fid), "id2": None, "more": [], "reloads": reloads})
         if n and a.verb == "show" and not as_json:
             print()
         if as_json:
@@ -4706,7 +4498,7 @@ def cmd(a) -> int:
     from .cli import out_json, stdin_text  # noqa: PLC0415
 
     verb = a.verb
-    ids = [x for x in (a.id, a.hit, *(a.more or [])) if x]
+    ids = [x for x in (a.id, a.id2, *(a.more or [])) if x]
     if verb in MANY and len(ids) > 1:
         return _each(a, ids)
     many = getattr(a, "reloads", None) is not None
@@ -4744,9 +4536,9 @@ def cmd(a) -> int:
             print(r.get("said", ""))
             _reload(a, r)
         elif verb == "new":
-            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session, a.asked))
+            out_json(new(stdin_text() or "", a.made_in, a.title, a.session, a.asked))
         elif verb == "round":
-            out_json(round_(a.id, stdin_text() or a.words or "", a.session, a.asked))
+            out_json(round_(a.id, stdin_text() or "", a.session, a.asked))
         elif verb == "again":
             out_json(again(a.id, a.session))
         elif verb == "done":
@@ -4775,7 +4567,7 @@ def cmd(a) -> int:
         elif verb == "notnow":
             out_json(not_now(a.id))
         elif verb == "redo":
-            out_json(redo(a.id, stdin_text() or a.words or "", a.session))
+            out_json(redo(a.id, stdin_text() or "", a.session))
         elif verb in ("undo", "remove"):
             r = undo(a.id) if verb == "undo" else remove(a.id)
             # the plugin's keys read JSON (one fix); a person in a terminal reads a sentence
@@ -4790,15 +4582,6 @@ def cmd(a) -> int:
         elif verb == "sandbox":
             # the fixer's own shell: it may reach the package registries; the tests it runs reach nothing
             out_json(sandbox_argv(int(a.id), net=True))
-        elif verb == "draft":
-            d = json.loads(stdin_text() or "{}")
-            root = os.environ.get("THIMBLE_ROOT")
-            st = Store(root, session=os.environ.get("THIMBLE_CONVERSATION")) if root else None
-            out_json(draft(a.id, str(d.get("title") or ""), str(d.get("summary") or ""), st))
-        elif verb == "keep":
-            print(keep(a.id, a.hit, stdin_text() if a.ask == "-" else None))
-        elif verb == "send":
-            out_json(send(a.id, a.answer, stdin_text() if a.ask == "-" else None))
         else:
             raise FixError(f"no verb {verb}")
     except FixError as e:

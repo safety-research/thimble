@@ -13,7 +13,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
@@ -46,8 +46,6 @@ export function refIcon(ref: string): IconName {
 /** A ref's chip tone: the evidence chip for the data, the accent chip for what the agent made (lib/refs
  * isEvidenceRef). */
 export const refTone = (ref: string): ChipTone => (isEvidenceRef(ref) ? 'evidence' : 'accent')
-
-export { decodeLabel }
 
 /** True where a standalone citation is its target's glyph alone, its name in the hover, so a long name does not crowd
  * the text: chat replies, inside a card's content wherever the card is drawn, and a report's text. A cited number stays
@@ -623,5 +621,3 @@ function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?
     </div>
   )
 }
-
-export default RefChip

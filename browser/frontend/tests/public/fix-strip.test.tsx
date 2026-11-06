@@ -134,7 +134,7 @@ describe('the row and the notice', () => {
 
   test('nothing to say, nothing shown; a fix that works shows its row above the composer, and nothing at the top', async () => {
     const foot = await mount(<FixWorking />)
-    const top = await mount(<FixPage ws="mini" />)
+    const top = await mount(<FixPage />)
     await settle()
     expect(foot.querySelector('.chat-fix')).toBeNull()
     fixes = [row({ phase: 'fixing', kind: null, said: null, state: 'working' })]
@@ -194,7 +194,7 @@ describe('the row and the notice', () => {
   test('Later: the row asks no more; Your fixes still offers Use it', async () => {
     fixes = [ready()]
     const el = await mount(result())
-    const top = await mount(<FixPage ws="mini" />)
+    const top = await mount(<FixPage />)
     await settle()
     fixes = []
     await click(button(el, 'Later'))

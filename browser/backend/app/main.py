@@ -7,7 +7,6 @@ import contextlib
 import importlib
 import logging
 import os
-import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -215,28 +214,6 @@ class RequestTiming:
         await self.app(scope, receive, send_timed)
 
 
-class OldEventRoutes:
-    """Pure ASGI middleware, outermost: a request on a route thimble 0.5.0 named for Claude Code channels, which a
-    session started before the update still calls, goes on as its new route (events.OLD_PATHS), so every check and the
-    router see the new path. Each such route is logged once."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-        self.seen: set[str] = set()
-
-    async def __call__(self, scope, receive, send) -> None:
-        from . import events  # noqa: PLC0415
-
-        new = events.OLD_PATHS.get(scope.get("path", "")) if scope["type"] == "http" else None
-        if new is not None:
-            if scope["path"] not in self.seen:
-                self.seen.add(scope["path"])
-                log.info("%s answers as %s: a Claude Code session started before the update to thimble 0.6.0 calls "
-                         "it; restarting that session loads the new plugin", scope["path"], new)
-            scope = {**scope, "path": new, "raw_path": new.encode("latin-1")}
-        await self.app(scope, receive, send)
-
-
 class CompleteStreams:
     """Pure ASGI middleware. When the server stops, sse_starlette cancels each event stream without the response's last
     message, which uvicorn reports as an error; such a response gets its last, empty message here. An unfinished
@@ -329,43 +306,14 @@ async def _lifespan(app: FastAPI):
         from . import cli
 
         cli.ensure_home()
-        st = cli.read_state()
-        if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
-            cli.write_state(st)
         hook_auth.ensure_session_key()
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")
-    # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
-    try:
-        config.migrate_registry()
-    except Exception:
-        log.exception("bringing the install tree's registry records into %s failed", config.DATA_DIR)
     from . import userconf
 
     if why := userconf.problem():
         log.warning("%s; no agent starts until it is fixed", why)
-    # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
-    # folders' settings.local.json (claude_changes.cleanup), each workspace's own Claude Code config dir, and the
-    # records of their per-file scratch mirrors in thimble's home (a mirror itself goes at its kernel's next start,
-    # notebook.mirror_corpus)
-    try:
-        from . import claude_changes, cli
-
-        for line in claude_changes.cleanup():
-            log.info("%s", line)
-        for old in config.WORKSPACES_DIR.glob("*/.claude-config"):
-            shutil.rmtree(old, ignore_errors=True)
-        shutil.rmtree(cli.home() / "mirrors", ignore_errors=True)
-    except Exception:
-        log.exception("removing what an older thimble left failed")
-    # the views an older thimble kept in a workspace's views/ moved into its local extension, once
-    try:
-        from . import views
-
-        views.migrate_workspaces()
-    except Exception:
-        log.exception("moving the workspaces' views into their local extensions failed")
     # the short temp folders of workspaces deleted by hand or while no server ran (runtime_cc.sweep_workspace_tmps)
     try:
         from . import runtime_cc
@@ -474,7 +422,6 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
     app.add_middleware(RequestTiming)  # times the whole stack
     app.add_middleware(CompleteStreams)  # sees every response's last message
-    app.add_middleware(OldEventRoutes)  # the checks see the new path
     app.add_middleware(BrowserPath)  # added last = outermost: /b/<key>/api/... goes on as /api/... (hook_auth)
 
     for name in ROUTER_MODULES:

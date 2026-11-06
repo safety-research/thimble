@@ -98,5 +98,3 @@ export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, d
     </form>
   )
 }
-
-export default ComposerFrame

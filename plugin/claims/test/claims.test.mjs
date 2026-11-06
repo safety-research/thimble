@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { cardOf, cellSlots, checkable, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, rowsCapacity, scrollWindow, snippetOf, wordDiff } from '../graph.js'
+import { cardOf, cellSlots, checkable, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, rowsCapacity, scrollWindow, snippetOf, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -79,17 +79,6 @@ test("a claim said without citations of its own takes the ones its reason cites 
       because: 'A post asks the run ahead to call it, and [saves on 87 pages](#) mention it.' },
   ] } })
   assert.deepEqual(st.claims[0].sources.map(s => s.label), ['Saves on 87 pages'])
-})
-
-test("a store an earlier version kept leaves out the whole folder's map it held", () => {
-  const st = readStore({ claims: [
-    { id: 'c1', text: 'The run failed at step 4.', by: 'claude', cluster: 'k1', said: [{ row: 'r1', by: 'claude', quote: 'failed at step 4' }, { by: 'folder', quote: 'step 4' }], folder: { card: 'folder-claims', id: 'a' }, links: [{ to: 'c2', how: 'supports', folder: true }] },
-    { id: 'c2', text: 'Agents blame a timezone bug', by: 'folder', cluster: 'k2', said: [{ by: 'folder', quote: 'a timezone mismatch' }] }],
-  clusters: [{ id: 'k1', name: 'failures', turn: 1, named: 1 }, { id: 'k2', name: 'timezone detour', from: 'folder', named: 1 }],
-  folder: { card: 'folder-claims', claims: 1 }, folderAsked: 't' }, 's')
-  assert.deepEqual(st.claims.map(c => [c.id, c.said.length, c.links, c.folder]), [['c1', 1, [], undefined]])
-  assert.deepEqual(st.clusters.map(k => k.id), ['k1'])
-  assert.ok(!('folder' in st) && !('folderAsked' in st))
 })
 
 /** A store of many claims in uneven clusters with links, as a long session makes them. */
@@ -441,7 +430,7 @@ test('a corrected claim: one line says so; h shows its History, one word-level d
   // the failed citations first; one x checks again keeps its place among them while it runs and after
   assert.deepEqual(evidenceOf({ sources: [{ n: 1, status: 'verified' }, { n: 2, status: 'checking', repair: true }, { n: 3, status: 'failed' }, { n: 4, status: 'verified', repair: true }] }).map(s => s.n), [2, 3, 4, 1])
   assert.equal(repairable({ row: 'r1', n: 2, status: 'failed', failedBy: 'none' }), true)
-  assert.deepEqual(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).map(rowText), ['9   × failed · citation', 'The check did not run.'])
+  assert.deepEqual(cardOf({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).rows.map(rowText), ['9   × failed · citation', 'The check did not run.'])
 })
 
 test("a corrected citation's card in the Claims pane says what the tray's header says: ✓ corrected where it said verified, or ✓ repaired after x, and what it was under it; a rewritten sentence or a narrowed citation says which; one not checked yet has the ? the reply draws after it", () => {
@@ -563,20 +552,6 @@ function eleven() {
   applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: qs.map(q => `${q.quote}.`).join(' ') }], out: { claims: qs } })
   return st
 }
-
-test('a store of v 1 cut cluster names at 60 characters: read, such a name ends after its last whole word in …', () => {
-  const cut60 = 'When the agents were busiest and whether activity dropped la'
-  assert.equal(cut60.length, 60)
-  const old = readStore({ v: 1, claims: [{ id: 'c1', text: 'A fact.', by: 'claude', cluster: 'k1' }, { id: 'c2', text: 'Another.', by: 'claude', cluster: 'k2' }],
-    clusters: [{ id: 'k1', name: cut60, turn: 1, named: 1 }, { id: 'k2', name: 'Why PRs were closed without merging', turn: 1, named: 1 }] }, 's')
-  assert.deepEqual(old.clusters.map(c => c.name), ['When the agents were busiest and whether activity dropped …', 'Why PRs were closed without merging'])
-  assert.equal(old.v, 2)
-  // the header wraps it with its … on the line of the word before
-  const head = graphView(paneData(old), { group: 'k1' }, { w: 72, h: 40 }).panel.map(rowText)
-  assert.equal(head[1], 'When the agents were busiest and whether activity dropped … · 1 claim')
-  // a store of v 2 keeps a name of 60 characters as it is
-  assert.equal(readStore({ v: 2, claims: [], clusters: [{ id: 'k1', name: cut60 }] }, 's').clusters[0].name, cut60)
-})
 
 test('a cluster named #N is the cluster of the Nth claim of the same list, never a cluster called "#N"', () => {
   const st = emptyStore('s')

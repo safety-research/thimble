@@ -607,11 +607,11 @@ test('a repair that corrected the citation says repaired in its header and what 
 
 
 test('a citation whose check did not run is failed: × in the reply, × failed in the card with the plain reason, and x starts its check; so is a check the session ended mid-way', CITES, async ($, on) => {
-  // an earlier thimble kept the first as unchecked, with no evidence, and the second as checking when its session
-  // ended: the resumed session finds both failed
+  // the session ended before the first one's check gave evidence, and while the second's ran: the resumed session
+  // finds both failed
   const { evidence: _e, ...words } = QUOTED
   const { clock, spawns, submitted } = await resumed($, on, [
-    { ...words, sentence: TWO, status: 'unchecked', reason: 'the reply was interrupted before its citations were checked' },
+    { ...words, sentence: TWO, status: 'checking' },
     { ...SECOND, status: 'checking' },
   ], 's-tray-12', { text: TWO })
   const reply = all(await $.ui.render(answer('row-t1', TWO)))

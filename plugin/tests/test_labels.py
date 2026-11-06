@@ -429,30 +429,6 @@ def test_a_new_conversation_in_the_same_folder_starts_with_no_labels_and_a_resum
     assert {f["path"]: f["labels"] for f in cov["files"]}["chat/room.jsonl"] == ["sorry"]
 
 
-def test_the_folders_labels_of_thimble_0_10_stay_on_disk_and_only_the_conversation_that_applied_one_finds_it(root: Path):
-    # thimble 0.10 kept one set of labels per folder, which every session showed
-    old = STORE.legacy_dir(root) / "labels"
-    old.mkdir(parents=True)
-    lab = {"name": "old", "kind": "regex", "rule": "sorry", "in": "chat/*.jsonl", "values": ["yes", "no"], "rev": 1,
-           "units": {"chat/room.jsonl#L1": {"v": "yes", "c": 1.0, "by": "regex"}}, "checks": {}, "sessions": ["conv-old"]}
-    (old / "old.json").write_text(json.dumps(lab))
-    before = (old / "old.json").read_text()
-    # a new conversation shows none of it
-    assert in_conversation(root, "conv-new", "label", "--json").stdout.strip() == "[]"
-    # the conversation that applied it, resumed, finds it again, and a change of it leaves the old file as it was
-    assert "  old: yes 1 · no 0 of 1 record" in in_conversation(root, "conv-old", "label", "old").stdout
-    assert in_conversation(root, "conv-old", "label", "old", "--check", "chat/room.jsonl#L1", "no").returncode == 0
-    assert (old / "old.json").read_text() == before
-    assert "the analyst checked 1" in in_conversation(root, "conv-old", "label", "old").stdout
-    assert in_conversation(root, "conv-new", "label", "--json").stdout.strip() == "[]"
-    # a label an earlier thimble wrote in the folder itself: the same
-    own = root / "thimble" / "labels"
-    own.mkdir(parents=True)
-    (own / "mine.json").write_text(json.dumps({**lab, "name": "mine", "sessions": ["conv-own"]}))
-    assert in_conversation(root, "conv-new2", "label", "--json").stdout.strip() == "[]"
-    assert [x["name"] for x in json.loads(in_conversation(root, "conv-own", "label", "--json").stdout)] == ["mine"]
-
-
 def test_a_label_keeps_a_version_of_its_counts_after_each_change_and_a_citation_reads_them_as_they_were(root: Path):
     """B19: what `thimble label NAME` counts is kept as a version after each change once no record waits for the model:
     a trial, the run on every record, the person's check, a new definition (which keeps the versions before it). The

@@ -1,6 +1,6 @@
-"""thimble fix (engine/kernel/fixes.py): a request, the fixer's end, the person's y, undo, off and on, the safe files, and
-submitting as files or as a pull request to a made-up remote. Each test has its own THIMBLE_HOME, Claude Code config
-folder and made-up release repository; `claude` and `gh` are fakes that log their arguments. All data here is made up."""
+"""thimble fix (engine/kernel/fixes.py): a request, the fixer's end, the person's y, undo, off and on, and the safe files.
+Each test has its own THIMBLE_HOME, Claude Code config folder and made-up release repository; `claude` and `gh` are
+fakes that log their arguments. All data here is made up."""
 from __future__ import annotations
 
 import json
@@ -368,7 +368,7 @@ def test_the_tests_run_for_one_fix_at_a_time_and_once_more_before_they_fail(worl
     u = made(world)
     got: list = []
     with FX.Lock("tests.lock"):
-        th = threading.Thread(target=lambda: got.append(FX.run_tests(u["id"])))
+        th = threading.Thread(target=lambda: got.append(FX._run_tests(FX._tests_argv(u["id"]), u["id"])))
         th.start()
         time.sleep(0.5)
         assert th.is_alive() and got == []
@@ -638,44 +638,6 @@ def test_a_github_install_clones_live_from_claude_codes_clone(world, tmp_path):
     assert sh("git", "branch", "--list", "mine", cwd=world["rel"]) == ""
 
 
-def test_submit_scans_then_saves_or_opens_a_pull_request_on_a_made_up_remote(world, monkeypatch, tmp_path):
-    r = FX.new("the bar should say how many failed, like the two in board-7.jsonl")
-    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
-    p.write_text(p.read_text() + "// seen in " + "/ho" + "me/dana/data/board-7.jsonl\n")
-    FX.done(r["id"], "Bar shows failed citations", "")
-    FX.apply(r["id"], press(r["id"]))
-    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"], "name": ["dana"]})
-    d = FX.draft(r["id"], "Bar shows failed citations", "While a reply has failed citations, the bar says how many.", None)
-    assert d["removed"] >= 2
-    pr = (FX.home() / "drafts" / "1" / "pr.md").read_text()
-    patch = (FX.home() / "drafts" / "1" / "fix.patch").read_text()
-    assert "board-7.jsonl" not in pr + patch and "/ho" + "me/dana" not in pr + patch
-    assert "‹data file›" in pr and "> the bar should say" in pr
-    # w: the same text, saved as files, nothing sent
-    with pytest.raises(FX.FixError):
-        FX.send(r["id"], "file", "a-guess")
-    out = FX.send(r["id"], "file", press(r["id"]))
-    assert sorted(out["files"]) == ["fix.patch", "pr.md", "title"]
-    assert (Path(out["saved"]) / "pr.md").read_text() == pr
-    # y: a pull request, here to a made-up fork (a bare repository) with a fake gh
-    fork = tmp_path / "fork.git"
-    sh("git", "init", "-q", "--bare", str(fork))
-    ghlog = tmp_path / "gh.log"
-    gh = fake(world["bin"] / "gh", ghlog, 'case "$1" in api) echo \'{"login": "made-up", "id": 42}\';; '
-              'pr) echo https://github.com/made-up/thimble/pull/9;; esac')
-    monkeypatch.setenv("THIMBLE_GH", str(gh))
-    monkeypatch.setenv("THIMBLE_FIX_PUSH_URL", str(fork))
-    out = FX.send(r["id"], "pr", press(r["id"]))
-    assert out["pr"].endswith("/pull/9") and FX.get(r["id"])["state"] == "sent"
-    pushed = sh("git", "for-each-ref", "--format=%(refname)", "refs/heads/", cwd=fork)
-    assert pushed.startswith("refs/heads/thimble-fix-1-")
-    author = sh("git", "log", "-1", "--format=%an <%ae>|%s", pushed, cwd=fork)
-    assert author == "made-up <42+made-up@users.noreply.github.com>|Bar shows failed citations"
-    body = sh("git", "show", pushed, cwd=fork)
-    assert "board-7.jsonl" not in body and "‹path›" in body
-    assert any(x.startswith("pr create") and "--draft" in x for x in ghlog.read_text().splitlines())
-
-
 def test_the_fixers_sandbox_writes_only_its_copy(world, tmp_path):
     srt = os.environ.get("THIMBLE_TEST_SRT")  # a folder with srt installed (sandbox/setup.mjs); skipped without it
     if not srt:
@@ -720,21 +682,6 @@ def test_a_copy_gets_the_types_claude_code_wrote(world, monkeypatch, tmp_path):
     monkeypatch.setattr(FX, "PLUGIN", plugin)
     FX.done(r["id"], "Bar says read", "The bar says read.")
     assert (Path(FX.round_(r["id"], "and keep the percent")["work"]) / "plugin" / ".claude-plugin" / "types" / "tsconfig.json").exists()
-
-
-def test_a_request_with_no_code_goes_as_an_issue(world, monkeypatch, tmp_path):
-    q = FX.done(FX.new("explain the terms of my field")["id"], "Explain terms of my field", "It needs the person's words.")
-    assert q["state"] == "request"
-    monkeypatch.setattr(FX, "session_terms", lambda st: {})
-    FX.draft(q["id"], "Explain terms of my field", "Explainers could use a glossary the person writes.", None)
-    assert not (FX.home() / "drafts" / str(q["id"]) / "fix.patch").exists()
-    ghlog = tmp_path / "gh.log"
-    gh = fake(world["bin"] / "gh", ghlog, 'case "$1" in api) echo \'{"login": "made-up", "id": 42}\';; '
-              'issue) echo https://github.com/made-up/thimble/issues/3;; esac')
-    monkeypatch.setenv("THIMBLE_GH", str(gh))
-    out = FX.send(q["id"], "pr", press(q["id"]))
-    assert out["pr"].endswith("/issues/3") and FX.get(q["id"])["state"] == "sent"
-    assert not any(x.startswith(("repo fork", "pr create")) for x in ghlog.read_text().splitlines())
 
 
 def as_github(w) -> Path:
@@ -1270,7 +1217,6 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     from kernel import cli  # noqa: PLC0415
 
     monkeypatch.delenv("CLAUDECODE", raising=False)
-    monkeypatch.setattr(FX, "can_share", lambda: True)
     a, b, c = three_fixes(world)
     FX.undo(b)
     d = FX.new("the claims pane should open the cluster I had open")
@@ -1324,8 +1270,6 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert all(f"thimble {w}" not in help_ for w in ("demo", "browser", "fix merge"))
     assert "thimble fix merge A B C" in cli.FIX_HELP  # the escape hatch stays in thimble fix --help only
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
-    monkeypatch.setattr(FX, "can_share", lambda: False)
-    assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
 
 
 def test_the_persons_verbs_take_several_numbers_check_them_all_first_and_go_on_past_a_fix_that_fails(world, capsys, monkeypatch):
@@ -1376,7 +1320,6 @@ def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(worl
     from kernel import cli  # noqa: PLC0415
 
     monkeypatch.delenv("CLAUDECODE", raising=False)
-    monkeypatch.setattr(FX, "can_share", lambda: True)
     # the shell stands in thimble's repository here, every file of which the scan would list
     monkeypatch.setattr(FX, "session_terms", lambda st: {})
     w = made(world, words="make the minimap smaller", edit=False)
@@ -1477,19 +1420,6 @@ def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_
         p = subprocess.run([sys.executable, str(script), "report"], capture_output=True, text=True,
                            env={**os.environ, "HOME": str(home), "CLAUDE_CONFIG_DIR": str(world["cc"])})
         assert p.returncode == 0 and p.stdout.strip() == "", gone
-
-
-def test_a_data_file_named_like_one_of_thimbles_goes_from_the_words_and_stays_in_the_diff(world, monkeypatch):
-    r = FX.new("after Claude read package.json, the bar should say read")
-    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
-    p.write_text(p.read_text() + "// a test reads a made-up package.json\n")
-    FX.done(r["id"], "Bar says read", "")
-    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["package.json"]})
-    FX.draft(r["id"], "Bar says read", "The bar says read, as package.json showed.", None)
-    pr = (FX.home() / "drafts" / "1" / "pr.md").read_text()
-    patch = (FX.home() / "drafts" / "1" / "fix.patch").read_text()
-    assert "package.json" not in pr and "after Claude read ‹data file›" in pr
-    assert "+// a test reads a made-up package.json" in patch
 
 
 def on_fix(w) -> dict:
@@ -1637,8 +1567,6 @@ def test_the_list_tags_a_fix_made_in_the_browser_after_its_date(world):
 def test_the_list_quotes_the_persons_own_words_and_show_has_claudes_beside_them(world, capsys, monkeypatch):
     from kernel import cli  # noqa: PLC0415
 
-    monkeypatch.setattr(cli, "stdin_text", lambda wait=1.0: "")  # no words on stdin: --words gives them
-
     # the person typed /thimble-fix <their words>; Claude wrote the words the fixer works from
     mine, claudes = "add a feature to customize the model in charge of citations", \
         "Add a way for the analyst to choose the model that checks citations"
@@ -1654,8 +1582,9 @@ def test_the_list_quotes_the_persons_own_words_and_show_has_claudes_beside_them(
     r = FX.round_(r["id"], "Show the model in the settings pane")
     r = FX.round_(r["id"], "Say which model it is", asked="and say which one")
     assert r["asked"] == [mine, None, "and say which one"] and len(r["words"]) == 3
-    # through the command, as the plugin gives it, also when the words start with a dash
-    assert cli.main(["fix", "new", "--words", "The bar says read", "--asked=-- the bar, say read"]) == 0
+    # through the command, as the plugin gives it (Claude's words on stdin), also when the person's start with a dash
+    monkeypatch.setattr(cli, "stdin_text", lambda wait=1.0: "The bar says read")
+    assert cli.main(["fix", "new", "--asked=-- the bar, say read"]) == 0
     assert json.loads(capsys.readouterr().out)["asked"] == ["-- the bar, say read"]
     # a fix with no words of the person's (Claude offered it) shows Claude's, as before
     c = FX.new("the legend hides its last row")

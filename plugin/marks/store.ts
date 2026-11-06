@@ -157,8 +157,8 @@ export async function rowMarks($: Engine, row: string): Promise<RowMarks | null>
 }
 
 /** The replies kept for this conversation that the state does not hold (a resumed session), back in it. Their marks
- *  that were still checked did not run: the check ended with the session that ran it. A mark an earlier thimble kept
- *  as `unchecked` is failed too. One that waits to be opened (`deferred`) still waits. */
+ *  that were still checked did not run: the check ended with the session that ran it. One that waits to be opened
+ *  (`deferred`) still waits. */
 export async function restoreMarks($: Engine): Promise<void> {
   const dir = `${await keptDir($)}/marks`
   let entries: { name: string; kind: string }[] = []
@@ -168,11 +168,9 @@ export async function restoreMarks($: Engine): Promise<void> {
     let r: Reply
     try { r = JSON.parse(String(await $.fs.read(`${dir}/${x.name}`))) as Reply } catch { continue }
     if (!r?.key || !Array.isArray(r.items) || (await replyOf($, r.key))) continue
-    const open = (m: MarkItem) => m.status === 'checking' || (m.status as string) === 'unchecked'
+    const open = (m: MarkItem) => m.status === 'checking'
     const ended = r.items.some(open)
-    await setReply($, ended
-      ? { ...r, items: r.items.map(m => (open(m) ? notRun(m, m.status === 'checking' ? 'The session ended before it did.' : '') : m)) }
-      : r)
+    await setReply($, ended ? { ...r, items: r.items.map(m => (open(m) ? notRun(m, 'The session ended before it did.') : m)) } : r)
     if (ended) await persist($, r.key)
   }
 }

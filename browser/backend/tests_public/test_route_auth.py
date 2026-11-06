@@ -84,7 +84,7 @@ def test_every_read_needs_the_cookie_or_the_token_and_only_the_open_reads_answer
     by_cookie.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     reads = [p for m, p, _, _ in rows if m == "GET" and not hook_auth.guarded(m, p)]
     gated = [p for p in reads if p not in hook_auth.OPEN_READS]
-    assert sorted(set(reads) - set(gated)) == sorted(hook_auth.OPEN_READS) and len(gated) >= 95
+    assert sorted(set(reads) - set(gated)) == sorted(hook_auth.OPEN_READS) and len(gated) >= 85
     refused = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
     for path in gated:
         url = _concrete(path)

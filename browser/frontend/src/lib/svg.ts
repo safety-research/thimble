@@ -158,7 +158,7 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
   }
   // read before the ids are prefixed, as a parent's id is before its children are reached below
   const backgrounds = new Set(all.filter(isBackground))
-  const ref = (s: string) => s.replace(/url\(\s*#([^)\s]+)\s*\)/g, (m, id: string) => (ids.has(id) ? `url(#${prefix}${id})` : 'none'))
+  const ref = (s: string) => s.replace(/url\(\s*#([^)\s]+)\s*\)/g, (_, id: string) => (ids.has(id) ? `url(#${prefix}${id})` : 'none'))
   for (const el of all) {
     for (const attr of Array.from(el.attributes)) {
       const name = attr.name.toLowerCase()

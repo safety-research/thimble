@@ -170,7 +170,7 @@ def test_a_request_that_never_reached_the_api_is_a_connection_failure_though_its
 def test_each_fix_says_where_it_runs():
     """The browser can't run /login or /model: a fix only the terminal can run says "In your terminal:" and has no
     button; one the browser can run has its words, and its button where one fixes it."""
-    where = {cls: notices.fix_where(cls) for cls in notices.API_WORDS}
+    where = {cls: at for cls, (_, _, at) in notices.API_WORDS.items()}
     assert where == {"refused": "browser", "auth": "terminal", "forbidden": "terminal", "not_found": "browser",
                      "overloaded": "browser", "rate_limited": "browser", "server_error": "browser",
                      "connection": "browser"}

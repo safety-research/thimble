@@ -16,7 +16,7 @@ pytestmark = pytest.mark.usefixtures("claude_code_sign_in", "workspaces_tmp")
 
 @pytest.fixture(autouse=True)
 def _small_sample(monkeypatch):
-    for table in (concepts._runs, concepts._subs, concepts._locks, concepts._cancels, concepts._tasks):
+    for table in (concepts._runs, concepts._locks, concepts._cancels, concepts._tasks):
         table.clear()
     label_asks.reset()
     monkeypatch.setattr(label_asks, "SAMPLE", 3)

@@ -2027,8 +2027,7 @@ button.chat-strip-head:hover {
   padding: 3px 0;
   overflow-wrap: anywhere;
 }
-.chat-fix-act.btn,
-.chat-fix-x.btn {
+.chat-fix-act.btn {
   flex: none;
 }
 .chat-fix-top {

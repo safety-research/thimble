@@ -4,9 +4,6 @@
 // The chips are the same for every message; only where the original stands on each differs:
 //   Length              short · as written · longer · much longer. The original is always "as written": a shorter
 //                       version leaves parts out, a longer one explains more and adds detail.
-//   Interpretation      facts only · as written · expert reading: how much the text says beyond what the facts
-//                       literally say, from the facts alone to an expert's reading of them. The original is always
-//                       "as written".
 //   Background          new · learning · working · expert: the reader's background, how much of the field the text
 //                       explains and how much it takes as known. The original stands at working, and reads "as written".
 //   a chip the person typed, after +: their own words ("for my manager", "more skeptical", "as a timeline",
@@ -22,8 +19,8 @@
 // messages to catch the person up on (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
 // which still show above it, so it never shows its original: 0 dismisses it.
 //
-// The chips belong to the whole answer: its text and the cards drawn in its turn. With the squeeze switch for cards on,
-// the request shows the original's cards (cardsBlock: each card's title, columns, first rows, what it draws and its
+// The chips belong to the whole answer: its text and the cards drawn in its turn. The request shows the original's
+// cards (cardsBlock: each card's title, columns, first rows, what it draws and its
 // view), and a reply may edit a card (a new version of it, same id), add one (a new view over the rows of a card the
 // request showed), or leave one out (readCards). cards.ts makes those as the person's versions through the card
 // runner; here the record keeps which cards each version shows, so a version seen before, and the original, come back
@@ -36,9 +33,7 @@
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
 //     own:      [{id, words}]         the chips the person typed for this message (at most three)
 //     scale:    5                     the chips' scales now: Length short · as written · longer · much longer, and
-//                                     the Background chip (records of scale 4 had none; before scale 4, Length had one
-//                                     line first; before scale 3, Background had five levels; before scale 2, Length
-//                                     was one line · short · medium · full): levelsAt reads them
+//                                     the Background chip
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     cards:    {key: {rows, did}}    the cards of each version that changed one: rows {row: [{id, copy}]} as drawn
 //                                     (`copy`: the copy of the card that version shows, cards.ts), did [{id, did:
@@ -136,26 +131,10 @@ export function setWords(rec) {
   return chipsOf(rec).filter(c => c.level !== c.level0).map(c => c.levels[c.level]).join(' · ')
 }
 
-/** `at` as the chips' scales read it now. A record of scale 4 had no Background chip, so it stands where the original
- *  does, and the rest reads as written. Length's one line went at scale 4: a record from before reads one line and
- *  short as short, and its longer levels one lower. A record written before Length had its original in the middle
- *  (scale 2) had one line · short · medium · full with the original at full, so full is the original and the rest reads
- *  as short. Background had the same four levels at scale 3, so its level reads as it was; before scale 3 it had five,
- *  and its level reads as the original's. */
-function levelsAt(s) {
-  // the Interpretation chip went in 0.10.4: a level a record set on it reads as not set
-  const { interpret: _gone, ...at } = s.at && typeof s.at === 'object' ? s.at : {}
-  // (a record of before has versions written; a new one has none until its first rewrite, which sets the scale)
-  const scale = Number(s.scale) || 1
-  if (scale >= 4 || !Object.keys(s.versions || {}).length) return at
-  const { length, familiarity, ...others } = /** @type {Record<string, number>} */ (at)
-  const rest = scale >= 3 && Number.isInteger(familiarity) ? { ...others, familiarity } : others
-  if (!Number.isInteger(length)) return rest
-  const was = scale < 2 ? (length >= 3 ? null : 0) : length === 2 ? null : Math.max(0, length - 1)
-  return was == null ? rest : { ...rest, length: was }
-}
+/** The levels a record's squeeze sets: its `at`. */
+const levelsAt = s => (s.at && typeof s.at === 'object' ? s.at : {})
 
-/** The levels set now, as the chips' scales read them (a record from before is read as levelsAt says). */
+/** The levels set now. */
 export const atOf = rec => levelsAt(sq(rec))
 
 /** A chip the person typed, as a chip: its words are its name, and its levels run from the original to fully. */
@@ -189,8 +168,7 @@ export function withOwn(rec, typed) {
 }
 
 /** Every chip of the message, in the order drawn: the fixed ones, then the ones the person typed. Each with `level0`,
- *  where the original stands, and `level`, where it is now. (A record from before may hold where an observer placed
- *  the original on Interpretation, record.verbs.s.at: it is not read, and the original stands at "as written".) */
+ *  where the original stands, and `level`, where it is now. */
 export function chipsOf(rec) {
   const s = sq(rec)
   const at = levelsAt(s)
@@ -765,7 +743,7 @@ export function applyRewrite(rec, { text, at, made = null, problems = [], cards 
   const s0 = sq(rec)
   const orig = s0.orig || {}
   // the original's cards, kept from the first rewrite that was shown them
-  const s = { ...s0, at: { ...at }, scale: SCALE, versions: scaledVersions(s0), orig: origCards && !orig.cards ? { ...orig, cards: origCards } : orig }
+  const s = { ...s0, at: { ...at }, scale: SCALE, versions: { ...(s0.versions || {}) }, orig: origCards && !orig.cards ? { ...orig, cards: origCards } : orig }
   const probe = { ...rec, squeeze: s }
   const chips = chipsOf(probe)
   const key = keyOf(chips)
@@ -781,32 +759,20 @@ export function applyRewrite(rec, { text, at, made = null, problems = [], cards 
   return isOriginal(chips) ? { ...rec, shown: null, squeeze: s } : { ...rec, shown: text, squeeze: s }
 }
 
-/** The versions kept, keyed by the chips' scales now: a record of scale 4 keeps them all (its keys name no
- *  Background level, so each reads at the original's). One from before drops the ones Length wrote, whose keys no level
- *  names now, and before scale 3 the ones Background's five levels wrote. */
-function scaledVersions(s) {
-  const v = { ...(s.versions || {}) }
-  const scale = Number(s.scale) || 1
-  if (scale >= 4) return v
-  const gone = scale >= 3 ? /(^|&)length=/ : /(^|&)(length|familiarity)=/
-  for (const k of Object.keys(v)) if (gone.test(k)) delete v[k]
-  return v
-}
-
 /** The record at a set of levels already written (a level seen before): no call. Null when that version is not kept. */
 export function fromVersions(rec, at) {
   const s = sq(rec)
   const chips = chipsOf({ ...rec, squeeze: { ...s, at, scale: SCALE } })
   if (isOriginal(chips)) return restore({ ...rec, squeeze: { ...s, at } })
-  const text = scaledVersions(s)[keyOf(chips)]
+  const text = (s.versions || {})[keyOf(chips)]
   if (typeof text !== 'string') return null
-  return { ...rec, shown: text, squeeze: { ...s, at, scale: SCALE, versions: scaledVersions(s), problems: [] } }
+  return { ...rec, shown: text, squeeze: { ...s, at, scale: SCALE, versions: { ...(s.versions || {}) }, problems: [] } }
 }
 
 /** The original again: every chip back where the original stands, the person's chips kept (off). */
 export function restore(rec) {
   const s = sq(rec)
-  return { ...rec, shown: null, squeeze: { ...s, at: {}, scale: SCALE, versions: scaledVersions(s), problems: [] } }
+  return { ...rec, shown: null, squeeze: { ...s, at: {}, scale: SCALE, versions: { ...(s.versions || {}) }, problems: [] } }
 }
 
 /** A message's first words, plain (a citation as its words), for naming it to Claude. */

@@ -8,16 +8,13 @@ calls) are prompts/checks/<id>.md, read from the prompt file until first changed
 terminal's heads-up and explainer lenses (plugin/prompts/lens-heads.md, lens-explain.md) as checks, and cover the
 documents and Claude's answers; Judgment calls covers the documents and the cards. The front matter's `shown` says
 whether a built-in is on until the analyst turns it on or off (Heads up and Explainers on, Judgment calls off). A stored
-copy still holding a name, a prompt or covers its built-in had before reads as the built-in is now (FORMER_NAMES,
-FORMER_PROMPTS, FORMER_COVERS, FORMER_DEFAULT_COVERS), since thimble stores a built-in whole when it is turned on or off
-or runs. Its `shown` stays as stored once the analyst set it (`shown_set`, which edit records for the analyst's switch
-and for main's run_check and stop_check) or when it is off; one stored on without `shown_set` reads as its built-in is
-now (_shown_now), since 0.7.0 and 0.8.0 turned every built-in on and stored it on when it ran or a save marked it
-stale. A stored copy under an id its built-in had before (FORMER_IDS: Important details and, before it, You should
-know, now Heads up) is renamed to the id now when the checks are read (_migrate), and a comment that names a former id
-reads as naming the id now, written so on the store's next write. A former built-in (RETIRED: `verified`, before 0.7.0,
-and `unverified`, Unverifiable) is listed only where the workspace stored it, as any stored check is, so its comments
-stay readable there; it never runs again, and no new check takes its id. A run is a `thimble:check`, a subagent of main
+copy still holding a prompt its built-in had before reads with the prompt now (FORMER_PROMPTS), since thimble stores a
+built-in whole when it is turned on or off or runs. Its `shown` stays as stored once the analyst set it (`shown_set`,
+which edit records for the analyst's switch and for main's run_check and stop_check) or when it is off; one stored on
+without `shown_set` reads as its built-in is now (_shown_now). A former built-in (RETIRED: `verified` and
+`unverified`, Unverifiable) is listed only where the workspace stored it, as any stored check is, so its comments stay
+readable there, and is on only where the analyst turned it on; it never runs again, and no new check takes its id. A
+run is a `thimble:check`, a subagent of main
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
 (context.render) and then the document, the check's prompt and the passages it covers (a run of Heads up or Explainers,
@@ -101,17 +98,8 @@ OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("heads-up", "explainers", "judgment")  # prompts/checks/<id>.md, listed first in this order
 # former built-ins: listed only where the workspace stored them, never run again, and no new check takes their ids
 RETIRED = ("verified", "unverified")
-# the ids the built-ins had before, each with its id now: a workspace's stored copy, and a comment, under a former id
-# reads under the id now (_migrate, current_id); the first one stored wins. Internal only: no surface shows a former id.
-FORMER_IDS = {"important-details": "heads-up", "you-should-know": "heads-up"}
-# what the built-ins were named before, the sha1 of the words (collapsed) of each prompt they shipped with before, and
-# what they covered before: a workspace's stored copy of a built-in that still holds one reads as the built-in is now
-# (_as_now)
-FORMER_NAMES = {"heads-up": ("You should know", "Important details")}
-FORMER_COVERS = {"judgment": (["documents"],)}
-# what a built-in covered by default before: a stored copy that holds it, and whose covers the analyst never set
-# (`covers_set`), reads as covering what its built-in covers now (_as_now)
-FORMER_DEFAULT_COVERS = {"heads-up": (["documents", "cards"], ["documents", "cards", "answers"])}
+# the sha1 of the words (collapsed) of each prompt the built-ins shipped with before: a workspace's stored copy of a
+# built-in that still holds one reads with the prompt now (_as_now)
 FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
     "heads-up": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5",
@@ -211,92 +199,38 @@ def _words_key(text: Any) -> str:
     return hashlib.sha1(_collapse(text).encode("utf-8")).hexdigest()
 
 
-def _shown_now(stored: dict[str, Any], now: dict[str, Any], *, before_cards: bool) -> bool:
-    """Whether a stored built-in is on: as stored when the analyst set it (`shown_set`) or it is off, and when it was
-    stored before checks covered the cards (`before_cards`: before 0.7.0, when the built-ins started off, so on was the
-    analyst's choice); else, stored on by 0.7.0 or 0.8.0, which turned every built-in on, as its built-in is now."""
-    if stored.get("shown_set") or stored.get("shown") is not True or before_cards:
+def _shown_now(stored: dict[str, Any], now: dict[str, Any]) -> bool:
+    """Whether a stored built-in is on: as stored when the analyst set it (`shown_set`) or it is off; else, stored on
+    when it ran, as its built-in is now."""
+    if stored.get("shown_set") or stored.get("shown") is not True:
         return bool(stored.get("shown"))
     return bool(now.get("shown"))
 
 
-def _as_now(stored: dict[str, Any], *, before_cards: bool = False) -> dict[str, Any]:
-    """A stored built-in with the name, the prompt and the covers its built-in has now in place of a former one it still
-    holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), and `shown` as _shown_now reads it; one the analyst changed
-    stays. A former built-in (RETIRED) reads as stored, but on only where the analyst turned it on."""
+def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
+    """A stored built-in with the prompt its built-in has now in place of a former one it still holds (FORMER_PROMPTS),
+    and `shown` as _shown_now reads it; one the analyst changed stays. A former built-in (RETIRED) reads as stored, but
+    on only where the analyst turned it on."""
     cid = str(stored.get("id") or "")
     if cid in RETIRED:
-        stored["shown"] = _shown_now(stored, {"shown": False}, before_cards=before_cards)
+        stored["shown"] = _shown_now(stored, {"shown": False})
         return stored
     now = builtin(cid) if cid in BUILTINS else None
     if now is None:
         return stored
-    stored["shown"] = _shown_now(stored, now, before_cards=before_cards)
-    if _collapse(stored.get("name")) in FORMER_NAMES.get(cid, ()):
-        stored["name"] = now["name"]
+    stored["shown"] = _shown_now(stored, now)
     if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
         stored["prompt"] = now["prompt"]
-    if stored.get("covers") in FORMER_COVERS.get(cid, ()) or (
-            not stored.get("covers_set") and stored.get("covers") in FORMER_DEFAULT_COVERS.get(cid, ())):
-        stored["covers"] = now["covers"]
     return stored
 
 
-def current_id(cid: Any) -> str:
-    """The id a check has now: a built-in's former id (FORMER_IDS) as the built-in's id now, any other as it is."""
-    return FORMER_IDS.get(str(cid or ""), str(cid or ""))
-
-
-def chat_as_now(meta: dict[str, Any]) -> dict[str, Any]:
-    """A check run's chat meta, in place, with its check under its id now (current_id) and, when its title is a former
-    name of that check (FORMER_NAMES), the check's name now in its title and in its brief; the meta's file stays as it
-    is until thimble writes it again."""
-    cid = current_id(meta.get("check"))
-    if not cid:
-        return meta
-    meta["check"] = cid
-    old = _collapse(meta.get("title"))
-    if old not in FORMER_NAMES.get(cid, ()):
-        return meta
-    name = str((builtin(cid) or {}).get("name") or old)
-    meta["title"] = name
-    if isinstance(meta.get("brief"), str):  # check-instructions names the check before its prompt: the first match
-        meta["brief"] = meta["brief"].replace(old, name, 1)
-    return meta
-
-
-def _migrate(d: Path) -> None:
-    """In the checks folder `d`, a built-in stored under a former id (FORMER_IDS) renamed to its id now, so a workspace
-    from before reads and writes it under that id; a copy already stored under the id now wins, and the former file
-    then stays unread."""
-    for old, new in FORMER_IDS.items():
-        src, dst = d / f"{old}.json", d / f"{new}.json"
-        if not src.is_file() or dst.exists():
-            continue
-        x = read_json(src, None)
-        if not isinstance(x, dict):
-            continue
-        x["id"] = new
-        try:
-            write_json(dst, x)
-            src.unlink(missing_ok=True)
-        except OSError:  # a folder that cannot be written reads the built-in from its prompt file
-            log.warning("%s: stored check not renamed to %s", d, new, exc_info=True)
-
-
 def read(c: str, cid: str) -> dict[str, Any] | None:
-    """The check `cid` (a former id as its id now): its workspace file, else the built-in of that id; None when none
-    exists."""
-    cid = current_id(cid)
-    _migrate(_dir(c))
+    """The check `cid`: its workspace file, else the built-in of that id; None when none exists."""
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
-        before_cards = "covers" not in stored or covers_of(stored["covers"]) in FORMER_COVERS.get(cid, ())
-        if "covers" not in stored:  # a check stored before checks covered the cards covers what its built-in says
-            stored["covers"] = (builtin(cid) or {}).get("covers") or list(DEFAULT_COVERS)
-        stored["covers"] = covers_of(stored["covers"])
-        return _as_now(stored, before_cards=before_cards)
+        stored["covers"] = covers_of(stored.get("covers"))
+        return _as_now(stored)
     return builtin(cid)
 
 
@@ -306,7 +240,7 @@ def list_checks(c: str) -> list[dict[str, Any]]:
     d = _dir(c)
     others = []
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
-        if p.stem in BUILTINS or p.stem in FORMER_IDS:
+        if p.stem in BUILTINS:
             continue
         x = read(c, p.stem) if p.stem in RETIRED else read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:
@@ -410,8 +344,8 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         check["colour"] = colour
     if shown is not None:  # the analyst's switch, or main's run_check or stop_check: a choice that stays (_shown_now)
         check["shown"], check["shown_set"] = bool(shown), True
-    if covers is not None:  # the analyst's Show in, or main's run_check: a choice that stays (_as_now)
-        check["covers"], check["covers_set"] = covers_of(covers), True
+    if covers is not None:  # the analyst's Show in, or main's run_check
+        check["covers"] = covers_of(covers)
     saved = save(c, check)
     _announce(c, cid)
     if shown is not None or colour is not None or covers is not None:
@@ -613,8 +547,6 @@ def recover(root: Path | None = None) -> list[str]:
 
     root = config.WORKSPACES_DIR if root is None else root
     ended: list[str] = []
-    for d in sorted(root.glob(f"*/{DIR}")) if root.is_dir() else []:
-        _migrate(d)
     for p in sorted(root.glob(f"*/{DIR}/*.json")) if root.is_dir() else []:
         check = read_json(p, None)
         if not isinstance(check, dict) or not isinstance(check.get("runs"), dict):
@@ -772,7 +704,7 @@ def digest(c: str, cid: str, cover: list[dict[str, Any]] | None = None) -> str:
     name = str((read(c, cid) or {}).get("name") or "")
 
     def keep(cm: dict[str, Any]) -> bool:
-        return current_id(cm.get("check")) == cid and cm.get("resolution") != answer_comments.RESOLUTION_SUPERSEDED
+        return cm.get("check") == cid and cm.get("resolution") != answer_comments.RESOLUTION_SUPERSEDED
 
     for cm in answer_comments._read(c):
         if keep(cm) and cm.get("ref") not in covered:
@@ -1781,13 +1713,6 @@ async def answer_comment_dismiss_route(c: str, cid: str) -> dict[str, Any]:
     """The analyst's Done on a comment on an answer, which takes its tint away. The comment; 404 for none."""
     _ws(c)
     return await asyncio.to_thread(answer_comments.set_status, c, cid, answer_comments.SETTLED)
-
-
-@router.post("/ws/{c}/answer-comments/{cid}/reopen")
-async def answer_comment_reopen_route(c: str, cid: str) -> dict[str, Any]:
-    """A dismissed comment on an answer open again. The comment; 404 for none."""
-    _ws(c)
-    return await asyncio.to_thread(answer_comments.set_status, c, cid, "open")
 
 
 async def shutdown() -> None:

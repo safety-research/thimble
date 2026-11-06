@@ -75,7 +75,7 @@ def corpus(tmp_path, monkeypatch, workspaces_tmp) -> Path:
     data = tmp_path / "data"
     root = _write(data / CORPUS)
     monkeypatch.setattr(config, "DATA_DIR", data.resolve())
-    for table in (concepts._runs, concepts._subs, concepts._locks, concepts._cancels, concepts._tasks, concepts._building,
+    for table in (concepts._runs, concepts._locks, concepts._cancels, concepts._tasks, concepts._building,
                   concepts._building_answers):
         table.clear()
     return root.resolve()

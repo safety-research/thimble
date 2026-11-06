@@ -753,23 +753,20 @@ async def test_the_review_s_pictures_take_each_state_in_its_pane_with_its_label_
     assert views.read_proposal(CORPUS, "threads")["review"]["shots"] == 3
 
 
-async def test_a_deleted_proposal_or_view_takes_its_build_folder_and_the_analyst_may_ask_for_it_again(ws, monkeypatch):
+async def test_a_deleted_view_takes_its_build_folder_and_the_analyst_may_ask_for_it_again(ws, monkeypatch):
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
 
     def propose(name, **k):
         return views.propose(CORPUS, name, "The posts.", ["board.jsonl"], "Unit: a post", **k)
 
-    first = [propose(n, asked=True) for n in ("One", "Two")]
-    for slug in (first[0]["slug"], "threads"):
-        dev.view_work_dir(CORPUS, slug).mkdir(parents=True, exist_ok=True)
-        (dev.view_work_dir(CORPUS, slug) / "sample.jsonl").write_text("{}\n")
-    views.delete_proposal(CORPUS, first[0]["slug"])
+    propose("Two", asked=True)
+    dev.view_work_dir(CORPUS, "threads").mkdir(parents=True, exist_ok=True)
+    (dev.view_work_dir(CORPUS, "threads") / "sample.jsonl").write_text("{}\n")
     views.delete_view(CORPUS, "threads")
-    assert not any(dev.view_work_dir(CORPUS, s).exists() for s in (first[0]["slug"], "threads")), "the builds' folders go"
-    assert [(d["name"], sorted(d)) for d in views.deleted_proposals(CORPUS)] == [
-        ("One", ["name", "slug", "ts"]), ("Threads", ["name", "slug", "ts"])]
-    assert propose("One", asked=True)["status"] == "queued"
-    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "One"]
+    assert not dev.view_work_dir(CORPUS, "threads").exists(), "the build's folder goes"
+    assert [(d["name"], sorted(d)) for d in views.deleted_proposals(CORPUS)] == [("Threads", ["name", "slug", "ts"])]
+    assert propose("Threads", asked=True)["status"] == "queued"
+    assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Threads"]
 
 
 def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws, tmp_path, monkeypatch):

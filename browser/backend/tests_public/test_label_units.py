@@ -27,11 +27,11 @@ FILES = ["agents/agent-01.jsonl", "agents/agent-02.jsonl", "agents/agent-03.json
 async def _stack(workspaces_tmp, monkeypatch):
     for name in ("THIMBLE_DEV", "THIMBLE_FRONTEND_URL", "THIMBLE_PORT"):
         monkeypatch.delenv(name, raising=False)
-    for table in (concepts._runs, concepts._subs, concepts._locks, concepts._cancels, concepts._tasks):
+    for table in (concepts._runs, concepts._locks, concepts._cancels, concepts._tasks):
         table.clear()
     tools._last_cell.clear()
     yield
-    for table in (concepts._runs, concepts._subs, concepts._tasks):
+    for table in (concepts._runs, concepts._tasks):
         table.clear()
     await notebook.shutdown_all()
 

@@ -50,8 +50,6 @@ export function Working() {
   )
 }
 
-export type RecordState = ToolState
-
 
 /** A run of consecutive `view` chips: the views main or a subagent proposed, one note. */
 export interface ViewsRow {

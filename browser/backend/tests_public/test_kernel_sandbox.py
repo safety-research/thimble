@@ -423,7 +423,7 @@ async def test_a_link_a_card_left_at_the_workspace_s_tmp_gives_no_later_kernel_t
         tmp.symlink_to(outside, target_is_directory=True)
         dedicated = await notebook.run_code("mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / "k2.txt")),
                                             "main", kernel="k2")
-        await notebook.restart("mini")
+        await notebook.shutdown_workspace("mini")
         shared = await notebook.run_code("mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / "k.txt")),
                                          "main")
     finally:
@@ -650,7 +650,7 @@ async def test_the_next_start_writes_no_kernel_log_through_a_link_left_in_place_
         assert logs
         for log in logs:
             _plant(log, dotfile)
-        await notebook.restart("mini")
+        await notebook.shutdown_workspace("mini")
         again = await notebook.run_code("mini", "print(6 * 7)", "main")
     finally:
         await notebook.shutdown_all()
@@ -1077,12 +1077,10 @@ print('deep')
 
 @pytest.mark.parametrize("wrap", ["srt", "bwrap"])
 async def test_a_deep_tree_a_card_leaves_stops_no_later_kernel_start(wrap, monkeypatch, workspaces_tmp):
-    """The server removes an srt kernel's HOME at each start, and in scratch/ a folder under a corpus name that an
-    earlier version's per-file mirror left. Both removals recursed, so a chain of folders deeper than Python's
-    recursion limit that a card's code made there raised RecursionError, which nothing caught: every later start of the
-    kernel failed, and with the chain in scratch/ every kernel of the workspace. Now the removal walks with a stack of
-    its own, the mirror takes a folder for one of its own only when the corpus holds each folder in it, and neither
-    removal fails a start."""
+    """The server removes an srt kernel's HOME at each start, and the removal recursed, so a chain of folders deeper
+    than Python's recursion limit that a card's code made there raised RecursionError, which nothing caught: every later
+    start of the kernel failed. Now the removal walks with a stack of its own and never fails a start, and the mirror
+    leaves a folder a card made in place of a corpus folder's link as it is."""
     if not _wrap_works(wrap):
         pytest.skip(f"{wrap} can't sandbox a process here")
     monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
@@ -1101,17 +1099,10 @@ async def test_a_deep_tree_a_card_leaves_stops_no_later_kernel_start(wrap, monke
 
 
 def test_a_kernel_start_never_depends_on_removing_what_a_card_left(monkeypatch, workspaces_tmp):
-    """The mirror's pass replaces a folder of scratch/ under a corpus name by the corpus folder's link only when it is
-    one an earlier version's per-file mirror left: a link to each file, in folders the corpus holds. A folder the
-    corpus does not hold is the kernel's and stays. Whatever goes wrong in that removal, or in the removal of an srt
-    kernel's HOME, leaves what it could not remove, and the start goes on."""
+    """The mirror's pass leaves a folder of scratch/ under a corpus name as the kernel's, and whatever goes wrong in the
+    removal of an srt kernel's HOME leaves what it could not remove: the start goes on."""
     corpus = config.corpus_dir("mini").resolve()
     scratch = notebook.scratch_dir("mini", fresh=True)
-    (scratch / "prompts").unlink()
-    (scratch / "prompts").mkdir()
-    (scratch / "prompts" / "worker.md").symlink_to(corpus / "prompts" / "worker.md")
-    notebook.mirror_corpus(corpus, scratch)
-    assert (scratch / "prompts").is_symlink()  # an earlier version's mirror goes
     (scratch / "prompts").unlink()
     (scratch / "prompts" / "made-up" / "d").mkdir(parents=True)
     notebook.mirror_corpus(corpus, scratch)
@@ -1120,7 +1111,6 @@ def test_a_kernel_start_never_depends_on_removing_what_a_card_left(monkeypatch, 
     def fails(*a, **kw):
         raise RecursionError("made up")
 
-    monkeypatch.setattr(notebook, "_unmirror", fails)
     (scratch / "README.md").unlink()
     notebook.mirror_corpus(corpus, scratch)
     assert (scratch / "README.md").is_symlink() and (scratch / "prompts" / "made-up").is_dir()

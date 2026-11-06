@@ -1,5 +1,5 @@
-"""thimble's config (app/userconf.py): layering and errors, the move out of an earlier build's settings.json, where the
-Settings pane writes, and what a session gets from it."""
+"""thimble's config (app/userconf.py): layering and errors, where the Settings pane writes, and what a session gets from
+it."""
 from __future__ import annotations
 
 import json

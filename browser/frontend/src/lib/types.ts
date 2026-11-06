@@ -398,7 +398,6 @@ export interface ConceptPatch {
   classes?: { name: string; color?: number | null; highlight?: boolean }[]
   shown?: boolean
 }
-export type Label = Concept
 
 export interface LabelRow {
   ref: string
@@ -457,21 +456,19 @@ export interface Filters {
 // ---- views and proposals ----
 
 /** A view ticket's build: `dropped` is a view proposal the analyst rejected, shown nowhere (backend
- * views.answer_offer); `suggested` a view proposal that waits for the analyst's Accept or Reject (backend views.offer),
- * or a 0.7.x orientation's viewer for a file type, which no card shows (backend views.open_offer). */
+ * views.answer_offer); `suggested` a view proposal that waits for the analyst's Accept or Reject (backend views.offer). */
 export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view, what they do with it, the files it reads,
- * and the state of the dev agent's build, whose agent chat is `chat`. The backend reads a 0.7.0 ticket's `why` as its
- * `description` (views._normalize_proposal). */
+ * and the state of the dev agent's build, whose agent chat is `chat`. */
 export interface Proposal {
   slug: string
   name: string
   description: string
-  /** what the analyst does with the view; empty for a viewer for a file type and a 0.7.0 ticket */
+  /** what the analyst does with the view; empty for a viewer for a file type */
   task: string
   claims: string[]
-  /** the layout a viewer for a file type or a 0.7.0 ticket gave; empty for propose_view's tickets */
+  /** the layout a viewer for a file type gave; empty for propose_view's tickets */
   arrangement: string
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
@@ -507,8 +504,7 @@ export interface Proposal {
   model?: string | null
   effort?: string | null
   /** a view proposal thimble made to the analyst (backend views.offer): when, after what (`main`, `thread:<id>`, or
-   * `file` for a viewer proposed when a file was opened) and why. An open
-   * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
+   * `file` for a viewer proposed when a file was opened) and why. An open proposal is `suggested` with this */
   offered?: ProposalOffer | null
   /** how the analyst answered the view proposal: Accept or Reject */
   answer?: 'accepted' | 'rejected' | null
@@ -537,17 +533,6 @@ export interface ViewReview {
   shots?: number
   /** the reviewer's agent id, a subagent of main (`thimble:view-reviewer`) */
   agent_id?: string | null
-}
-
-/** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
- * browser, why not, the workspace's answer for the type and its proposal (backend views.suggestion_for). */
-export interface ViewSuggestion {
-  path: string
-  suffix: string
-  eligible: boolean
-  reason: string
-  answer: 'suggested' | 'none' | 'dismissed' | null
-  proposal: Proposal | null
 }
 
 /** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */
@@ -904,10 +889,9 @@ export interface WriteupComment {
   section?: string | null
   proposal?: string | null
   /** what supports the statement `text`, shown on request: markdown whose citations show as chips (backend
-   * canvas_comments.note_of; a comment stored before it is read as its first sentence and the rest) */
+   * canvas_comments.note_of) */
   details?: string | null
-  /** why it is resolved: the analyst's Done, or superseded by a later run of its check (`known`, in a comment resolved
-   * before 0.7.0, is resolved as any other) */
+  /** why it is resolved: the analyst's Done, or superseded by a later run of its check */
   resolution?: 'done' | 'superseded' | string | null
 }
 
@@ -1944,11 +1928,6 @@ export interface FolderListing {
   n_files?: number
   /** the folder's modification time when it was read, which `GET /sources/stamps` compares (backend folder_stamp) */
   stamp?: string
-}
-
-/** `GET /concepts/{id}/rows` with `next`, the rowid cursor for the page after this one (null at the end). */
-export interface LabelRowsPage extends LabelRowsResponse {
-  next: number | null
 }
 
 // ---- undo and redo (backend undo.py) ----

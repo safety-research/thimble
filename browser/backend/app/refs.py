@@ -601,8 +601,7 @@ def _locate(corpus_dir: Path, rel: str) -> tuple[Path, str]:
         raise RefError(str(e), 400)
     if path.exists():
         return path, rel
-    root_for = getattr(config, "corpus_root_for_dir", None)
-    root = root_for(corpus_dir) if callable(root_for) else None
+    root = config.corpus_root_for_dir(corpus_dir)
     if root is None:
         return path, rel
     try:

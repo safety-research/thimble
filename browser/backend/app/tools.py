@@ -817,7 +817,7 @@ def _default_timeout(ctx: Ctx) -> float | None:
 
     if ctx.actor not in CHAT_ACTORS or session_kind(ctx.session) in FULL_TIME_SESSIONS:
         return None
-    return float(getattr(notebook, "CHAT_EXEC_TIMEOUT", 30.0))
+    return notebook.CHAT_EXEC_TIMEOUT
 
 
 def _first_clause(text: str, cap: int = LINE_LIMIT) -> str:

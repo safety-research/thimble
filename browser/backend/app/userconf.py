@@ -8,9 +8,6 @@ A file that does not parse, or a key or value this module does not know, is a Co
 and what it takes. No agent session starts while the config has one (session); the Settings pane and `thimble doctor`
 show it. The models and efforts are read leniently (load_or_defaults), so the pages still show.
 
-Earlier builds kept the agents' models and permission modes in the workspace's settings.json. migrate moves them into
-that workspace's override the first time the workspace's config is read, so each workspace runs as it did.
-
 Edits of the config. An agent's edit of these files (config_files) goes to the analyst in every permission mode, as an
 edit of the corpus does with `data` at "ask" (Session.verdict, ask_cause `config`), so the analyst sees on the card what
 an agent would change in its own permissions and decides; a session nobody answers is refused it. main's kept mode
@@ -423,8 +420,6 @@ def _merge(low: dict[str, Any], high: dict[str, Any]) -> dict[str, Any]:
 def load(c: str | None = None) -> dict[str, Any]:
     """The config of workspace `c` (the file alone without one): DEFAULTS, the file, the workspace's override.
     ConfigError when either file has an error."""
-    if c:
-        migrate(c)
     merged = _merge(DEFAULTS, read(global_file(), "global"))
     if c:
         merged = _merge(merged, read(workspace_file(c), "workspace"))
@@ -497,9 +492,8 @@ def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
-    """A config file (or a workspace's settings.json, migrate) written whole, in place (ledger.rewrite_text): a kernel
-    wrapper hides a workspace's config.json and settings.json by a mount on each, which a new file renamed over it
-    would take off inside a running kernel."""
+    """A config file written whole, in place (ledger.rewrite_text): a kernel wrapper hides a workspace's config.json
+    and settings.json by a mount on each, which a new file renamed over it would take off inside a running kernel."""
     from .ledger import rewrite_text  # noqa: PLC0415 — ledger imports config, which imports this module lazily
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -513,8 +507,6 @@ def save(c: str | None, patch: dict[str, Any]) -> None:
     among them (module note, one fence). ConfigError, writing nothing, when either file has an error or the result
     would."""
     with _lock:
-        if c:
-            migrate(c)
         files = [(workspace_file(c), "workspace")] if c else []
         files.append((global_file(), "global"))
         held = {p: _raw(p) for p, _ in files}
@@ -534,51 +526,7 @@ def save(c: str | None, patch: dict[str, Any]) -> None:
                 _write(p, held[p])
 
 
-# --------------------------------------------------------------------------- the settings.json of earlier builds
-
-LEGACY_MODELS = "models"  # config.MODELS_KEY: models.main stays, since it is main's, kept for its next launch
-LEGACY_MODES = "permission_modes"
-_STRICT = {"manual": 0, "auto": 1, "bypass": 2}
-
-
-def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
-    """An earlier build's `models` (less main's) and `permission_modes` as settings of this file: each role's model and
-    effort, and its fast mode where the agent still takes one, the orientation subagents' model and effort as the
-    orientation's subagentModel and subagentEffort, and the dev agent's row, or `views` where its own row is not set, the
-    stricter of the two when both are. The other agents' rows are left out: they run in main's mode now (module note, one
-    fence)."""
-    by_role = {role: name for name, role in ROLES.items()}
-    agents: dict[str, dict[str, Any]] = {}
-    for role, conf in models.items():
-        if not isinstance(conf, dict):
-            continue
-        effort = str(conf.get("effort") or "").strip().lower()
-        if role in ("subagents", "readers"):
-            model = conf.get("model")
-            if isinstance(model, str) and model.strip():
-                agents.setdefault("orientation", {})["subagentModel"] = model.strip()
-            if effort in config.ROLE_EFFORTS:
-                agents.setdefault("orientation", {})["subagentEffort"] = effort
-            continue
-        name = by_role.get(role)
-        if name is None:
-            continue
-        mine: dict[str, Any] = {}
-        if isinstance(conf.get("model"), str) and conf["model"].strip():
-            mine["model"] = conf["model"].strip()
-        if effort and (effort in config.role_efforts(role) or role == "orient" and effort in config.LEGACY_EFFORTS):
-            mine["effort"] = effort
-        if isinstance(conf.get("fast"), bool) and "fast" in DEFAULTS["agents"][name]:
-            mine["fast"] = conf["fast"]
-        if mine:
-            agents.setdefault(name, {}).update(mine)
-    got = {a: m for a, m in rows.items() if m in PERMISSION_MODES and a in ("dev", "views")}
-    if "views" in got:
-        view = got.pop("views")
-        got["dev"] = min(got.get("dev", view), view, key=_STRICT.__getitem__)
-    if "dev" in got:
-        agents.setdefault("dev", {})["permissionMode"] = got["dev"]
-    return {"agents": agents} if agents else {}
+# --------------------------------------------------------------------------- the Settings pane's changes
 
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
@@ -613,53 +561,6 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
         agents.setdefault(agent_of_row("dev" if row == "views" else row), {})["permissionMode"] = mode
     return {"agents": agents} if agents else {}
 
-
-def migrate(c: str) -> bool:
-    """Bring workspace `c`'s config up to date: an earlier build's models and permission modes moved into its override
-    (_move_settings). True when something moved."""
-    if not config._valid_name(c):
-        return False
-    return _move_settings(c)
-
-
-def _move_settings(c: str) -> bool:
-    """Move an earlier build's models and permission modes out of workspaces/<c>/settings.json into the workspace's
-    override (legacy_patch), where a value the override already holds stays; True when something moved. A settings
-    file that cannot be read, or an override with an error, is left for a later read."""
-    settings = config.WORKSPACES_DIR / c / "settings.json"
-    try:
-        stored = json.loads(settings.read_text("utf-8"))
-    except (OSError, ValueError):
-        return False
-    if not isinstance(stored, dict):
-        return False
-    models = stored.get(LEGACY_MODELS) if isinstance(stored.get(LEGACY_MODELS), dict) else {}
-    roles = {k: v for k, v in models.items() if k != "main"}
-    if not roles and LEGACY_MODES not in stored:
-        return False
-    with _lock:
-        target = workspace_file(c)
-        try:
-            held = _raw(target)
-        except ConfigError as e:
-            log.warning("%s: settings of an earlier build stay in %s until this is fixed: %s", c, settings, e)
-            return False
-        patch = legacy_patch(roles, stored.get(LEGACY_MODES) if isinstance(stored.get(LEGACY_MODES), dict) else {})
-        moved = copy.deepcopy(held)
-        for path, value in leaves(patch):
-            if _get(moved, path) is _MISSING:
-                _put(moved, path, value)
-        if moved != held:
-            _write(target, moved)
-        rest = {k: v for k, v in stored.items() if k != LEGACY_MODES}
-        if LEGACY_MODELS in rest:
-            main = models.get("main")
-            rest[LEGACY_MODELS] = {"main": main} if isinstance(main, dict) else {}
-            if not rest[LEGACY_MODELS]:
-                rest.pop(LEGACY_MODELS)
-        _write(settings, rest)
-    log.info("%s: moved the agents' models and permission modes from %s to %s", c, settings, target)
-    return True
 
 
 # --------------------------------------------------------------------------- what a session gets

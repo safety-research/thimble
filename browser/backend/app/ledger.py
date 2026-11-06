@@ -29,10 +29,6 @@ router = APIRouter()
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
 # shows).
 SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40}
-# Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
-# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route and
-# terminal_first picked how the orientation ran, hide_chat hid the browser's chat column.
-RETIRED_KEYS = frozenset({"orient_route", "terminal_first", "hide_chat"})
 
 
 # --------------------------------------------------------------------------- plain-file helpers
@@ -404,16 +400,16 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
-    """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
-    them from thimble's config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's
-    Claude Code settings turn off, `config_error`, the config's error or ''; `config_ignored`, the keys its files hold
-    that this build reads and ignores (userconf.ignored); `agents`, agent_rows; `card_wait`, the minutes a code ticket's
-    question on its card waits (userconf.card_wait_s); PROPOSE_KEY, whether thimble shows view proposals (userconf.propose_views);
+    """The effective settings: SETTINGS_DEFAULTS under `stored`, `models` as config.models_for resolves them from
+    thimble's config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude
+    Code settings turn off, `config_error`, the config's error or ''; `config_ignored`, the keys its files hold that this
+    build reads and ignores (userconf.ignored); `agents`, agent_rows; `card_wait`, the minutes a code ticket's question
+    on its card waits (userconf.card_wait_s); PROPOSE_KEY, whether thimble shows view proposals (userconf.propose_views);
     ASK_KEY, the key held with a click to ask in the browser (userconf.ask_key); EDITS_KEY, whether main may write the
     corpus (corpus_edits); LABELS_KEY, whether Claude makes labels (labels_on)."""
     from . import modes, userconf  # noqa: PLC0415 — they import this module
 
-    kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
+    kept = {k: v for k, v in stored.items() if k != modes.SETTING}
     return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c),
             modes.SETTING: modes.rows(c) if c else {}, "disabled_modes": sorted(modes.disabled()),
             "config_error": userconf.problem(c), "config_ignored": userconf.ignored(c), "agents": agent_rows(c),
@@ -460,7 +456,7 @@ def get_settings(c: str) -> dict[str, Any]:
 # switches, the View proposals switch and the ask key are written to thimble's config (userconf.save), the rest to the
 # workspace's settings.json.
 # Every other key is the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a
-# kernel cell or a session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
+# kernel cell or a session's command can reach the route on loopback.
 WEB_KEY = "web"  # {row: "off" | None}: a subagent of main kept off WebFetch and WebSearch, or back on main's rule
 WEB_ROWS = {"critic": "critic", "writer": "writer", "checks": "checks"}  # the web switches' rows, by thimble's config's agent
 # true, false or null: thimble's config's `views.propose`, whether thimble shows view proposals
@@ -478,7 +474,7 @@ EDITS_KEY = "corpus_edits"
 # the key out, which is on. The Labels sidebar's Label tool switch changes it, from the analyst's browser alone
 LABELS_KEY = "labels"
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", WEB_KEY, PROPOSE_KEY, ASK_KEY,
-                      EDITS_KEY, LABELS_KEY, *RETIRED_KEYS})
+                      EDITS_KEY, LABELS_KEY})
 
 
 def web_patch(rows: Any) -> dict[str, Any]:
@@ -539,7 +535,7 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
         if settings[ASK_KEY] is not None and settings[ASK_KEY] not in userconf.ASK_KEYS:
             raise HTTPException(400, f"{ASK_KEY} takes {', '.join(json.dumps(k) for k in userconf.ASK_KEYS)} or null")
     try:
-        return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
+        return put_settings(c, settings)
     except userconf.ConfigError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -550,9 +546,8 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     it out) go to thimble's config
     (userconf.save), which raises userconf.ConfigError for a value it does not take;
     main's model settings and everything else to settings.json, where only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. A change that lets main
-    do less closes main's session kept open for a background command at once (runtime.settings_changed). Returns the
-    effective settings."""
+    never SETTINGS_DEFAULTS, so a changed default takes effect. A change that lets main do less closes main's session
+    kept open for a background command at once (runtime.settings_changed). Returns the effective settings."""
     from . import modes, runtime, userconf  # noqa: PLC0415 — they import this module
 
     models = settings.get(config.MODELS_KEY) if isinstance(settings.get(config.MODELS_KEY), dict) else {}
@@ -576,7 +571,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     path = ws_dir(c) / "settings.json"
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
-    merged = {k: v for k, v in {**stored, **settings}.items() if k not in RETIRED_KEYS}
+    merged = {**stored, **settings}
     for key in (EDITS_KEY, LABELS_KEY):
         if merged.get(key, False) is None:  # null puts the switch back on its default, on
             merged.pop(key)
@@ -744,12 +739,7 @@ async def restore_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[st
             # a request or a thread made the folder again since (config.workspace_dir, such as an open tab's): it goes
             # to the archive as well, where a folder that holds nothing is listed as no session (folder_sessions)
             path.rename(archive_path(c))
-    from . import investigation, views  # noqa: PLC0415 — lazy: investigation imports this module
-
-    try:
-        views.move_to_local(path)  # an archive an older thimble made keeps its views in views/
-    except OSError:
-        log.exception("%s: the restored views were not moved into the local extension", c)
+    from . import investigation  # noqa: PLC0415 — lazy: investigation imports this module
 
     investigation.reset_streams(c)  # an open tab starts over on the restored workspace
     log.info("%s: archive %s restored", c, name)

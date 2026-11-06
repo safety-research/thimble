@@ -389,7 +389,6 @@ async def _guarded(run: _Run) -> None:
     capacity outside the slot, and its record ended however the check ends."""
     token = _current.set(run)
     try:
-        cell = notebook_cell(run.c, run.cid) or {}
         run.effort = await asyncio.to_thread(read_effort, run.c)
         waits = list(CAPACITY_WAITS_S)
         while True:

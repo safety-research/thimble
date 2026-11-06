@@ -279,5 +279,3 @@ export function Icon({ name, size = 16, title, className, ...rest }: IconProps) 
     </svg>
   )
 }
-
-export default Icon

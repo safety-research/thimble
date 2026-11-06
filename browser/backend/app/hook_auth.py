@@ -98,8 +98,6 @@ BROWSER_PREFIX = "/b/"
 BROWSER_PATH = re.compile(r"/b/([A-Za-z0-9_-]{16,128})(/api(?:/.*)?)", re.DOTALL)
 BROWSER_KEY_SCOPE = "thimble_browser_key"  # where BrowserPath keeps a request's key, in the ASGI scope's state
 BROWSER_KEY_BYTES = 24  # a browser's key: secrets.token_urlsafe of this many bytes (32 characters)
-# The path earlier builds scoped the cookie to, which every server on 127.0.0.1 received; a claim deletes one there.
-OLD_COOKIE_PATH = "/api/"
 # in thimble's home: [{hash, key, at}], the sha256 of each signed-in browser's cookie and key (claim)
 PAIRED_FILE = "paired.json"
 PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
@@ -438,8 +436,7 @@ def _sha_hex(value: object) -> bool:
 
 def _entries() -> list[dict[str, str]]:
     """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home. An entry without the
-    sha256 of a key (an earlier build's, whose cookie was scoped to OLD_COOKIE_PATH) signs no browser in: that browser
-    signs in again with the link."""
+    sha256 of a key signs no browser in: that browser signs in again with the link."""
     global _paired, _paired_home
     where = str(home())
     if _paired is not None and _paired_home == where:
@@ -524,10 +521,8 @@ def signed_in_at(request: Request) -> str:
 
 
 def set_cookie(r: Response, value: str, key: str) -> Response:
-    """`r` with this server's cookie `value` (ui_cookie) scoped to the path of the browser key `key` (browser_path), and
-    the deletion of a cookie of that name an earlier build scoped to OLD_COOKIE_PATH."""
+    """`r` with this server's cookie `value` (ui_cookie) scoped to the path of the browser key `key` (browser_path)."""
     r.set_cookie(ui_cookie(), value, max_age=UI_COOKIE_AGE_S, path=browser_path(key), httponly=True, samesite="strict")
-    r.delete_cookie(ui_cookie(), path=OLD_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 

@@ -1014,10 +1014,6 @@
   font-size: var(--text-xl);
   font-weight: 600;
 }
-.access-lead {
-  margin: 0 0 12px;
-  color: var(--text-secondary);
-}
 .access-choices {
   display: grid;
   gap: 6px;

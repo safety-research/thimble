@@ -212,26 +212,19 @@ def pending_line(title: str) -> str:
 
 def kernels_kept(c: str) -> bool:
     """Whether this server's start reconnected a kernel of workspace `c` (notebook.LAST_RECONNECT)."""
-    try:
-        from . import notebook  # noqa: PLC0415
-    except Exception:  # noqa: BLE001
-        return False
-    rec = getattr(notebook, "LAST_RECONNECT", None)
+    from . import notebook  # noqa: PLC0415
+
+    rec = notebook.LAST_RECONNECT
     if not isinstance(rec, dict):
         return False
     return any(str(k).startswith(f"{c}/") for k in rec.get("reconnected") or [])
 
 
 async def _wait_kernels_reconnected() -> None:
+    from . import notebook  # noqa: PLC0415
+
     try:
-        from . import notebook  # noqa: PLC0415
-    except Exception:  # noqa: BLE001
-        return
-    wait = getattr(notebook, "wait_reconnect", None)
-    if wait is None:
-        return
-    try:
-        await wait()
+        await notebook.wait_reconnect()
     except Exception:  # noqa: BLE001
         log.debug("waiting for the kernel reconnect failed", exc_info=True)
 
@@ -3485,8 +3478,6 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if status == "done" and await _feedback(c, slug, run, prop, lines):  # the whole report, as finish_view gives
             return
     if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
-        if not prop.get("revision"):
-            views.update_proposal(c, slug, held=None)  # a held proposal shows in the views list, failed
         _view_failed(c, slug, subagents.plan_failed_line(view_tools.BUILDER), run.chat)
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
@@ -4393,13 +4384,6 @@ async def status() -> dict[str, Any]:
         "restart_pending": (_restart_pending or {}).get("title"),
         "last_apply": {"ts": la["ts"], "title": la["title"], "commit": la["commit"]} if la else None,
     }
-
-
-@router.post("/dev/restart", status_code=202)
-async def post_restart(request: Request) -> dict[str, Any]:
-    if not _is_loopback(request):
-        raise HTTPException(403, "restart is only available from localhost")
-    return {"status": await request_restart(None, reason="manual restart")}
 
 
 @router.post("/dev/announce")

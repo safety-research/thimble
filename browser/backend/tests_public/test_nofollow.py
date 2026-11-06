@@ -413,13 +413,6 @@ def _case_mark_interrupted(out):
         lambda r: r == []
 
 
-def _case_migrate_scratch(out):
-    from app import notebook
-    _fifo(_ws() / "notebooks" / "madeup01.json")
-    notebook._scratch_migrated.clear()
-    return lambda: notebook.migrate_scratch(CORPUS), lambda r: r == []
-
-
 def _case_work_texts(out):
     from app import work_files
     _fifo(_ws() / "notebooks" / "madeup01.json")
@@ -511,7 +504,7 @@ def _case_telemetry_events(out):
 READERS = {f.__name__.removeprefix("_case_"): f for f in (
     _case_tail_records, _case_last_uuid, _case_chat_of, _case_context_records, _case_marks_transcript,
     _case_session_cost, _case_sub_meta, _case_fork_ref, _case_continued_in, _case_held_events,
-    _case_citing_documents, _case_mark_interrupted, _case_migrate_scratch, _case_work_texts, _case_work_read_text,
+    _case_citing_documents, _case_mark_interrupted, _case_work_texts, _case_work_read_text,
     _case_render_theme, _case_libs_lock, _case_last_seq, _case_label_rows, _case_view_progress,
     _case_undo_journal, _case_chat_events,
     _case_chat_lines, _case_chat_meta, _case_chats_listed, _case_telemetry_events)}

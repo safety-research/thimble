@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .store import Store, folder_name, legacy_dir, safe_name, temp_folders, thimble_home
+from .store import Store, folder_name, safe_name, temp_folders, thimble_home
 
 HANDED = "THIMBLE_HANDED_OFF"  # set by the plugin for its run of a command from Claude Code's sandbox (handoff.ts)
 ENGINE = Path(__file__).resolve().parents[1]
@@ -104,8 +104,8 @@ def _places(st: Store) -> tuple[list[str], list[str], list[str]]:
     """What the command reads and writes, made where missing, as real paths: (what it reads, what it writes, the temp
     folders). It writes the conversation's records of the folder, the folder's cache, the session's change feed and
     the session's temp folders (thimble's home's tmp/ when the session has none); it reads besides them its Python, the
-    kernel, the folder under analysis, its working folder, thimble's earlier records of the folder (store.py
-    legacy_dir) and the other conversations' labels of it, whose model reads a --prompt label takes up again."""
+    kernel, the folder under analysis, its working folder, and the other conversations' labels of it, whose model reads
+    a --prompt label takes up again."""
     th = thimble_home()
     feed = th / "events" / f"{safe_name(st.session)}.jsonl"
     for d in (st.dir / "labels", st.cache, feed.parent):
@@ -117,8 +117,7 @@ def _places(st: Store) -> tuple[list[str], list[str], list[str]]:
         temps = [str((th / "tmp").resolve())]
     writes = [str(st.dir.resolve()), str(st.cache.resolve()), str(feed.resolve()), *temps]
     others = glob.glob(str(th.resolve() / "conversations" / "*" / "folders" / folder_name(str(st.root))))
-    reads = [*_py_dirs(sys.executable), str(ENGINE), str(st.root), os.getcwd(),
-             *[str(p.resolve()) for p in (legacy_dir(st.root),) if p.is_dir()], *sorted(others)]
+    reads = [*_py_dirs(sys.executable), str(ENGINE), str(st.root), os.getcwd(), *sorted(others)]
     return reads, writes, temps
 
 

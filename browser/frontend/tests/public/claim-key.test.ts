@@ -1,9 +1,8 @@
 // The page's sign-in with the one-time code in thimble's link (src/lib/api.ts claimKey): `#p=` is posted with the
 // workspace of `?ws=`, and leaves the address once the server has answered; a code that is gone (410) shows the
 // page's own notice, whose × sends nothing, until a later link signs the browser in; a claim the server never answered is tried again; a link opened in a tab
-// already on its page (a change of the hash alone) is claimed too; an earlier version's `#k=` leaves the address and is
-// never sent. After the claim the page asks which browser it is (GET /ui/paired). Every write waits for the claim
-// (backend hook_auth.LocalWriteGuard).
+// already on its page (a change of the hash alone) is claimed too. After the claim the page asks which browser it is
+// (GET /ui/paired). Every write waits for the claim (backend hook_auth.LocalWriteGuard).
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
@@ -151,21 +150,4 @@ test('a link opened in a tab already on its page is claimed when only the hash c
   await claimKey()
   expect(posts).toEqual(['{"code":"fresh"}'])
   expect(loc.hash).toBe('')
-})
-
-test("an earlier version's key leaves the address and is never sent", async () => {
-  const loc = stubPage('#k=secret', '?ws=logs')
-  const { claimKey, claimOnHashChange } = await import('../../src/lib/api.ts')
-  await claimKey()
-  expect(loc.hash).toBe('')
-  expect(posts).toEqual([])
-  // in a tab already on its page too
-  claimOnHashChange()
-  loc.hash = '#k=again'
-  listeners.hashchange()
-  await claimKey()
-  expect(loc.hash).toBe('')
-  expect(posts).toEqual([])
-  await vi.advanceTimersByTimeAsync(0)
-  expect(requests.join('\n')).not.toMatch(/secret|again/)
 })

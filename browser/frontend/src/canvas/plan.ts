@@ -70,8 +70,7 @@ export interface StepMark {
 }
 
 /** The marks of what the plan's last edit changed (backend plans.LAST_EDIT), which the card shows until the next edit
- * that changes the plan or the analyst clears them: each changed or new step's mark by its id; null when it has none.
- * A mark stored before the marks named fields (`was`, the old text) reads as changed in the fields `was` held. */
+ * that changes the plan or the analyst clears them: each changed or new step's mark by its id; null when it has none. */
 export function planEdit(cell: Pick<Cell, 'kind' | 'payload'>): { steps: Map<string, StepMark> } | null {
   if (cell.kind !== 'plan') return null
   const raw = (cell.payload as { last_edit?: unknown } | undefined)?.last_edit
@@ -81,10 +80,9 @@ export function planEdit(cell: Pick<Cell, 'kind' | 'payload'>): { steps: Map<str
   if (e.steps && typeof e.steps === 'object') {
     for (const [id, m] of Object.entries(e.steps as Record<string, unknown>)) {
       if (!m || typeof m !== 'object') continue
-      const mark = m as { new?: unknown; changed?: unknown; was?: unknown }
+      const mark = m as { new?: unknown; changed?: unknown }
       if (mark.new) steps.set(id, { kind: 'new', fields: [] })
       else if (Array.isArray(mark.changed)) steps.set(id, { kind: 'changed', fields: strs(mark.changed) })
-      else if (mark.was && typeof mark.was === 'object') steps.set(id, { kind: 'changed', fields: Object.keys(mark.was) })
     }
   }
   return steps.size ? { steps } : null

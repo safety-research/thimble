@@ -1,8 +1,7 @@
 """Comments on the canvas (canvas_comments.py, checks.py's run target CANVAS): a check that covers the cards runs at
 main's turn end on the cards it has not seen, as a follow-on start through thimble's module, with a task file that
 lists the cards and a plan card's steps; its add_comment takes a covered card or step and stores the comment's
-statement (`text`) and its `details`, and a comment stored before `details` reads as its first sentence and the rest;
-Done hides a comment, and one resolved as known before 0.7.0 reads as resolved; a run's end supersedes its check's
+statement (`text`) and its `details`; Done hides a comment; a run's end supersedes its check's
 earlier comments on what it covered; a deleted card's comments are not served; main's run_check with `on: cards` gives
 the exact Agent call, and main's own add_comment on a card is Claude's note. The built-ins, Judgment calls,
 Unverifiable and Heads up, each cover the documents and the cards; only Heads up is on until the
@@ -109,41 +108,6 @@ def test_the_built_ins_are_heads_up_and_explainers_on_the_documents_and_the_chat
     for gone in ("verified", "unverified"):
         assert checks.read(CORPUS, gone) is None
     assert checks.by_name(CORPUS, "Verified") is None and checks.by_name(CORPUS, "Unverifiable") is None
-
-
-def test_a_comment_s_statement_and_details_are_read_from_words_written_as_one_text():
-    """A comment stored before `details` is its first sentence, the statement, and the rest, its details; a leading copy
-    of its own check's name and a colon goes, since a comment shows its check's name, and no other label does."""
-    got = canvas_comments.parse_note("Important details: blocking the web also blocks GitHub. The build fetches "
-                                     "fast_float from GitHub, so the pilot's builds will fail.", "Important details")
-    assert got == {"statement": "Blocking the web also blocks GitHub.",
-                   "details": "The build fetches fast_float from GitHub, so the pilot's builds will fail."}
-    got = canvas_comments.parse_note("**Unverifiable:** each agent builds pandas from source on 1 CPU. A build takes "
-                                     "about 1.5 minutes, e.g. 48 agents at once slow the machine.", "Unverifiable")
-    assert got["statement"] == "Each agent builds pandas from source on 1 CPU."
-    assert got["details"] == "A build takes about 1.5 minutes, e.g. 48 agents at once slow the machine."
-    assert canvas_comments.parse_note("No card shows this count.") == {"statement": "No card shows this count.",
-                                                                      "details": ""}
-    for other in ("Heads up: the log covers one week.", "You should know: the log covers one week."):
-        assert canvas_comments.parse_note(other, "Important details")["statement"] == other, "another check's label stays"
-    assert canvas_comments.parse_note("Judgment calls: the log covers one week.")["statement"].startswith("Judgment")
-
-
-def test_a_statement_ends_where_its_sentence_ends_when_the_next_starts_with_a_file_name_or_code():
-    """Live check plan-cards: 3 of 15 comments lost their title because the next sentence started with a lowercase file
-    name or a code span, so the first sentence ran on."""
-    got = canvas_comments.parse_note("Important details: the prompts promise test checks on merges that no step builds. "
-                                     "conditions/shared/environment.md line 20 says a PR merges with green tests.",
-                                     "Important details")
-    assert (got["statement"], got["details"]) == ("The prompts promise test checks on merges that no step builds.",
-                                                  "conditions/shared/environment.md line 20 says a PR merges with green tests.")
-    got = canvas_comments.parse_note("There is no forge code in this folder. `forge/` holds only a test.")
-    assert (got["statement"], got["details"]) == ("There is no forge code in this folder.", "`forge/` holds only a test.")
-    got = canvas_comments.parse_note("Important details: **Blocking the web also blocks GitHub.** The build fails.",
-                                     "Important details")
-    assert (got["statement"], got["details"]) == ("Blocking the web also blocks GitHub.", "The build fails.")
-    got = canvas_comments.parse_note("The U.S. mirror is slow, e.g. at night. Use another one.")
-    assert (got["statement"], got["details"]) == ("The U.S. mirror is slow, e.g. at night.", "Use another one.")
 
 
 async def test_a_check_turned_on_or_off_is_a_checks_record_on_the_stream(board):
@@ -269,9 +233,9 @@ async def test_add_comment_refuses_a_card_the_run_does_not_cover(board, bridge):
     assert not canvas_comments.open_comments(CORPUS)
 
 
-async def test_done_hides_a_comment_and_one_resolved_as_known_before_reads_as_resolved(board, bridge):
-    """Done is the one way the analyst resolves a comment. A comment resolved as `known` (Know it, before 0.7.0) stays
-    resolved: it is not served as open, a run's task does not list it, and it opens again as any resolved one does."""
+async def test_done_hides_a_comment_and_a_resolved_one_stays_out_of_the_next_run(board, bridge):
+    """Done is the one way the analyst resolves a comment: a resolved comment is not served as open, a run's task does
+    not list it, and it opens again."""
     a = _card("Which condition merged more PRs?")
     b = _card("Did any agent still fail to build?")
     act = await _turn_ended()
@@ -284,20 +248,14 @@ async def test_done_hides_a_comment_and_one_resolved_as_known_before_reads_as_re
     assert next(x for x in canvas_comments._read(CORPUS) if x["id"] == one["id"])["resolution"] == "done"
     with pytest.raises(Exception):
         await canvas_comments.resolve_route(CORPUS, one["id"])  # no open comment of that id
-
-    def known(items):  # as Know it left it before 0.7.0
-        for x in items:
-            if x["id"] == two["id"]:
-                x.update(status="dismissed", resolution="known", resolved_by="analyst", resolved_ts="2026-10-01T00:00:00+00:00")
-
-    canvas_comments._change(CORPUS, known)
+    await canvas_comments.resolve_route(CORPUS, two["id"])
     assert (await canvas_comments.list_route(CORPUS))["comments"] == []
     subagents.run_ended(CORPUS, act.agent, "done", "Two comments.", source="handback")
     await _until(lambda: _run()["status"] == "done", "the run never ended")
     notebook.edit_cell(CORPUS, b, title="Did any agent still fail to build, per condition?", by="model")
     await _turn_ended()
     task = (checks.work_dir(CORPUS, IMPORTANT, checks.CANVAS) / checks.TASK_FILE).read_text()
-    assert "Each agent builds pandas on 1 CPU." not in task and not re.search(r"\bknown\b|\bknow it\b", task.lower().split("## ")[-1])
+    assert "Each agent builds pandas on 1 CPU." not in task
     canvas_comments.reopen(CORPUS, [two["id"]])
     assert [c["id"] for c in canvas_comments.open_comments(CORPUS)] == [two["id"]]
 
@@ -352,26 +310,23 @@ async def test_main_s_add_comment_on_a_card_is_claude_s_note_and_resolve_comment
     assert not res.is_error and len(canvas_comments.open_comments(CORPUS)) == 1
 
 
-async def test_done_on_a_document_s_comment_and_one_resolved_as_known_before_read_as_resolved(board, bridge):
+async def test_done_on_a_document_s_comment_resolves_it_and_a_resolved_one_stays_out_of_the_next_run(board, bridge):
     r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": "# One\n\n## A\n\nAll the deletions came "
                                                     "from one account.\n"}, actor="analyst")
     assert not r.is_error, r.text
     d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
     sid = report_types.all_sentences(d)[0]["id"]
-    # a comment stored before `details`, one text: the document reads it as its statement and its details
-    d.setdefault("comments", []).append({"id": "c1", "sentence_id": sid, "text": "Heads up: the log covers one "
-                                         "week. Older deletions are not in it.", "author": "check", "check": IMPORTANT,
+    d.setdefault("comments", []).append({"id": "c1", "sentence_id": sid, "text": "The log covers one week.",
+                                         "details": "Older deletions are not in it.", "author": "check", "check": IMPORTANT,
                                          "run": "r0", "ts": "2026-10-08T00:00:00+00:00", "status": "open"})
     d["comments"].append({"id": "c2", "sentence_id": sid, "text": "The account is a bot.", "details": "", "author": "check",
                           "check": IMPORTANT, "run": "r0", "ts": "2026-10-08T00:00:00+00:00", "status": "dismissed",
-                          "resolution": "known"})  # as Know it left it before 0.7.0
+                          "resolution": "done"})
     report_types.write_doc(CORPUS, investigation.MAIN, "report", d)
-    cm, old = report_types.read_doc(CORPUS, investigation.MAIN, "report")["comments"]
-    assert (cm["text"], cm["details"]) == ("The log covers one week.", "Older deletions are not in it.")
     await report_types.dismiss(CORPUS, investigation.MAIN, "report", "c1")
     cm, old = report_types.read_doc(CORPUS, investigation.MAIN, "report")["comments"]
     assert (cm["status"], cm["resolution"], cm["text"]) == ("dismissed", "done", "The log covers one week.")
-    assert (old["status"], old["resolution"]) == ("dismissed", "known"), "stored as it was, and resolved"
+    assert (old["status"], old["resolution"]) == ("dismissed", "done"), "stored as it was, and resolved"
     check = checks.read(CORPUS, IMPORTANT)
     task = checks.task_text(CORPUS, check, "report", checks.passages("report", report_types.read_doc(
         CORPUS, investigation.MAIN, "report")))
@@ -395,7 +350,7 @@ async def test_main_s_add_comment_on_a_document_keeps_its_details_and_the_analys
     assert (mine["author"], mine["text"]) == ("claude", "Two accounts deleted pages, not one.")
     assert mine["details"] == f"- The table counts two accounts [[2|card:{cid}]].\n- The second made 3 of 40."
     assert mine["evidence"] == f"card:{cid}"
-    assert (yours["author"], yours["text"], yours["details"]) == ("analyst", "Check this. And March too.", "")
+    assert (yours["author"], yours["text"], yours.get("details") or "") == ("analyst", "Check this. And March too.", "")
     lines = report_types.document_text(CORPUS, report_types.read_type(CORPUS, "report"),
                                        report_types.read_doc(CORPUS, investigation.MAIN, "report"), True)
     assert f"#{first} · claude · Two accounts deleted pages, not one. — - The table counts two accounts" in lines
@@ -478,7 +433,7 @@ async def test_a_thread_a_comment_s_field_opens_names_the_comment_on_its_anchor_
     from app import agents
 
     plan = _card("Plan: build it", steps=_steps("not started", "not started", "not started"))
-    cm, _ = canvas_comments.add(CORPUS, card=plan, step="s2", check=IMPORTANT, run="r1", author=canvas_comments.CHECK_AUTHOR,
+    cm, _ = canvas_comments.add(CORPUS, card=plan, step="s2", check=IMPORTANT, run="r1", author=checks.AUTHOR,
                                 text="Blocking the web also blocks GitHub.", details="The build fetches two libraries.")
     meta = await agents.create_route(CORPUS, agents.NewThread(anchor=f"card:{plan}#step-2", anchor_text="Plan: build it",
                                                                surface="canvas", element="comment", comment=cm["id"]))

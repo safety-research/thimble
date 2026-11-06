@@ -662,17 +662,6 @@ def cmd_install(a: argparse.Namespace) -> int:
     return IN.cmd(a)
 
 
-def _shares(line: str) -> bool:
-    """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
-    return "thimble file " in line or "needs gh, GitHub's" in line
-
-
-def _no_share(text: str) -> str:
-    from . import fixes as FX  # noqa: PLC0415
-
-    return text if FX.can_share() else "\n".join(x for x in text.splitlines() if not _shares(x))
-
-
 def _no_labels(text: str) -> str:
     """The help without labels, while Labels is off (labels_off): without each `thimble label` entry (its first line and
     the lines that go on from it), and without the label in what Claude runs the command for and what takes --json."""
@@ -689,12 +678,8 @@ def _no_labels(text: str) -> str:
 
 
 def _help() -> str:
-    """thimble --help: this file's text, without the file lines while this thimble has no thimble file, and without the
-    label lines while Labels is off (_no_labels)."""
-    from . import fixes as FX  # noqa: PLC0415
-
-    lines = __doc__.strip().splitlines()
-    text = "\n".join(x for x in lines if FX.can_share() or not _shares(x))
+    """thimble --help: this file's text, without the label lines while Labels is off (_no_labels)."""
+    text = __doc__.strip()
     return _no_labels(text) if labels_off() else text
 
 
@@ -742,19 +727,18 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     # the plugin's count: stop counting the folder's files after this many seconds, within Claude Code's time limit
     p.add_argument("--within", type=float, help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_coverage)
-    p = sub.add_parser("fix", help="your changes to thimble", description=_no_share(FIX_HELP),
+    p = sub.add_parser("fix", help="your changes to thimble", description=FIX_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, the person's keys, and carry, which a
     # session's start and thimble-browser's start run for the fixes an update set aside
     p.add_argument("verb", nargs="?", default="list",
                    choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "shown", "apply", "merge", "notnow",
-                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send", "carry"), metavar="VERB")
+                            "redo", "undo", "remove", "sandbox", "carry"), metavar="VERB")
     p.add_argument("id", nargs="?")
-    p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
+    p.add_argument("id2", nargs="?", help=argparse.SUPPRESS)  # the second fix, for merge and a verb that takes several
     p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
-    p.add_argument("--words", help=argparse.SUPPRESS)
     p.add_argument("--asked", help=argparse.SUPPRESS)  # new, round: the person's words beside `words` (a plugin before 0.10.6)
     p.add_argument("--title", help=argparse.SUPPRESS)
     p.add_argument("--summary", help=argparse.SUPPRESS)
@@ -764,7 +748,6 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     p.add_argument("--cannot", help=argparse.SUPPRESS)  # done: the fixer's end said why it cannot be done (-: stdin)
     p.add_argument("--within", type=float, help=argparse.SUPPRESS)  # done: wait at most SECONDS for the tests
     p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, again, redo, done: the Claude Code session of the fixer
-    p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.add_argument("--check", action="store_true", help=argparse.SUPPRESS)  # update: the session's check (plugin/fix)
     p.add_argument("--once", action="store_true", help=argparse.SUPPRESS)  # update --check: a dev install's commit, once
@@ -836,11 +819,11 @@ def stdin_wait(argv: list[str]) -> float:
     if cmd == "file":
         return NEEDS_S if a.verb == "issue" and a.draft == "-" else 0.0
     if cmd == "fix":
-        if a.verb in ("new", "round", "redo", "draft"):
+        if a.verb in ("new", "round", "redo"):
             return 1.0
         if a.verb == "done":
             return 1.0 if "-" in (a.cannot, a.summary) else 0.0
-        if a.verb in ("apply", "merge", "keep", "send"):
+        if a.verb in ("apply", "merge"):
             return 1.0 if a.ask == "-" else 0.0
     return 0.0
 

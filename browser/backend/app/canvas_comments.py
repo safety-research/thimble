@@ -10,12 +10,10 @@ A comment has the fields a document's comment has, with `card` and `step` in pla
 `step` is the stable id of a plan card's step (notebook.plan_steps, `s<n>` as it was made), named to a model as
 `card:<id>#step-<n>` by its place. `author` is `check` for a run's comment and `claude` for main's. Every comment is a
 short statement, `text`, which the analyst reads first, and optional `details`, which they open on request: `text` has
-its citations flattened for reading, `details` keeps them as chips, and both cite into `evidence`. A comment stored
-before `details` (no such key) is read as its first sentence and the rest (note_of), and a leading copy of its check's
-name with a colon is dropped, since a comment shows its check's name. `status` is `open` or `dismissed`
-(report.SETTLED_STATUS) and `resolution` says why: `done` (the analyst's Done), `superseded` (a later run of its check
-covered its card or step), or `known` in a comment resolved before 0.7.0, which reads as resolved as any other. A
-comment on a card that is gone is not served.
+its citations flattened for reading, `details` keeps them as chips, and both cite into `evidence`. A leading copy of
+its check's name with a colon is dropped, since a comment shows its check's name. `status` is `open` or `dismissed`
+(report.SETTLED_STATUS) and `resolution` says why: `done` (the analyst's Done) or `superseded` (a later run of its check
+covered its card or step). A comment on a card that is gone is not served.
 
 The passages of the canvas (passages()) are the cards a check covers, in the tree's order, each followed by its steps:
 the cards of the analyst's groups and the threads' (not the orientation's deck, a document's figures or labels' cards).
@@ -47,7 +45,6 @@ EVENT = "canvas-comments"  # the stream record a change emits
 RESOLUTION_DONE = "done"  # the analyst's Done, or main's resolve_comment
 RESOLUTION_SUPERSEDED = "superseded"
 SETTLED = "dismissed"  # report.SETTLED_STATUS
-CHECK_AUTHOR = "check"
 CLAUDE = "claude"
 COVERED_ROLES = ("analyst",)  # notebook.DEFAULT_ROLE: the analyst's groups and every thread's
 SKIPPED_KINDS = ("label",)  # a label's card is the label's review, which its own pane shows
@@ -56,11 +53,6 @@ WHOLE_AUTHORS = ("analyst", "terminal")  # the analyst's own comments, read whol
 # a plan payload's keys of its steps (plans.REMOVED, plans.LAST_EDIT), left out of its card's fp
 PLAN_STEP_KEYS = ("steps", "removed_steps", "last_edit")
 _REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
-# a sentence's end: its mark, then any closing quote, bracket or emphasis, then a space or the end; the next sentence can
-# start with anything, such as a file name or a code span
-_SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)\]*_`]*(?=\s|$)")
-# what before a full stop ends no sentence: a common abbreviation, a single letter or an initialism (e.g., U.S.)
-_ABBREV_RE = re.compile(r"(?:^|[\s(\[])(?:e\.g|i\.e|etc|vs|cf|approx|incl|no|fig|eq|[A-Za-z]|(?:[A-Za-z]\.)+[A-Za-z])$", re.I)
 
 
 def _now() -> str:
@@ -76,16 +68,6 @@ def _path(c: str) -> Path:
 
 
 # --------------------------------------------------------------------------- what a comment says
-
-
-def parse_note(text: str, name: str = "") -> dict[str, str]:
-    """{statement, details} of a comment's words as one text: a leading copy of its check's name `name` with a colon
-    dropped, the first sentence the statement (its bold taken off, its first letter capitalized) and the rest the
-    details."""
-    rest = _untagged(text, name)
-    end = _first_end(rest)
-    first = rest[:end] if end else rest
-    return {"statement": first.replace("**", "").strip(), "details": rest[len(first):].strip()}
 
 
 def _untagged(text: str, name: str = "") -> str:
@@ -110,36 +92,11 @@ def clean_details(details: Any) -> str:
 
 def note_of(cm: dict[str, Any], name: str = "") -> dict[str, str]:
     """{text, details} of a stored comment as the analyst reads it: its statement and its details. The analyst's own
-    comment is whole; one stored with `details` is its `text` without a leading copy of its check's name `name`; one
-    stored before `details` is split into its first sentence and the rest (parse_note)."""
+    comment is whole; a check's or Claude's is its `text` without a leading copy of its check's name `name`."""
     text = str(cm.get("text") or "")
     if str(cm.get("author") or "") in WHOLE_AUTHORS:
         return {"text": _collapse(text), "details": clean_details(cm.get("details"))}
-    if "details" in cm:
-        return {"text": _untagged(text, name), "details": clean_details(cm.get("details"))}
-    got = parse_note(text, name)
-    return {"text": got["statement"], "details": got["details"]}
-
-
-def split_stored(cm: dict[str, Any], name: str = "") -> bool:
-    """A comment stored before `details`, made a statement and its details in place (note_of, its check's name
-    `name`); whether it changed."""
-    if not isinstance(cm, dict) or "details" in cm or not cm.get("text"):
-        return False
-    cm.update(note_of(cm, name))
-    for k in ("tag", "title", "body"):
-        cm.pop(k, None)
-    return True
-
-
-def _first_end(text: str) -> int | None:
-    """Where the first sentence of `text` ends (after its mark and any closing quote or emphasis), or None for one
-    sentence: a full stop after an abbreviation or a single letter ends none."""
-    for m in _SENTENCE_END_RE.finditer(text):
-        if text[m.start()] == "." and _ABBREV_RE.search(text[: m.start()]):
-            continue
-        return m.end()
-    return None
+    return {"text": _untagged(text, name), "details": clean_details(cm.get("details"))}
 
 
 # --------------------------------------------------------------------------- the cards a check covers
@@ -310,21 +267,10 @@ def card_lines(c: str, refs: list[str], ps: list[dict[str, Any]] | None = None) 
 # --------------------------------------------------------------------------- the store
 
 
-def _current_checks(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """`items` with each comment's check under its id now, in place (checks.current_id): a comment of a built-in's
-    former id reads as the built-in's, and is written so on the store's next write."""
-    from . import checks  # noqa: PLC0415 — checks imports this module
-
-    for x in items:
-        if x.get("check"):
-            x["check"] = checks.current_id(x["check"])
-    return items
-
-
 def _read(c: str) -> list[dict[str, Any]]:
     data = read_json(_path(c), {})
     items = data.get("comments") if isinstance(data, dict) else None
-    return _current_checks([x for x in items or [] if isinstance(x, dict) and x.get("id")])
+    return [x for x in items or [] if isinstance(x, dict) and x.get("id")]
 
 
 def _change(c: str, fn: Any) -> Any:
@@ -334,7 +280,7 @@ def _change(c: str, fn: Any) -> Any:
 
     def change(data: Any) -> Any:
         items = data.get("comments") if isinstance(data, dict) else None
-        items = _current_checks([x for x in items or [] if isinstance(x, dict) and x.get("id")])
+        items = [x for x in items or [] if isinstance(x, dict) and x.get("id")]
         out["value"] = fn(items)
         return {"comments": items}
 
@@ -538,12 +484,4 @@ async def resolve_route(c: str, cid: str) -> dict[str, Any]:
     _ws(c)
     if not resolve(c, [cid]):
         raise HTTPException(404, f"no open comment {cid!r}")
-    return {"comments": open_comments(c)}
-
-
-@router.post("/ws/{c}/canvas/comments/{cid}/reopen")
-async def reopen_route(c: str, cid: str) -> dict[str, Any]:
-    """A resolved comment open again. Answers the open comments."""
-    _ws(c)
-    reopen(c, [cid])
     return {"comments": open_comments(c)}

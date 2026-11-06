@@ -17,7 +17,7 @@ const BIN = '/made-up/plugin/bin/thimble'
 // what every run has besides the request's variables: THIMBLE_HANDOFF empty, so it never hands itself on, and the marks
 // of a command in Claude Code
 const MARKS = { THIMBLE_HANDOFF: '', CLAUDECODE: '1', THIMBLE_HANDED_OFF: '1' }
-const ENDS = ['.live', '.part', '.ask', '.took', '.out', '.err', '.code', '.done']
+const ENDS = ['.live', '.part', '.ask', '.took', '.out', '.err', '.done']
 
 /** The module's hooks on an engine that keeps the environment, files (with their times), timers and the time in
  *  memory. Its shell takes and runs a command as hooks/handoff.ts's TAKE does: the rename that takes it, `took` on its

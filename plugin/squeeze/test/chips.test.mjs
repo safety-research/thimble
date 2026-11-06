@@ -28,11 +28,9 @@ test('a rewrite is held to the original: its citations stay as written, and a nu
 
 test('the request carries only the definition of each level picked, and Length always', () => {
   const words = { words: 40, data: false, keep: 0 }
-  const rec = { text: TEXT, squeeze: { at: { length: 3, interpret: 0, 'x-boss': 3 }, own: [{ id: 'x-boss', words: 'for my boss' }], scale: 4 } }
+  const rec = { text: TEXT, squeeze: { at: { length: 3, 'x-boss': 3 }, own: [{ id: 'x-boss', words: 'for my boss' }], scale: 5 } }
   const tail = request(rec, { system: 'S' }).prompt[1].text
   assert.match(tail, /- Length: much longer\. About two and a half times the original/)
-  // the Interpretation chip went in 0.10.4: a level an older record set on it is not sent
-  assert.ok(!tail.includes('Interpretation'))
   assert.match(tail, /"for my boss": fully\. Write the whole text as these words ask\./)
   // no other level of any chip is defined, and the input (the original) stays in the cached head
   for (const [chip, at] of [['length', 3]]) {
@@ -41,27 +39,8 @@ test('the request carries only the definition of each level picked, and Length a
   assert.ok(!tail.includes(MEANS.own[1]()) && !tail.includes(MEANS.own[2]()))
   assert.ok(!tail.includes('<original>'))
   // a chip left where the original is, other than Length, is not named
-  const one = request({ text: TEXT, squeeze: { at: { length: 0 }, scale: 4 } }, { system: 'S' }).prompt[1].text
+  const one = request({ text: TEXT, squeeze: { at: { length: 0 }, scale: 5 } }, { system: 'S' }).prompt[1].text
   assert.match(one, /- Length: short\./)
-  assert.ok(!one.includes('Interpretation'))
-  // a record of scale 3 (one line first, Background's four levels) reads on the scales now, its Background level kept
-  const old = chipsOf({ text: TEXT, squeeze: { at: { length: 4, familiarity: 0 }, scale: 3, versions: { 'length=4': 'x' } } })
-  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'familiarity=novice'])
-})
-
-test('older records still read after the scale went to 5 (levelsAt)', () => {
-  const read = squeeze => chipsOf({ text: TEXT, squeeze }).map(c => `${c.id}=${c.levels[c.level]}`)
-  // scale 4, no Background chip: Length reads as it was, Background stands at the original's, and the Interpretation
-  // level it set reads as not set (that chip went in 0.10.4)
-  const four = { at: { length: 0, interpret: 2 }, scale: 4, versions: { 'length=0&interpret=2': 'Short, read.', 'length=0': 'Short.' } }
-  assert.deepEqual(read(four), ['length=short', 'familiarity=working'])
-  // the version of its levels without Interpretation comes back with no call; the one with it is not shown
-  assert.equal(fromVersions({ text: TEXT, squeeze: four }, { length: 0 }).shown, 'Short.')
-  // scale 2, when Background had five levels: its level reads as the original's, and the versions it wrote go
-  assert.deepEqual(read({ at: { familiarity: 4 }, scale: 2, versions: { 'familiarity=4': 'x' } }), ['length=as written', 'familiarity=working'])
-  assert.equal(fromVersions({ text: TEXT, squeeze: { at: {}, scale: 2, versions: { 'familiarity=0': 'x' } } }, { familiarity: 0 }), null)
-  // scale 3 kept Background's four levels: a version of it alone comes back
-  assert.equal(fromVersions({ text: TEXT, squeeze: { at: {}, scale: 3, versions: { 'familiarity=0': 'New.' } } }, { familiarity: 0 }).shown, 'New.')
 })
 
 test('each version keeps its cards: an edit takes its card\'s place, an add goes last, a drop leaves one out; 0 brings the original\'s back', () => {

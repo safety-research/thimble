@@ -663,7 +663,7 @@ async def settle(fid: int, answer: str) -> None:
         # the checks build the page into the fix's temp folder, which its fixer writes too: what is there once they end
         # is their build (checks_page)
         await asyncio.to_thread(shutil.rmtree, checks_page(fid), True)
-        # the tests run for one fix at a time, and once more when they fail (the kernel's run_tests)
+        # the tests run for one fix at a time, and once more when they fail (the kernel's _run_tests)
         r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way

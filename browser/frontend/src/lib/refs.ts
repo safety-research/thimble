@@ -41,8 +41,6 @@ export type ParsedRef =
 export const CARD = 'card:'
 /** Whether a string is a card's ref, by either prefix. */
 export const isCardRef = (ref: string): boolean => ref.startsWith('card:') || ref.startsWith('cell:')
-/** `card:<id>` for a card id. */
-export const cardRef = (id: string): string => `${CARD}${id}`
 const CELL_RE = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@(out)?(\d+))?(?:#(.*))?$/
 const CELL_LINES_RE = /^L(\d+)(?:-L?(\d+))?$/
 const CELL_TD_RE = /^([^/]+)\/(.+)$/
@@ -230,13 +228,6 @@ function runPrefix(path: string, among: readonly string[] = []): string {
 export function hiddenPath(ref: string): string | null {
   const p = parseRef(ref)
   return p && 'path' in p && p.path.split('/').filter(Boolean).length > 2 ? p.path : null
-}
-
-export function ordinal(n: number): string {
-  const v = n % 100
-  if (v >= 11 && v <= 13) return `${n}th`
-  const last = n % 10
-  return `${n}${last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th'}`
 }
 
 /** A card's printed lines as every chip and hover names them, whichever of the card's outputs holds them: `card output

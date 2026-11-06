@@ -67,7 +67,7 @@ def _write(c: str, slug: str = "posts", **extra) -> dict:
 
 
 def _propose(c: str, slug: str = "posts") -> None:
-    views._save_proposals(c, [{"slug": slug, "name": "Posts", "why": "", "claims": ["board.jsonl"], "arrangement": "",
+    views._save_proposals(c, [{"slug": slug, "name": "Posts", "description": "", "claims": ["board.jsonl"], "arrangement": "",
                                "proposed_by": "analyst", "status": "built", "orientation": False, "ts": "t"}])
 
 
@@ -112,11 +112,6 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     (ws / "extension" / "views" / "planted").symlink_to(outside, target_is_directory=True)
     views.ensure_local(ws)
     assert not (ws / "extension" / "views" / "planted").exists()
-
-    other = config.workspace_dir(OTHER)
-    (other / "extension").symlink_to(ws / "extension", target_is_directory=True)
-    assert views.migrate_workspaces() == {}
-    assert not (other / "extension").exists(), "a link left by an older kernel goes at the start"
 
     shutil.rmtree(ws / "extension")
     (ws / "extension").write_text("")

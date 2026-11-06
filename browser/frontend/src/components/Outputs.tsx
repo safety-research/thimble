@@ -27,32 +27,6 @@ import { drawChart, NOTHING_DRAWN, refitChart, type DrawnChart, type NothingDraw
 import { failureText, loadChunk } from '../lib/chunkRecovery'
 import { MdImage } from './MdImage'
 
-// the chart drawing (lib/vegaDraw), which the view kit's charts share, named here too for what imports it from here
-export {
-  applyRefit,
-  currentSchema,
-  designedWidth,
-  fitComposite,
-  fixScaleBindings,
-  hasLegend,
-  hasScaleBinding,
-  hiddenXLabels,
-  labelTooltips,
-  legendWrap,
-  measureOverrun,
-  MIN_X_LABEL_FONT,
-  onPaper,
-  refitChart,
-  responsive,
-  scaleWidths,
-  unroundClippedBars,
-  usesContainerWidth,
-  wrapTitle,
-  wrapTitleText,
-  xLabelsFit,
-} from '../lib/vegaDraw'
-export type { HiddenX, Overrun, Refit, RefitView, XLabels } from '../lib/vegaDraw'
-
 export const ERROR_MIME = 'application/vnd.thimble.error+json'
 export const isVegaLite = (mime: string) => /^application\/vnd\.vegalite\.v[456][+.]json$/.test(mime)
 /** The drawings the canvas makes from a card's code, by the card kind that shows each (backend tools.DRAWING_MIMES). */
@@ -190,19 +164,6 @@ export const outIndex = (outputs: MimeBundle[] | undefined, bundle: MimeBundle):
 const MD_REHYPE = [rehypeNumericCells]
 // a markdown output loads no image from another host (components/MdImage)
 const MD_COMPONENTS: Components = { img: MdImage }
-
-export function Outputs({ outputs }: { outputs: MimeBundle[] }) {
-  if (!outputs?.length) return null
-  return (
-    <div className="outputs">
-      {outputs.map((b, i) => (
-        <Output key={i} bundle={b} />
-      ))}
-    </div>
-  )
-}
-
-export default Outputs
 
 /** The labels a card uses, as a chart reads their classes' colours (lib/chartDefaults labelColours). */
 export type ChartLabels = readonly Pick<Concept, 'labels' | 'classes'>[]

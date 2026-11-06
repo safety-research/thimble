@@ -88,7 +88,7 @@ export function FixWorking() {
 /** The page after the person's click put a fix on or took it off: once the server is back from its restart, the page
  * loads the new build, or, while something typed would be lost, the fix's row offers Reload (`fixHeld`). And Your
  * fixes, which `/thimble-fix` alone opens. */
-export function FixPage({ ws }: { ws: string }) {
+export function FixPage() {
   const restarting = useRef<number | null>(null)
   const [rows, load] = useFixes(() => {
     const fid = restarting.current

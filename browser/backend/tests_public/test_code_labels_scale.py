@@ -33,7 +33,8 @@ def test_the_wrapper_labels_every_record_of_every_file(tmp_path):
         exec(compile(code, "wrapper", "exec"), {"__name__": "wrapper"})
     finally:
         os.chdir(cwd)
-    rows, errors, message = concepts.parse_code_output([], rows_file)
+    with open(rows_file, encoding="utf-8") as f:
+        rows, errors, message = concepts._parse_code_rows(f)
     assert len(rows) == 120 and errors == 0 and message is None
     assert sum(r["label"] == "yes" for r in rows) == 40
     assert rows[4]["ref"] == f"{groups[1]['paths'][0]}#L2" and rows[4]["label"] == "yes"

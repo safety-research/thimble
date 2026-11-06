@@ -14,9 +14,7 @@ import contextlib
 import copy
 import json
 import logging
-import os
 import re
-import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,7 +35,6 @@ BUILTIN_SLUGS = ("report",)
 RESERVED = set(BUILTIN_SLUGS) | {"story", "slides", "video", "brief", "findings", "run", "investigation", "events", "notes", "critiques", "reports",
                                  "types", "draft", "versions", "presets", "new"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
-MATERIAL_SLOT = "{{material}}"  # the slot a legacy custom type's text may hold, taken out by type_form
 PROMPT_MAX = 40_000
 RUBRIC_MAX = 20_000
 SCHEMA_MAX = 40_000
@@ -432,13 +429,9 @@ def doc_words(doc: dict[str, Any]) -> int:
 
 def type_form(t: dict[str, Any]) -> str:
     """What read_ref("type:<name>") returns, the one text a writer reads for a type: a built-in's form, or a custom
-    type's
-    own text then its form's text, then the rubric. A legacy `## Material` heading and {{material}} slot are taken
-    out."""
+    type's own text then its form's text, then the rubric."""
     text = str(t.get("prompt") or "").strip()
     if not t.get("builtin", False) or not text:
-        text = text.replace(MATERIAL_SLOT, "")
-        text = re.sub(r"(?:^|\n)#{1,3}\s*Material\s*\n", "\n", text).strip()
         if t.get("renderer") in prompts.TYPE_FILES:
             text = (text + "\n\n" if text else "") + type_paragraph_text(str(t["renderer"]))
     rubric = str(t.get("rubric") or "").strip()
@@ -460,9 +453,6 @@ def frame_file(c: str, inv_id: str, slug: str) -> Path:
 
 def _with_defaults(doc: dict[str, Any]) -> dict[str, Any]:
     doc.setdefault("comments", [])
-    # a legacy `locked` list of edited sentences locks nothing: only a block the analyst locked is locked
-    # (set_block_lock)
-    doc.pop("locked", None)
     doc.setdefault("generation", 1)
     for u in units(doc):
         if isinstance(u.get("paragraphs"), list):
@@ -485,38 +475,7 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
     if slug == "report":
         doc.setdefault("renderer", "document")
         doc.setdefault("title_ok", _title_ok(_collapse(doc.get("title"))))
-    _legacy_comments(doc)
-    _split_comments(c, doc)
     return _with_defaults(doc)
-
-
-# a legacy verify agent's marks, each read as the comment of the built-in check of its kind, a caveat as a judgment call
-LEGACY_CHECKS = {"verified": "verified", "unverified": "unverified", "judgment": "judgment", "caveat": "judgment"}
-
-
-def _legacy_comments(doc: dict[str, Any]) -> None:
-    """A stored document's verifier comments as check comments (LEGACY_CHECKS), and each comment of a built-in's former
-    id as the built-in's (checks.current_id), in place; written so on its next save."""
-    from .checks import current_id  # noqa: PLC0415
-    from .report import CHECK_AUTHOR, LEGACY_AUTHOR  # noqa: PLC0415
-
-    for cm in doc.get("comments") or []:
-        if isinstance(cm, dict) and cm.get("author") == LEGACY_AUTHOR:
-            cm["author"] = CHECK_AUTHOR
-            cm["check"] = LEGACY_CHECKS.get(str(cm.pop("kind", "") or ""), "judgment")
-        elif isinstance(cm, dict) and cm.get("check"):
-            cm["check"] = current_id(cm["check"])
-
-
-def _split_comments(c: str, doc: dict[str, Any]) -> None:
-    """A stored document's comments from before `details`, each made its statement and its details, in place
-    (canvas_comments.split_stored, by its check's name); written so on its next save."""
-    from . import canvas_comments, checks  # noqa: PLC0415
-
-    old = [cm for cm in doc.get("comments") or [] if isinstance(cm, dict) and "details" not in cm and cm.get("text")]
-    names = checks.names(c) if any(cm.get("check") for cm in old) else {}
-    for cm in old:
-        canvas_comments.split_stored(cm, names.get(str(cm.get("check") or ""), ""))
 
 
 def _inv(c: str, inv_id: str) -> Path:

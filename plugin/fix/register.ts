@@ -137,7 +137,7 @@ export async function strayLine($: Engine, fixes: Fix[]): Promise<void> {
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), and `thimble file issue` and
  *  `thimble file pr`, which post the person's fix publicly from their own terminal: never Claude's. */
-const OWN_VERBS = /\bthimble\s+(?:fix\s+(?:new|round|again|done|shown|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)|file\s+(?:issue|pr))\b/
+const OWN_VERBS = /\bthimble\s+(?:fix\s+(?:new|round|again|done|shown|apply|merge|notnow|redo|undo|remove|sandbox)|file\s+(?:issue|pr))\b/
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 /** Whether this session looked for a newer release already (kept across a reload of the module). */

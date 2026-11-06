@@ -69,9 +69,6 @@ export type Events = {
   openView: { slug: string }
   /** show the file at `path` in the File browser's mode `mode` (files/Reader pickKey), such as a file viewer's */
   fileMode: { path: string; mode: string }
-  /** Open in on a file's panel: the file in the view `slug`, or in the File browser for null, kept as the view the
-   * analyst last used for it */
-  openIn: { path: string; ref?: string; slug: string | null }
   /** a layout main asked for with set_layout (the stream's `layout` record): a preset, and the surfaces its panes show
    * in reading order */
   layout: { layout: 'one' | 'columns' | 'rows' | 'three' | 'quadrants'; surfaces: string[] }

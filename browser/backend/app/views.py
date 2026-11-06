@@ -70,7 +70,6 @@ from .ledger import atomic_write_text, read_json, unlinked, write_json, write_js
 
 log = logging.getLogger("thimble.views")
 
-KERNEL = view_calls.KERNEL  # the first of the workspace's kernels for readers (view_calls)
 VIEWS_SUBDIR = "views"
 # under the workspace: its local extension, which holds the views built for it in views/<slug>/ beside its manifest,
 # read-only to a kernel (kernel_wrap.READ_ONLY_DIRS)
@@ -79,23 +78,18 @@ LOCAL_MANIFEST = "extension.json"
 LOCAL_VERSION = "local"
 CACHE_SUBDIR = "cache"  # in a view's folder: its check pictures
 PROPOSALS_FILE = "proposals.json"
-DELETED_FILE = "deleted.json"  # the proposals the analyst deleted, [{slug, name, ts}] (delete_proposal)
+DELETED_FILE = "deleted.json"  # the views the analyst deleted or discarded, [{slug, name, ts}] (deleted_proposals)
 # no view is hidden: off.json, where earlier versions kept the views hidden from the views bar, is not read
 KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, name}, kept past the view's deletion
 # under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
 # index as the views kernel pickled it and the bytes build_index read of each claimed file, by fingerprint
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
-TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is the proposal of an orientation from before 0.8.0 left out
 # when the analyst stopped the orientation before its view was built, or a view proposal the analyst rejected
-# (answer_offer, its `answer`). An orientation's proposal (before 0.8.0; one proposes none now) carries `held: true`
-# until its view first passes its checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at
-# once, and the analyst hears of it only then.
+# (answer_offer, its `answer`).
 # `suggested` with an `offered` object is a view proposal thimble shows the analyst (offer), after a turn (proposer.py)
-# or for a file type opened in the File browser (suggest), which builds only once the analyst accepts it (accept). A
-# `suggested` row without `offered` is an orientation's viewer for a file type, as 0.7.x stored them, which is never
-# shown (open_offer).
+# or for a file type opened in the File browser (suggest), which builds only once the analyst accepts it (accept).
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
 PENDING = ("queued", "building")  # the statuses a restart queues again (dev.recover_views)
 SHOTS_KEPT = 5  # the check pictures kept per view, newest first (the session Reads the latest)
@@ -107,7 +101,7 @@ VERSION_RE = re.compile(r"^[0-9a-f]{12}$")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
-                  "suggestions", "suggest", "propose-now"}
+                  "suggest", "propose-now"}
 RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
 # a reader call names the claimed files only when they are this many or fewer, or when its kernel must build the index
 # (view_host `need_paths`), so a view of a million files sends their paths only to build
@@ -130,9 +124,6 @@ SIBLING_SAMPLE = 200  # of a claimed folder's paths, those looked for in a folde
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
-# a request of the headless page still unanswered is waited for this long (scripts/view_shot.mjs ANSWER_MS), and the
-# run's time grows by the time its requests take to answer
-ANSWER_WAIT_S = 600.0
 # the view's pane: in a 1440×900 window beside the chat, as it opens and with the Labels pane open beside it, and in a
 # 1920×1080 window as it opens
 PANE_SIZE, PANE_NARROW, PANE_WIDE = (1048, 676), (798, 676), (1528, 856)
@@ -263,12 +254,8 @@ def _now() -> str:
 
 def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
     """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
-    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build (an orientation's from
-    before 0.8.0, before its view first passes) says `held`: its chip in the orientation's thread follows it, while
-    the views bar and the view-ready toast wait for the view to be built (mark_built) (live checks L19, L25)."""
+    worker thread (a route's blocking part) hands it to the bound loop."""
     event = {"type": "view", "slug": slug, "status": status, **extra}
-    if slug in held_slugs(c):
-        event["held"] = True
 
     def send() -> None:
         try:
@@ -380,87 +367,6 @@ def ensure_local(ws: Path) -> Path:
         if p.is_symlink():
             nofollow.unlink(p)
     return d
-
-
-def move_to_local(ws: Path) -> list[str]:
-    """The views an older thimble kept in views/ of the workspace folder `ws` moved into its local extension: each view's
-    folder (one that holds a view's file, or one a proposal names) is renamed into extension/views/ whole, its files,
-    cache and times unchanged, so its proposal, kept versions and indexes find it as before. A slug the local extension
-    holds already stays where it is. A link is left at each old place (old_link), so an older thimble run on the workspace again finds its views rather than
-    building them again. Run again, it moves nothing. A link where the local extension or its views folder goes, which
-    a kernel of an older thimble could leave, is removed. Returns the slugs moved."""
-    for p in (ws / LOCAL_SUBDIR, ws / LOCAL_SUBDIR / VIEWS_SUBDIR):
-        if p.is_symlink():
-            p.unlink()
-    old = ws / VIEWS_SUBDIR
-    try:
-        raw = read_json(old / PROPOSALS_FILE, [])
-    except (OSError, ValueError):
-        raw = []
-    named = {str(p.get("slug")) for p in raw if isinstance(p, dict)} if isinstance(raw, list) else set()
-    try:
-        found = [d for d in sorted(old.iterdir()) if SLUG_RE.match(d.name) and d.is_dir() and not d.is_symlink()
-                 and (d.name in named or any((d / n).is_file() for n in (VIEW_JSON, READER_PY, VIEW_HTML)))]
-    except OSError:
-        found = []
-    if not found:
-        return []
-    new = ensure_local(ws) / VIEWS_SUBDIR
-    moved: dict[str, str] = {}
-    for d in found:
-        to = new / d.name
-        if to.exists():
-            log.warning("%s: the view %s stays in %s, since the local extension has one of that slug", ws.name, d.name, old)
-            continue
-        src = str(d.resolve())
-        os.replace(d, to)
-        moved[src] = str(to.resolve())
-        try:
-            os.symlink(Path("..") / LOCAL_SUBDIR / VIEWS_SUBDIR / d.name, d, target_is_directory=True)
-        except OSError as e:
-            log.warning("%s: no link was left at the old place of the view %s: %s", ws.name, d.name, e)
-    if moved:
-        _new_sessions(old / PROPOSALS_FILE, raw, {Path(p).name for p in moved.values()})
-        log.info("%s: %d view(s) moved into the workspace's local extension", ws.name, len(moved))
-    return sorted(Path(p).name for p in moved.values())
-
-
-def old_link(c: str, slug: str) -> Path:
-    """Where an older thimble kept the view `slug`, which move_to_local leaves a link at."""
-    return state_dir(c) / slug
-
-
-def _new_sessions(path: Path, raw: Any, slugs: set[str]) -> None:
-    """Each first build of `slugs` that a restart cut off starts a new session rather than resuming its own, whose
-    earlier turns name the folder's old place: its session is dropped from the proposals in `raw`, written to `path`. A
-    change keeps its session, since the message that resumes it names the folder."""
-    if not isinstance(raw, list) or path.is_symlink():
-        return
-    cut = [x for x in raw if isinstance(x, dict) and x.get("slug") in slugs and x.get("status") in PENDING
-           and not x.get("changed") and x.get("session_id")]
-    for x in cut:
-        x.pop("session_id", None)
-        x.pop("session", None)
-    if cut:
-        write_json(path, raw)
-
-
-def migrate_workspaces() -> dict[str, list[str]]:
-    """move_to_local for each workspace folder in the workspaces folder, archives left out. {workspace: the slugs moved}
-    for each that moved any."""
-    out = {}
-    try:
-        folders = sorted(d for d in config.WORKSPACES_DIR.iterdir() if d.is_dir() and not d.is_symlink()
-                         and config._valid_name(d.name) and not d.name.startswith("."))
-    except OSError:
-        return {}
-    for d in folders:
-        try:
-            if moved := move_to_local(d):
-                out[d.name] = moved
-        except OSError:
-            log.exception("%s: the views were not moved into the local extension", d.name)
-    return out
 
 
 def _view_dirs(c: str) -> dict[str, Path]:
@@ -785,32 +691,17 @@ def _as_built(c: str, slug: str, live: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def list_views(c: str) -> list[dict[str, Any]]:
-    """The workspace's views as read_built reads them, the views of held proposals (held_slugs) left out, then the
-    built-in viewers they do not override. A draft does not override a built-in viewer of its slug."""
-    held = held_slugs(c)
-    mine = [v for v in _own_views(c) if v["slug"] not in held]
+    """The workspace's views as read_built reads them, then the built-in viewers they do not override. A draft does not
+    override a built-in viewer of its slug."""
+    mine = _own_views(c)
     have = {v["slug"] for v in mine}
     return [*mine, *(v for s in BUILTIN_VIEWERS if s not in have and (v := read_builtin(s)) is not None)]
 
 
 def _own_views(c: str) -> list[dict[str, Any]]:
-    """The workspace's own views as read_built reads them, held ones kept (list_proposals settles its rows against
-    them)."""
+    """The workspace's own views as read_built reads them, those switched off kept (list_proposals settles its rows
+    against them)."""
     return [v for s in _view_dirs(c) if (v := read_built(c, s)) is not None]
-
-
-def held_slugs(c: str) -> set[str]:
-    """The slugs of an orientation's proposals (before 0.8.0) whose views have not passed their checks yet, read from the
-    stored rows (list_proposals reads list_views)."""
-    try:
-        p = proposals_path(c)
-        raw = read_json(p, []) if p.is_file() else []
-    except (OSError, ValueError, HTTPException):
-        return set()
-    if not isinstance(raw, list):
-        return set()
-    return {str(x["slug"]) for x in raw
-            if isinstance(x, dict) and x.get("slug") and (x.get("held") or x.get("status") == "held")}
 
 
 def read_builtin(slug: str) -> dict[str, Any] | None:
@@ -904,11 +795,10 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = 
 
 def mark_built(c: str, slug: str) -> dict[str, Any]:
     """Register the view in the slug's folder: `built` stamped into its view.json (the only writer of that field), its
-    memo dropped, and a proposal under the slug marked built, and no longer held, so an orientation's view (before
-    0.8.0) reaches the analyst as soon as it passes its checks. Emits `view {slug, status: built}`, with `asked` for a view the analyst
-    asked for, which the browser then opens. The first build of a view proposal the analyst accepted (accept) says
-    `accepted` instead: the browser marks the view new and leaves it closed; a change to it later (revise) says
-    neither."""
+    memo dropped, and a proposal under the slug marked built. Emits `view {slug, status: built}`, with `asked` for a
+    view the analyst asked for, which the browser then opens. The first build of a view proposal the analyst accepted
+    (accept) says `accepted` instead: the browser marks the view new and leaves it closed; a change to it later
+    (revise) says neither."""
     ensure_local(config.workspace_dir(c))
     d = views_dir(c) / slug
     raw = _view_json(d)
@@ -923,7 +813,7 @@ def mark_built(c: str, slug: str) -> dict[str, Any]:
     # the first build under the proposal, not a change to a view built before (revise marks that `revision`)
     first = prop is not None and prop.get("status") != "built" and not prop.get("revision")
     if prop is not None:
-        update_proposal(c, slug, status="built", error=None, held=None)
+        update_proposal(c, slug, status="built", error=None)
     opens = prop is not None and bool(prop.get("asked")) and not prop.get("accepted")
     extra: dict[str, Any] = {"asked": True} if opens else {}
     if first and prop is not None and prop.get("accepted"):
@@ -1003,8 +893,6 @@ def delete_view(c: str, slug: str) -> None:
     drop_built_copy(c, slug)
     _forget(c, slug)
     view_calls.forget_view(c, slug)
-    if old_link(c, slug).is_symlink():
-        old_link(c, slug).unlink()
     items = list_proposals(c)
     if any(p.get("slug") == slug for p in items):
         _save_proposals(c, [p for p in items if p.get("slug") != slug])
@@ -2356,11 +2244,7 @@ def proposals_path(c: str) -> Path:
 
 # A proposal (propose_view) says what the analyst sees in the view (`description`) and what they do with it (`task`),
 # and claims the files it reads; the dev agent reads those files itself for the fields, keys and counts. A viewer for a
-# file type (suggest) also gives a free-text `arrangement`. A 0.7.0 row has `why` in place of `description`, and the
-# layout fields below as its `spec`, also written out as its `arrangement`: it reads as it was proposed (layout_lines).
-# The layout fields of a 0.7.0 proposal, in the order its ticket listed them, each with the words it is named by
-LEGACY_SPEC_FIELDS = (("unit", "Unit"), ("overview", "Overview"), ("zoom", "Zoom"), ("filter", "Filter"),
-                      ("details", "Details"))
+# file type (suggest) also gives a free-text `arrangement`.
 
 
 def _one(text: Any) -> str:
@@ -2369,13 +2253,8 @@ def _one(text: Any) -> str:
 
 
 def layout_lines(prop: dict[str, Any]) -> str:
-    """The layout a proposal gave beside its description and task, as a ticket's bullets: a 0.7.0 proposal's spec, one
-    bullet per field, else its free-text arrangement (a viewer for a file type, a 0.7.0 row without a spec); '' for a
-    proposal that gives none, as propose_view's do."""
-    spec = prop.get("spec") if isinstance(prop.get("spec"), dict) else {}
-    lines = [f"- {label}: {v}" for k, label in LEGACY_SPEC_FIELDS if (v := _one(spec.get(k)))]
-    if lines:
-        return "\n".join(lines)
+    """The layout a proposal gave beside its description and task, as a ticket's bullet: its free-text arrangement (a
+    viewer for a file type); '' for a proposal that gives none, as propose_view's do."""
     arrangement = _one(prop.get("arrangement"))
     return f"- The unit and the layout: {arrangement}" if arrangement else ""
 
@@ -2384,7 +2263,7 @@ def proposal_lines(prop: dict[str, Any]) -> str:
     """A proposal as the dev agent's tickets give it (view_tools.fenced_proposal, dev.change_text): what the analyst
     sees, what they do with it, the files it reads, and any layout it gave (layout_lines)."""
     task = _one(prop.get("task"))
-    return "\n".join(x for x in (f"- What the analyst sees: {_one(prop.get('description') or prop.get('why'))}",
+    return "\n".join(x for x in (f"- What the analyst sees: {_one(prop.get('description'))}",
                                  f"- What the analyst wants to accomplish: {task}" if task else "",
                                  f"- The files it reads: {', '.join(prop.get('claims') or [])}",
                                  layout_lines(prop)) if x)
@@ -2396,15 +2275,13 @@ def _lines(text: Any) -> str:
 
 
 def _normalize_proposal(p: dict[str, Any]) -> dict[str, Any]:
-    """A stored row as the routes give it, with legacy fields normalized: a glob reads as its claim, a 0.7.0 row's
-    `why` as its description, and a `proposed` status reads as queued."""
-    out = {k: v for k, v in p.items() if k not in ("renderer", "data_md", "glob", "view", "path", "why")}
-    out["claims"] = _str_list(p.get("claims")) or _str_list(p.get("glob"))
-    out["description"] = str(p.get("description") or p.get("why") or "")
+    """A stored row as the routes give it: its claims, description, task and arrangement always there, and a status
+    other than STATUSES read as queued."""
+    out = dict(p)
+    out["claims"] = _str_list(p.get("claims"))
+    out["description"] = str(p.get("description") or "")
     out["task"] = str(p.get("task") or "")
     out.setdefault("arrangement", "")
-    if out.get("status") == "held":  # a row stored when a held proposal waited unbuilt
-        out.update(status="queued", held=True)
     if out.get("status") not in STATUSES:
         out["status"] = "queued"
     return out
@@ -2540,8 +2417,7 @@ def offers(c: str) -> list[dict[str, Any]]:
 
 
 def open_offer(c: str) -> dict[str, Any] | None:
-    """The view proposal that waits for the analyst's answer: the oldest `suggested` row with `offered`. A `suggested`
-    row without `offered`, a 0.7.x orientation's viewer for a file type, never is."""
+    """The view proposal that waits for the analyst's answer: the oldest `suggested` row with `offered`."""
     return next((p for p in offers(c) if p.get("status") == "suggested"), None)
 
 
@@ -2551,7 +2427,7 @@ def _after_ok(after: Any) -> bool:
 
 def _names_taken(c: str) -> set[str]:
     """The names, case-folded, that a new view proposal may not take: every proposal row's, answered ones included,
-    every view built for the workspace (held ones too), and every deleted proposal's."""
+    every view built for the workspace, and every deleted proposal's."""
     return {n.casefold() for n in (*(str(p.get("name") or "") for p in list_proposals(c)),
                                    *(str(v.get("name") or "") for v in _own_views(c)),
                                    *(str(d.get("name") or "") for d in deleted_proposals(c))) if n}
@@ -2620,8 +2496,8 @@ def answer_offer(c: str, slug: str, answer: str = "rejected") -> dict[str, Any]:
 
 
 def deleted_proposals(c: str) -> list[dict[str, Any]]:
-    """The proposals the analyst deleted (delete_proposal), whose names no view proposal takes again (_names_taken). A
-    record from before 0.8.0 may also carry `counted`, which nothing reads."""
+    """The views the analyst deleted (delete_view) or discarded after a failed build (discard), whose names no view
+    proposal takes again (_names_taken)."""
     p = state_dir(c) / DELETED_FILE
     raw = read_json(p, []) if p.is_file() else []
     return [x for x in raw if isinstance(x, dict) and x.get("name")] if isinstance(raw, list) else []
@@ -2647,8 +2523,7 @@ def propose(c: str, name: str, description: str, claims: Any, arrangement: str =
     (`route`, a click unless given), with the run's `values` (model and effort, else Settings' dev row). A typed
     proposal, main's propose_view, is not queued: its caller starts it with main's Agent call (dev.start_build). A view
     already built under the name is changed in place (revise). A proposal of the same name not yet built is replaced
-    under its slug, its build stopped: a waiting view proposal of the name too, since the analyst asked for this one,
-    and a held proposal of an orientation from before 0.8.0 with any view built under it (_stop_build's `force`).
+    under its slug, its build stopped: a waiting view proposal of the name too, since the analyst asked for this one.
     `asked` says the analyst asked for it. A proposal says what the analyst sees in the view (`description`, 400
     without it) and, from propose_view, what they do with it (`task`), and may give a free-text `arrangement`."""
     name = title_case(name)
@@ -2669,10 +2544,10 @@ def propose(c: str, name: str, description: str, claims: Any, arrangement: str =
     with _proposals_lock:
         items = list_proposals(c)
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
-                    and (p.get("status") != "built" or p.get("held"))), None)
+                    and p.get("status") != "built"), None)
         if old is not None:
             _stop_review(c, old["slug"], forget=True)
-            _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
+            _stop_build(c, old["slug"], "replaced")
             items = [p for p in list_proposals(c) if p.get("slug") != old["slug"]]
         slug = old["slug"] if old is not None else _unique_slug(c, name)
         prop = {"slug": slug, "name": name, "description": description, "task": task, "claims": claims_l,
@@ -2705,18 +2580,17 @@ def _queue(c: str, slug: str) -> None:
     dev.queue_view(c, slug)
 
 
-def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
-    """Stop the proposal's build, if one runs, and empty its folder: a dismissed or replaced ticket leaves no draft.
-    With `force` (a held proposal replaced) a view built under it goes too, since nobody has seen it."""
+def _stop_build(c: str, slug: str, why: str) -> None:
+    """Stop the proposal's build, if one runs, and empty its folder: a dismissed or replaced ticket leaves no draft."""
     from . import dev  # noqa: PLC0415
 
     dev.stop_view(c, slug, why)
     d = views_dir(c) / slug
     built = d.is_dir() and bool(_view_json(d).get("built"))
-    if d.is_dir() and (force or not built):
+    if d.is_dir() and not built:
         nofollow.rmtree(d, ignore_errors=True)
         nofollow.rmtree(index_dir(c, slug), ignore_errors=True)
-    if force or not built:
+    if not built:
         nofollow.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
 
@@ -2833,7 +2707,7 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
            route: str = CLICK, values: dict[str, Any] | None = None, quiet: bool = False) -> dict[str, Any]:
     """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A `description` is the proposal made again (propose), so
-    its task and arrangement replace the old ones with it, a 0.7.0 spec too. A built view's files are copied aside first
+    its task and arrangement replace the old ones with it. A built view's files are copied aside first
     (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
     the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
     finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
@@ -2866,7 +2740,7 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
         if values:
             fields["values"] = {k: str(v) for k, v in values.items() if v}
         if description := _one(description):
-            fields.update(description=description, task=_one(task), arrangement=_lines(arrangement), spec=None)
+            fields.update(description=description, task=_one(task), arrangement=_lines(arrangement))
         if claims_l := _str_list(claims):
             fields["claims"] = claims_l
         if revision:
@@ -5123,20 +4997,11 @@ def _recover(c: str) -> None:
 
 @router.get("/ws/{c}/views/proposals")
 async def list_proposals_route(c: str) -> list[dict[str, Any]]:
-    """The proposals. A held one, the proposal of an orientation from before 0.8.0 whose view has not passed its checks
-    yet, is listed with `held` for the orientation's card, and the views bar leaves it out."""
+    """The proposals."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
     return list_proposals(c)
-
-
-@router.get("/ws/{c}/views/suggestions")
-async def suggestions_route(c: str, path: str) -> dict[str, Any]:
-    """What thimble proposes for a file opened in the File browser (suggestion_for): whether a viewer may be proposed
-    for its type, why not, the workspace's answer for the type, and the proposal for it when there is one."""
-    config.workspace_dir(c)
-    return await asyncio.to_thread(suggestion_for, c, path)
 
 
 class SuggestBody(BaseModel):
@@ -5277,16 +5142,6 @@ async def message_route(c: str, slug: str, body: ViewMessage, request: Request) 
     return message(c, slug, body.text)
 
 
-@router.delete("/ws/{c}/views/proposals/{slug}")
-async def delete_proposal_route(c: str, slug: str, request: Request) -> dict[str, Any]:
-    """Delete the proposal (delete_proposal); while its builder or reviewer runs, that is a click that stops it."""
-    config.workspace_dir(c)
-    if _working(c, slug):
-        _click(request)
-    delete_proposal(c, slug)
-    return {"ok": True}
-
-
 @router.get("/ws/{c}/views")
 async def list_views_route(c: str, path: str | None = None, wait: int = 0) -> list[dict[str, Any]]:
     """Every view with the files it claims, glob claims matched against the corpus's folder tree as last walked: before
@@ -5298,11 +5153,6 @@ async def list_views_route(c: str, path: str | None = None, wait: int = 0) -> li
     if path is None:
         return await asyncio.to_thread(lambda: [_public(v, c, wait=bool(wait)) for v in list_views(c)])
     return [_public(v) for v in views_for(c, path.strip().strip("/"))]
-
-
-@router.get("/ws/{c}/views/{slug}")
-async def get_view_route(c: str, slug: str) -> dict[str, Any]:
-    return _public(_view_or_404(c, slug))
 
 
 @router.delete("/ws/{c}/views/{slug}")

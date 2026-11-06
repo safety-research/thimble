@@ -182,5 +182,3 @@ export function ChipRun({ children, max = 6 }: { children: readonly ReactNode[];
     </>
   )
 }
-
-export default ToolCard

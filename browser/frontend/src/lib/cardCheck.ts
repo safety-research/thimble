@@ -208,6 +208,3 @@ export function checkState(cell: Checked): CheckFilterState {
   if (checkProblem(check)) return 'failed'
   return check.state === 'checked' ? 'verified' : 'unverified'
 }
-
-/** Whether the card is being checked: its body and citations shimmer. */
-export const isChecking = (cell: Checked): boolean => checkOf(cell)?.state === 'running'

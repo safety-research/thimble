@@ -792,7 +792,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             aside={onCollapse && <Button variant="icon" size="sm" icon="panel-left" title="Collapse the chat" className="chat-head-collapse" onClick={onCollapse} />}
           />
         </header>
-        <FixPage ws={ws} />
+        <FixPage />
         <div
           className="chat-list"
           ref={listRef}

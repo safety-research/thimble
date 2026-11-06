@@ -13,5 +13,3 @@ export function Spinner({ size = 10, label, className, style, ...rest }: Spinner
   const cls = className ? `spinner ${className}` : 'spinner'
   return label ? <span className={cls} style={vars} role="status" aria-label={label} {...rest} /> : <span className={cls} style={vars} aria-hidden="true" {...rest} />
 }
-
-export default Spinner

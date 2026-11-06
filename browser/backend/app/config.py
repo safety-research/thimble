@@ -52,9 +52,6 @@ def default_data_dir() -> Path:
 
 
 DATA_DIR = Path(os.environ.get("THIMBLE_DATA_DIR") or default_data_dir()).resolve()
-# The install tree's data/: a legacy registry location and where a checkout's own corpora sit as directories
-# data/<c>/manifest.json. migrate_registry brings the records it holds into DATA_DIR at server start.
-LEGACY_DATA_DIR = REPO_ROOT / "data"
 WORKSPACES_DIR = Path(os.environ.get("THIMBLE_WORKSPACES_DIR") or REPO_ROOT / "workspaces").resolve()
 # The built UI (frontend/dist). main.py serves it at / when the server is not in dev mode (a release install has no
 # Vite); the server's start and cli.py's doctor print NO_UI_BUILD_HINT when it is missing. Tests point FRONTEND_DIST at
@@ -762,77 +759,6 @@ def _write_sidecar(rec: dict) -> None:
 def name_taken(name: str) -> bool:
     """Whether a corpus of DATA_DIR holds `name`: a corpus directory DATA_DIR/<name>, or a sidecar, readable or not."""
     return _dir_corpus(name) is not None or sidecar_path(name).exists()
-
-
-def _registry_holds(data_dir: Path, name: str) -> str | None:
-    """The folder the registry `data_dir` maps `name` to — a corpus directory of that name, else the path a sidecar
-    records (the sidecar itself, marked unreadable, when it does not parse) — or None when the name is free."""
-    if (data_dir / name / "manifest.json").is_file():
-        return str(data_dir / name)
-    sidecar = data_dir / f"{name}{SIDECAR_SUFFIX}"
-    if not sidecar.exists():
-        return None
-    try:
-        cur = json.loads(sidecar.read_text("utf-8"))
-    except (OSError, ValueError):
-        cur = None
-    return cur["path"] if isinstance(cur, dict) and isinstance(cur.get("path"), str) else f"{sidecar} (unreadable)"
-
-
-def migrate_registry(data_dir: Path | None = None, legacy: Path | None = None,
-                     workspaces: Path | None = None) -> list[Path]:
-    """At server start: bring the records the install tree's data/ (`legacy`) holds into the registry `data_dir`, so every
-    folder the install knew stays mapped. Idempotent: writes only names `data_dir` does not have, and only for names with a
-    workspace under `workspaces` (a record with no workspace holds no state, and would take the name from the analyst's own
-    folder of that name). A name held for another folder is skipped with a warning. Runs only when `data_dir` is
-    $THIMBLE_HOME/data and `legacy` is another, existing directory. Returns the paths written."""
-    target = (DATA_DIR if data_dir is None else Path(data_dir)).resolve()
-    source = (LEGACY_DATA_DIR if legacy is None else Path(legacy)).resolve()
-    ws_root = (WORKSPACES_DIR if workspaces is None else Path(workspaces)).resolve()
-    if target != default_data_dir() or source == target or not source.is_dir():
-        return []
-    try:
-        entries = sorted(source.iterdir())
-    except OSError:
-        return []
-    written: list[Path] = []
-    for entry in entries:
-        if entry.name.endswith(SIDECAR_SUFFIX) and entry.is_file():
-            name = entry.name[: -len(SIDECAR_SUFFIX)]
-            try:
-                text = entry.read_text("utf-8")
-                rec = json.loads(text)
-            except (OSError, ValueError):
-                continue
-            if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
-                continue
-            folder = rec["path"]
-            what = f"copied the registration of {folder}"
-        elif entry.is_dir() and (entry / "manifest.json").is_file():
-            name = entry.name
-            folder = str(entry)
-            text = json.dumps({"name": name, "root": folder, "path": folder, "registered_at": _now(),
-                               "manifest": _scan_manifest(entry)}, indent=1, ensure_ascii=False) + "\n"
-            what = f"registered the corpus directory {entry}"
-        else:
-            continue
-        if not _valid_name(name) or not (ws_root / name).is_dir():
-            continue
-        held = _registry_holds(target, name)
-        if held is not None:
-            if Path(held).expanduser().resolve() != Path(folder).expanduser().resolve():
-                log.warning("registry: the name %r in %s is held for %s; the record for %s in %s was not brought along "
-                            "(a /thimble there registers the folder under the next free name)", name, target, held, folder, source)
-            continue
-        target.mkdir(parents=True, exist_ok=True)
-        dest = target / f"{name}{SIDECAR_SUFFIX}"
-        fd, tmp = tempfile.mkstemp(prefix=f".{dest.name}.", suffix=".tmp", dir=str(target))
-        os.close(fd)
-        Path(tmp).write_text(text, "utf-8")
-        os.replace(tmp, dest)
-        log.info("registry: %s as %r in %s (from %s)", what, name, target, source)
-        written.append(dest)
-    return written
 
 
 def workspace_path(name: str) -> Path:

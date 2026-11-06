@@ -30,11 +30,11 @@ PATTERN = r"(?i)forge pr claim"  # 3 of the 8 board posts match
 
 @pytest.fixture(autouse=True)
 def _clean_state(workspaces_tmp):
-    for table in (concepts._runs, concepts._subs, concepts._locks, concepts._cancels, concepts._tasks, concepts._building,
+    for table in (concepts._runs, concepts._locks, concepts._cancels, concepts._tasks, concepts._building,
                   concepts._building_answers):
         table.clear()
     yield
-    for table in (concepts._runs, concepts._subs, concepts._tasks, concepts._building, concepts._building_answers):
+    for table in (concepts._runs, concepts._tasks, concepts._building, concepts._building_answers):
         table.clear()
 
 
@@ -64,6 +64,12 @@ async def _create(api, **kw) -> dict:
     r = await api.post(f"/api/ws/{CORPUS}/concepts", json={"name": "claims a PR", **kw})
     assert r.status_code == 200, r.text
     return r.json()
+
+
+async def _values(api, concept_id: str, path: str) -> dict[str, str]:
+    """The classifier's value per ref of the label on one file, as the reader reads them (GET /labels?path=)."""
+    r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": path})
+    return {row["ref"]: row["label"] for x in r.json() if x["concept_id"] == concept_id for row in x["rows"]}
 
 
 def _ok(labels: list[dict]) -> "model_mod.CallResult":
@@ -119,12 +125,13 @@ async def test_regex_apply_records_for_real(api, workspaces_tmp):
     for r in rows:
         assert refs.resolve(MINI, r["ref"])["kind"] == "record"
 
-    r = await api.get(f"/api/ws/{CORPUS}/concepts/{k['id']}/labels", params={"path": "board.jsonl"})
-    body = r.json()
-    assert body["concept"]["id"] == k["id"] and {row["ref"]: row["label"] for row in body["rows"]} == expected
+    r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "board.jsonl"})
+    (body,) = [x for x in r.json() if x["concept_id"] == k["id"]]
+    assert {row["ref"]: row["label"] for row in body["rows"]} == expected
     assert all(row["analyst"] is None and row["source"] == "regex" and row["confidence"] == 1.0 for row in body["rows"])
     assert all(not row["rationale"] for row in body["rows"] if row["label"] == "no")
-    assert (await api.get(f"/api/ws/{CORPUS}/concepts/{k['id']}/labels", params={"path": "events.jsonl"})).json()["rows"] == []
+    other = (await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "events.jsonl"})).json()
+    assert not [x for x in other if x["concept_id"] == k["id"]]
 
     k2 = (await api.get(f"/api/ws/{CORPUS}/concepts/{k['id']}")).json()
     assert k2["n_labeled"] == 8 and k2["counts"] == s["counts"] and k2["run"]["status"] == "done" and k2["run"]["done"] == 8
@@ -620,7 +627,7 @@ async def test_every_prompt_run_learns_from_the_analysts_values_and_agreement_le
     base = f"/api/ws/{CORPUS}/concepts/{k['id']}"
     s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
     assert s["status"] == "done" and s["examples"] == 0 and fake_classify.calls[-1]["concept"]["examples"] == []
-    model = {r["ref"]: r["label"] for r in (await api.get(f"{base}/labels", params={"path": "board.jsonl"})).json()["rows"]}
+    model = await _values(api, k["id"], "board.jsonl")
     flip = {"yes": "no", "no": "yes"}
     ordered = sorted(model)
     judged = {ordered[0]: flip[model[ordered[0]]], ordered[1]: flip[model[ordered[1]]], ordered[2]: model[ordered[2]]}
@@ -673,7 +680,7 @@ async def test_a_run_that_fails_after_labeling_its_examples_still_leaves_them_ou
     k = await _create(api, description="a board post that claims a PR")
     base = f"/api/ws/{CORPUS}/concepts/{k['id']}"
     await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})
-    model = {r["ref"]: r["label"] for r in (await api.get(f"{base}/labels", params={"path": "board.jsonl"})).json()["rows"]}
+    model = await _values(api, k["id"], "board.jsonl")
     first = [f"board.jsonl#L{i}" for i in (1, 2, 3)]  # the first call's records
     for ref in first:
         await api.post(f"{base}/labels", json={"ref": ref, "label": model[ref]})

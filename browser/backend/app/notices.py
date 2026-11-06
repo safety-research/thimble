@@ -378,12 +378,6 @@ SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
                f"example exported ANTHROPIC_API_KEY), restart the server: {config.RESTART_HOW}", TERMINAL)
 
 
-def fix_where(cls: Any) -> str:
-    """Where the fix of a failure of class `cls` (API_WORDS' keys) runs: BROWSER or TERMINAL; BROWSER for any other
-    failure, whose words say what to do."""
-    return API_WORDS.get(str(cls or ""), ("", "", BROWSER))[2]
-
-
 def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | None:
     """The class of an API failure (API_WORDS' keys), or None for any other failure: Claude's safeguards by the line's
     words, then the record's HTTP `status` (Claude Code's apiErrorStatus), then a connection failure by its words where

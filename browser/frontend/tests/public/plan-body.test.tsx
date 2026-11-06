@@ -209,9 +209,6 @@ describe('a plan card', () => {
     await act(async () => foot.querySelector<HTMLButtonElement>('.plan-edit-clear')!.click())
     await settle()
     expect(posted).toEqual(['/api/ws/w/cards/p1an0001/plan-edit/clear'])
-    // a mark stored with the text as it was (before marks named fields) reads as Changed in those fields
-    const old = planEdit({ kind: 'plan', payload: { steps: [], last_edit: { steps: { s2: { was: { text: 'Pilot' } } }, removed: [{ id: 's9', text: 'Report' }] } } })
-    expect([...old!.steps]).toEqual([['s2', { kind: 'changed', fields: ['text'] }]])
     expect(errors).toEqual([])
   })
 

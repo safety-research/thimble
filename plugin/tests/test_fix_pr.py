@@ -301,6 +301,20 @@ def test_a_detail_of_the_persons_in_the_code_refuses_and_names_each_one(world, g
     assert branches(gh, "made-up") == [] and "pr" not in FX.get(rec["id"])
 
 
+def test_a_data_file_named_like_one_of_thimbles_goes_from_the_text_and_stays_in_the_code(world, gh, monkeypatch, capsys):
+    """A file of the person's named like one that thimble's repository has (package.json) is taken out of the words, and
+    stays in the code, where the name is thimble's own."""
+    rec = fix_on(world, "// a test reads a made-up package.json\n")
+    FX.write_json(SH.share_dir(rec["id"]) / "given.json", {**DRAFT, "wrong": "After Claude read package.json, the bar "
+                                                                            "should say read."})
+    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["package.json"]})
+    answer(monkeypatch, "")
+    assert CLI.main(["file", "pr", str(rec["id"])]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "    After Claude read ‹data file›, the bar should say read." in lines
+    assert "  ✓ privacy check: took 1 file name out of the text; nothing of yours in the code" in lines
+
+
 def test_gh_missing_or_signed_out_says_how_in_one_line(world, gh, monkeypatch, capsys):
     rec = fix_on(world)
     answer(monkeypatch, "y")
@@ -342,12 +356,9 @@ def test_a_fix_with_no_change_to_send_and_claude_code_are_refused(world, gh, mon
 
 
 def test_help_lists_it(world, capsys, monkeypatch):
-    monkeypatch.setattr(FX, "can_share", lambda: True)
     assert CLI.main(["--help"]) == 0
     assert ("\n    thimble file pr N              open a pull request with fix N's code on the public repo (asks first)"
             in capsys.readouterr().out)
     with pytest.raises(SystemExit):
         CLI.main(["fix", "--help"])
     assert "thimble file pr N [--yes]" in capsys.readouterr().out
-    monkeypatch.setattr(FX, "can_share", lambda: False)
-    assert CLI.main(["--help"]) == 0 and "thimble file pr" not in capsys.readouterr().out

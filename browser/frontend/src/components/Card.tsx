@@ -43,5 +43,3 @@ export function Card({ head, meta, foot, as = 'div', selected, dim, flat, tight,
     </Tag>
   )
 }
-
-export default Card

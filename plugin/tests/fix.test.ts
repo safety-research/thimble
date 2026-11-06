@@ -349,7 +349,7 @@ test("a request forks the session into its copy with a text copy of the screen; 
   // the verbs and the folder only thimble and the person's keys use: refused to main and to the fixer alike
   for (const agentId of [undefined, 'agent-fixer-1']) {
     expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5', agentId, command: 'thimble fix apply 1 --ask -' }, ran)).deny)).toContain('Only thimble and the person')
-    expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5b', agentId, command: 'cd x && thimble  fix send 1 --answer pr' }, ran)).deny)).toContain('Only thimble and the person')
+    expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5b', agentId, command: 'cd x && thimble  fix merge 1 2 --ask -' }, ran)).deny)).toContain('Only thimble and the person')
     // sending a fix publicly is the person's own command, never Claude's
     for (const command of ['thimble file pr 1 --yes', 'thimble file issue 1 --open', 'cd x && thimble  file  pr 2'])
       expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5d', agentId, command }, ran)).deny)).toContain('Only thimble and the person')

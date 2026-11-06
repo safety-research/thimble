@@ -646,8 +646,6 @@ export function cardOf(s, W, { whole = false } = {}) {
   return { rows, cut: sn.cut }
 }
 
-export const citationRows = (s, W) => cardOf(s, W).rows
-
 // why a claim was wrong, as a check of its citations said it: the reason of one it failed or corrected
 const checkWhy = c => (c?.sources || []).map(s => ((s.status === 'failed' || s.status === 'corrected') && s.reason ? s.reason : '')).find(Boolean) || ''
 
