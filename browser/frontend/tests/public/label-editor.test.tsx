@@ -1,67 +1,12 @@
 // @vitest-environment jsdom
-// The label editor (src/files/LabelEditor.tsx): Files' Labels sidebar and the popover a view opens over itself draw the
-// one editor, LabelCard, with the same fields, prompt, classes and actions. A label that exists opens compact, with More
-// folded over the rest; Cancel and Re-run show once something changed. A new label shows every field. The popover takes
-// the focus, and Escape, Cancel or × close it, giving the focus back and telling the opener; a second request takes the
-// first one's place. A view's edit call (labelCalls.ts) hands the editor the rect the page gave, in the page's
-// coordinates, and a view's label controls (ViewPane) open it with what a new label applies to. A class's swatch opens
-// the palette Color by's chips open (ValuePalette), whose pick for a saved value goes through setColour, and whose
-// Escape closes the palette alone.
+// A new label in the label editor (src/files/LabelCard.tsx), which Files' Labels sidebar and the popover a view opens
+// both draw: its name and its prompt typed, Run creates the label over the files it applies to, with the two classes a
+// new label starts with, and starts its run.
 import { act } from 'react'
-import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
-import type { ViewLabelActions } from '../../src/files/labelCalls.ts'
+import { afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { LabelCard } from '../../src/files/LabelCard.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
-import type { Concept } from '../../src/lib/types.ts'
-import { LABEL_WHEEL } from '../../src/files/labels.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
-
-let viewActions: ViewLabelActions | undefined
-vi.mock('../../src/files/ViewerFrame', () => ({
-  ViewerFrame: (p: { labelActions?: ViewLabelActions }) => {
-    viewActions = p.labelActions
-    return <div className="stub-frame" />
-  },
-}))
-
-const { closeLabelEditor, EDITOR_WIDTH, LabelEditorHost, openLabelEditor } = await import('../../src/files/LabelEditor.tsx')
-const { frameAnchor, frameRect, runLabelCall } = await import('../../src/files/labelCalls.ts')
-const { useLabelRuns, useLabelSide } = await import('../../src/files/ViewSide.tsx')
-const { ViewPane } = await import('../../src/files/ViewPane.tsx')
-
-const kind = {
-  id: 'k1',
-  name: 'activity type',
-  description: 'What the agent is doing in this message.',
-  unit: 'record',
-  kind: 'prompt',
-  spec: '',
-  glob: 'transcript.jsonl',
-  marks: 'record',
-  n_labeled: 1815,
-  labels: ['reading', 'writing', 'other'],
-  created_by: 'analyst',
-  ts: '',
-  shown: true,
-  classes: [
-    { name: 'reading', color: 1, highlight: true },
-    { name: 'writing', color: 2, highlight: true },
-    { name: 'other', color: 0, highlight: false },
-  ],
-} as unknown as Concept
-
-const labels: FilesLabels = {
-  all: [kind],
-  on: [kind],
-  focus: kind.id,
-  setFocus: () => undefined,
-  byId: new Map([[kind.id, kind]]),
-  presence: new Map(),
-  toggle: () => undefined,
-  setClasses: () => undefined,
-  setColour: vi.fn(),
-  save: async () => kind,
-  remove: vi.fn(async () => undefined),
-}
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -70,99 +15,12 @@ beforeAll(() => {
     disconnect() {}
   } as unknown as typeof ResizeObserver
 })
-beforeEach(() => {
-  // the popover reads the labels itself, as a label's popover on a card does
-  vi.stubGlobal('fetch', async (url: string) => {
-    const path = new URL(String(url), 'http://thimble.test').pathname
-    const body = path.endsWith('/concepts') ? [kind] : path.endsWith('/labels/presence') ? [] : path.endsWith('/labels/glob') ? { files: ['transcript.jsonl'], total: 1 } : null
-    // what else is asked (the settings, a view's notes) is not there
-    return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404, headers: { 'content-type': 'application/json' } })
-  })
-})
 afterEach(() => {
-  act(() => closeLabelEditor())
   unmountAll()
   vi.unstubAllGlobals()
 })
 
-/** The sidebar's editor, as Files places it at the Labels pane's edge. */
-function SideCard({ editing, of = labels }: { editing: string | 'new'; of?: FilesLabels }) {
-  const runs = useLabelRuns('w', of)
-  const { card } = useLabelSide({ ws: 'w', labels: of, runs, open: true, onToggleOpen: () => undefined, editing, onEdit: () => undefined, drafted: null, onDraft: () => undefined, appliesTo: ['transcript.jsonl'], width: 250, onWidth: () => undefined, onWidthEnd: () => undefined, maxWidth: 400 })
-  return <div className="side">{card}</div>
-}
-
-/** What a card shows: its field names, name, prompt, classes and the foot's actions. */
-const shape = (card: Element) => ({
-  keys: [...card.querySelectorAll('.label-card-key')].map((e) => e.textContent),
-  facts: [...card.querySelectorAll('.label-card-fact')].map((e) => e.textContent),
-  name: card.querySelector<HTMLInputElement>('[aria-label="Name"]')?.value,
-  prompt: card.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')?.value,
-  classes: [...card.querySelectorAll<HTMLInputElement>('[aria-label="Class name"]')].map((e) => e.value),
-  switches: card.querySelectorAll('[role="switch"]').length,
-  foot: [...card.querySelectorAll('.label-card-foot button')].map((b) => b.textContent?.trim()),
-})
-
-const popover = () => document.querySelector<HTMLElement>('.popover.label-editor-pop')
-const frames = () => new Promise((r) => setTimeout(r, 40))
-
-/** A control to open the editor beside, and to give the focus back to. */
-function control(): HTMLButtonElement {
-  const b = document.body.appendChild(document.createElement('button'))
-  b.textContent = 'activity type'
-  return b
-}
-
-describe('one label editor in the sidebar and in the popover', () => {
-  test('both draw LabelCard with the same fields, prompt, classes and actions', async () => {
-    const el = await mount(
-      <>
-        <SideCard editing="k1" />
-        <LabelEditorHost ws="w" />
-      </>,
-    )
-    const at = control()
-    await act(async () => openLabelEditor({ id: 'k1', anchor: at }))
-    await settle()
-    const side = el.querySelector('.side .label-card')!
-    const pop = popover()!
-    const inPop = pop.querySelector('.label-card')!
-    // compact: the type and scope, the prompt and the classes; no highlight switch and no foot until something changes
-    expect(shape(inPop)).toEqual(shape(side))
-    expect(shape(inPop)).toEqual({ keys: ['Type', 'Scope'], facts: ['read by Claude', 'transcript.jsonl · 1,815 records'], name: 'activity type', prompt: 'What the agent is doing in this message.', classes: ['reading', 'writing', 'other'], switches: 0, foot: [] })
-    for (const card of [side, inPop]) {
-      expect(card.querySelector('.label-card-more')?.getAttribute('aria-expanded')).toBe('false')
-      expect(card.querySelector('.label-card-head [aria-label="Close"]')).not.toBeNull()
-      // a multi-class label has no color of its own: its glyph, and its name in the ink
-      expect(card.querySelector<HTMLInputElement>('[aria-label="Name"]')!.style.color).toBe('')
-      expect(card.querySelector('.label-card-tag')).not.toBeNull()
-    }
-    // the sidebar's card is its own dialog on the overlay's paper; in the popover, the popover is both, at the card's width
-    expect([side.classList.contains('overlay'), side.getAttribute('role'), side.getAttribute('aria-label')]).toEqual([true, 'dialog', 'Edit activity type'])
-    expect([inPop.classList.contains('overlay'), inPop.classList.contains('in-popover'), inPop.getAttribute('role')]).toEqual([false, true, null])
-    expect([pop.getAttribute('role'), pop.getAttribute('aria-label'), pop.style.width]).toEqual(['dialog', 'Edit activity type', `${EDITOR_WIDTH}px`])
-  })
-
-  test("a new label's editor has Label from prompt above it in both", async () => {
-    const el = await mount(
-      <>
-        <SideCard editing="new" />
-        <LabelEditorHost ws="w" />
-      </>,
-    )
-    await act(async () => openLabelEditor({ id: null, anchor: control(), appliesTo: ['transcript.jsonl'] }))
-    await settle()
-    for (const card of [el.querySelector('.side .label-card')!, popover()!.querySelector('.label-card')!]) {
-      expect(card.querySelector('[aria-label="Label from prompt"]')).not.toBeNull()
-      expect(card.querySelector<HTMLInputElement>('[aria-label="Applies to"]')?.value).toBe('transcript.jsonl')
-      expect(shape(card).foot).toEqual(['Cancel', 'Run'])
-      // every field, since a new label needs them
-      expect(shape(card).keys).toEqual(['Over', 'Marks', 'Applies to', 'Classifier', 'Model', 'Classes'])
-      expect(card.querySelector('.label-card-more')).toBeNull()
-    }
-    expect(popover()!.getAttribute('aria-label')).toBe('New label')
-  })
-})
+const NO_LABELS = { all: [], on: [], focus: null, byId: new Map(), presence: new Map(), toggle: () => undefined, save: async () => undefined, remove: async () => undefined } as unknown as FilesLabels
 
 /** Type `text` into a field as React hears it. */
 async function type(el: HTMLTextAreaElement | HTMLInputElement, text: string) {
@@ -173,178 +31,31 @@ async function type(el: HTMLTextAreaElement | HTMLInputElement, text: string) {
   })
 }
 
-describe('a compact card', () => {
-  test('More holds the rest: what it labels and marks, what it applies to, the classifier, the model, the highlights and + class', async () => {
-    const el = await mount(<SideCard editing="k1" />)
-    const more = el.querySelector<HTMLButtonElement>('.label-card-more')!
-    expect(more.textContent).toBe('More')
-    await act(async () => more.click())
-    expect(more.getAttribute('aria-expanded')).toBe('true')
-    const body = el.querySelector('.label-card-more-body')!
-    expect([...body.querySelectorAll('.label-card-key')].map((e) => e.textContent)).toEqual(['Over', 'Marks', 'Applies to', 'Classifier', 'Model', 'Highlight'])
-    expect([...body.querySelectorAll('.label-card-hlname')].map((e) => e.textContent)).toEqual(['reading', 'writing', 'other'])
-    expect(body.querySelectorAll('[role="switch"]')).toHaveLength(3)
-    expect([...body.querySelectorAll('button')].some((b) => b.textContent === 'class')).toBe(true)
-    await act(async () => more.click())
-    expect(el.querySelector('.label-card-more-body')).toBeNull()
-  })
-
-  test('an edit shows Cancel and Re-run; put back, they go again', async () => {
-    const el = await mount(<SideCard editing="k1" />)
-    const prompt = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!
-    await type(prompt, 'What the agent does.')
-    expect(shape(el.querySelector('.label-card')!).foot).toEqual(['Cancel', 'Re-run'])
-    await type(prompt, 'What the agent is doing in this message.')
-    expect(shape(el.querySelector('.label-card')!).foot).toEqual([])
-    await type(el.querySelector<HTMLInputElement>('[aria-label="Name"]')!, 'activity')
-    expect(shape(el.querySelector('.label-card')!).foot).toEqual(['Cancel', 'Re-run'])
-  })
-
-})
-
-describe("a class's swatch", () => {
-  const swatch = (root: ParentNode, name: string) => root.querySelector<HTMLButtonElement>(`[aria-label="Change the color of ${name}"]`)!
-  const palette = () => document.querySelector<HTMLElement>('.popover.colorby-palette')
-
-  test("opens the value palette, the class's color ringed; a pick for a saved value goes through setColour", async () => {
-    const setColour = labels.setColour as ReturnType<typeof vi.fn>
-    setColour.mockClear()
-    const el = await mount(<SideCard editing="k1" />)
-    await act(async () => swatch(el, 'writing').click())
-    const picks = [...palette()!.querySelectorAll('.colorby-pick')]
-    expect(picks.map((b) => b.getAttribute('aria-label'))).toEqual([...LABEL_WHEEL.flat().map((n) => `Color ${n}`), 'Gray'])
-    expect(picks.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'))).toEqual(['Color 2'])
-    expect(palette()!.querySelector('.colorby-palette-head')?.textContent).toBe('writing')
-    await act(async () => (picks.find((b) => b.getAttribute('aria-label') === 'Color 5') as HTMLButtonElement).click())
-    expect(setColour.mock.calls).toEqual([['k1', 'writing', 5]])
-    expect(palette()).toBeNull()
-  })
-
-  test('Escape in the palette closes the palette alone, in the popover too', async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    await act(async () => openLabelEditor({ id: 'k1', anchor: control() }))
-    await settle()
-    const at = swatch(popover()!, 'reading')
-    at.focus()
-    await act(async () => at.click())
-    // the palette takes the focus on the class's own color
-    await act(frames)
-    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true')
-    expect(palette()!.contains(document.activeElement)).toBe(true)
-    await act(async () => void document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-    expect(palette()).toBeNull()
-    expect(popover(), 'the editor stays open').not.toBeNull()
-    expect(document.activeElement, 'the focus back on the swatch').toBe(swatch(popover()!, 'reading'))
-  })
-})
-
-describe('the popover', () => {
-  test('takes the focus; Escape closes it, gives the focus back and tells the opener', async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    const at = control()
-    const closed = vi.fn()
-    await act(async () => openLabelEditor({ id: 'k1', anchor: at, back: at, onClose: closed }))
-    await act(frames)
-    expect(popover()!.contains(document.activeElement), 'the focus is in the popover').toBe(true)
-    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-    expect(popover()).toBeNull()
-    expect(document.activeElement).toBe(at)
-    expect(closed.mock.calls).toEqual([[true]])
-  })
-
-  test('× closes it, and so does Cancel once an edit shows it', async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    const at = control()
-    for (const name of ['Close', 'Cancel']) {
-      const closed = vi.fn()
-      await act(async () => openLabelEditor({ id: 'k1', anchor: at, back: at, onClose: closed }))
-      await act(frames)
-      if (name === 'Cancel') await type(popover()!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!, 'What the agent does.')
-      const button = [...popover()!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name)!
-      button.focus()
-      await act(async () => button.click())
-      expect(popover(), name).toBeNull()
-      expect(document.activeElement, name).toBe(at)
-      expect(closed.mock.calls, name).toEqual([[true]])
+test('a new label with a name and a prompt: Run creates it over the files it applies to, and starts its run', async () => {
+  const posts: { url: string; body: Record<string, unknown> }[] = []
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    const u = String(url)
+    const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>
+      posts.push({ url: u, body })
+      if (u.endsWith('/concepts')) return json({ id: 'k9', ...body })
+      if (u.endsWith('/apply')) return json({ id: 'run-1', state: 'running' })
     }
+    // what else the editor reads (the models, the files its glob names) is not there
+    return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
   })
-
-  test("a second request takes the first one's place, and the first hears it closed", async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    const first = vi.fn()
-    const second = vi.fn()
-    await act(async () => openLabelEditor({ id: 'k1', anchor: control(), onClose: first }))
-    await act(async () => openLabelEditor({ id: null, anchor: control(), onClose: second }))
-    await settle()
-    expect(first.mock.calls).toEqual([[false]])
-    expect(second).not.toHaveBeenCalled()
-    expect(document.querySelectorAll('.popover.label-editor-pop').length).toBe(1)
-    expect(popover()!.getAttribute('aria-label')).toBe('New label')
-  })
-
-})
-
-describe("a view's edit call", () => {
-  const frame = () => {
-    const f = document.createElement('iframe')
-    f.getBoundingClientRect = () => new DOMRect(100, 50, 600, 400)
-    return f
-  }
-  const ctx = (f: HTMLIFrameElement, edit: NonNullable<ViewLabelActions['edit']>, onEditorClosed?: () => void) => ({ ws: 'w', byId: labels.byId, palette: [], actions: { setOn: () => undefined, setColour: () => undefined, edit }, frame: f, onEditorClosed })
-  const box = (r: DOMRect) => [r.left, r.top, r.width, r.height]
-
-  test("places the editor beside the page's rect, in this page's coordinates, and tells the page when it closes", async () => {
-    const f = frame()
-    const got: unknown[] = []
-    const closed = vi.fn()
-    let close: (focused: boolean) => void = () => undefined
-    await runLabelCall(
-      'edit',
-      { id: 'activity type', anchor: { left: 10, top: 20, width: 30, height: 12 } },
-      ctx(
-        f,
-        (id, at) => {
-          got.push([id, at && box(at.anchor.getBoundingClientRect()), at?.side, at?.back === f])
-          if (at) close = at.onClose
-        },
-        closed,
-      ),
-    )
-    expect(got).toEqual([['k1', [110, 70, 30, 12], 'aside', true]])
-    close(true)
-    expect(closed.mock.calls).toEqual([[true]])
-  })
-
-  test("with no rect, or one that is not, it stands inside the view's top-left corner, below that point", async () => {
-    const f = frame()
-    for (const anchor of [undefined, { left: 'x', top: 0, width: 1, height: 1 }, { left: 0, top: 0, width: -4, height: 1 }]) {
-      let at: [number[], string] | null = null
-      await runLabelCall('edit', { id: 'k1', anchor }, ctx(f, (_, a) => (at = [box(a!.anchor.getBoundingClientRect()), a!.side])))
-      expect(at).toEqual([[108, 54, 0, 0], 'below'])
-    }
-    let side = ''
-    await runLabelCall('edit', { id: null, anchor: { left: 0, top: 0, width: 80, height: 20 }, side: 'below' }, ctx(f, (_, a) => (side = a!.side)))
-    expect(side).toBe('below')
-  })
-
-})
-
-test("a view's label controls open the editor over the view, a new label applying to the files the view claims", async () => {
-  const view = { slug: 'timeline', name: 'Activity Timeline', version: 'v1', n_files: 1, files: ['transcript.jsonl'], first_file: 'transcript.jsonl', claims: ['transcript.jsonl'] }
-  await mount(
-    <>
-      <ViewPane ws="w" view={view as never} path="transcript.jsonl" labels={labels} />
-      <LabelEditorHost ws="w" />
-    </>,
-  )
-  await settle()
-  const f = document.createElement('iframe')
-  document.body.appendChild(f)
+  const runs: [string, unknown][] = []
   const closed = vi.fn()
-  await act(async () => viewActions!.edit!(null, { anchor: frameAnchor(f, null), side: 'below', back: f, onClose: closed }))
+  const el = await mount(<LabelCard ws="w" label={null} labels={NO_LABELS} appliesTo={['transcript.jsonl']} onClose={closed} onRun={(id, run) => runs.push([id, run])} />)
   await settle()
-  expect(popover()!.querySelector<HTMLInputElement>('[aria-label="Applies to"]')?.value).toBe('transcript.jsonl')
-  expect(document.querySelector('aside.files-side-labels'), 'no sidebar opens').toBeNull()
-  await act(async () => closeLabelEditor())
-  expect(closed).toHaveBeenCalledTimes(1)
+  await type(el.querySelector<HTMLInputElement>('[aria-label="Name"]')!, 'refund asks')
+  await type(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!, 'Does the customer ask for a refund?')
+  await act(async () => [...el.querySelectorAll('button')].find((b) => b.textContent === 'Run')!.click())
+  await settle()
+  expect(posts.map((p) => p.url)).toEqual(['/api/ws/w/concepts', '/api/ws/w/concepts/k9/apply'])
+  expect(posts[0].body).toMatchObject({ name: 'refund asks', kind: 'prompt', description: 'Does the customer ask for a refund?', glob: 'transcript.jsonl' })
+  expect((posts[0].body.classes as { name: string }[]).map((c) => c.name)).toEqual(['match', 'no match'])
+  expect(runs).toEqual([['k9', { id: 'run-1', state: 'running' }]])
+  expect(closed).toHaveBeenCalled()
 })

@@ -1,7 +1,7 @@
 // The browser checks, tests/public/browser: real components in Playwright's headless Chromium, for what only a
-// browser's layout, sandbox or drawing shows (a sandboxed output cannot reach the page or draw over it, a view's frame
-// draws the labels' marks). Each page is answered by its test on a made-up origin, so no port is opened and nothing
-// leaves the machine.
+// browser's layout or sandbox shows (a sandboxed output cannot reach the page or draw over it, and the screenshot
+// tool's token goes to the page's own API alone). Each page is answered by its test, on a made-up origin or a server
+// on the loopback, so nothing leaves the machine.
 // Run from frontend/: npm run test:browser, once `npx playwright install chromium-headless-shell` has installed the
 // Chromium.
 import { defineConfig } from 'vitest/config'

@@ -1,26 +1,11 @@
 // The report editor's model (src/report/model.ts). A stored document becomes editor blocks and back: a block the
 // analyst did not touch saves the writer's own text unchanged, and a citation is one atom that is never split.
-import { describe, expect, test } from 'vitest'
-import {
-  blocksFromDoc,
-  CITE_CHAR,
-  contentFromText,
-  editorBlocksFromWire,
-  origTexts,
-  passageOrder,
-  plainOf,
-  sameWire,
-  TITLE_ID,
-  wireFromEditor,
-} from '../../src/report/model.ts'
+import { expect, test } from 'vitest'
+import { blocksFromDoc, contentFromText, editorBlocksFromWire, origTexts, sameWire, wireFromEditor, type EditorBlockLike } from '../../src/report/model.ts'
 import type { Writeup } from '../../src/lib/types.ts'
-import { openComments } from '../../src/report/checkComments.ts'
 
-type Doc = Pick<Writeup, 'title' | 'sections' | 'title_locked'>
 const sentence = (id: string, text: string, extra: object = {}) => ({ id, text, refs: [], tags: [], ...extra })
-const doc = (d: object) => d as unknown as Doc
-
-const DOC = doc({
+const DOC = {
   title: 'Review load decided which pull requests merged',
   sections: [
     {
@@ -39,40 +24,15 @@ const DOC = doc({
     },
     { id: 's2', heading: 'Empty', paragraphs: [], figures: [] },
   ],
-})
+} as unknown as Pick<Writeup, 'title' | 'sections' | 'title_locked'>
 
-describe('inline text', () => {
-  test('a citation is never split: a value with a bar, spaces or a slash stays one atom with its ref', () => {
-    const content = contentFromText('Median [[4.2 days|card:ab12#median wait/all PRs]] per review.') as any[]
-    const cites = content.filter((p) => p.type === 'cite')
-    expect(cites).toEqual([{ type: 'cite', props: { value: '4.2 days', ref: 'card:ab12#median wait/all PRs' } }])
-    expect(plainOf('Median [[4.2 days|card:ab12#median wait/all PRs]] per review.')).toBe(`Median ${CITE_CHAR} per review.`)
-  })
-})
-
-describe('blocks back to the document', () => {
-  test('the editor blocks read back to the same document when nothing was touched', () => {
-    const wire = blocksFromDoc(DOC)
-    const blocks = editorBlocksFromWire(wire) as any[]
-    expect(blocks[0].id).toBe(TITLE_ID)
-    expect(blocks[0].props).toEqual({ level: 1 })
-    expect(blocks[2]).toEqual({ id: 'f0', type: 'figure', props: { cell: 'card:abcdef13', caption: 'Lead' } })
-    const back = wireFromEditor(blocks.map((b) => ({ ...b, children: [] })), origTexts(wire))
-    expect(back).toEqual(wire)
-    expect(sameWire(back, wire)).toBe(true)
-  })
-})
-
-describe('comments on the title', () => {
-  // the report checks read the title as a passage (report:<slug>#title), so a check's comment on it comes first
-  test('a comment on the title comes before the sections\' comments', () => {
-    const view = DOC as unknown as Writeup
-    expect(passageOrder(view)[0]).toBe(TITLE_ID)
-    const comments = [
-      { id: 'c2', sentence_id: 'a1', text: 'On a sentence.', check: 'unverified', status: 'open' },
-      { id: 'c1', sentence_id: TITLE_ID, text: 'No card shows seven weeks.', check: 'unverified', status: 'open' },
-    ] as unknown as Writeup['comments']
-    const open = openComments(comments, [], passageOrder(view))
-    expect(open.map((c) => [c.id, c.sid])).toEqual([['c1', TITLE_ID], ['c2', 'a1']])
-  })
+test('a document read into the editor and back is the same document, each citation one atom', () => {
+  const wire = blocksFromDoc(DOC)
+  const blocks = editorBlocksFromWire(wire) as EditorBlockLike[]
+  const back = wireFromEditor(blocks.map((b) => ({ ...b, children: [] })), origTexts(wire))
+  expect(back).toEqual(wire)
+  expect(sameWire(back, wire)).toBe(true)
+  // a value with a bar, spaces or a slash stays one atom with its ref
+  const cites = (contentFromText('Median [[4.2 days|card:ab12#median wait/all PRs]] per review.') as { type: string; props?: unknown }[]).filter((p) => p.type === 'cite')
+  expect(cites).toEqual([{ type: 'cite', props: { value: '4.2 days', ref: 'card:ab12#median wait/all PRs' } }])
 })

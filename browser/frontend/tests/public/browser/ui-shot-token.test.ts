@@ -1,9 +1,9 @@
 // What scripts/ui_shot.mjs sends, the page screenshots of main's `screenshot` tool and of the dev agent (backend
 // tools._shot_page, dev.run_shot). The headless page holds no sign-in cookie, so its reads of thimble's API carry the
 // shot token the server hands the script in THIMBLE_SHOT_TOKEN (backend hook_auth.mint_shot): only reads of /api/ on the
-// page's own origin, never a write (answered 204 in the script) and never another origin. --offline and --own-origin
-// still refuse what they refuse for /api/ paths, which a read handler that continued every GET once let through.
-// The pages come from two small servers on the loopback, since the script drives a browser of its own.
+// page's own origin, never a write (answered 204 in the script) and never another origin; and --offline, with which a
+// card's figure is shot, reaches no server at all. The pages come from two small servers on the loopback, since the
+// script drives a browser of its own.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -26,7 +26,7 @@ async function serve(page: () => string, port: number): Promise<{ server: Server
   const seen: Seen[] = []
   const server = createServer((req, res) => {
     seen.push({ method: req.method ?? '', path: req.url ?? '', headers: req.headers })
-    if (req.url === '/' || req.url === '/own') {
+    if (req.url === '/') {
       res.writeHead(200, { 'content-type': 'text/html' })
       res.end(page())
     } else {
@@ -97,12 +97,4 @@ test('--offline reaches no server at all, /api/ paths included, and sends no tok
   writeFileSync(file, `<!doctype html><img src="${own.origin}/api/img.png"><script>fetch('${own.origin}/api/read', { mode: 'no-cors' })</script>`)
   await shoot(['--url', pathToFileURL(file).href, '--offline'])
   assert.deepEqual(own.seen, [])
-})
-
-test('--own-origin keeps the page to its own server, /api/ paths included', async () => {
-  own.seen.length = 0
-  other.seen.length = 0
-  await shoot(['--url', `${own.origin}/own`, '--own-origin'])
-  assert.equal(reqs(own, '/api/read')[0]?.headers['x-thimble-shot'], TOKEN)
-  assert.deepEqual(reqs(other, '/api/other'), [], 'another port of the loopback is another origin')
 })

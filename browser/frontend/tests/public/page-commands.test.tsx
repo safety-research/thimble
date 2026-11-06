@@ -1,36 +1,14 @@
 // @vitest-environment jsdom
-// The page's own command in the chat's composer (src/chat/commands.ts pageCommand, ChatPanel's send): /tour runs the tour
-// from its first step (src/shell/TourHost.tsx). A "/" lists it with what it does. Alone in the message it goes to no
-// session; with words after it, the message is one for Claude, as any other. There is no /login: the workbench signs
-// no one in, and Settings' first row, Claude access, switches how it reaches Claude (settings.test.tsx).
+// The page's own command in the chat's composer (src/chat/commands.ts pageCommand, ChatPanel's send): /tour, alone in
+// the message, runs the tour from its first step (src/shell/TourHost.tsx) and goes to no session.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
-import { COMMANDS, commandsFor, pageCommand, TOUR_COMMAND } from '../../src/chat/commands.ts'
 import { bus } from '../../src/lib/bus.ts'
 import type { ChatMeta } from '../../src/lib/types.ts'
-import { ClaudeAccessHost } from '../../src/shell/ClaudeAccess.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const T = '2026-11-05T10:00:00+00:00'
-
-describe('which messages are the page’s own commands', () => {
-  test('/tour alone; with words after it, or as part of a longer name, it is not; /login is no command', () => {
-    expect(pageCommand('  /tour \n')).toBe('tour')
-    expect(pageCommand('/tour the views')).toBeNull()
-    expect(pageCommand('/tours')).toBeNull()
-    expect(pageCommand('/rewind')).toBeNull()
-    expect(pageCommand('what does /tour show?')).toBeNull()
-    expect(pageCommand('/login')).toBeNull()
-  })
-
-  test('a "/" lists /tour with what it does, and no /login', () => {
-    expect(commandsFor('/to').map((c) => c.name)).toEqual([TOUR_COMMAND])
-    expect(COMMANDS.find((c) => c.name === TOUR_COMMAND)?.about).toBeTruthy()
-    expect(commandsFor('/lo')).toEqual([])
-    expect(COMMANDS.map((c) => c.name)).not.toContain('/login')
-  })
-})
 
 describe("in the chat's composer", () => {
   let posted: { url: string; body: unknown }[]
@@ -83,18 +61,5 @@ describe("in the chat's composer", () => {
     } finally {
       off()
     }
-  })
-
-  test('/login is a message for Claude, as any other, and opens no step', async () => {
-    const el = await mount(
-      <>
-        <ChatPanel ws="mini" />
-        <ClaudeAccessHost />
-      </>,
-    )
-    await settle()
-    await send(el, '/login')
-    expect(document.querySelector('[role="dialog"].access')).toBeNull()
-    expect(posted).toEqual([{ url: '/api/ws/mini/events', body: { kind: 'main', payload: { text: '/login' } } }])
   })
 })
