@@ -1,6 +1,7 @@
 // A held ⌘-click highlight stays on what it marks (src/pointer/highlight.ts): when the element moves (a card laid out
 // again, the canvas panned or zoomed) the highlight moves with it within a frame, and when the element is gone (the card
-// drawn anew) the highlight fades rather than staying where the element was.
+// drawn anew) the highlight fades rather than staying where the element was. The highlight that follows the pointer
+// while ⌘ is held does the same on a word under a still pointer, as when a ⌘ scroll zooms the canvas.
 import assert from 'node:assert/strict'
 import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Page } from 'playwright'
@@ -29,6 +30,20 @@ beforeAll(async () => {
     `    a.remove(); await frames()`,
     `    const gone = hl()`,
     `    return { before, moved, gone }`,
+    `  },`,
+    `  // a word followed, not held, on a plane that zooms to \`zoom\` about the word's start, the pointer still; then the word is removed`,
+    `  word: async (zoom) => {`,
+    `    highlight.release()`,
+    `    stage.innerHTML = '<div id="plane" style="position:absolute;left:100px;top:100px;transform-origin:0 0;font:16px sans-serif;white-space:nowrap"><span id="w">Orientation</span></div>'`,
+    `    const r = document.createRange(); r.selectNodeContents(document.getElementById('w').firstChild)`,
+    `    highlight.text(r); await frames()`,
+    `    const before = hl()`,
+    `    document.getElementById('plane').style.transform = 'scale(' + zoom + ')'; await frames()`,
+    `    const zoomed = hl()`,
+    `    const word = r.getBoundingClientRect()`,
+    `    document.getElementById('w').remove(); await frames()`,
+    `    const gone = hl()`,
+    `    return { before, zoomed, word: { x: word.left, w: word.width }, gone }`,
     `  },`,
     `  // a 12px box held inside #line, on a plane that zooms to \`zoom\`; then #line is drawn anew`,
     `  box: async (zoom) => {`,
@@ -81,4 +96,15 @@ test('a held box inside an element zooms with it and fades once the element is d
   near(got.zoomed.y, 280, 'top at 200%')
   near(got.zoomed.w, 24, 'width at 200%')
   assert.equal(got.redrawn.on, false, 'the box fades once its element is replaced')
+})
+
+test('a word the highlight follows, not held, zooms with the canvas under a still pointer and fades once removed', async () => {
+  const got: { before: Hl; zoomed: Hl; word: { x: number; w: number }; gone: Hl } = await page.evaluate(() => (window as any).__t.word(0.4))
+  assert.ok(got.before.on, 'the word is highlighted')
+  assert.ok(got.zoomed.on, 'the highlight still shows after the zoom')
+  // the word's tint is the word grown by WORD_PAD (2px across)
+  near(got.zoomed.x, got.word.x - 2, 'left after the zoom')
+  near(got.zoomed.w, got.word.w + 4, 'width after the zoom')
+  assert.ok(got.zoomed.w < got.before.w / 2, `the highlight shrank with the word: ${got.before.w} -> ${got.zoomed.w}`)
+  assert.equal(got.gone.on, false, 'the highlight fades once the word is removed')
 })
