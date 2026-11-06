@@ -96,7 +96,7 @@ class LiveServerConnect(ConnectionRefusedError):
 
 
 # The ports a live thimble server of the user's answers on: the default (cli.DEFAULT_PORT, written here since conftest
-# runs before any app module is imported; test_suite_isolation checks they agree) and the THIMBLE_PORT the run started
+# runs before any app module is imported; _no_live_server_probe checks they agree) and the THIMBLE_PORT the run started
 # with. No test connects to one: a CLI path that falls back to the default port would reach the user's server.
 DEFAULT_PORT = 8300
 LIVE_PORTS = frozenset(int(p) for p in (DEFAULT_PORT, os.environ.get("THIMBLE_PORT")) if str(p or "").isdigit())
@@ -194,9 +194,8 @@ def _data_files() -> dict[str, tuple]:
 
 @pytest.fixture(autouse=True)
 def _shared_data_untouched():
-    """A test that leaves a change in the shared data folder fails: every later test in its worker would read it, as a
-    .claude/ left in mini once made test_runtime's sandbox test fail after test_agent_programs. A test that writes into
-    a corpus works on its own copy (data_tmp)."""
+    """A test that leaves a change in the shared data folder fails: every later test in its worker would read it. A
+    test that writes into a corpus works on its own copy (data_tmp)."""
     before = _data_files()
     yield
     after = _data_files()
@@ -359,20 +358,6 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def card_wait(minutes: float | None) -> float:
-    """Set `cardWait` in the test's thimble config, keeping its other keys (None takes it out); the wait in seconds."""
-    import json
-
-    from app import userconf
-
-    p = userconf.global_file()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    data = json.loads(p.read_text()) if p.exists() else {}
-    data.pop("cardWait", None)
-    p.write_text(json.dumps({**data, **({"cardWait": minutes} if minutes is not None else {})}))
-    return userconf.card_wait_s()
-
-
 def _record(**values: str) -> None:
     """`values` into the test's server.json, keeping what it holds."""
     import json
@@ -380,42 +365,6 @@ def _record(**values: str) -> None:
     p = Path(os.environ["THIMBLE_HOME"]) / "server.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({**(json.loads(p.read_text()) if p.exists() else {}), **values}))
-
-
-def code_project(folder: Path) -> None:
-    """`folder` made a git repository of its files and of a Python package, `tool` (tool.rows.N is 3), with the file
-    times git's index keeps behind the files' own, as after a copy or a checkout: then `git status` and `git diff`
-    rewrite the index unasked."""
-    import subprocess  # noqa: PLC0415
-
-    (folder / "tool").mkdir()
-    (folder / "tool" / "__init__.py").write_text("")
-    (folder / "tool" / "rows.py").write_text("N = 3\n")
-    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "files"]):
-        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null",
-                        *args], cwd=folder, check=True, capture_output=True)
-    later = time.time() + 5
-    for p in folder.rglob("*"):
-        if ".git" not in p.relative_to(folder).parts:
-            os.utime(p, (later, later))
-
-
-def earlier_orientation_proposal(c: str, name: str, description: str, claims: list[str], arrangement: str = "") -> str:
-    """A proposal as an orientation from before 0.8.0 stored it (views.propose with `orientation`, which 0.8.0 took out),
-    for the tests of what thimble still does with such a row: one the analyst did not ask for, a follow-on start,
-    announced as queued and its build queued. Its slug."""
-    from app import views  # noqa: PLC0415
-
-    name = views.title_case(name)
-    with views._proposals_lock:
-        slug = views._unique_slug(c, name)
-        row = {"slug": slug, "name": name, "description": description, "task": "", "claims": list(claims),
-               "arrangement": arrangement, "proposed_by": "analyst", "status": "queued", "ts": views._now(),
-               "orientation": True, "held": True, "route": views.FOLLOW_ON}
-        views._save_proposals(c, [*views.list_proposals(c), row])
-    views._emit(c, slug, "queued")
-    views._queue(c, slug)
-    return slug
 
 
 @pytest.fixture()
@@ -557,8 +506,8 @@ def _no_held_events():
     """The quiet events events.post holds for the next event, the modes main's hooks reported, the session that is
     main in each workspace and each workspace's runtime (runtime.ensure makes one) are module state: none carries over
     from another test, so a test that runs after a turn on the same xdist worker still sees no main session where it made
-    none, and no runtime of a workspace folder that is gone. A Listener left open hands main's events back to the
-    runtime once its test ends."""
+    none, and no runtime of a workspace folder that is gone. A test that stood in for runtime.deliver has it back once
+    it ends."""
     from app import events, runtime, session
 
     deliver = runtime.deliver
@@ -576,54 +525,6 @@ def _no_held_events():
     clear()
     yield
     clear()
-
-
-class Listener:
-    """Main of workspace `corpus` as the server runs it, for a test that checks what reaches main: each event events.post
-    hands main (runtime.deliver) is kept here instead of starting a turn, and taken like an asyncio.Queue's."""
-
-    def __init__(self, corpus: str) -> None:
-        from collections import deque
-
-        from app import runtime
-
-        self.corpus = corpus
-        self.notes: deque = deque()
-        self._real = runtime.deliver
-        runtime.ensure(corpus)  # main attached as the server attaches it, the mirror's session
-
-        def deliver(c: str, note: dict) -> None:
-            if c == corpus:
-                self.notes.append(note)
-            else:
-                self._real(c, note)
-
-        runtime.deliver = deliver
-
-    def empty(self) -> bool:
-        return not self.notes
-
-    def get_nowait(self) -> dict:
-        import asyncio
-
-        if not self.notes:
-            raise asyncio.QueueEmpty
-        return self.notes.popleft()
-
-    async def get(self, timeout: float = 10.0) -> dict:
-        import asyncio
-
-        end = time.monotonic() + timeout
-        while self.empty():
-            if time.monotonic() > end:
-                raise asyncio.TimeoutError
-            await asyncio.sleep(0.02)
-        return self.get_nowait()
-
-    def close(self) -> None:
-        from app import runtime
-
-        runtime.deliver = self._real
 
 
 @pytest.fixture(autouse=True)
@@ -662,6 +563,8 @@ def _no_live_server_probe(monkeypatch):
     to the default port, which may be the user's own server. A probe of another port, such as a test server's, probes
     as before; a test's own patch still wins. The audit hook (_no_live_server) refuses any other way there."""
     from app import cli, dev, feedback, restart_watch
+
+    assert cli.DEFAULT_PORT == DEFAULT_PORT, "conftest's DEFAULT_PORT is cli.DEFAULT_PORT"
 
     def guarded(real, default, none):
         def probe(url=None, *args, **kwargs):

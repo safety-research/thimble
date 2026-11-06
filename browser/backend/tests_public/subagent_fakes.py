@@ -1,5 +1,5 @@
-"""Stand-ins for the tests of thimble's agents (subagents.py): the bridge to the runtime (app.module_bridge) and the hint
-sections of prompts/tools.md they read. Each is a fixture a test asks for by name."""
+"""Stand-ins for the tests of thimble's agents (subagents.py): the bridge to the runtime (app.module_bridge), a fixture a
+test asks for by name, with the hint sections of prompts/tools.md whose filled-in words a test reads."""
 from __future__ import annotations
 
 import sys
@@ -8,16 +8,10 @@ from typing import Any
 
 import pytest
 
-# the hints the subagent paths name (prompts/tools.md), each with its placeholders, so a test reads what was filled in
+# hints the subagent paths name (prompts/tools.md), each with its placeholders, so a test reads what was filled in
 HINTS = {
     "writer-context-file": "READ {path} FIRST",
-    "writer-context-files": "READ {n} FILES {paths} FIRST",
-    "check-task-files": "READ {n} FILES {paths} FIRST",
-    "agent-continue-earlier-session": "EARLIER SESSION: {session}",
-    "agent-continue-earlier-version": "EARLIER VERSION",
     "main-stopped-note": "MAIN STOPPED",
-    "thread-stopped-note": "THREAD STOPPED {thread} {agent_id}",
-    "follow-up-ran-on": "RAN ON {model} {effort}",
 }
 
 
@@ -60,13 +54,3 @@ def bridge(monkeypatch) -> FakeBridge:
     real = tools.descriptions
     monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **HINTS})
     return fake
-
-
-@pytest.fixture()
-def hints(monkeypatch) -> dict[str, str]:
-    """The hints of HINTS, for prompts/tools.md before lane D adds them."""
-    from app import tools
-
-    real = tools.descriptions
-    monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **HINTS})
-    return HINTS

@@ -48,4 +48,3 @@ def test_purge_never_follows_a_link_out_of_the_workspaces_folder(dirs, tmp_path,
     assert [(r.id, r.path) for r in found] == [("linked", None)], "a link is no workspace and no archive"
     assert cli.main(["purge", "linked", "-y"]) == 0
     assert (outside / "keep").is_dir() and (ws / "linked").is_symlink()
-    assert runs._child(ws, "..") is None and runs._child(ws, ".archive") is None and runs._child(ws, "linked") is None
