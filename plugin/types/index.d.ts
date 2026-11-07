@@ -15,8 +15,9 @@ declare module 'claude-code' {
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
-       *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`) */
-      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }>
+       *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`); `asked`: a
+       *  check the person asked for (opening a citation, g, x); `note`: the words its prompt ends with */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number; asked?: boolean; note?: string }>
       /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
        *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
       checksRefused: string[]
