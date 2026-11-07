@@ -194,3 +194,8 @@ async def test_only_the_analyst_s_click_puts_a_fix_on_and_undo_takes_it_off(fixi
     assert fixes.status()["fixes"][0]["said"] == "thimble fix undone: Card counts rows"
     await fixes.dismiss_route(1, analyst)
     assert fixes.status()["fixes"] == []
+
+
+def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():
+    end = fixes.end_of("It already is.\n\n```\nTitle: Bar word is bold\nRequest: The bar's word is bold already.\n```")
+    assert end == {"title": "Bar word is bold", "summary": "The bar's word is bold already.", "request": True}
