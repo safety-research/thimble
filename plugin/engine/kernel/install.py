@@ -232,7 +232,8 @@ def installed(a: Any, r: Run, rel: dict[str, Any]) -> int:
             with FX.Lock():
                 got = releases.fetch(to, FX.live_dir(), then=then, archive=True)
             got["based_on"] = based_on
-            had = rel.get("commit") or (rel["base"] if rel.get("kind") == "github" else "")
+            # GitHub's commit of what is installed, also after a thimble from before release files moved it
+            had = FX.github_commit(rel)
             if not ((got["commit"] and got["commit"] == had) or got["base"] == rel["base"]):
                 say(f"thimble {FX.release_name(rel)} is installed in {home}. It moves to {got['version']} now, and "
                     "keeps your fixes (a few minutes)...")

@@ -609,6 +609,47 @@ def test_ref_to_a_prerelease_installs_its_file_by_its_name_beside_the_newest_rel
                             "/releases/download/v0.11.0-rc1/thimble-0.11.0-rc1.tar.gz"]
 
 
+def update_as_before_release_files(w, tag: str) -> str:
+    """thimble update to the release `tag` as a thimble from before release files makes it, with git: the tag fetched
+    from thimble's repository into live, mine and the release checkout moved to GitHub's commit, and release.json given
+    that commit as base and the tag. The fields that thimble does not know (made, commit, source, sha256) stay as they
+    were. GitHub's commit of the release."""
+    live, rel = w.th / "fixes" / "live", w.release()
+    sh("git", "fetch", "-q", "--no-tags", str(w.bare), f"+refs/tags/{tag}:refs/thimble/releases/{tag}", cwd=live)
+    new = sh("git", "rev-parse", f"refs/thimble/releases/{tag}^{{commit}}", cwd=live)
+    sh("git", "checkout", "-q", "-B", "mine", new, cwd=live)
+    sh("git", "checkout", "-q", "--detach", new, cwd=w.th / "fixes" / "release")
+    rel.update(base=new, checked=new, tag=tag, version="", updated=1.0)
+    (w.th / "fixes" / "release.json").write_text(json.dumps(rel, indent=2) + "\n")
+    return new
+
+
+def test_ref_moves_an_install_that_a_thimble_before_release_files_updated(w):
+    """A thimble from before release files moves base to GitHub's commit of the newer release, and leaves the fields of
+    release.json it does not know as they were: they name the release it moved from. --ref back to that release moves
+    the install there, as it moves any install, and the release is the same commit as a fresh install's."""
+    assert w.install("--no-browser").returncode == 0
+    made, v8 = live_head(w), sh("git", "rev-parse", "v0.10.8", cwd=w.bare)
+    v9 = w.publish("v0.10.9")
+    assert update_as_before_release_files(w, "v0.10.9") == v9
+    assert IN.FX.github_commit(w.release()) == v9
+    p = w.install("--no-browser", "--ref", "v0.10.8")
+    assert p.returncode == 0, text_of(p)
+    assert ("thimble 0.10.9 is installed in ~/.thimble. It moves to 0.10.8 now, and keeps your fixes (a few "
+            "minutes)...") in p.stdout.splitlines(), text_of(p)
+    rel = w.release()
+    assert (live_head(w), rel["made"], rel["tag"], rel["commit"]) == (made, made, "v0.10.8", v8)
+
+
+def test_a_branch_is_named_by_github_s_commit_of_what_live_is_on():
+    made, github, moved = "1" * 40, "2" * 40, "3" * 40
+    rel = {"kind": "release", "ref": "try-r110", "base": made, "made": made, "commit": github, "based_on": "v0.10.8"}
+    assert IN.FX.release_name(rel) == "try-r110 at 2222222"
+    # a thimble from before release files moved live to another branch with git: GitHub's commit is base
+    rel.update(ref="try-r111", base=moved)
+    assert IN.FX.release_name(rel) == "try-r111 at 3333333"
+
+
 def test_ref_over_a_dev_install_sets_its_fixes_aside_and_installs_the_branch(w, monkeypatch):
     clone = w.home / "thimble"
     sh("git", "clone", "-q", str(w.bare), str(clone))

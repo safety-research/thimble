@@ -36,7 +36,9 @@ Under $THIMBLE_HOME/fixes:
     release.json     where the release came from: the install's kind (release: from a release's file), its source (the
                      file's address), the file's sha256, GitHub's commit of the release (commit), Claude Code's
                      marketplace entry before the first fix, the release commit (base) and its tag, or for a branch
-                     its name (ref) and the newest release when it was installed (based_on)
+                     its name (ref) and the newest release when it was installed (based_on). source, sha256, commit
+                     and based_on describe the release commit `made`: while base is another commit, a thimble from
+                     before release files moved base with git and left them as they were (_as_made)
     state.json       {"on": false} while the person turned their fixes off (live then shows the release commit)
     off.sh           back to the plain release, also when thimble does not load: sh ~/.thimble/fixes/off.sh
     asks/<id>.json   the sha256 of the secret of the person's key press for apply and merge, which the plugin writes at
@@ -569,7 +571,8 @@ def ensure_live(src: dict[str, Any] | None = None) -> dict[str, Any]:
         got = _live_from_file(src)
         commit = got["base"]
         rel = {"kind": src["kind"], "source": got["source"], "sha256": got["sha256"], "commit": got["commit"],
-               "repo": str(live), "entry": src.get("entry"), "base": commit, "version": _version_at(live, commit),
+               "made": commit, "repo": str(live), "entry": src.get("entry"), "base": commit,
+               "version": _version_at(live, commit),
                "pointed": False, "created": time.time(), "checked": commit,
                **({"tag": got["tag"]} if got["tag"] else {"ref": got["ref"], "based_on": got.get("based_on") or ""})}
     else:
@@ -586,7 +589,7 @@ def ensure_live(src: dict[str, Any] | None = None) -> dict[str, Any]:
         tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
         rel = {"kind": src["kind"], "source": src["url"], "repo": str(repo), "entry": src.get("entry"), "base": commit,
                "version": _version_at(live, commit), "pointed": False, "created": time.time(), "checked": commit,
-               **({"commit": commit} if src["kind"] == "github" else {}),
+               **({"commit": commit, "made": commit} if src["kind"] == "github" else {}),
                **({"tag": tag} if RELEASE_TAG.match(tag) else {})}
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
@@ -704,7 +707,7 @@ def _follow(rel: dict[str, Any]) -> dict[str, Any]:
     if moved and moved.get("base") == new:
         # a zip's later release, made from its file: its tag and where it came from
         tag = moved["tag"]
-        rel.update(source=moved["source"], sha256=moved["sha256"], commit=moved["commit"])
+        rel.update(source=moved["source"], sha256=moved["sha256"], commit=moved["commit"], made=new)
     else:
         tag = next((t for t in (git("describe", "--tags", "--exact-match", "--match", "v*", new, cwd=r, check=False)
                                 for r in (live, src) if r) if RELEASE_TAG.match(t)), "")
@@ -2791,6 +2794,19 @@ def latest_release(then: str = "run thimble update again") -> dict[str, Any]:
     return {"tag": tag, "version": tag[1:], "url": releases.base()}
 
 
+def _as_made(rel: dict[str, Any]) -> bool:
+    """Whether release.json's source, sha256, commit and based_on describe the release live is on (base): they were
+    written with it, which `made` records. An update by a thimble from before release files moves base with git and
+    leaves the fields it does not know as they were."""
+    return bool(rel.get("base")) and rel.get("made") == rel["base"]
+
+
+def github_commit(rel: dict[str, Any]) -> str:
+    """GitHub's commit of the release live is on: release.json's commit while it describes base (_as_made), else base
+    itself, which git fetched from GitHub (an install or an update by a thimble from before release files)."""
+    return str(rel.get("commit") or "") if _as_made(rel) else str(rel.get("base") or "")
+
+
 def release_name(rel: dict[str, Any] | None = None) -> str:
     """The release live is on, as the person reads it: 0.10.3, else the plugin's version, else the commit. Before the
     first fix makes live (no release.json), the thimble that runs (_own_name)."""
@@ -2802,7 +2818,7 @@ def release_name(rel: dict[str, Any] | None = None) -> str:
     if rel.get("ref") and not rel.get("tag"):
         # a branch scripts/install.sh --ref installed, as a release is tried before it is out: GitHub's commit of it,
         # which a branch installed from GitHub's archive has apart from its release commit
-        return f"{rel['ref']} at {str(rel.get('commit') or rel.get('base') or '')[:7]}"
+        return f"{rel['ref']} at {(github_commit(rel) or str(rel.get('base') or ''))[:7]}"
     return str(rel.get("tag") or "").removeprefix("v") or str(rel.get("version") or "") or str(rel.get("base") or "")[:7]
 
 
@@ -3492,7 +3508,7 @@ def update(check: bool = False, once: bool = False, say=None, to: dict[str, Any]
             now = _described(repo, base) or now
         # a branch that scripts/install.sh --ref installed keeps its name, and is as new as the newest release when it
         # was installed (based_on); one that an older thimble installed has its history back to that release in live
-        have = (str(rel.get("based_on") or "").removeprefix("v") or _described(repo, base)
+        have = (str((rel.get("based_on") if _as_made(rel) else "") or "").removeprefix("v") or _described(repo, base)
                 if rel.get("ref") and not rel.get("tag") else now)
     elif src["kind"] == "zip":
         tag = _folder_tag(Path(src["repo"]), src["prefix"])
@@ -3556,7 +3572,7 @@ def update(check: bool = False, once: bool = False, say=None, to: dict[str, Any]
         if got.get("source"):
             # where the release came from: its file (or GitHub's archive of a branch), and GitHub's commit of it
             rel.update(kind="release", source=got["source"], sha256=got.get("sha256") or "",
-                       commit=got.get("commit") or "")
+                       commit=got.get("commit") or "", made=new)
         if tag:
             rel["tag"] = tag
             rel.pop("ref", None)
