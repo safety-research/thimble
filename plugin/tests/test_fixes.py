@@ -521,3 +521,17 @@ def test_an_update_that_cannot_download_the_release_changes_nothing_and_says_wha
         assert str(e.value).startswith(said), str(e.value)
         assert state_of_fixes() == before
         assert FX.get(a["id"])["state"] == "on" and "read ${n}" in live_file("plugin/bar/bar.tsx")
+
+
+def test_words_an_older_thimble_kept_with_the_fixer_s_closing_fence_show_without_it(world):
+    """thimble 0.10.12 and before kept what a fix does as its fixer wrote it, and a fixer may close its end in a code
+    fence. The fix's record, which thimble fix show, the reapply prompt, an issue's text, the terminal's line and the
+    workbench all read, gives those words without the fence, as a fixer's end gives them now."""
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    FX.put({**FX.get(r["id"]), "summary": "The bar's coverage item says read.\n```"})
+    stored = json.loads((FX.home() / "fixes.jsonl").read_text().splitlines()[-1])
+    assert stored["summary"].endswith("```")
+    assert FX.get(r["id"])["summary"] == FX.records()[r["id"]]["summary"] == "The bar's coverage item says read."
+    shown = FX.show_lines(r["id"], 100)
+    assert "  Claude did    The bar's coverage item says read." in shown and "```" not in "\n".join(shown), shown

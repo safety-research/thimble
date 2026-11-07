@@ -257,7 +257,9 @@ def short(words: str, n: int = 48) -> str:
 
 def records() -> dict[int, dict[str, Any]]:
     """Each fix's record: the last line of its id in fixes.jsonl. A record stored before thimble kept a notice (0.10.4
-    and older) gets the one its files have now, as put would give it, so that the person is told before they use it."""
+    and older) gets the one its files have now, as put would give it, so that the person is told before they use it.
+    Words stored by thimble 0.10.12 or older end without the code fence the fixer closed its end with, as the fixer's
+    end (plugin/fix/fixer.ts endOf) gives them now."""
     out: dict[int, dict[str, Any]] = {}
     try:
         lines = (home() / "fixes.jsonl").read_text().splitlines()
@@ -274,6 +276,8 @@ def records() -> dict[int, dict[str, Any]]:
             notice = notice_of([str(f.get("path") or "") for f in r.get("files") or [] if isinstance(f, dict)])
             if notice:
                 r["notice"] = notice
+        if isinstance(r.get("summary"), str):
+            r["summary"] = re.sub(r"\s*`{3,}\s*$", "", r["summary"])
     return out
 
 
