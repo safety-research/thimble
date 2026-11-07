@@ -32,6 +32,7 @@ import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
+import { ThimbleTag } from '../files/LabelsHelp'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -296,13 +297,14 @@ export const asksQuestion = (title: string | undefined, name: string): boolean =
   return !!t && t !== name.trim().toLowerCase()
 }
 
-/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels). */
+/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels): thimble's
+ * logo in grey, then Label, and on hover what a label is (files/LabelsHelp ThimbleTag). */
 export function LabelKindTag() {
-  return <span className="bcell-kind-tag">Label</span>
+  return <ThimbleTag>Label</ThimbleTag>
 }
 
 /** What a label card's label row says after the label's name (details labelIdentity): what kind of classifier gave its
- * values, in plain words (a code or regex rule over the data, or a model's judgment), how many units it ran over, the
+ * values, in plain words (a code or regex rule over the data, or a model's prompt), how many units it ran over, the
  * label it ran within and where, in one quiet line; the hover gives the whole line, every file pattern whole. */
 export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'model' | 'within'> }) {
   const { ws, concepts } = useContext(CanvasContext)
@@ -388,7 +390,7 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
               return (
                 <tr key={v}>
                   <td>
-                    {classes ? <span className={`bcell-value-square${cls?.highlight ? ' is-lit' : ''}`} style={{ '--c': colourVar(cls?.color) } as CSSProperties} title={cls?.highlight ? 'painted in Files' : undefined} /> : null}
+                    {classes ? <span className={`bcell-value-square${cls?.highlight ? ' is-lit' : ''}`} style={{ '--c': colourVar(cls?.color) } as CSSProperties} title={cls?.highlight ? 'highlighted in Files' : undefined} /> : null}
                     <button type="button" className={`bcell-value${on ? ' is-on' : ''}`} aria-pressed={on} disabled={!scope || pending != null} onClick={() => void toggle(v)} onMouseDown={(e) => e.stopPropagation()}>
                       {pending === v ? <Spinner size={10} label="setting the filter" /> : null}
                       {v}

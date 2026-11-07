@@ -314,9 +314,9 @@ export function shortGlob(glob: string | null | undefined): { short: string; ful
 }
 
 /** How a label card names a label's classifier, in plain words, so a rule over the data reads apart from a model's
- * judgment: `Code rule`, `Regex rule`, or `<model> judgment (prompt)` (`model` as the card names it, else `Model`). */
+ * prompt: `Code rule`, `Regex rule`, or `<model> prompt` (`model` as the card names it, else `Prompt`). */
 export const classifierWords = (kind: string, model = ''): string =>
-  kind === 'code' ? 'Code rule' : kind === 'regex' ? 'Regex rule' : `${model || 'Model'} judgment (prompt)`
+  kind === 'code' ? 'Code rule' : kind === 'regex' ? 'Regex rule' : model ? `${model} prompt` : 'Prompt'
 
 /** What a label card says of its label after its name: how the label is defined (classifierWords) and what it ran
  * over, `over 12,480 records in <files>` (a trial's `over a sample of`; its files as shortGlob writes them, else the
