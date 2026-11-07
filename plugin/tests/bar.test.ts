@@ -107,3 +107,39 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   expect(await pane.find({ type: 'Text', text: /in Claude's context +0\/10 records/ })).toBeDefined()
   await pane.unmount()
 })
+
+/** The node of a drawing whose key is `key`, or null. */
+function byKey(n: Any, key: string): Any {
+  if (!n || typeof n !== 'object') return null
+  if (Array.isArray(n)) { for (const x of n) { const f = byKey(x, key); if (f) return f } return null }
+  if (n.props?.key === key) return n
+  return byKey(n.props?.children, key) ?? byKey(n.children, key)
+}
+
+// A bar too narrow for one row: the counts give way so that it keeps one row. Where it takes a second row anyway, for
+// the right's items, they come back on that row when they fit there, and stay gone where they would take one more row
+test("a bar that takes a second row for the right's items anyway gives the counts that gave way their room on it; where they would take one more row, they stay gone", async ($, on) => {
+  const w = world(on, JSON.stringify(COVERAGE))
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  // the look at the answer has not answered: the bar names w for the claims it will find
+  on('model.fork', () => ({ value: { isAnswered: false, reason: 'empty-reply' } }))
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.prompt.submit({ text: 'why did it fail?', origin: { kind: 'composer' } } as never)
+  await $.turn.start({ text: 'why did it fail?', turnId: 't1' } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(20000)
+  // the bar's rows in a terminal `term` columns wide (the band 5 narrower), each row's words
+  const bar = async (term: number) => {
+    const band = await $.ui.render({ ...(BAND as Any), props: { ...(BAND as Any).props, bodyColumns: term - 5 }, viewport: { columns: term, rows: 40, isFullscreen: true } } as never)
+    const first = byKey(band, 'bar')
+    return [[textOf(byKey(first, 'bar-left')), textOf(byKey(first, 'bar-right'))].filter(Boolean).join(' | '), ...['bar-1', 'bar-right-0'].map(k => byKey(band, k)).filter(Boolean).map(textOf)]
+  }
+  expect(await bar(160)).toEqual(['thimble  v visualize · s simplify | w claims · r coverage 43% (3/7 files) · l 2 labels'])
+  // 45 columns: the keys fill the first row, and w goes on a row of its own, where both counts fit
+  expect(await bar(45)).toEqual(['thimble  v visualize · s simplify', 'w claims · r coverage 43% · l 2 labels'])
+  // 40 columns: coverage, which gave way last, comes back first
+  expect(await bar(40)).toEqual(['thimble  v visualize · s simplify', 'w claims · r coverage 43%'])
+  // 35 columns: the keys take two rows, w beside the first; a row of the counts' own would be a third, so they stay gone
+  expect(await bar(35)).toEqual(['thimble  v visualize | w claims', '         s simplify'])
+})

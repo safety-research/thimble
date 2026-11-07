@@ -23,7 +23,9 @@
 // name of the mark ] opens, in that mark's look, and the busy step's words beside its glyph, which also turns after a
 // citation being checked. What gave way takes back the room left in the reverse order. The keys stay:
 // what still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the
-// first row they would take no fewer rows. The settings pane draws the same bar as
+// first row they would take no fewer rows. A bar that takes more rows anyway gives way only as far as those rows need:
+// the left's words take back the room of the left's rows, and the counts the room of the right's row, when that takes
+// no more rows. The settings pane draws the same bar as
 // its switches would leave it (`preview`), on as many rows as its items take: nothing in it is a press, no work shows
 // and nothing gives way.
 import type { EngineInterface } from 'claude-code'
@@ -187,6 +189,18 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const hintIn = !!hint && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
   const whole = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
   let left = whole
+  // what still does not fit takes more rows, each item whole: the left's in rows under its first item, beside the right's
+  // on the first row, or, when that takes no fewer rows, with the right's on a row of their own under them
+  const rowsOf = (l: Item[], r: Item[]) => {
+    const alone = fill(l, width - 9, width - 9)
+    const room = width - 9 - lenOf(r) - 2
+    const beside = !r.length ? alone : room >= Math.max(0, ...l.map(itemLen)) ? fill(l, room, width - 9) : null
+    const under = r.length ? fill(r, width, width) : []
+    const besideWins = !!beside && beside.length < alone.length + under.length
+    return { lines: besideWins ? beside! : alone, rightLines: besideWins ? [] : under, besideWins }
+  }
+  const rowCount = (x: { lines: Item[][]; rightLines: Item[][] }) => x.lines.length + x.rightLines.length
+  let rows = rowsOf(left, right)
   if (!preview) {
     // a narrow bar, in the order at the top of this file: from the least it can draw (the busy step's glyph and seconds,
     // each item's shortest words, coverage without its file counts), a whole count gives way while it is still too
@@ -195,44 +209,51 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
     // takes back the room left, the words that say what a sign means first: the mark ] opens (`] explainer`: the bar's
     // one sign of what the marks' looks are), the busy step's words (`checking 3 citations`: what the glyph that turns
     // after a citation means), the rest of the item's words (`] show explainer`), coverage's file counts (beside
-    // coverage alone), then the busy step's other steps
-    const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
+    // coverage alone), then the busy step's other steps. `apart`: the left's items and the right's each on rows of their
+    // own, so that each gives way only as far as its own rows need
     const all = right
     const bare = (x: Item) => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x)
-    right = right.map(bare)
-    if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
-    if (spare(least, right) < 0) right = right.filter(x => x.id !== 'coverage' || !counted(x))
-    for (const id of hintIn ? [] : ['coverage', 'labels']) {
-      if (right.some(x => x.id === id) || !all.some(x => x.id === id && counted(x))) continue
-      const tried = all.filter(x => x.id === id || right.some(y => y.id === x.id)).map(x => (x.id === id ? bare(x) : right.find(y => y.id === x.id)!))
-      if (spare(least, tried) >= 0) right = tried
+    const narrow = (apart: boolean) => {
+      const leftSpare = (l: Item[], r: Item[]) => (apart ? width - 9 - lenOf(l) : spare(l, r))
+      const rightSpare = (l: Item[], r: Item[]) => (apart ? width - lenOf(r) : spare(l, r))
+      const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
+      let r = all.map(bare)
+      if (rightSpare(least, r) < 0) r = r.filter(x => x.id !== 'labels' || !counted(x))
+      if (rightSpare(least, r) < 0) r = r.filter(x => x.id !== 'coverage' || !counted(x))
+      for (const id of hintIn ? [] : ['coverage', 'labels']) {
+        if (r.some(x => x.id === id) || !all.some(x => x.id === id && counted(x))) continue
+        const tried = all.filter(x => x.id === id || r.some(y => y.id === x.id)).map(x => (x.id === id ? bare(x) : r.find(y => y.id === x.id)!))
+        if (rightSpare(least, tried) >= 0) r = tried
+      }
+      const l = [...least]
+      // each item that has shorter words: the longest of `tried` that fits in the room left
+      const takeWords = (tried: (x: Item) => string[]) => whole.forEach((x, i) => {
+        if (!x.shorter?.length) return
+        const room = itemLen(l[i]!) + leftSpare(l, r)
+        const fits = tried(x).find(w => itemLen({ ...x, words: w }) <= room)
+        if (fits !== undefined) l[i] = { ...x, words: fits }
+      })
+      // the busy step's words in the room left: its newest step's alone (`alone`), or with its other steps
+      const takeBusy = (alone: boolean) => { if (b) l[0] = busyItem(alone ? { ...b, more: [] } : b, len(l[0]!.words) + leftSpare(l, r)) }
+      takeWords(x => x.shorter!)
+      takeBusy(true)
+      takeWords(x => [x.words])
+      const back = r.map(x => all.find(y => y.id === x.id) ?? x)
+      if (rightSpare(l, back) >= 0) r = back
+      takeBusy(false)
+      return { l, r }
     }
-    left = [...least]
-    // each item that has shorter words: the longest of `tried` that fits in the room left
-    const takeWords = (tried: (x: Item) => string[]) => whole.forEach((x, i) => {
-      if (!x.shorter?.length) return
-      const room = itemLen(left[i]!) + spare(left, right)
-      const fits = tried(x).find(w => itemLen({ ...x, words: w }) <= room)
-      if (fits !== undefined) left[i] = { ...x, words: fits }
-    })
-    // the busy step's words in the room left: its newest step's alone (`alone`), or with its other steps
-    const takeBusy = (alone: boolean) => { if (b) left[0] = busyItem(alone ? { ...b, more: [] } : b, len(left[0]!.words) + spare(left, right)) }
-    takeWords(x => x.shorter!)
-    takeBusy(true)
-    takeWords(x => [x.words])
-    const back = right.map(x => all.find(y => y.id === x.id) ?? x)
-    if (spare(left, back) >= 0) right = back
-    takeBusy(false)
+    ;({ l: left, r: right } = narrow(false))
+    rows = rowsOf(left, right)
+    // the bar takes more rows anyway: what gave way so that the right's items would fit beside the left's takes back the
+    // room of those rows, each side on rows of its own, when that takes no more rows (a count beside a hint stays gone)
+    if (!hintIn && rowCount(rows) > 1) {
+      const apart = narrow(true)
+      const tried = rowsOf(apart.l, apart.r)
+      if (rowCount(tried) <= rowCount(rows)) { left = apart.l; right = apart.r; rows = tried }
+    }
   }
-  // what still does not fit takes more rows, each item whole: the left's in rows under its first item, beside the right's
-  // on the first row, or, when that takes no fewer rows, with the right's on a row of their own under them
-  const alone = fill(left, width - 9, width - 9)
-  const room = width - 9 - lenOf(right) - 2
-  const beside = !right.length ? alone : room >= Math.max(0, ...left.map(itemLen)) ? fill(left, room, width - 9) : null
-  const under = right.length ? fill(right, width, width) : []
-  const besideWins = !!beside && beside.length < alone.length + under.length
-  const lines = besideWins ? beside! : alone
-  const rightLines = besideWins ? [] : under
+  const { lines, rightLines, besideWins } = rows
 
   // an item's words in its words' look, its marked words in their own
   const said = (x: Item, i: number, s: string): Any[] => partsAround(s, x.marked?.words).map((p: { s: string; marked: boolean }, j: number) =>
