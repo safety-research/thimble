@@ -363,9 +363,10 @@ async function settled($: Engine, id: string, rec: Rec, o: { written: boolean })
   const was = before ? shownOf(before) : ''
   const now = shownOf(rec)
   if (rec.catchup && typeof rec.shown === 'string' && now !== was) {
-    // a catch-up's first version: the view goes to it, below the replies it covers; each version is read for
-    // explainers and heads-ups as an answer is
-    if (typeof before?.shown !== 'string') await $.ui.scroll({ to: { key: blockKey(rec) }, block: 'start' }).catch(() => undefined)
+    // a catch-up's first version: the view moves only as far as it takes to show it, below the replies it covers, so
+    // a view at the end stays there with what stands under it; each version is read for explainers and heads-ups as an
+    // answer is
+    if (typeof before?.shown !== 'string') await $.ui.scroll({ to: { key: blockKey(rec) }, block: 'nearest' }).catch(() => undefined)
     void lookAtCatchUp($, drawnAt(rec), rec.shown, { simpler: isSimplify(rec) }).catch(() => undefined)
     // a simpler version's first text: a step of the tour done (tour/tour.ts)
     if (isSimplify(rec) && typeof before?.shown !== 'string') void tourDid($, 's').catch(() => undefined)
