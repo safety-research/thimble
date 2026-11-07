@@ -8,9 +8,9 @@
 // Readers skip the kinds they do not know. Telemetry adds:
 //
 //   {kind: 'call', feature, prompt, model, usage, ms, blocked, ok, ...}   one model call thimble made: a label's read
-//        (feature 'labels'), the observer's look after an answer ('observer'), a squeeze's rewrite ('squeeze'), a longer
-//        explainer ('explain'). `blocked`: whether the main turn waited for it (thimble's calls run beside the turn, so
-//        false).
+//        (feature 'labels'), the observer's look after an answer ('observer'), a squeeze's rewrite ('squeeze', with
+//        `simplify` for a simpler version), a longer explainer ('explain'). `blocked`: whether the main turn waited for
+//        it (thimble's calls run beside the turn, so false).
 //   {kind: 'turn', feature, agent, ms, usage, model, hook_ms, reason}     one turn: main's (feature 'main'), or a fork's
 //        (feature 'checker', 'designer' or 'thread'). `hook_ms`: the time thimble's own hooks took inside a main turn,
 //        which is the latency thimble adds to it.

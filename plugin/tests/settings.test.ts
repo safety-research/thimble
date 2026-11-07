@@ -82,15 +82,15 @@ function settingsWorld(on: Any, rows: Record<string, boolean | string>): Any[] {
   return set
 }
 
-test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Explainers and Heads-ups auto, and Rewrite, Catch-up, Claims, Labels and Coverage off, which the rows and the preview show; off puts back what they had', async ($, on) => {
+test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Explainers and Heads-ups auto, and Simplify, Catch-up, Claims, Labels and Coverage off, which the rows and the preview show; off puts back what they had', async ($, on) => {
   const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: false, explain: 'on demand', details: 'off', claimsMode: 'auto', labels: true, coverage: true, defaultsAt: DEFAULTS.at }
   const set = settingsWorld(on, rows)
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
   // first, its name and what it does in plain words
   expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^\s*MINIMAL MODE\s+on · off/)
-  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.')
-  for (const w of [/^ rewrite$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
+  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Simplify, Catch-up, Claims, Labels and Coverage are off.')
+  for (const w of [/^ simplify$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   await pane.press({ key: 'mode-minimal-on' })
   // one change per hook, as each loads the plugin again; the new load's session start makes the next
   expect(set.length).toBe(1)
@@ -103,15 +103,15 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('verified when you open it')
   expect((await pane.find({ key: 'says-cards' }))?.text).toContain('only when you ask for one')
   expect((await pane.find({ key: 'says-explain' }))?.text).toContain('after each answer')
-  expect((await pane.find({ key: 'says-squeezeAnswers' }))?.text).toContain('No rewrites.')
+  expect((await pane.find({ key: 'says-squeezeAnswers' }))?.text).toContain('No simpler versions.')
   expect((await pane.find({ key: 'says-claimsMode' }))?.text).toContain('No Claims pane.')
   // the preview: v still acts, and c, e and a on selected words; the keys of what Minimal turned off are gone
   for (const w of [/^ visualize$/, /^ cite$/, /^ explain$/, /^ ask$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
-  for (const w of [/^ rewrite$/, /^ catch up$/, /^ claims$/, /^ coverage$/, /^ labels$/]) expect(await pane.find({ type: 'Text', text: w })).toBeUndefined()
+  for (const w of [/^ simplify$/, /^ catch up$/, /^ claims$/, /^ coverage$/, /^ labels$/]) expect(await pane.find({ type: 'Text', text: w })).toBeUndefined()
   await pane.press({ key: 'mode-minimal-off' })
   await settleAll($)
   expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: false, explain: 'on demand', details: 'off', claimsMode: 'auto', labels: true, coverage: true })
-  for (const w of [/^ rewrite$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
+  for (const w of [/^ simplify$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   await pane.unmount()
   setOptions({})
 })

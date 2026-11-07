@@ -4,8 +4,8 @@
 //
 //   props: {items: [{id, n, name, levels, level, level0, ends, word, picked}], plus: what is typed after + (null when
 //           nothing is), keys: whether the chips hold the keys (false while the tray holds them over the chips), held:
-//           whether a click gave the chips the keyboard, revert: whether 0 has a version to take back, width, color,
-//           ack}
+//           whether a click gave the chips the keyboard, revert: whether 0 has a version to take back, remove: whether
+//           0 removes what the chips are on (a simpler version or a catch-up), width, color, ack}
 //   in a frame in thimble's color, a row for each chip, then a row of what acts on them all, with the chips' keys, each
 //   where it acts and drawn as the bar draws its keys (the bar names none of them, as the tray's keys are in its
 //   header). A chip's row: its digit (the key that picks it), its name, its two ends either side of its dots (`1 Length
@@ -15,8 +15,8 @@
 //   its frame and its keys are. The last row: `s close`; `+ your own`, which adds a chip of the person's own, its words
 //   typed in the prompt box as + there does (while the chips hold the keyboard, + typed there types them in the chips:
 //   `+ <words>▏ ↵ adds it · tab lets it go`, and close without its key, s being a letter there); `0 revert` while there
-//   is a version to take back; `esc back to the prompt` while they hold the keyboard. While the tray holds the keys, the
-//   same with no key.
+//   is a version to take back (`0 remove` on a simpler version or a catch-up); `esc back to the prompt` while they hold
+//   the keyboard. While the tray holds the keys, the same with no key.
 //   Each part keeps its place while the chips are open, so a click lands where it was aimed: the names, the ends and
 //   the dots stand in columns, a key the chips do not name now leaves its cells blank, a chip's level in words ends its
 //   row, and a part of the last row that shows for a while (0 revert, esc) has a place of its own after the ones that
@@ -121,7 +121,7 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const parts = [
     action('close', 's', 'close', keyed && !typing),
     add,
-    ...(revert ? [action('revert', '0', 'revert')] : esc ? [kept('revert', '0 revert')] : []),
+    ...(revert ? [action('revert', '0', props?.remove ? 'remove' : 'revert')] : esc ? [kept('revert', '0 revert')] : []),
     ...(esc ? [action('esc', 'esc', 'back to the prompt')] : []),
   ]
   // three cells between parts

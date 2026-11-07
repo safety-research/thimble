@@ -2,7 +2,8 @@
 // Pure: the workbench's look (browser/backend/app/look_of.mjs) names its answers with the same words.
 //
 //   messagesText(msgs) -> "Read this message of Claude's, above in the session: ..." for the messages of one look, each
-//                         {kind: 'answer' | 'reply', text, turnNo, prompt: {text, by}, catchUp?}
+//                         {kind: 'answer' | 'reply', text, turnNo, prompt: {text, by}, catchUp?, simpler?}; `simpler`:
+//                         the catchUp words are a simpler version of the one answer above them, not a catch-up
 import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 
 const cut = (s, n) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
@@ -18,7 +19,12 @@ function promptedBy(p) {
 /** The messages a look reads, named so the fork finds each in the conversation: its kind, its turn, its first words. */
 export function messagesText(msgs) {
   const one = m => {
-    // a catch-up is not in the session above: its words stand here, and it is what the analyst reads of the replies
+    // a catch-up is not in the session above: its words stand here, and it is what the analyst reads of the replies;
+    // a simpler version stands below its answer, which still shows
+    if (m.catchUp && m.simpler) {
+      const n = m.catchUp.split('\n').length
+      return `A simpler version thimble wrote of Claude's answer at the end of turn ${m.turnNo} (${n} line${n === 1 ? '' : 's'}). The analyst reads it below that answer, which still shows. It is not in the session above; these are its words:\n${cut(m.catchUp, 6000)}`
+    }
     if (m.catchUp) {
       const n = m.catchUp.split('\n').length
       return `A catch-up thimble wrote of Claude's messages since the analyst's last prompt (${n} line${n === 1 ? '' : 's'}). The analyst reads it below those messages, in place of reading them. It is not in the session above; these are its words:\n${cut(m.catchUp, 6000)}`

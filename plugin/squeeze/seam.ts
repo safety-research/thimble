@@ -1,29 +1,35 @@
-// seam.ts: where Squeeze and Catch-up (two settings) meet the rest of thimble (core/answerview.ts calls each function by name, since
-// Claude Code follows `$` only into functions a file declares or imports). The feature's own modules are beside this
-// file: term.ts (the records, the rewrite, the catch-up, what Claude hears), ui.ts (the chips, their keys, the bar, the
-// drawing), cards.ts (the cards a squeeze changes), chips.mjs (pure: the chips, the request, the reply, the checks),
-// chips.tsx (the chips' Client), prompts/squeeze.md.
+// seam.ts: where Simplify and Catch-up (two settings; Simplify's key is squeezeAnswers) meet the rest of thimble
+// (core/answerview.ts calls each function by name, since Claude Code follows `$` only into functions a file declares or
+// imports). s writes a simpler version of the last answer below it in one press, as b writes a catch-up below the
+// replies that piled up; s again opens the chips on it, which make it longer, more novice or more expert, or follow the
+// person's own words, and 0 removes it. The feature's own modules are beside this file: term.ts (the records, the call
+// that writes a version, the simpler version, the catch-up, what Claude hears), ui.ts (the keys, the chips, the bar,
+// the drawing), cards.ts (the cards a squeeze changes), chips.mjs (pure: the chips, the request, the reply, the
+// checks), chips.tsx (the chips' Client), prompts/squeeze.md.
 //
 //   SQUEEZE_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   squeezeView($, row, text)          the text a row of Claude's shows now in place of what Claude wrote: a version
-//                                      the person squeezed or stretched, the part of it written in so far, `dim` while
-//                                      a rewrite runs; null: the row as Claude wrote it
-//   squeezeUnder($, els, row, cols, cardsIn)  what stands under the row after its cards: the catch-up of the replies
-//                                      it ends (the rule down its side, its head line, its words with their marks, the
-//                                      replies' explainers and the cards it places), why a catch-up failed, what a
-//                                      squeeze left out of its cards, the chips while they are open on it
+//                                      s rewrote in place in 0.10.12 and earlier (a resumed session's), the part of
+//                                      it written in so far, `dim` while a rewrite runs; null: the row as Claude
+//                                      wrote it
+//   squeezeUnder($, els, row, cols, cardsIn)  what stands under the row after its cards: its simpler version, or the
+//                                      catch-up of the replies it ends (the rule down its side, its head line, its
+//                                      words with their marks, the replies' explainers and the cards it places),
+//                                      why a block's first version failed, what a squeeze left out of its cards,
+//                                      the chips while they are open on it
 //   squeezeUnderCard($, els, id, cols) what stands under one card: what a squeeze changed of it
 //   squeezeHidesCard($, id)            whether a card is left out of the version of its answer shown now
 //   squeezeHolds($)                    whether the chips are open: their keys come before the tray's and the ask's
 //   squeezeHeld($)                     the keys the open chips take now, which nothing else names (core/answerview.ts
 //                                      heldKeys); '*' while a click gave them the keyboard
-//   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
-//   squeezeBar($, on, preview)         its items at the bar's left (`s rewrite`, `b catch up on N replies`; while the
+//   squeezeKey($, key, until)          s and b (and the chips' keys while they are open): a taker as hooks/keys.ts
+//                                      takes it
+//   squeezeBar($, on, preview)         its items at the bar's left (`s simplify`, `b catch up on N replies`; while the
 //                                      chips are open, what they cannot show, since they name their keys themselves)
 //   registerSqueeze                    its own hooks: /rewrite (what + writes in the prompt box, hidden from the
 //                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
-//                                      version told to Claude, a resumed session's cards, the end of main's turn (the
-//                                      chips s asked for while it ran open on its answer)
+//                                      version told to Claude, a resumed session's cards, the end of main's turn (s,
+//                                      pressed while it ran, acts on its answer)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -32,8 +38,8 @@ import type { Take } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
-import { promptSent, recOf } from './term'
-import { addOwn, answerDone, barItems, type CardsIn, chipsHeld, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { promptSent, recOf, slotOf } from './term'
+import { addOwn, answerDone, barItems, type CardsIn, chipsHeld, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, simplifyNow, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,9 +91,9 @@ export const registerSqueeze: Register = on => {
     const r = await next(e)
     try { await restoreCardsShown($) } catch { /* the cards draw as they stand */ }
     try {
-      await $.command.register({ name: 'rewrite', description: 'Rewrite the message the keys act on along a chip in your own words: /rewrite for my manager', argumentHint: '[who or what to rewrite it for]', immediate: true })
+      await $.command.register({ name: 'rewrite', description: 'Change the simpler version of the last answer along a chip in your own words: /rewrite for my manager', argumentHint: '[who or what to rewrite it for]', immediate: true })
     } catch {
-      // s at an empty prompt still opens the chips
+      // s at an empty prompt still simplifies
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -96,12 +102,14 @@ export const registerSqueeze: Register = on => {
   // So the typeahead and /help leave it out; it runs when the box sends it
   on('command.describe', { command: /^(thimble:)?rewrite$/ }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
 
-  // /rewrite [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
-  // on), picked; with no words, the chips open
+  // /rewrite [words]: a chip in the person's own words on the simpler version or catch-up the chips are open on (else
+  // the one standing on the newest answer; with none, a simpler version of it is written first), picked; with no
+  // words, the chips open. It never rewrites a message in place
   on('command.run', { command: 'rewrite' }, async ($, e) => {
-    if (!featureOn('squeezeAnswers')) return { text: 'Rewrite is off. Turn it on in /thimble-settings to use it.' }
-    const id = (await openNow($))?.id ?? (await targetNow($))
-    if (!id || !(await recOf($, id))) return { text: 'No message to rewrite yet: ask Claude something first.' }
+    if (!featureOn('squeezeAnswers')) return { text: 'Simplify is off. Turn it on in /thimble-settings to use it.' }
+    let id = (await openNow($))?.id ?? (await targetNow($))
+    if (id && !slotOf(id)) id = await simplifyNow($, id)
+    if (!id || !(await recOf($, id))) return { text: 'No answer to simplify yet: ask Claude something first.' }
     if (!ownWords(e.args)) { await openChips($, id); return {} }
     await addOwn($, id, e.args)
     return {}

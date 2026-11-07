@@ -3,6 +3,7 @@ a Claude Code session, Claude runs it to label records and to see what it read.
 
 In a shell:
 
+    thimble tour                   a two-minute tour of thimble: Claude Code opens on made-up sample data
     thimble update                 the newest thimble, for the terminal plugin and the browser workbench. Your fixes
                                    that still fit it stay on; thimble reapply brings back one that does not
     thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that did not fit
@@ -645,6 +646,12 @@ def cmd_reapply(a: argparse.Namespace) -> int:
     return FX.cmd_reapply(a)
 
 
+def cmd_tour(a: argparse.Namespace) -> int:
+    from . import tour as TR  # noqa: PLC0415
+
+    return TR.cmd(a)
+
+
 def cmd_doctor(a: argparse.Namespace) -> int:
     from . import doctor as DR  # noqa: PLC0415
 
@@ -686,7 +693,7 @@ def _help() -> str:
 def _parser() -> tuple[argparse.ArgumentParser, Any]:
     """The command's parser, and its commands'."""
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    named = "update,reapply,fixes,fix,file,doctor," + ("" if labels_off() else "label,") + "coverage"
+    named = "tour,update,reapply,fixes,fix,file,doctor," + ("" if labels_off() else "label,") + "coverage"
     sub = ap.add_subparsers(dest="cmd", metavar="{" + named + "}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -774,6 +781,11 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
                        "back what is still needed, and runs thimble update --continue. Run it in a shell.")
     p.add_argument("--print", action="store_true", help="print Claude's first message, and open nothing")
     p.set_defaults(fn=cmd_reapply)
+    p = sub.add_parser("tour", help="a two-minute tour of thimble, on made-up sample data",
+                       description="thimble tour: copies made-up sample data into ~/.thimble/tour and opens Claude Code "
+                       "there in its fullscreen layout, with /thimble:tour as the first prompt. Claude walks you through "
+                       "thimble one step at a time. Run it in a shell.")
+    p.set_defaults(fn=cmd_tour)
     p = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem",
                        description="thimble doctor: a checklist of what thimble needs, one line each: ✓ when it works, "
                        "× when it does not, with the step that fixes it on the line below. Run it in a shell.")

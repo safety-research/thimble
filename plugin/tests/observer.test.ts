@@ -108,3 +108,18 @@ test("an answer gets one look: a fork of the conversation with the lenses' secti
   const log = JSON.parse(s.files.get('/made-up/.thimble/conversations/s-observer/observer.json')!).log
   expect(log.at(-1)).toMatchObject({ kind: 'look', turn: 1, fork: { lenses: { explain: 'lens-explain', heads: 'lens-heads', claims: 'lens-claims' } } })
 })
+
+test("the tour's sample answer gets no look (tour/tour.ts tourSample): Claude wrote it without reading the data, on purpose; a later answer does", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([READ])
+  // the tour waits for its sample answer: the turn that ends now writes it
+  await s.$.state.set({ plugin: 'thimble', key: 'tour' }, { at: 'answer', done: [], asides: 0 })
+  await answered(s, { id: 't1', prompt: '/thimble:tour', rows: ['Customers placed [36 orders](#) in March 2026.'] })
+  expect(s.forks.length).toBe(0)
+  // the tour ended; its sample answer is kept by its row, and an answer of the person's own gets its look
+  await s.$.state.set({ plugin: 'thimble', key: 'tour' }, null)
+  await s.$.state.set({ plugin: 'thimble', key: 'tourSample' }, 't1-row-0')
+  await answered(s, { id: 't2', prompt: 'How many test runs failed?', rows: ['Two runs failed, both on the p95 check.'] })
+  expect(s.forks.length).toBe(1)
+  expect(s.forks[0]).not.toContain('36 orders')
+})

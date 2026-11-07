@@ -15,7 +15,7 @@
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
+const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Simplify, Catch-up, Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -78,9 +78,9 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
-    does: 'Press s to rewrite an answer shorter or longer, more novice or more expert, or in your own words. Press 0 for the original. One call each time you ask.',
-    says: { on: 'Press s to rewrite an answer shorter or longer, more novice or more expert. Press 0 for the original.', off: 'No rewrites.' },
+    key: 'squeezeAnswers', title: 'Simplify', group: 'Answers', default: true,
+    does: 'Press s for a shorter, plainer version of the last answer, below it. Press s again for its chips, which make it longer, more novice or more expert, or follow your own words. Press 0 to remove it. One call each time you ask.',
+    says: { on: 'Press s for a shorter, plainer version of the last answer, below it. Its chips make it longer, more novice or more expert; 0 removes it.', off: 'No simpler versions.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
@@ -137,7 +137,7 @@ const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
 export const RETIRED = {
   marks: { type: 'boolean', title: 'Citations (old setting)', description: 'Replaced by Citations, which has its modes.', default: true },
   citationChecks: { type: 'string', title: 'Citation checks (old setting)', description: 'Replaced by Citations, which has its modes.', options: ['auto', 'on demand', 'off'], default: 'on demand' },
-  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Rewrite and Catch-up.', default: true },
+  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Simplify and Catch-up.', default: true },
   counts: { type: 'boolean', title: 'Labels and coverage on the bar (old setting)', description: 'Replaced by Labels and Coverage.', default: true },
   squeezeCards: { type: 'boolean', title: 'Squeeze changes cards (old setting)', description: 'Removed: a squeeze may move or leave out a card.', default: true },
   claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Claims, which has its modes.', default: true },
@@ -247,7 +247,7 @@ export function valueIn(values, key) {
 /** Minimal: the modes it sets. Claude still cites, each citation verified when it is opened (auto cite), and the look
  *  after each answer still writes explainers and heads-ups; where Claude Code reports the pointer (its fullscreen
  *  layout, with its mouse reports on) its answers are plain, these showing only for the paragraph under the pointer
- *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Rewrite,
+ *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Simplify,
  *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off, and with Labels off Claude makes no labels:
  *  the guidance leaves out its Labels section (guidance/guidance.ts), and `thimble label` refuses Claude's commands
  *  (hooks/path.ts). Turning it on saves them (settings/term.ts), and the rows show them; a row changed away from them
