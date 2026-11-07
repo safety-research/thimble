@@ -4,8 +4,8 @@
 // busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
 // main, but main reads the cards it drew
 // with the person's next prompt. Its first card on the screen is a step of the tour done (tour/tour.ts), and a design
-// that ends with no card lets the tour go on. When Claude wrote messages after the answer (the tour's steps, say), the
-// prompt quotes the answer, so the fork draws that one and not the newest message.
+// that ends with no card lets the tour go on. When Claude wrote messages after the answer (a reply during the tour,
+// say), the prompt quotes the answer, so the fork draws that one and not the newest message.
 //
 // v closes an open tray, as s does (tray/seam.ts trayGiveWay), so that the tray's rows do not hide the card.
 //
@@ -152,8 +152,8 @@ async function checkedSince($: Engine, row: string): Promise<string> {
 }
 
 /** The answer v was pressed under, quoted, when Claude wrote other messages after it: the prompt says "your last
- *  answer", and the fork, a copy of the whole conversation, would draw the newest message. The tour's steps and the
- *  replies to the person's own prompts during the tour are such messages (core/answers.ts holdAnswers). */
+ *  answer", and the fork, a copy of the whole conversation, would draw the newest message. The replies to the person's
+ *  own prompts during the tour are such messages (core/answers.ts holdAnswers). */
 async function olderAnswer($: Engine, row: string): Promise<string> {
   const rows = await textRows($)
   if (!rows.includes(row) || rows.at(-1) === row) return ''
@@ -325,7 +325,7 @@ export const registerDesigner: Register = on => {
     const r = await next(e)
     const synthetic = e.origin.kind === 'model' && e.origin.model === '<synthetic>'
     if (e.agentId === undefined && !synthetic && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
-      // a row of a turn that answers nothing (a step of the tour) is not the answer v draws under
+      // a row of a turn that answers nothing (a reply during the tour) is not the answer v draws under
       const turnId = await mainTurn($).catch(() => '')
       if (turnId && (await answersNothing($, turnId).catch(() => false))) return r
       void $.state.set(ANSWER, r.uuid).catch(() => undefined)

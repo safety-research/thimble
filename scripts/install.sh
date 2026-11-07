@@ -239,23 +239,38 @@ signin() {
   "$1/scripts/thimble-browser" --setup "${args[@]}" <"$tty" | sed 's/^/  /' || true
 }
 
-# finish WHAT: the end: what is installed, how to try it (in the Claude Code session that runs the install, which sets
-# CLAUDECODE for its commands, or in a terminal), then what does not work yet. In a terminal it names the tour
-# (thimble tour, plugin/engine/kernel/tour.py); in Claude Code, Claude offers the tour itself (CLAUDE.md)
+# finish WHAT: the end: what is installed, how to try it, then what does not work yet. In the Claude Code session that
+# runs the install (it sets CLAUDECODE for its commands), the file tour-next in thimble's home names that session, and
+# thimble starts its tour there when the person's /reload-plugins loads it (plugin/tour/tour.ts). In a terminal, it
+# asks whether to take the tour now, and runs thimble tour on yes (plugin/engine/kernel/tour.py)
 finish() {
+  local tour=0 answer
   say ""
   say "$1."
   say ""
-  if [ -n "${CLAUDECODE:-}" ]; then say "Try it now: type /reload-plugins in this Claude Code session."
+  if [ -n "${CLAUDECODE:-}" ]; then
+    if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && printf '%s\n' "$CLAUDE_CODE_SESSION_ID" >"$home/tour-next" 2>/dev/null; then
+      say "Try it now: type /reload-plugins in this Claude Code session. A two-minute tour of thimble starts then."
+    else
+      say "Try it now: type /reload-plugins in this Claude Code session, then /thimble:tour for a two-minute tour."
+    fi
   else
     say "Try it now: run claude in a folder of data files."
-    say "Take the two-minute tour: run thimble tour"
+    if terminal; then tour=1; else say "Take the two-minute tour: run thimble tour"; fi
   fi
   if [ "$built" = 1 ]; then
     say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
       "it prints."
   fi
   if [ -s "$notes" ]; then say ""; cat "$notes"; fi
+  [ "$tour" = 1 ] || return 0
+  say ""
+  printf 'Take the two-minute tour now? [Y/n]: '
+  read -r answer </dev/tty || answer=n
+  case "$answer" in
+    n | N | no | No | NO) say "Take it later: run thimble tour" ;;
+    *) "$bin_dir/thimble" tour </dev/tty || true ;;
+  esac
 }
 
 main() {

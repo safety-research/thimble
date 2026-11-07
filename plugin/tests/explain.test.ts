@@ -1,6 +1,6 @@
 // The explainers and heads-ups (explain/): after the observer's look, each stands on its words in the answer as a
 // press, in the theme's teal and orange; e explains the words selected in an answer, and with Citations manual, c makes
-// them a citation. While the tour waits for its explainer step, the explainer shown sends Claude the next step, once.
+// them a citation. While the tour waits for its selection step, the explainer shown is that step done.
 // All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
@@ -19,7 +19,7 @@ import { citeBar, citeKey, citeWords } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { noteViewport } from '../cards/draw'
-import { TAG, tourDid, tourStart } from '../tour/tour'
+import { tourDid, tourNow, tourStart } from '../tour/tour'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -166,26 +166,19 @@ test('e explains the words selected in an answer, on the row the selection lies 
   setOptions({})
 })
 
-test('the tour (tour/tour.ts): while its step 1 waits, the explainer of the selected words shown sends Claude step 1 done, once', async () => {
+test('the tour (tour/tour.ts): while its selection step waits, the explainer of the selected words shown is that step done', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
   const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '' }) })
-  const sent: string[] = []
-  s.$.prompt = { submit: async (a: Any) => { sent.push(String(a.text)); return { text: a.text } } }
+  s.$.ui.place = async () => ({ isPlaced: true, requestId: 'r-made-up' })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
   await tourStart(s.$)
   await tourDid(s.$, 'answer')
-  await settle()
-  expect(sent).toEqual([`${TAG} Step 0 done. Say step 1.`])
+  expect((await tourNow(s.$))?.at).toBe('e')
   await pressE(s, { text: 'the client', requestId: 't1-row' })
   await settle()
-  expect(sent.slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`])
-  // the same explainer opened again: no second prompt
-  const again = await explainKey(s.$, 'e', 0)
-  await again?.now?.()
-  await again?.later?.()
-  await settle()
-  expect(sent.length).toBe(2)
+  expect((await tourNow(s.$))?.done).toEqual(['answer', 'e'])
+  expect((await tourNow(s.$))?.at).toBe('cite')
 })
 
 test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {

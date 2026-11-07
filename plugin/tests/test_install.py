@@ -411,17 +411,24 @@ def test_local_installs_from_the_clone_as_the_dev_install(w):
     assert not (w.th / "fixes").exists()
 
 
-def test_an_install_inside_claude_code_names_reload_plugins_and_leaves_the_tour_to_claude(w):
-    """Run by Claude in a Claude Code session (CLAUDECODE set), the end says /reload-plugins and names no thimble tour,
-    which opens a session of its own: Claude offers the tour in the session (CLAUDE.md)."""
+def test_an_install_inside_claude_code_names_reload_plugins_and_the_tour_starts_there(w):
+    """Run by Claude in a Claude Code session (CLAUDECODE set), the end says /reload-plugins and writes the session's id
+    to tour-next, so thimble starts its tour when it loads there (plugin/tour/tour.ts). Without the session's id, it
+    names /thimble:tour."""
     clone = w.home / "thimble"
     sh("git", "clone", "-q", str(w.bare), str(clone))
-    p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1")
+    p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1",
+                  CLAUDE_CODE_SESSION_ID="made-up-session")
     assert p.returncode == 0, text_of(p)
     assert before_notes(p.stdout)[-3:] == [
         "thimble is installed from your clone ~/thimble.", "",
-        "Try it now: type /reload-plugins in this Claude Code session."], p.stdout
+        "Try it now: type /reload-plugins in this Claude Code session. A two-minute tour of thimble starts then."], p.stdout
+    assert (w.th / "tour-next").read_text() == "made-up-session\n"
     assert "thimble tour" not in p.stdout
+    (w.th / "tour-next").unlink()
+    p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1")
+    assert "then /thimble:tour for a two-minute tour." in p.stdout
+    assert not (w.th / "tour-next").exists()
 
 
 # ------------------------------------------------------------------ the kernel's steps alone
