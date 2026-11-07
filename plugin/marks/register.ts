@@ -8,7 +8,8 @@
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
-//                    reload of the plugin left running (checker.ts resumeChecks)
+//                    reload of the plugin left running (checker.ts resumeChecks), and the tour hears those that gave up
+//                    (tour/tour.ts tourChecked)
 //   session.append   main's text rows, as they are stored
 //   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others); the
 //                    tour's sample answer waits for its cite step (tour/tour.ts tourHolds)
@@ -151,6 +152,8 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     try { await restoreMarks($) } catch { /* the marks of earlier replies draw failed: their check did not run */ }
     try { await resumeChecks($) } catch { /* the checks that run end as they would */ }
+    // a check that gave up as the plugin loaded can be the last result the tour's cite step waits for
+    await tourChecked($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 

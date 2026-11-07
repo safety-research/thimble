@@ -24,17 +24,17 @@
 //   v         the first card that v's designer draws is on the screen (designer/v.ts). A design that ends with no
 //             card counts too (tourMissed), so the tour goes on
 //   s         the first text of the simpler version shows (squeeze/term.ts)
-//   cite      every citation of the sample answer has its result (tourChecked, after each check ends:
-//             marks/register.ts). Until the step's key, the sample answer and the simpler version of it draw their
-//             cited words as plain words, with nothing ] reaches, and the checker holds their check (tourHolds: their
-//             marks wait `deferred`, marks/checker.ts startCheck). c at an empty prompt with no words selected
-//             (tourKey; c with words selected still cites them, marks/cite.ts), or a click on the step's line, starts
-//             the check of all its citations (marks/checker.ts waitingCheck) and asks for the sample answer in view:
-//             the person watches them appear, turn while they are checked, and land checked, the wrong number
-//             corrected. About DONE_MS after the last result, the step row is asked for in view; it counts what the
-//             check did. Claude Code moves a row of the transcript only while a hook answers the person's press, pick,
-//             prompt or command (cards/draw.ts revealCard): the click's move is one; c's, and the one after DONE_MS,
-//             may move nothing
+//   cite      every citation of the sample answer has its result (tourChecked, after each check ends, and at session
+//             start, where a check whose fork is gone gives up: marks/register.ts). Until the step's key, the sample
+//             answer and the simpler version of it draw their cited words as plain words, with nothing ] or c reaches,
+//             and the checker holds their check (tourHolds: their marks wait `deferred`, marks/checker.ts startCheck).
+//             c at an empty prompt with no words selected in another answer (tourKey; there c still cites them,
+//             marks/cite.ts), or a click on the step's line, starts the check of all its citations
+//             (marks/checker.ts waitingCheck) and asks for the sample answer in view: the person watches them appear,
+//             turn while they are checked, and land checked, the wrong number corrected. About DONE_MS after the last
+//             result, the step row is asked for in view; it counts what the check did (Claude's numbers). Claude Code
+//             moves a row of the transcript only while a hook answers the person's press, pick, prompt or command
+//             (cards/draw.ts revealCard): the click's move is one; c's, and the one after DONE_MS, may move nothing
 //
 // Citations come last, and the tour introduces them: by then the person knows the answer, so they watch thimble check
 // its numbers. The step that waits is the first one not done whose feature is on: e needs a selection, which only a
@@ -350,11 +350,12 @@ export function tourMissed($: Engine, step: Step): Promise<void> {
 // ------------------------------------------------------------------------------------------------ the cite step
 
 /** c at an empty prompt while the cite step waits for it (core/answerview.ts restoredKey asks after marks/cite.ts,
- *  so c with words selected still cites them), and a click on the step's line (this module's ui.press hook): the check
- *  of the sample answer's citations starts, its spawns first (core/forks.ts: inside the hook), each waiting out the
- *  key's word window; the sample answer draws its citations, and is asked for in view, its top at the window's top. c
- *  again while some still wait (Claude Code refused the check) asks again. A letter right after c undoes it: the check
- *  is not asked for, and the citations wait as before. Null for any other key, or while nothing waits. */
+ *  so c with words selected in another answer still cites them; the sample answer's own wait for this step), and a
+ *  click on the step's line (this module's ui.press hook): the check of the sample answer's citations starts, its
+ *  spawns first (core/forks.ts: inside the hook), each waiting out the key's word window; the sample answer draws its
+ *  citations, and is asked for in view, its top at the window's top. c again while some still wait (Claude Code refused
+ *  the check) asks again. A letter right after c undoes it: the check is not asked for, and the citations wait as
+ *  before. Null for any other key, or while nothing waits. */
 export async function tourKey($: Engine, key: string, until: number): Promise<Take | null> {
   if (key !== CHECK_KEY) return null
   const t = await tourNow($)
@@ -387,9 +388,10 @@ function checkStarted($: Engine, at: number | null): Promise<void> {
   })
 }
 
-/** A check of citations ended (marks/register.ts, after endCheck and after autoRepair): once each citation of the
- *  sample answer has its result (none checked now, none waiting, none that autoRepair has yet to repair), the cite step
- *  is done, with what the check did, and DONE_MS later the view goes to the step row. */
+/** A check of citations ended (marks/register.ts, after endCheck and after autoRepair, and at session start after
+ *  resumeChecks): once each citation of the sample answer has its result (none checked now, none waiting, none that
+ *  autoRepair has yet to repair), the cite step is done, with what the check did (Claude's numbers), and DONE_MS later
+ *  the view goes to the step row. */
 export function tourChecked($: Engine): Promise<void> {
   return inTurn(async () => {
     const t = await tourNow($)
@@ -397,7 +399,9 @@ export function tourChecked($: Engine): Promise<void> {
     const key = await replyKeyOf($, t.sample)
     const items = key ? (await replyOf($, key))?.items ?? [] : []
     if (!key || !items.length || items.some(m => m.status === 'checking' || m.status === 'deferred') || repairsDue(key)) return
-    const checked: Checked = { n: items.length, corrected: items.filter(m => m.status === 'corrected').length, failed: items.filter(m => m.status === 'failed').length }
+    // Claude's numbers alone (not words the person cited), and a narrowing changes no value (designer/v.ts checkedSince)
+    const own = items.filter(m => !m.asked)
+    const checked: Checked = { n: own.length, corrected: own.filter(m => m.status === 'corrected' && !m.narrowed).length, failed: own.filter(m => m.status === 'failed').length }
     await goOn($, { ...t, checked }, [...t.done, 'cite'], t.missed)
     const startedAt = t.startedAt
     $.clock.after(DONE_MS, () => { void showStepRow($, startedAt).catch(() => undefined) })
