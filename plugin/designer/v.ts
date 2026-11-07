@@ -3,15 +3,16 @@
 // with the `card` tool and fixes it from the card's text copy. Its cards draw under the answer v was pressed on; the
 // busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
 // main, but main reads the cards it drew
-// with the person's next prompt. Its first card on the screen is a step of the tour done (tour/tour.ts).
+// with the person's next prompt. Its first card on the screen is a step of the tour done (tour/tour.ts), and a design
+// that ends with no card lets the tour go on.
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
 // "very"). The fork is spawned inside the keys' prompt.edit hook, so Claude Code skips only that hook for the fork and
 // this plugin's other hooks serve it (its card calls, its end). This module's agent.spawn hook holds the spawn until the
 // word window closes, and refuses it when a letter came: so a word typed after v starts nothing at all.
 //
-// v starts a design only when there is an answer to draw (main's last text row, as session.append stored it), main is
-// not working, Cards is on, and no other design runs. Otherwise v types as any letter. A design whose fork Claude Code
+// v starts a design only when there is an answer to draw (main's last text row, as session.append stored it, in a turn
+// that answers something: core/answers.ts answersNothing), main is not working, Cards is on, and no other design runs. Otherwise v types as any letter. A design whose fork Claude Code
 // no longer runs (its end was missed, say in a reload of the plugin) ends as failed: at session start, with a notice,
 // and when v is pressed again.
 //
@@ -30,19 +31,20 @@ import type { EngineInterface, Register } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText } from '../cards/draw'
-import { anchoredAt, type CardMeta, inTemp, metaOf } from '../cards/store'
+import { anchoredAt, callOf, type CardMeta, inTemp, metaOf } from '../cards/store'
+import { answersNothing } from '../core/answers'
 import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut, cutWords, fenced } from '../core/text.js'
-import { mainRuns } from '../core/turn'
+import { mainRuns, mainTurn } from '../core/turn'
 import { plainSentence } from '../marks/message.js'
 import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
-import { tourDid } from '../tour/tour'
+import { tourDid, tourMissed } from '../tour/tour'
 
 type Engine = EngineInterface
 
@@ -167,14 +169,29 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
   try {
     const r = await spawnFork($, { kind: 'designer', prompt, description: DESCRIPTION })
     if (d.status === 'cancelled') return
-    if (!r.agentId) return await end($, d, 'failed', `× v could not start drawing a card: ${cut(r.deny || 'Claude Code started no agent', 200)}`)
+    if (!r.agentId) { await end($, d, 'failed', `× v could not start drawing a card: ${cut(r.deny || 'Claude Code started no agent', 200)}`); return missed($) }
     d.agentId = r.agentId
     d.status = 'running'
     await save($, d)
     await busyWhile($, 'drawing a card', () => designStep($, d))
   } catch (err) {
     await end($, d, 'failed', `× v could not start drawing a card: ${reason(err)}`)
+    missed($)
   }
+}
+
+/** A design the person started ended with no card: the tour, when it waits for v, goes on (tour/tour.ts). */
+function missed($: Engine): void {
+  void tourMissed($, 'v').catch(() => undefined)
+}
+
+/** Whether the card call stored a version that is on the screen now: a call that did not draw answers with words
+ *  only (cards/tool.ts failed), and its card keeps the call with its error. */
+async function drewCard($: Engine, toolUseId: string): Promise<boolean> {
+  const id = toolUseId ? await callOf($, toolUseId) : null
+  const meta = id ? await metaOf($, id) : null
+  const call = meta?.calls?.[toolUseId]
+  return !!meta && meta.version > 0 && !!call && !call.error && call.version > 0
 }
 
 /** The fork ended: main reads the cards it drew, or the person reads why it drew none. */
@@ -286,6 +303,9 @@ export const registerDesigner: Register = on => {
     const r = await next(e)
     const synthetic = e.origin.kind === 'model' && e.origin.model === '<synthetic>'
     if (e.agentId === undefined && !synthetic && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
+      // a row of a turn that answers nothing (a step of the tour) is not the answer v draws under
+      const turnId = await mainTurn($).catch(() => '')
+      if (turnId && (await answersNothing($, turnId).catch(() => false))) return r
       void $.state.set(ANSWER, r.uuid).catch(() => undefined)
       void writeKept($, ANSWER_FILE, { row: r.uuid }).catch(() => undefined)
     }
@@ -301,18 +321,22 @@ export const registerDesigner: Register = on => {
       } catch (err) {
         await end($, d, 'failed', `× v could not finish the card: ${reason(err)}`)
       }
+      if (d.status === 'failed') missed($)
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder. A card it drew is a step
-  // of the tour done (tour/tour.ts), once it is on the screen
+  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder. A card call that drew a
+  // version on the screen is a step of the tour done (tour/tour.ts); one that did not draw is not
   on('tool.call', { agentId: /\S/ }, async ($, e, next) => {
     if (forkOf(e.agentId)?.kind !== 'designer') return next(e)
     const no = await denial($, e as never)
     if (no) return { deny: no }
     const r = await next(e)
-    if (String(e.tool) === CARD_TOOL && !('deny' in r && r.deny !== undefined) && !r.isError) void tourDid($, 'v').catch(() => undefined)
+    if (String(e.tool) === CARD_TOOL && !('deny' in r && r.deny !== undefined) && !r.isError) {
+      const toolUseId = String((e as { tool_use_id?: unknown }).tool_use_id ?? '')
+      void drewCard($, toolUseId).then(ok => (ok ? tourDid($, 'v') : undefined)).catch(() => undefined)
+    }
     return r
   }).catch(($, e, next) => (next.called ? next(e) : forkOf(e.agentId)?.kind === 'designer' ? { deny: "thimble could not check this call of the card's copy" } : next(e)))
 

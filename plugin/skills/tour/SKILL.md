@@ -5,25 +5,29 @@ description: A two-minute tour of thimble on made-up sample data, in this conver
 
 You give the person a short tour of thimble. Say each step's words exactly as written below, one step per message, and nothing else: no greeting, no summary, no comment on thimble's reports. Call no tool to say a step.
 
-The sample data is ${CLAUDE_PLUGIN_ROOT}/tour/sample/orders.csv: one row per order of Fernhill Tea, a made-up online tea shop, in March 2026. The answer in step 1 is fixed, so do not read the file for it. One number in that answer is wrong on purpose. Do not correct it.
+The sample data is ${CLAUDE_PLUGIN_ROOT}/tour/sample/orders.csv: one row per order of Fernhill Tea, a made-up online tea shop, in March 2026. Step 0 is a fixed answer about it. One number in that answer is wrong on purpose, so that the person sees thimble check it. These two rules are for your own messages only: do not read the file to write step 0, and do not correct the wrong number in your messages. thimble's checker reads the file, checks each cited number, and corrects the wrong one.
 
-thimble sees what the person does. When they did a step, a prompt from thimble that starts with "(thimble tour)" names the step to say next. Say that step at once. When the person writes something else, answer in one or two short sentences, then say the step you said last again.
+thimble sees what the person does. When a step is done, a prompt from thimble that starts with "(thimble tour)" names the step to say next. Say that step at once. When the person writes something else, answer in one or two short sentences, then say the step you said last again.
 
-## Step 1
+## Step 0
 
 Say it now. Your message is the text between the two lines of dashes, word for word, without the dashes.
 
 ----------
-One number below is wrong on purpose: watch thimble check it.
-
 **Fernhill Tea's orders in March 2026** (`orders.csv`)
 
-Fernhill Tea, a small online tea shop, refunded [7 orders](#) in March 2026, and [6 orders](#) arrived late. Most of the late ones went by Parcelo, one of the shop's two carriers.
+Customers of Fernhill Tea, a small online tea shop, placed [36 orders](#) in March 2026, worth [$1,872](#) in all. That is an average order value of [$52](#).
 
-Customers placed [36 orders](#) in all, worth [$1,872](#). That is an average order value of [$52](#). Most orders were for loose-leaf tins, and the rest were gift boxes and samplers. The North region placed the most orders, [14 of the 36](#).
+The North region placed the most orders, [14 of the 36](#). The South came second, and the East and the West placed fewer. Loose-leaf tins were most of the orders. Gift boxes and samplers made up the rest.
 
-Press v to draw a card of this answer.
+Two carriers shipped the orders. Parcelo shipped most of them, and Swiftbox shipped the rest. [6 orders](#) arrived late, and most of the late ones went by Parcelo.
+
+The shop refunded [7 orders](#). Most of the refunded orders arrived on time, so late delivery does not explain the refunds.
 ----------
+
+## Step 1
+
+One number in the answer above is wrong on purpose: watch thimble check it. Press v to draw a card of the answer.
 
 ## Step 2
 
@@ -31,11 +35,11 @@ Select the words “average order value” in the answer with the mouse, then pr
 
 ## Step 3
 
-thimble checks each underlined number against the data. Click the number of refunded orders to see its check.
+The number of refunded orders was wrong on purpose. Click it to see thimble's check.
 
 ## Step 3k
 
-thimble checks each underlined number against the data. Press ] until the tray above the prompt shows the number of refunded orders and its check.
+The number of refunded orders was wrong on purpose. Press ] until the tray above the prompt shows that number and its check.
 
 ## Step 4
 
@@ -44,3 +48,7 @@ Press s for a shorter, plainer version of the answer.
 ## Step 5
 
 The tour is over. For thimble's settings, click thimble on the bar or type /thimble-settings.
+
+## Step 5k
+
+The tour is over. For thimble's settings, type /thimble-settings.

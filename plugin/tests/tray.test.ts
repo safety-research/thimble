@@ -141,14 +141,17 @@ test("the tour (tour/tour.ts): while its citation step waits, ] on a citation se
   const { submitted, clock } = await resumed($, on, QUOTED)
   const tour = () => submitted.map(e => String(e.text)).filter(t => t.startsWith('(thimble tour)'))
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  // the turn that said step 1 ends: Cards and Explainers are off, so the tour goes on to the citation step
+  // the turn that writes the sample answer ends: Cards and Explainers are off, so the tour goes on to the citation step
   await $.turn.start({ text: '<command-name>/thimble:tour</command-name>', turnId: 't2' } as never)
-  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: '', durationMs: 10, isAborted: false } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'A made-up sample answer.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t2' } as never)
+  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: 'A made-up sample answer.', durationMs: 10, isAborted: false } as never)
   await clock.advance(100)
-  expect(tour()).toEqual(['(thimble tour) Step 1 is off in the settings. Say step 3.'])
+  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 3.'])
+  // { picks the answer with the citation; ] opens it
+  await $.prompt.edit(key('{'))
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(10)
-  expect(tour()).toEqual(['(thimble tour) Step 1 is off in the settings. Say step 3.', '(thimble tour) Step 3 done. Say step 4.'])
+  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 3.', '(thimble tour) Step 3 done. Say step 4.'])
   // the same citation opened again: no second prompt
   await $.prompt.edit(key('0'))
   await $.prompt.edit(key(']'))
