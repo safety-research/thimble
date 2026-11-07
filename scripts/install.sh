@@ -82,10 +82,14 @@ unpack() {
 'safe = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}; t.extractall(sys.argv[2], m, **safe); '\
 'print(*top)' "$1" "$2")
 }
-# newest: the newest release's tag, from where GitHub's page of the latest release points, which reads no file
+# newest: the newest release's tag in $ref, from where GitHub's page of the latest release points, which reads no file;
+# '' when it names none, with the HTTP status of GitHub's answer in $status (curl ends well on a 503, once its tries
+# are over)
 newest() {
-  web -o /dev/null -w '%{redirect_url}' --max-time 60 "$releases/releases/latest" |
-    sed -n 's|.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p'
+  local got
+  got="$(web -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 60 "$releases/releases/latest")" || got=""
+  status="${got%% *}"
+  ref="$(printf '%s\n' "${got#* }" | sed -n 's|.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p')"
 }
 
 # ver_ge HAVE WANT: whether the version HAVE is WANT or later, comparing up to three dotted numbers
@@ -402,11 +406,12 @@ main() {
   if [ -n "$asked" ]; then
     ref="$asked"
   else
-    ref="$(newest)" || ref=""
+    newest
     if [ -z "$ref" ]; then
+      say ""
       printf 'Downloading thimble into %s...' "$(tilde "$home")"
       why="$(why_curl)"
-      failed "${why:-https://github.com/safety-research/thimble has no release}" \
+      failed "${why:-thimble found no release at $releases (GitHub answered ${status:-nothing})}" \
         "Check the network, then run the install again."
     fi
   fi

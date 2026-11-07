@@ -458,11 +458,20 @@ def test_a_release_file_that_is_missing_broken_or_out_of_reach_says_what_to_do_a
         "link or a path out of its folder.",
         f"Report it at {issues}. Nothing was installed."], text_of(p)
     nothing_installed(w)
+    # GitHub's page of the latest release answers 503, which curl tries again, then takes for an answer
+    w.gh.refuse(503)
+    p = w.install("--no-browser")
+    assert p.returncode == 1 and p.stdout.splitlines()[-4:] == [
+        "  Node.js 22.20.0, Python " + ".".join(map(str, sys.version_info[:3])) + ", git "
+        f"{sh('git', '--version').split()[2]}, Claude Code 2.1.316: all here.", "",
+        f"Downloading thimble into ~/.thimble... failed: thimble found no release at {w.gh.url} (GitHub answered 503).",
+        "Check the network, then run the install again. Nothing was installed."], text_of(p)
+    nothing_installed(w)
     w.gh.stop()
     p = w.install("--no-browser")
     lines = p.stdout.splitlines()
     assert p.returncode == 1 and lines[-2].startswith("Downloading thimble into ~/.thimble... failed: ") and \
-        "curl" not in lines[-2], text_of(p)
+        "curl" not in lines[-2] and lines[-3] == "", text_of(p)
     assert lines[-1] == "Check the network, then run the install again. Nothing was installed."
     nothing_installed(w)
 

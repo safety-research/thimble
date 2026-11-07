@@ -111,7 +111,7 @@ def newest(then: str = "run thimble update again") -> str:
                           then, 60).partition(" ")
     m = re.search(r"/releases/tag/(v\d+\.\d+\.\d+)$", to.strip())
     if not m:
-        raise FX.FixError(f"{base()} names no release (GitHub answered {status or 'nothing'}); {then}")
+        raise FX.FixError(f"thimble found no release at {base()} (GitHub answered {status or 'nothing'}); {then}")
     return m.group(1)
 
 

@@ -183,7 +183,7 @@ def test_newest_reads_where_the_latest_release_page_points_and_downloads_nothing
     (gh.root / "latest").unlink()
     with pytest.raises(FX.FixError) as e:
         R.newest("run the install again")
-    assert str(e.value) == f"{gh.url} names no release (GitHub answered 404); run the install again"
+    assert str(e.value) == f"thimble found no release at {gh.url} (GitHub answered 404); run the install again"
 
 
 def test_download_checks_the_file_against_its_sha256sums_and_each_failure_says_what_to_do(tmp_path, gh, monkeypatch):

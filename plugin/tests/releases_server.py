@@ -11,8 +11,9 @@ plain http, as GitHub answers:
 It serves the folder `root`: <root>/<tag>/ holds a release's files, <root>/latest names the newest release, and each
 request is a line of <root>/requests.log ("GET /releases/latest"), so a test can count what was downloaded.
 publish(repo, tag) builds a release's two files with scripts/release-file.sh, the build a release's Action runs, and
-makes it the newest; drop(tag) takes them away; spoil(tag) changes its file's bytes while SHA256SUMS stays; stop() ends
-the server, so that a request finds nothing listening.
+makes it the newest; drop(tag) takes them away; spoil(tag) changes its file's bytes while SHA256SUMS stays; refuse(code)
+has the page of the latest release answer with that status (503, as when GitHub is down); stop() ends the server, so
+that a request finds nothing listening.
 
 Run as a script, it does the same from a shell, for a test by hand (python3 releases_server.py --help)."""
 from __future__ import annotations
@@ -52,6 +53,13 @@ def spoil(root: Path, tag: str) -> None:
         f.write_bytes(f.read_bytes() + b"made-up bytes")
 
 
+def refuse(root: Path, code: int) -> None:
+    """The page of the latest release answers with the status `code` from now on (0: as before)."""
+    (root / "latest-status").unlink(missing_ok=True)
+    if code:
+        (root / "latest-status").write_text(f"{code}\n")
+
+
 class Handler(BaseHTTPRequestHandler):
     server: "Server"
 
@@ -78,6 +86,9 @@ class Handler(BaseHTTPRequestHandler):
                 f.write(f"{self.command} {path}\n")
         here = f"http://127.0.0.1:{srv.server_address[1]}"
         if path == "/releases/latest":
+            refused = srv.root / "latest-status"
+            if refused.is_file():
+                return self.send(int(refused.read_text().strip()))
             latest = srv.root / "latest"
             tag = latest.read_text().strip() if latest.is_file() else ""
             return self.send(302, b"", f"{here}/releases/tag/{tag}") if tag else self.send(404)
@@ -129,6 +140,9 @@ class Releases:
     def spoil(self, tag: str) -> None:
         spoil(self.root, tag)
 
+    def refuse(self, code: int) -> None:
+        refuse(self.root, code)
+
     def stop(self) -> None:
         if not self.stopped:
             self.stopped = True
@@ -160,6 +174,8 @@ def main() -> int:
     p.add_argument("--not-latest", action="store_true", help="leave the newest release as it is")
     for name, text in (("drop", "take a release's files away"), ("spoil", "change a release file's bytes")):
         sub.add_parser(name, help=text).add_argument("tag")
+    sub.add_parser("refuse", help="have the page of the latest release answer with this status (0: as before)"
+                   ).add_argument("code", type=int)
     a = ap.parse_args()
     a.root.mkdir(parents=True, exist_ok=True)
     if a.what == "serve":
@@ -174,6 +190,8 @@ def main() -> int:
         print(publish(a.root, a.repo, a.tag, not a.not_latest))
     elif a.what == "drop":
         drop(a.root, a.tag)
+    elif a.what == "refuse":
+        refuse(a.root, a.code)
     else:
         spoil(a.root, a.tag)
     return 0
