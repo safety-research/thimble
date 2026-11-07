@@ -155,7 +155,7 @@ export const END = (clicks: boolean): string[] => [
 ]
 
 /** The words of the sample answer that step e names. */
-export const E_WORDS = 'average order value'
+export const E_WORDS = 'loose-leaf tins'
 
 /** One step's action while it waits: its words, with each key as `{k}` and words drawn bold as `**words**`. v, s and
  *  cite name the answer they act on, since the row can stand under a reply to the person's own prompt. `checking`: the

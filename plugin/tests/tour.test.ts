@@ -121,7 +121,7 @@ test("while e waits its words shimmer in the sample answer: a band moves across 
   setOptions({})
   noteViewport({ isFullscreen: true })
   const { $, timers, tick } = fake()
-  const text = 'Customers placed [36 orders](#). That is an average order value of [$52](#). The shop refunded [7 orders](#).'
+  const text = 'Customers placed [36 orders](#). Most were loose-leaf tins, worth [$52](#). The shop refunded [7 orders](#).'
   const words = (s: Any[]) => s.map(x => text.slice(x.start, x.end)).join('')
   const band = (s: Any[]) => s.filter(x => x.look.color !== accent()).map(x => text.slice(x.start, x.end))
   await tourStart($)
@@ -308,7 +308,7 @@ test("the sample answer's check is held until c: then each citation is checked a
   noteViewport({ isFullscreen: true })
   try {
     const { $, spawned } = checking()
-    const text = 'Customers placed [36 orders](#) in March 2026. That is an average order value of [$52](#). The shop refunded [7 orders](#).'
+    const text = 'Customers placed [36 orders](#) in March 2026. Most were loose-leaf tins, worth [$52](#). The shop refunded [7 orders](#).'
     const statuses = async () => ((await rowMarks($, 'row-sample'))?.items ?? []).map(m => `${m.shown}:${m.status}`)
     await tourStart($)
     // the turn that writes the sample answer ends: its check is held, its citations wait
@@ -392,8 +392,8 @@ test('the step row counts the steps it shows, names the words of e in bold and i
   // e waits: its words bold, in the default color; its key in thimble's color; the line itself not bold
   const e = row(at('e', ['answer']))
   expect(textOf(e)).toContain('thimble tour · 1 of 4')
-  expect(textOf(e)).toContain('› Highlight average order value in the answer above, then press e.')
-  const bold = nodes(e).find(n => n.type === 'Text' && n.props?.children === 'average order value')
+  expect(textOf(e)).toContain('› Highlight loose-leaf tins in the answer above, then press e.')
+  const bold = nodes(e).find(n => n.type === 'Text' && n.props?.children === 'loose-leaf tins')
   expect(bold?.props).toMatchObject({ bold: true })
   expect(bold?.props?.color).toBeUndefined()
   expect(nodes(e).find(n => n.type === 'Text' && n.props?.children === 'e')?.props).toMatchObject({ bold: true })
@@ -618,7 +618,7 @@ test('in a session: before the cite step, c on words selected in the sample answ
   const t = await session($, on)
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  expect(textOf(await drawnAnswer($, 'row-t1', SAMPLE))).toContain('Highlight average order value in the answer above, then press e.')
+  expect(textOf(await drawnAnswer($, 'row-t1', SAMPLE))).toContain('Highlight loose-leaf tins in the answer above, then press e.')
   expect(await t.press('c')).toEqual({ text: 'c', cursor: 1 })
   await t.clock.advance(1000)
   expect(t.spawns).toEqual([])
