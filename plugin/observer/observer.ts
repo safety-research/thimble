@@ -151,7 +151,7 @@ async function coverageNow($: Engine): Promise<string> {
 }
 
 /** The keys above the analyst's prompt, as the features leave them. */
-const rowKeys = () => [['cards', 'v visualize'], ['squeezeAnswers', 's rewrite'], ['claims', 'w claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
+const rowKeys = () => [['cards', 'v visualize'], ['squeezeAnswers', 's simplify'], ['claims', 'w claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
 
 /** The look's step on the bar's busy line: `adding explainers, details, claims`. */
 export function lookWord(lenses: string[]): string {

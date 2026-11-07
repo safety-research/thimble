@@ -9,15 +9,19 @@
 //   a chip the person typed, after +: their own words ("for my manager", "more skeptical", "as a timeline",
 //                       "engineer → manager"), as written · a little · more · fully. The original stands at as written.
 // Each level is defined once, here (MEANS), and the request carries only the definition of the level picked (pickLine).
-// A message arrives as Claude wrote it; the chips rewrite it on demand. Every chip counts in every rewrite: one
-// $.model.complete call writes the message at all the chips' levels at once, and each version written is kept, so a
-// state seen before comes back with no call.
+// A message arrives as Claude wrote it. Every chip counts in every rewrite: one $.model.complete call writes the
+// message at all the chips' levels at once, and each version written is kept, so a state seen before comes back with
+// no call.
 //
 // A catch-up is a message of its own that the chips write of several of Claude's messages: all of them since the
 // person's last prompt, when replies piled up (term.ts). Its record is a message's record with `catchup` set; its text
 // (the original) is the messages as written, one after another (catchUpText); the request names them as several
 // messages to catch the person up on (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
 // which still show above it, so it never shows its original: 0 dismisses it.
+// A simpler version (s) is a catch-up of one message, the latest answer, with `catchup.kind` 'simplify': the request
+// names one message to make simpler (SIMPLIFY_HEAD), and it arrives at Length short and Background learning
+// (SIMPLIFY_AT). It stands below the answer as a catch-up does, and its chips change it. A message's own versions,
+// rewritten in place, are what s did before 0.10.12: a resumed session's records still hold and draw them.
 //
 // The chips belong to the whole answer: its text and the cards drawn in its turn. The request shows the original's
 // cards (cardsBlock: each card's title, columns, first rows, what it draws and its
@@ -271,12 +275,20 @@ export function pickLine(c, m = {}) {
 /** The line that heads the original in a catch-up's request: several messages, written as one. */
 export const CATCHUP_HEAD = "The original answer: Claude's messages since the analyst's last prompt, in the order it wrote them. The analyst knows the conversation as it was before them. Write one message that catches them up."
 
+/** The line that heads the original in a simpler version's request: one message, made simpler. */
+export const SIMPLIFY_HEAD = 'The original answer, as Claude wrote it. Write one simpler message of it, for an analyst who found it long or hard to follow. It stands below the original, which stays on the screen.'
+
+/** The levels a simpler version arrives at: Length short, Background learning. */
+export const SIMPLIFY_AT = Object.freeze({ length: 0, familiarity: 1 })
+
 /** A catch-up's original: Claude's messages, in order, one after another. */
 export const catchUpText = texts => (texts || []).map(t => String(t || '').trim()).filter(Boolean).join('\n\n---\n\n')
 
 /** Whether a record is a catch-up, and one that still stands (not dismissed). */
 export const isCatchUp = rec => !!(rec && rec.catchup && typeof rec.catchup === 'object')
 export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
+/** Whether a record is a simpler version of one answer (s): a catch-up of that one message. */
+export const isSimplify = rec => isCatchUp(rec) && rec.catchup.kind === 'simplify'
 
 /**
  * The $.model.complete request that writes the message at its chips' levels: the input (the question, the original,
@@ -295,7 +307,7 @@ export function request(rec, { system, toolkit = '', question = '', chips = chip
   const head = [
     question ? `The analyst asked: ${question.trim().slice(0, 2000)}` : 'The analyst\'s question is not known.',
     '',
-    isCatchUp(rec) ? CATCHUP_HEAD : 'The original answer, as Claude wrote it:',
+    isSimplify(rec) ? SIMPLIFY_HEAD : isCatchUp(rec) ? CATCHUP_HEAD : 'The original answer, as Claude wrote it:',
     '<original>',
     String(rec?.text ?? ''),
     '</original>',
@@ -797,7 +809,7 @@ export function shownKey(rec) {
 /**
  * What Claude reads beside the person's next prompt (core/tell.ts), once the person settled on a version of its
  * message: the version they read, whole, so a later turn knows what
- * they saw. A catch-up names the replies it stands in for. `told` says the version Claude was told of before: going
+ * they saw. A catch-up names the replies it stands in for, and a simpler version the message it stands below. `told` says the version Claude was told of before: going
  * back to the original is said only after a version was told. Empty when there is nothing new to say.
  */
 export function settledNote(rec, told = 'orig') {
@@ -807,6 +819,11 @@ export function settledNote(rec, told = 'orig') {
   const did = cardsDid(rec)
   const cards = did.length ? `\n\nIts cards changed with it: ${did.map(d => `"${d.title}" (${d.id}) ${d.did}${d.did === 'edited' ? `, now version ${d.v}` : ''}`).join('; ')}.` : ''
   const asWere = sq(rec).cards ? ', with its cards as they were' : ''
+  if (isSimplify(rec)) {
+    const which = `your message ("${firstWordsOf(rec.text)}")`
+    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst closed the simpler version of ${which}; it shows as you wrote it${asWere}.`
+    return `Below ${which}, which still shows as you wrote it, the analyst read a simpler version of it that the squeeze chips wrote${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}`
+  }
   if (isCatchUp(rec)) {
     const n = Number(rec.catchup.replies) || 0
     const of = n === 1 ? 'reply' : `${n} replies`

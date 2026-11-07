@@ -21,8 +21,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
       if (s.choices) assert.deepEqual(Object.keys(s.says), s.choices)
     }
     for (const [k, f] of Object.entries({ ...RETIRED, ...DEFAULTS_FIELD })) assert.deepEqual(manifest.userConfig[k], f)
-    // the person reads Squeeze as Rewrite, and Claims by its name; the keys stay, so a saved setting still applies
-    assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Rewrite')
+    // the person reads Squeeze as Simplify, and Claims by its name; the keys stay, so a saved setting still applies
+    assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Simplify')
     assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Claims')
     assert.deepEqual(SWITCHES.find(s => s.key === 'claimsMode').choices, ['auto', 'on demand', 'off'])
   }
@@ -154,7 +154,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({})
   }
   // Minimal is a preset: its modes (PRESET) keep Claude citing, each citation verified when it is opened, and the
-  // explainers and heads-ups in the look after each reply; Cards on demand; Rewrite, Catch-up and the session-wide
+  // explainers and heads-ups in the look after each reply; Cards on demand; Simplify, Catch-up and the session-wide
   // panes (Claims, Labels, Coverage) off. Explainers and Heads-ups saved as the switches they were read as auto (on)
   // and off (off)
   {

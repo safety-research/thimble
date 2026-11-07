@@ -40,7 +40,7 @@ export async function howTo($: Engine, feature: string, text: string, about?: st
 export const REMINDERS: { feature: string; on: () => boolean; text: string }[] = [
   { feature: 'explain', on: () => choiceOf('explain') === 'on demand', text: 'select a passage in an answer and press e to explain it.' },
   { feature: 'cite', on: () => choiceOf('citations') === 'manual', text: 'select a passage in an answer and press c to verify the claim.' },
-  { feature: 'rewrite', on: () => featureOn('squeezeAnswers') === true, text: 'press s to rewrite the last answer shorter or longer, more novice or more expert.' },
+  { feature: 'rewrite', on: () => featureOn('squeezeAnswers') === true, text: 'press s for a shorter, plainer version of the last answer.' },
 ]
 
 /** The end of one of main's answers: one reminder, of the first feature waiting to be asked that the session has

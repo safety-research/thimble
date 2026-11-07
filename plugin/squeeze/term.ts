@@ -1,18 +1,20 @@
-// term.ts: Squeeze in the terminal: the records of the versions the chips wrote, the one call per change that rewrites
-// an answer in place, the new text writing itself in from the top, the catch-up of replies that piled up, and what
-// Claude hears of the version the person settled on. The chips themselves, their keys and their drawing, are
-// draw.ts's; the seam (seam.ts) hands it to the hosts.
+// term.ts: Squeeze in the terminal: the records of the versions the chips wrote, the one call per change that writes
+// a version, the new text writing itself in from the top, the simpler version of an answer (s), the catch-up of
+// replies that piled up (b), and what Claude hears of the version the person settled on. The chips themselves, their
+// keys and their drawing, are ui.ts's; the seam (seam.ts) hands it to the hosts.
 //
 // A record is a message's own (its id is the row) or a catch-up's (its id is `<host row>#cu`, kept on the newest of
-// the replies it covers). Both live in the message's part `squeeze` (core/answers.ts setPart), which a resumed session
+// the replies it covers). A simpler version is a catch-up of one message, with `catchup.kind` 'simplify' (simplify).
+// A message's own record holds the versions s rewrote in place before 0.10.12, which a resumed session still draws;
+// s no longer writes one. Both live in the message's part `squeeze` (core/answers.ts setPart), which a resumed session
 // reads back with its turn:
 //   {own: {shown, squeeze}, cu: {text, at, shown, squeeze, catchup}, inCatchUp: <host row>}
 // chips.mjs says the fields. While a change is on its way, the module's state says where the chips go (want), and a
 // failed call says why (error).
 //
 // A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
-// recorded in the session's events with the prompt it used (telemetry `squeeze`, the bar's busy line `rewriting` or
-// `writing a catch-up`); `shown` holds the result; a state seen before comes back from the record with no call. A call
+// recorded in the session's events with the prompt it used (telemetry `squeeze`, with `simplify` for a simpler
+// version; the bar's busy line `simplifying`, `writing a catch-up` or `rewriting`); `shown` holds the result; a state seen before comes back from the record with no call. A call
 // waits 1 s after the last change (settings.json settleMs), and one record has one call at a time: a change while a
 // call runs stops that call, and the rewrite starts over at the new levels once the wait after the change ends. While a
 // call runs the old text dims; when the new text is there it writes itself in from the top at a model's pace.
@@ -41,8 +43,8 @@ import { tracked } from '../telemetry/telemetry'
 import { trayOffRow } from '../tray/seam'
 import { answerCards, applyCards, placeCatchUpCards, showCards, type Answer } from './cards'
 import {
-  ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
-  fromVersions, isOriginal, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
+  ARRIVE, SCALE, SIMPLIFY_AT, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
+  fromVersions, isOriginal, isSimplify, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
   setWords, settledNote, shownKey, termsOf,
 } from './chips.mjs'
 
@@ -51,7 +53,9 @@ type Engine = EngineInterface
 type Any = any
 type At = Record<string, number>
 
-export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean }
+/** A catch-up's own fields; `kind` 'simplify': a simpler version of the one message in `rows` (s), not a catch-up of
+ *  replies that piled up. */
+export type CatchUp = { host: string; rows: string[]; replies: number; question: string; prompt: string | null; dismissed?: boolean; kind?: 'simplify' }
 /** A record the chips act on: a message's own (`id` = its row) or a catch-up's (`id` = `<host>#cu`). */
 export type Rec = { id: string; row: string; text: string; at: string; shown: string | null; squeeze: Any; catchup?: CatchUp }
 /** A message's part `squeeze`. */
@@ -133,9 +137,9 @@ export const running = (id: string) => inflight.has(id)
 
 // ------------------------------------------------------------------------------------------------ the rewrite
 
-/** What a failed rewrite says: what failed and why, then the key that tries again. */
-export function failedWords(why: string, key?: string | null): string {
-  return `The rewrite failed: ${why}. ${key ? `Press ${key} to try again` : 'Pick the level again to try again'}`
+/** What a failed rewrite says: what failed (`what`) and why, then the key that tries again. */
+export function failedWords(why: string, key?: string | null, what = 'The rewrite'): string {
+  return `${what} failed: ${why}. ${key ? `Press ${key} to try again` : 'Pick the level again to try again'}`
 }
 
 /** Where the chips of a record go, said at once (the chips read it), before the rewrite is asked: a key pressed right
@@ -247,6 +251,8 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const original = await originalOf($, rec).catch(() => rec.text)
   const probe: Rec = { ...rec, text: original, squeeze: { ...s, at: want.at, scale: SCALE } }
   const stale = () => latest.get(id) !== gen
+  const simple = isSimplify(rec)
+  const failed = (why: string) => failedWords(why, want.key, simple ? 'The simpler version' : 'The rewrite')
   revealing.delete(id)
   await setUi($, id, { running: { since: Number(await $.clock.now()) }, error: null, reveal: null })
   const rows = rec.catchup ? [...rec.catchup.rows] : [rec.row]
@@ -274,20 +280,20 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const stop = new AbortController()
   stops.set(id, stop)
   const t0 = Number(await $.clock.now())
-  const r = await tracked($, { feature: 'squeeze', prompt: 'squeeze', model: req.model, doing: rec.catchup ? 'writing a catch-up' : 'rewriting', extra: { row: rec.row, key: keyWords, ...(answer ? { cards: answer.cards.length } : {}) } }, () => Promise.race([$.model.complete(req as Any, { signal: stop.signal }), stopped(stop.signal)]))
+  const r = await tracked($, { feature: 'squeeze', prompt: 'squeeze', model: req.model, doing: simple ? 'simplifying' : rec.catchup ? 'writing a catch-up' : 'rewriting', extra: { row: rec.row, key: keyWords, ...(simple ? { simplify: true } : {}), ...(answer ? { cards: answer.cards.length } : {}) } }, () => Promise.race([$.model.complete(req as Any, { signal: stop.signal }), stopped(stop.signal)]))
   if (stops.get(id) === stop) stops.delete(id)
   const ms = Number(await $.clock.now()) - t0
   // a later change came while it ran, and stopped it: its result is not shown (the latest change makes its own call)
   if (stale()) { await log($, { row: id, ok: r.isAnswered, dropped: 'a later change came', ms }); return }
   if (!r.isAnswered) {
     const why = modelWhy(r)
-    await setUi($, id, { error: failedWords(why, want.key) })
+    await setUi($, id, { error: failed(why) })
     await log($, { row: id, ok: false, why, reason: r.reason, ms })
     return
   }
   const reply = readReply(r.text)
   if (!reply.text.trim()) {
-    await setUi($, id, { error: failedWords('the model wrote no text', want.key) })
+    await setUi($, id, { error: failed('the model wrote no text') })
     return
   }
   // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
@@ -326,7 +332,7 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
     row: id, ok: true, ms, model: req.model, effort: req.effort, prompt: 'squeeze', usage: (r as Any).usage, key: keyWords, problems: checked.problems,
     rows: rowsOf(placed.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
     ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}),
-    ...(terms.length ? { terms: terms.length } : {}), ...(placed.left.length ? { card_lines_left_out: placed.left } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
+    ...(terms.length ? { terms: terms.length } : {}), ...(placed.left.length ? { card_lines_left_out: placed.left } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(simple ? { simplify: true } : rec.catchup ? { catchup: rec.catchup.replies } : {}),
     ...(answer ? { cards: answer.cards.length, asked: reply.cards.map((c: Any) => `${c.op} ${c.id}`), did: (cards?.did ?? []).map((d: Any) => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}),
   })
 }
@@ -420,19 +426,21 @@ export type Pile = { n: number; prompt: { row: string | null; text: string } | n
 /**
  * Replies piled up: two or more of Claude's replies (turns it ended with words) came since the person's last prompt
  * and since the newest catch-up of them the person read. Then b (the bar names it) catches up on all the replies
- * since that prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
+ * since that prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not,
+ * and neither does a simpler version of one reply (s).
  */
 export async function pileUp($: Engine, on: (key: string) => boolean = featureOn): Promise<Pile | null> {
   if (!on('catchUp')) return null
   const since = await sinceLast($)
   let from = 0
   for (let i = since.replies.length - 1; i >= 0; i--) {
-    if ((await partNow($, since.replies[i]!)).cu) { from = i + 1; break }
+    const cu = (await partNow($, since.replies[i]!)).cu
+    if (cu && cu.catchup?.kind !== 'simplify') { from = i + 1; break }
   }
   return since.replies.length - from >= 2 ? { n: since.replies.length, ...since } : null
 }
 
-/** The catch-up on a reply, while it stands (not dismissed), or null. */
+/** The catch-up on a reply, or its simpler version, while it stands (not dismissed), or null. */
 export async function catchUpOn($: Engine, row: string): Promise<Rec | null> {
   const rec = await recOf($, cuId(row))
   return rec && catchUpStands(rec) ? rec : null
@@ -456,9 +464,9 @@ export async function catchUpAt($: Engine, row: string): Promise<Rec | null> {
  * those messages as written, one after another, first written at Length short (one call, as any chip change is). The
  * newest reply (`host`) keeps it; each other message names the host. It draws below the newest of the messages
  * (drawnAt), the last above the prompt, and the messages it covers still show as written. Returns its id; the first
- * version is on its way.
+ * version is on its way. `kind` 'simplify': a simpler version of the one message (simplify).
  */
-export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
+export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null; kind?: 'simplify' }): Promise<string | null> {
   const texts: string[] = []
   for (const r of o.rows) {
     const m = await messageOf($, r)
@@ -467,11 +475,24 @@ export async function catchUp($: Engine, o: { host: string; rows: string[]; repl
   if (!texts.length || !(await messageOf($, o.host))) return null
   const id = cuId(o.host)
   const now = Number(await $.clock.now())
-  await saveRec($, { id, row: o.host, text: catchUpText(texts), at: new Date(now).toISOString(), shown: null, squeeze: { at: {} }, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt } })
+  await saveRec($, { id, row: o.host, text: catchUpText(texts), at: new Date(now).toISOString(), shown: null, squeeze: { at: {} }, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt, ...(o.kind ? { kind: o.kind } : {}) } })
   for (const r of o.rows) if (r !== o.host) await setPart<SqPart>($, r, 'squeeze', cur => ({ ...(cur ?? {}), inCatchUp: o.host }))
   await setUi($, id, { running: null, error: null, reveal: null, want: null, asked: null })
-  void setLevels($, id, { length: ARRIVE }).catch(() => undefined)
+  // a simpler version that fails says s writes it again (ui.ts squeezeKeyTake)
+  void (o.kind === 'simplify' ? setLevels($, id, { ...SIMPLIFY_AT }, 's') : setLevels($, id, { length: ARRIVE })).catch(() => undefined)
   return id
+}
+
+/**
+ * A simpler version of Claude's message `row` (s): a catch-up of that one message, drawn below it as a catch-up is,
+ * first written at Length short and Background learning (SIMPLIFY_AT). The message still shows as written. An earlier
+ * version of it, or a catch-up that stood on it, goes. Returns its id; the first version is on its way.
+ */
+export async function simplify($: Engine, row: string): Promise<string | null> {
+  const was = (await partNow($, row)).cu
+  if (was && !was.catchup.dismissed) await dismissCatchUp($, cuId(row), { quiet: true })
+  const question = await questionOf($, row).catch(() => '')
+  return catchUp($, { host: row, rows: [row], replies: 1, question, prompt: null, kind: 'simplify' })
 }
 
 /**
