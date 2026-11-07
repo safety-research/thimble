@@ -125,7 +125,10 @@ def _body(rec: dict[str, Any], d: dict[str, str], hold: Callable[[str], str] = s
     working = rec.get("state") == "working"
     request = failed or working or rec.get("state") == "request" or not rec.get("commit")
     rel = FX.release()
-    version = rel.get("version") or str(rel.get("base") or "")[:7] or "?"
+    # the release by its tag (a release commit made from a release's file is the person's own commit), a branch by its
+    # name and GitHub's commit; a dev install's checkout as before, by version or commit, never by its branch's name
+    version = (FX.release_name(rel) if rel.get("tag") or rel.get("ref") else
+               rel.get("version") or str(rel.get("base") or "")[:7]) or "?"
     if failed:
         why = " ".join(str(rec.get("error") or "").split()) or hold("(say what stopped it)")
         middle = f"{hold('### Why it could not be done here')}\n\n{why}\n\n" + (
@@ -154,7 +157,7 @@ def _scan(text: str, st: Store | None, own: list[str] | None = None) -> tuple[li
     found = FX.session_terms(st)
     terms = FX._widen(found, held["issue"], known, set())
     repo_paths = [(str(FX.live_dir()) + os.sep, ""), (str(FX.PLUGIN) + os.sep, "plugin/")]
-    hits, _notes = P.scan(held, terms, known, repo_paths, allow=[base])
+    hits, _notes = P.scan(held, terms, known, repo_paths, allow=[base, FX.release().get("commit") or ""])
     out = FX._unprotect(P.apply(held, hits), keep)["issue"]
     return hits, out
 
@@ -326,7 +329,7 @@ def _scan_code(diff: str, st: Store | None) -> list[dict[str, Any]]:
     known = FX._known(base)
     terms = FX._widen(FX.session_terms(st), held["diff"], known, base_files)
     repo_paths = [(str(FX.live_dir()) + os.sep, ""), (str(FX.PLUGIN) + os.sep, "plugin/")]
-    hits, _notes = P.scan(held, terms, known, repo_paths, allow=[base])
+    hits, _notes = P.scan(held, terms, known, repo_paths, allow=[base, FX.release().get("commit") or ""])
     out = [{"kind": h["kind"], "found": h["found"], "where": _where(diff, h["found"], h["kind"]) or ["the code"]}
            for h in hits]
     added = sorted(set(re.findall(r"^\+\+\+ b/(\S+)$", diff, re.M)) - base_files)
@@ -362,10 +365,29 @@ def _pr_ready(fid: int | str) -> dict[str, Any]:
 MAIN_REF = "refs/thimble/upstream/main"  # in live: main's tip as `thimble file pr` last fetched it
 
 
+def _release_tags(url: str) -> dict[str, str]:
+    """Each release tag of thimble's repository at `url` (v0.10.3, not v0.11.0-rc1) and its commit, as git reads them
+    (an annotated tag's commit, not the tag object); {} when git cannot read them."""
+    try:
+        p = FX.remote_git("ls-remote", "--tags", url, "refs/tags/v*", check=False, timeout=120)
+    except FX.FixError:
+        return {}
+    tags: dict[str, str] = {}
+    for line in p.stdout.splitlines() if p.returncode == 0 else []:
+        sha, _, ref = line.partition("\t")
+        name = ref.removeprefix("refs/tags/")
+        peeled = name.endswith("^{}")
+        name = name.removesuffix("^{}")
+        if FX.RELEASE_TAG.match(name) and (peeled or name not in tags):
+            tags[name] = sha
+    return tags
+
+
 def _main_tip() -> dict[str, str]:
     """The newest thimble, which a pull request goes onto: the commit main's tip is on thimble's repository (update_url),
-    fetched into live, {commit, version}. Its version is the release tag at that commit, else the plugin's version
-    there, else the commit."""
+    fetched into live with git, its whole history once when live was made from a release's file, {commit, version}. Its
+    version is the release whose tag is at that commit (_release_tags), else the plugin's version there, else the
+    commit."""
     live, url = FX.live_dir(), FX.update_url()
     p = FX.remote_git("fetch", "-q", "--no-tags", url, f"+refs/heads/main:{MAIN_REF}", cwd=live, check=False,
                       timeout=600)
@@ -376,14 +398,8 @@ def _main_tip() -> dict[str, str]:
                           f"thimble could not read main from {url} ({err[-1] if err else 'no message'}); a pull "
                           "request goes onto it, so check the network, then try again")
     tip = FX.git("rev-parse", f"{MAIN_REF}^{{commit}}", cwd=live)
-    version = ""
-    try:
-        latest = FX.latest_release()
-        if latest["commit"] == tip:
-            version = latest["version"]
-    except FX.FixError:
-        pass
-    return {"commit": tip, "version": version or FX._version_at(live, tip) or tip[:7]}
+    named = max((t for t, c in _release_tags(url).items() if c == tip), key=FX._vtuple, default="")
+    return {"commit": tip, "version": named[1:] or FX._version_at(live, tip) or tip[:7]}
 
 
 def _applies(base: str, diff: str) -> bool:

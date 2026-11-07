@@ -5,7 +5,7 @@ One script installs both, or the plugin alone, in `~/.thimble`.
 
 ## What you need
 
-- **macOS or Linux**, with **git**. On Windows, **WSL 2**: see [Windows](#windows) below.
+- **macOS or Linux**, with **git** and **curl**. On Windows, **WSL 2**: see [Windows](#windows) below.
 - **Node.js 22.18 or later** (the workbench alone runs on 22.12 or later) and **Python 3.10 or later** (`python3`, or
   the Python that `THIMBLE_PYTHON` names). Check with `node --version` and `python3 --version`.
 - **Claude Code 2.1.307 or later**. Check with `claude --version`. `claude update` updates it, unless a package manager
@@ -64,8 +64,10 @@ Options go after `bash -s --`:
   Without `--sign-in`, the script asks in a terminal, and otherwise the workbench asks when it starts. The script
   checks the choice with one small call. `thimble-browser --setup` changes it later.
 - `--bin-dir DIR`: the commands go in `DIR`, not in `~/.local/bin`.
-- `--ref REF`: a branch or tag of thimble in place of the newest release, to try a branch before its release. Put the
-  same name in place of `main` in the address.
+- `--ref REF`: a branch or tag of thimble in place of the newest release, to try a branch before its release: the
+  release's file when the tag has one, else GitHub's archive of it. Put the same name in place of `main` in the
+  address. A release from before thimble's releases had files installs with its own script: the address with its tag
+  in place of `main`.
 - `--remove-0.9`: see [thimble 0.9](#thimble-09).
 
 You can run it again at any time: an install in `~/.thimble` stays as it is, with your fixes, and the script puts in
@@ -73,8 +75,8 @@ place any part that is missing. It does the same when you run it from a download
 
 ## Where things go
 
-- `~/.thimble/fixes/live`: the release, as a git copy of its tag (about 8 MB), where `/thimble-fix` keeps your fixes as
-  commits. Claude Code loads the plugin from here (`claude plugin marketplace add` with this folder, then
+- `~/.thimble/fixes/live`: the release, from its file (`thimble-X.Y.Z.tar.gz`, about 6 MB), as a git repository of its
+  own, where `/thimble-fix` keeps your fixes as commits. Claude Code loads the plugin from here (`claude plugin marketplace add` with this folder, then
   `claude plugin install thimble@thimble`), and keeps a copy in its own folder of plugins. The plugin's settings
   (`/thimble-settings`) stay in Claude Code's settings (`pluginConfigs`).
 - `~/.thimble/fixes/release`: the plain release, which no fix changes. `thimble fix off` and the rest of the way back
@@ -95,10 +97,12 @@ command at once, and `thimble-browser` the next time it starts. After that start
 
     thimble update
 
-Run it in a shell, not inside Claude Code. It moves both products to the newest release and keeps your fixes: each one
-that still fits the release stays on, once thimble's checks pass with it there; one that does not is off, kept in
-`thimble fixes`, until `thimble reapply` has Claude fit it. Then type `/reload-plugins` in Claude Code, and start
-`thimble-browser` again. Claude Code sessions say when a newer release is out.
+Run it in a shell, not inside Claude Code. It downloads the newest release's file, moves both products to that release
+and keeps your fixes: each one that still fits the release stays on, once thimble's checks pass with it there; one that
+does not is off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it. Then type `/reload-plugins` in
+Claude Code, and start `thimble-browser` again. Claude Code sessions say when a newer release is out.
+
+GitHub counts the downloads of each release's file; thimble sends nothing else.
 
 ## Uninstall
 
@@ -153,8 +157,10 @@ The install:
   Claude then asks to run the script outside it, or you run it in your own terminal. The install's check of the card
   sandbox may fail inside Claude Code's sandbox for that reason alone. The check that counts is a card drawn in a new
   `claude` session: a card that cannot draw says why in the line above the prompt.
-- **The download failed.** The script says git's last line. Check the network, then run the script again: nothing was
-  installed.
+- **The download failed.** The script says curl's line, or what is wrong with the release's file. A firewall must let
+  github.com and release-assets.githubusercontent.com through (codeload.github.com too for `--ref`). Behind a proxy,
+  the download goes through the one `https_proxy` names, else the one git's config names (`git config --global
+  http.proxy`). Check the network, then run the script again: nothing was installed.
 - **`~/.local/bin` is not on your `PATH`.** A note at the end of the install gives the line to add to your shell's
   startup file. Until then, start the commands by their full paths.
 

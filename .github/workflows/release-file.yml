@@ -1,0 +1,52 @@
+# A release's file: thimble-X.Y.Z.tar.gz and SHA256SUMS, built from the release's tag by scripts/release-file.sh and
+# attached to the release. The install and thimble update download that file, and GitHub counts its downloads, which is
+# how many people install each version. The release recipe (CONTRIBUTING.md, Releasing thimble) runs this by hand while
+# the release is a draft, so that a published release has its file from the start; it also runs when a release is
+# published, and then does nothing when the release has both files already. A file is never replaced under the people
+# who are downloading it.
+#
+# For a published release, GitHub runs this file as the release's tag has it, so the first release that holds it is the
+# first to get a file. A run by hand (workflow_dispatch) needs this file on the default branch.
+name: release file
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release's tag, such as v0.10.13"
+        required: true
+
+permissions:
+  contents: write  # to attach the files to the release
+
+concurrency:
+  group: release-file-${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  attach:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # the tag reaches the shell through the environment, never through an expression in a run step
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false  # the release's files go up with gh, which takes GH_TOKEN
+
+      - name: Attach thimble-X.Y.Z.tar.gz and SHA256SUMS, unless the release has both
+        run: |
+          name="thimble-${TAG#v}.tar.gz"
+          have=$(gh release view "$TAG" --json assets -q '.assets[].name')
+          if printf '%s\n' "$have" | grep -qxF "$name" && printf '%s\n' "$have" | grep -qxF SHA256SUMS; then
+            echo "$TAG has $name and SHA256SUMS already: nothing to do."
+            exit 0
+          fi
+          scripts/release-file.sh "$TAG" "$RUNNER_TEMP/release"
+          gh release upload "$TAG" "$RUNNER_TEMP/release/$name" "$RUNNER_TEMP/release/SHA256SUMS" --clobber
+          gh release view "$TAG" --json assets -q '.assets[].name'

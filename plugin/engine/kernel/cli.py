@@ -598,8 +598,9 @@ FILE_HELP = """Send one of your fixes to thimble's public repository on GitHub, 
 Both take your names, paths and the names of your data out of the text first. Run them in your own terminal."""
 
 
-UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
-browser workbench in one go. Run it in a shell, not inside Claude Code.
+UPDATE_HELP = """thimble update: the newest thimble release (its newest release on GitHub), for the terminal plugin and the
+browser workbench in one go. It downloads that release's file from GitHub, which counts the download. Run it in a
+shell, not inside Claude Code.
 
 When you have fixes, it puts each one that still fits back on the release, as it was (fixes you turned off stay off):
 its change applies, and the release passes the checks a new fix passes with it. One the release already has leaves
@@ -801,7 +802,11 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     p = sub.add_parser("install", description="thimble install VERB: a step of scripts/install.sh, which runs them in "
                        "order (engine/kernel/install.py says what each does). Run the script, not this.")
     p.add_argument("verb", choices=INSTALL_VERBS, metavar="VERB")
-    p.add_argument("--from", dest="from_", metavar="DIR", help="release: the release the script downloaded")
+    p.add_argument("--file", metavar="FILE", help="release: the release's file the script downloaded, or GitHub's "
+                   "archive of the branch or tag --ref names")
+    p.add_argument("--tag", help="release: the release that file is (vX.Y.Z)")
+    p.add_argument("--from", dest="from_", metavar="DIR", help="release: a git clone of the release, as install "
+                   "scripts before release files give it")
     p.add_argument("--ref", help="release: the branch or tag the script was asked for")
     p.add_argument("--folder", metavar="DIR", help="the clone of a dev install (scripts/install.sh --local)")
     p.add_argument("--bin-dir", dest="bin_dir", metavar="DIR", help="where the commands are (~/.local/bin)")
