@@ -142,6 +142,7 @@ test("R2: a request carries only the variables that say which session and folder
       THIMBLE_SESSION: 's-1', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '/made-up/data/runs',
       THIMBLE_PYTHON: '/made-up/cc/claude-1000/py.sh', THIMBLE_HOME: '/made-up/cc/claude-1000/home', THIMBLE_CLAUDE: '/made-up/cc/claude-1000/claude',
       THIMBLE_GIT: '/made-up/cc/claude-1000/git', THIMBLE_UPDATE_URL: '/made-up/cc/claude-1000/release', PATH: '/made-up/cc/claude-1000/bin',
+      THIMBLE_RELEASES_URL: '/made-up/cc/claude-1000/releases',
       LD_PRELOAD: '/made-up/cc/claude-1000/x.so', PYTHONPATH: '/made-up/cc/claude-1000/py', GIT_CONFIG_COUNT: '1', THIMBLE_HANDOFF: '/made-up/cc/claude-1000/box',
       CLAUDECODE: '', THIMBLE_HANDED_OFF: '',
     } })
