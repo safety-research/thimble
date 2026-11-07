@@ -22,8 +22,8 @@
 //   openTray($, mark)                  open the tray on a mark (an explainer's press, explain/seam.ts): true when it did
 //   trayOffRow($, row)                 close the tray when it stands on this row, whose text changed under its marks
 //                                      (a squeeze version shown, squeeze/term.ts)
-//   trayGiveWay($)                     the tray gives way to the squeeze chips, which take the keys (s): it closes, or
-//                                      a card ] reached gives its keys back; returns what puts it back (s undone)
+//   trayGiveWay($)                     the tray gives way to what takes the keys (v): it closes, or a card ] reached
+//                                      gives its keys back; returns what puts it back (v undone)
 //   registerTray                       its own hooks (a question asked with the tray open, ...)
 import type { EngineInterface, Register } from 'claude-code'
 

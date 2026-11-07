@@ -7,7 +7,7 @@
 // that ends with no card lets the tour go on. When Claude wrote messages after the answer (the tour's steps, say), the
 // prompt quotes the answer, so the fork draws that one and not the newest message.
 //
-// v closes an open tray, as s does (tray/seam.ts trayGiveWay), so that the tray's rows do not hide the card.
+// v closes an open tray (tray/seam.ts trayGiveWay), so that the tray's rows do not hide the card.
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
 // "very"), and that letter puts the tray back as it stood. The fork is spawned inside the keys' prompt.edit hook, so

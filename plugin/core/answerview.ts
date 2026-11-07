@@ -37,7 +37,7 @@ import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
-import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
+import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, askBar, askKey, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
@@ -153,7 +153,7 @@ export async function underText($: Engine, els: Any, row: string, cols: number):
   return els0(await safe(labelsUnderAnswer($, els, row, cols), []))
 }
 
-/** The lines under a row after the cards drawn under it: the catch-up of the replies it ends, the squeeze chips.
+/** The lines under a row after the cards drawn under it: the catch-up of the replies it ends, or its simpler version.
  *  `cardsIn`: the frames of the cards a text places on lines of its own (cards/draw.ts framesIn). */
 export async function underAll($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>): Promise<Any[]> {
   return els0(await safe(squeezeUnder($, els, row, cols, cardsIn), []))
@@ -186,15 +186,13 @@ export function aboveShape(): { gap: boolean } {
 
 /** The keys taken now by what holds them and names them in its own place, which every other surface leaves unnamed,
  *  so each key shows once, where it acts. In the order a key at an empty prompt reaches them (hooks/keys.ts): the line
- *  of a fix (fix/line.ts fixHeld), the open tray's, or a card's ] reached (tray/seam.ts trayHeld), then the open
- *  chips' (squeeze/seam.ts squeezeHeld; '*', every key, while a click gave them the keyboard); and the close the side
- *  pane's key row names (core/pane.ts paneHeld). `ask`: the keys asked about, when not all. Read from the state, so a
+ *  of a fix (fix/line.ts fixHeld), the open tray's, or a card's ] reached (tray/seam.ts trayHeld); and the close the
+ *  side pane's key row names (core/pane.ts paneHeld). `ask`: the keys asked about, when not all. Read from the state, so a
  *  drawing that asks draws again when what holds the keys changes. */
 export async function heldKeys($: Engine, ask?: string[]): Promise<Set<string>> {
   return new Set([
     ...(await safe(fixHeld($), [] as string[])),
     ...(await safe(trayHeld($, ask), [] as string[])),
-    ...(await safe(squeezeHeld($), [] as string[])),
     ...(await safe(paneHeld($), [] as string[])),
   ])
 }
@@ -212,15 +210,14 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
  *  the selected words, each in its color while words are selected: c cite (purple), e explain (teal), a ask (blue).
  *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached, `rewrite for…` while the prompt
  *  box holds /rewrite), the left names only those. An item whose key what holds the keys takes now (`held`, heldKeys:
- *  the open tray's keys are in its header, the open chips' in the chips) is left out: each key shows once, where it
- *  acts. */
+ *  the open tray's keys are in its header) is left out: each key shows once, where it acts. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
   const free = keyFree(preview ? new Set() : held ?? (await heldKeys($)))
-  // while the tray holds the keys, what the open chips say waits with their keys
+  // while the tray holds the keys, what squeeze says with no key (`rewrite for…`) waits
   const holds = tray.some(x => x.focus) || (!preview && (await safe(trayHolds($), false)))
   return [
-    // the keys of a card ] reached are the tray's own; at rest, its ] gives way to the chips', which take ]
+    // the keys of a card ] reached are the tray's own
     ...tray.filter(x => x.focus || free(x)),
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => (x.key ? free(x) : !holds)),
     ...items(await safe(citeBar($, on, preview), []), preview).filter(free),
@@ -254,16 +251,11 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
   ]
 }
 
-/** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
- *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, s, { } over the answers, then the keys that act on the selected words, while they wait (else
- *  typed): e, c and a; then w (the claims), then t. */
+/** A key at an empty prompt, to the first feature that takes it now: the tray (while open its own keys, 0 closes it;
+ *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, +, 0), { } over the answers, then the
+ *  keys that act on the selected words, while they wait (else typed): e, c and a; then w (the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
-  const tray = await safe(trayHolds($), false)
-  const chips = await safe(squeezeHolds($), false)
-  return (tray ? await safe(trayKey($, key, until), null) : null)
-    ?? (chips ? await safe(squeezeKey($, key, until), null) : null)
-    ?? (tray ? null : await safe(trayKey($, key, until), null))
+  return (await safe(trayKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
@@ -273,12 +265,11 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(threadsKey($, key, until), null))
 }
 
-/** What the features' keys read of the state (whether the tray and the squeeze chips hold the keys, whether the bar
+/** What the features' keys read of the state (whether the tray holds the keys, whether the bar
  *  names w), read as the plugin loads: each load starts with nothing kept (a change in the settings loads it again), and
  *  the first key would read it inside the few milliseconds Claude Code gives the key's hook. */
 export async function keysReady($: Engine): Promise<void> {
   await safe(trayHolds($), false)
-  await safe(squeezeHolds($), false)
   await safe(claimsReady($), undefined)
 }
 
