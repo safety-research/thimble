@@ -8,7 +8,6 @@ fake that keeps Claude Code's records as Claude Code does; node, uv and npm are 
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 import re
