@@ -53,11 +53,13 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { tourChecked, tourHolds } from '../tour/tour'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck, TOUR_DESCRIPTION } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
+// the tour's cite step (tour/tour.ts)
+import { tourChecked, tourHolds } from '../tour/tour'
+import { TOUR_DESCRIPTION } from './checker'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
