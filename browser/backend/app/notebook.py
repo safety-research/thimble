@@ -2507,6 +2507,9 @@ def _log_lines(k: _Kernel) -> list[str]:
 # The kernel ends at once; started again on new ports, it starts.
 PORT_TAKEN = "Address already in use"
 LAUNCH_TRIES = 3
+# A fresh kernel that has not answered within STARTUP_TIMEOUT is killed and started once more: a start that ran long on
+# a busy machine (many kernels starting at once, a view build) is most often quick the next time.
+STARTUP_TRIES = 2
 
 
 async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, control: bool) -> None:
@@ -2849,13 +2852,23 @@ async def _launch(k: _Kernel, workspace: str) -> None:
             argv, keep = wrapped_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
         elif wrap == config.KERNEL_WRAP_SRT:
             argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp, home=k.home)
-        for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
+        ports_left, slow = LAUNCH_TRIES - 1, []  # slow: the seconds each start that timed out ran
+        while True:
+            began = time.monotonic()
             try:
                 k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source, tmp, tuple(keep))
                 return
+            except TimeoutError as e:
+                slow.append(time.monotonic() - began)
+                if len(slow) >= STARTUP_TRIES:
+                    took = " and ".join(f"{s:.1f} s" for s in slow)
+                    raise TimeoutError(f"{e} (started {len(slow)} times, which took {took})") from e
+                log.warning("kernel %s of %s did not answer %.1f s after its start began (%s); killed, and starting "
+                            "it again", k.key, workspace, slow[-1], e)
             except RuntimeError as e:
-                if PORT_TAKEN not in str(e) or not tries_left:
+                if PORT_TAKEN not in str(e) or not ports_left:
                     raise
+                ports_left -= 1
                 log.warning("kernel %s of %s ended at its start: a port of its connection file was taken (%s); "
                             "starting it again on new ports", k.key, workspace, e)
     finally:

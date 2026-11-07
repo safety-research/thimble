@@ -46,3 +46,50 @@ async def test_a_card_runs_in_a_mirror_of_the_corpus_writes_none_of_it_and_sees_
     assert lines[4] == "[] 1", "the kernel's environment holds no credential"
     assert (scratch / "made-by-a-cell.db").is_file() and (scratch / "notes.txt").is_file()
     assert not (corpus_dir / "made-by-a-cell.db").exists() and not (corpus_dir / "notes.txt").exists()
+
+
+@pytest.fixture()
+def slow_starts(monkeypatch):
+    """The first `n` fresh starts of a kernel stuck in its start lines (as on a machine too busy to start it in time),
+    with a start limit of 0.5 s, and each start's process as _wait_ready saw it. Set `n` before the run."""
+    seen: dict = {"n": 1, "procs": []}
+    monkeypatch.setattr(notebook, "STARTUP_TIMEOUT", 0.5)
+    monkeypatch.setattr(notebook, "SHELL_LINES",
+                        ("import os, time; os.environ.get('SLOW_START') and time.sleep(60)", *notebook.SHELL_LINES))
+    env, wait = notebook.kernel_env, notebook._wait_ready
+
+    def kernel_env():
+        return {**env(), **({"SLOW_START": "1"} if len(seen["procs"]) < seen["n"] else {})}
+
+    async def wait_ready(k, kc, timeout, *, control):
+        seen["procs"].append(k.proc)
+        # the starts that are not slow get the usual allowance, however busy the machine running the tests is
+        return await wait(k, kc, timeout if len(seen["procs"]) <= seen["n"] else 60.0, control=control)
+
+    monkeypatch.setattr(notebook, "kernel_env", kernel_env)
+    monkeypatch.setattr(notebook, "_wait_ready", wait_ready)
+    return seen
+
+
+async def test_a_kernel_that_does_not_answer_in_time_is_killed_and_started_again(workspaces_tmp, slow_starts,
+                                                                                 caplog):
+    cell = await notebook.run_code(CORPUS, "print('ok')", "user", kernel="slow")
+    assert cell["status"] == "ok" and _text(cell) == "ok\n", cell["outputs"]
+    first, second = slow_starts["procs"]
+    assert first.pid != second.pid and not notebook._group_alive(first.pid, first.pid), "the slow start is gone"
+    said = [r.getMessage() for r in caplog.records if "did not answer" in r.getMessage()]
+    assert len(said) == 1 and "after its start began" in said[0] and "killed, and starting it again" in said[0]
+
+
+async def test_a_kernel_that_never_answers_in_time_fails_the_card_with_how_long_each_start_took(workspaces_tmp,
+                                                                                               slow_starts):
+    slow_starts["n"] = notebook.STARTUP_TRIES
+    cell = await notebook.run_code(CORPUS, "print('ok')", "user", kernel="slow")
+    assert cell["status"] == "error"
+    err = next(b[notebook.ERROR_MIME] for b in cell["outputs"] if notebook.ERROR_MIME in b)
+    assert err["ename"] == "TimeoutError"
+    assert err["evalue"].startswith("the kernel did not answer kernel_info within 0.5 s (started 2 times, which took ")
+    assert len(slow_starts["procs"]) == notebook.STARTUP_TRIES
+    assert not any(notebook._group_alive(p.pid, p.pid) for p in slow_starts["procs"])
+    k = notebook._kernel(CORPUS, "slow")
+    assert k.kc is None and not k.record.exists() and not k.conn.exists()
