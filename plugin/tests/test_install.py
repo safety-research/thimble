@@ -458,6 +458,20 @@ def test_a_release_file_that_is_missing_broken_or_out_of_reach_says_what_to_do_a
         "link or a path out of its folder.",
         f"Report it at {issues}. Nothing was installed."], text_of(p)
     nothing_installed(w)
+    # a member with an absolute path, after the folder's own: the line names that member
+    with tarfile.open(f, "w:gz") as t:
+        for name, kind in (("thimble-0.10.9", tarfile.DIRTYPE), ("thimble-0.10.9/README.md", tarfile.REGTYPE),
+                           ("/made-up/escaped.txt", tarfile.REGTYPE)):
+            info = tarfile.TarInfo(name)
+            info.type = kind
+            t.addfile(info)
+    (f.parent / "SHA256SUMS").write_text(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  thimble-0.10.9.tar.gz\n")
+    p = w.install("--no-browser")
+    assert p.returncode == 1 and p.stdout.splitlines()[-2] == (
+        "Downloading thimble 0.10.9 into ~/.thimble... failed: thimble-0.10.9.tar.gz holds /made-up/escaped.txt, a link "
+        "or a path out of its folder."), text_of(p)
+    nothing_installed(w)
+    assert not Path("/made-up").exists()
     # GitHub's page of the latest release answers 503, which curl tries again, then takes for an answer
     w.gh.refuse(503)
     p = w.install("--no-browser")

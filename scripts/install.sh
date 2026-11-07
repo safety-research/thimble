@@ -73,14 +73,16 @@ sha() {
   (cd / && "$py" -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1")
 }
 # unpack FILE DIR: the archive FILE into DIR, its one folder named on stdout; every member is checked before anything
-# is written: an absolute path, a .. part, anything but a file or a folder (a link, a device), or a second folder at
-# the top refuses it, with the member's name on stderr (Python's data filter, where it has one, checks again)
+# is written: an absolute path, a .. part, anything but a file or a folder (a link, a device), or a path outside the
+# first member's folder refuses it, with that member's name on stderr (Python's data filter, where it has one, checks
+# again)
 unpack() {
   (cd / && "$py" -I -c 'import sys, tarfile; t = tarfile.open(sys.argv[1]); m = t.getmembers(); '\
-'top = {x.name.split("/")[0] for x in m}; bad = [x.name for x in m if x.name.startswith("/") or ".." in '\
-'x.name.split("/") or not (x.isfile() or x.isdir()) or len(top) != 1]; bad and sys.exit("refused: " + bad[0]); '\
+'m or sys.exit("it holds no files"); top = m[0].name.split("/")[0]; bad = [x.name for x in m if '\
+'x.name.startswith("/") or ".." in x.name.split("/") or not (x.isfile() or x.isdir()) or '\
+'x.name.split("/")[0] != top]; bad and sys.exit("refused: " + bad[0]); '\
 'safe = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}; t.extractall(sys.argv[2], m, **safe); '\
-'print(*top)' "$1" "$2")
+'print(top)' "$1" "$2")
 }
 # newest: the newest release's tag in $ref, from where GitHub's page of the latest release points, which reads no file;
 # '' when it names none, with the HTTP status of GitHub's answer in $status (curl ends well on a 503, once its tries
