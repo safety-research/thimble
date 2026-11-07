@@ -183,12 +183,12 @@ declare module 'claude-code' {
       observerLooks: { session: string; msgs: unknown[] } | null
 
       // ---- the tour (tour/tour.ts)
-      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `cite`, `v`, `s`, or `end`), the steps done
-       *  and those that did not work, when it started, the row of its sample answer, the ids of its placed rows (the
-       *  intro, the step row placed under a later reply) and how many were placed; null with no tour */
+      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `v`, `ask`, `s`, `cite`, or `end`), the
+       *  steps done and those that did not work, when it started, the row of its sample answer, the ids of its placed
+       *  rows (the intro, the step row placed under a later reply) and how many were placed; null with no tour */
       tour: {
-        at: 'answer' | 'e' | 'cite' | 'v' | 's' | 'end'; done: ('answer' | 'e' | 'cite' | 'v' | 's')[]
-        missed: ('answer' | 'e' | 'cite' | 'v' | 's')[]; startedAt: number; k: number
+        at: 'answer' | 'e' | 'v' | 'ask' | 's' | 'cite' | 'end'; done: ('answer' | 'e' | 'v' | 'ask' | 's' | 'cite')[]
+        missed: ('answer' | 'e' | 'v' | 'ask' | 's' | 'cite')[]; startedAt: number; k: number
         intro: string | null; sample: string | null; moved: string | null
       } | null
       /** the tours started before the one that runs, as they were then: their rows still draw them */

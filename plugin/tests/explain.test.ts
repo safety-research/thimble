@@ -178,7 +178,7 @@ test('the tour (tour/tour.ts): while its selection step waits, the explainer of 
   await pressE(s, { text: 'the client', requestId: 't1-row' })
   await settle()
   expect((await tourNow(s.$))?.done).toEqual(['answer', 'e'])
-  expect((await tourNow(s.$))?.at).toBe('cite')
+  expect((await tourNow(s.$))?.at).toBe('v')
 })
 
 test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {

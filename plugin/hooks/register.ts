@@ -40,7 +40,7 @@
 //   bar         ../bar/register.ts      the line above the prompt: busy step, failure and fix lines, counts
 //   fix         ../fix/register.ts      /thimble-fix: the person's changes to their own thimble, made by the fixer in a
 //                                       scratch copy, applied with their key; the fixer's calls in the sandbox
-//   tour        ../tour/tour.ts         /thimble:tour: the tour's intro and step row, drawn by thimble; its marks on the
+//   tour        ../tour/tour.ts         /thimble:tour: the tour's intro and step row, drawn by thimble; its mark on the
 //                                       sample answer; its start after an install
 import type { Register } from 'claude-code'
 

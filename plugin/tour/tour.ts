@@ -16,20 +16,27 @@
 // A step is done at the moment it shows its result:
 //
 //   answer    main's turn that the skill started ends with an answer: the sample answer
-//   e         the explainer of the selected words shows in the tray (explain/seam.ts)
-//   cite      the marked citation, the wrong number, opens in the tray with its check (tray/tray.ts tourOpened). By
-//             then the checker has corrected it, so the tray shows the old value and the check. Where no click reaches
-//             thimble, ] opens it
+//   e         the explainer of the selected words shows in the tray (explain/seam.ts). The step names the words in
+//             bold; the answer marks nothing for it
 //   v         the first card that v's designer draws is on the screen (designer/v.ts). A design that ends with no
 //             card counts too (tourMissed), so the tour goes on
+//   ask       the first answer of a side thread about a card shows (threads/thread.ts). The step asks about the card v
+//             drew: a click on `ask` in the card's header, or ] to the card and a (cards/head.ts)
 //   s         the first text of the simpler version shows (squeeze/term.ts)
+//   cite      the marked citation, the wrong number, opens in the tray with its check (tray/tray.ts tourOpened). By
+//             then the checker has corrected it, so the tray shows the old value and the check. A click on it in the
+//             simpler version opens the same citation of the sample answer, so it counts too. Where no click reaches
+//             thimble, ] opens it
 //
-// The steps that act on the answer's words come first, while the answer is on the screen. The step that waits is the
-// first one not done whose feature is on: e needs a selection, which only a click reaches (bar/intro.ts clicksReach).
-// While e or cite waits, the sample answer marks what to select or click (tourSpans, drawn by core/answerview.ts).
+// The citation comes last: by then the card, the side thread and the simpler version may have moved the answer off the
+// screen, so the step says to scroll up to it. The step that waits is the first one not done whose feature is on: e
+// needs a selection, which only a click reaches (bar/intro.ts clicksReach); ask needs a card that v drew (side threads
+// have no switch of their own). While cite waits, the sample answer marks the wrong number (tourSpans, drawn by
+// core/answerview.ts).
 //
 // While the tour runs after the sample answer, main's turns answer nothing for thimble's features (core/answers.ts
-// holdAnswers). So v, e, ], s and the observer act on the sample answer, not on a reply to the person's own prompt. The
+// holdAnswers). So v, e, ], s and the observer act on the sample answer, not on a reply to the person's own prompt. A
+// side thread's fork is no turn of main's: it answers, and its end does not move the step row. The
 // observer does not look at the sample answer itself (tourSample): Claude wrote it without reading the data, on
 // purpose, and the checker checks its numbers. A /clear or a /resume ends the tour (hooks/turnover.ts). Where
 // thimble's drawing does not show (core/host.ts), no tour runs.
@@ -40,12 +47,12 @@
 // not start the tour.
 //
 //   tourStart($)          the skill started: step 0 waits
-//   tourDid($, step)      a step done: `answer`, `e`, `cite`, `v` or `s`
+//   tourDid($, step)      a step done: `answer`, `e`, `v`, `ask`, `s` or `cite`
 //   tourMissed($, step)   a step that the person did but that did not work (v drew no card): the tour goes on
 //   tourOpened($, row, n) citation n of a row opened in the tray: the cite step done when it is the marked one
 //   tourRuns($)           whether a tour runs (bar/hints.ts gives no reminder meanwhile)
 //   tourSample($, row)    whether a row is the tour's sample answer, or the answer of the turn that writes it now
-//   tourSpans($, row, t)  the marks on the sample answer's words while e or cite waits
+//   tourSpans($, row, t)  the mark on the wrong number in the sample answer while cite waits
 //   tourUnder($, e)       the step row at the end of an answer's drawing, when the answer is a tour's sample answer
 //   turnTour($)           a /clear or a /resume: the tour ends
 //   registerTour          the start, the intro, the end of main's turn, the placed rows, and the start after an install
@@ -69,8 +76,8 @@ type Engine = EngineInterface
 type Any = any
 
 /** A step that is done, in the order the tour asks for them: the sample answer, then what the person does. */
-export type Step = 'answer' | 'e' | 'cite' | 'v' | 's'
-export const STEPS: Step[] = ['answer', 'e', 'cite', 'v', 's']
+export type Step = 'answer' | 'e' | 'v' | 'ask' | 's' | 'cite'
+export const STEPS: Step[] = ['answer', 'e', 'v', 'ask', 's', 'cite']
 
 /** The tour: the step that waits (`end` once all are done), the steps done, those that did not work, when it started,
  *  and the row of its sample answer (null until Claude ends it). Its placed rows: the intro (null until placed) and the
@@ -101,7 +108,7 @@ const SAMPLE = { plugin: 'thimble', key: 'tourSample' } as const
 
 /** What the intro says. */
 export const INTRO = [
-  "thimble works on Claude's answers. It checks their numbers, draws cards, explains words and writes simpler versions.",
+  "thimble works on Claude's answers. It checks their numbers, draws cards, explains words, writes simpler versions and answers questions in side threads.",
   'Below, Claude writes an answer about the made-up orders of a tea shop. One number in it is wrong on purpose.',
 ]
 
@@ -112,15 +119,21 @@ export const END = (clicks: boolean): string[] => [
   'Type /thimble:tour to take the tour again.',
 ]
 
-/** One step's action while it waits: its words, with each key as `{k}`. v and s name the answer they act on, since
- *  the row can stand under a reply to the person's own prompt. */
+/** The words of the sample answer that step e names. */
+export const E_WORDS = 'average order value'
+
+/** One step's action while it waits: its words, with each key as `{k}` and words drawn bold as `**words**`. v and s
+ *  name the answer they act on, since the row can stand under a reply to the person's own prompt. */
 export function stepAction(s: Step, clicks: boolean): string {
-  if (s === 'e') return 'Select the highlighted words with the mouse, then press {e}.'
-  if (s === 'cite') return clicks
-    ? 'One number was wrong on purpose. Click the highlighted number to see how thimble checked it.'
-    : 'One number was wrong on purpose. Press {]} until the tray above the prompt shows the highlighted number.'
+  if (s === 'e') return `Select **${E_WORDS}** in the answer with the mouse, then press {e}.`
   if (s === 'v') return 'Press {v} to draw a card of the tea shop answer.'
+  if (s === 'ask') return clicks
+    ? 'Click ask at the top right of the card, type a question about it, and press Enter.'
+    : 'Press {]} until it reaches the card, press {a}, type a question about it, and press Enter.'
   if (s === 's') return 'Press {s} for a shorter, plainer version of the tea shop answer.'
+  if (s === 'cite') return clicks
+    ? 'One number was wrong on purpose. Scroll up to the tea shop answer and click the highlighted number.'
+    : 'One number was wrong on purpose. Press {]} until the tray above the prompt shows the highlighted number.'
   return ''
 }
 
@@ -129,27 +142,30 @@ export function stepDone(s: Step, missed: boolean): string {
   if (s === 'e') return 'e explained the words.'
   if (s === 'cite') return "The tray showed thimble's check of the wrong number."
   if (s === 'v') return missed ? 'v drew no card this time.' : 'v drew a card.'
+  if (s === 'ask') return 'You asked a side thread about the card.'
   if (s === 's') return 's wrote a simpler version.'
   return ''
 }
 
-/** Whether a step's feature is on now. Step e needs a selection, which only a click reaches. */
-function stepOn(s: Step, clicks: boolean): boolean {
+/** Whether a step's feature is on now. Step e needs a selection, which only a click reaches. Step ask needs the card
+ *  that v draws: Cards on, and v not `missed` (it drew no card). Side threads have no switch of their own. */
+function stepOn(s: Step, clicks: boolean, missed: Step[]): boolean {
   if (s === 'answer') return true
   if (s === 'v') return featureOn('cards') === true
+  if (s === 'ask') return featureOn('cards') === true && !missed.includes('v')
   if (s === 'e') return clicks && featureOn('explain') === true
   if (s === 'cite') return featureOn('cite') === true
   return featureOn('squeezeAnswers') === true
 }
 
 /** The step after `from` that the tour asks for next: not done, and on. Null: the end. */
-export function nextStep(from: Step, done: Step[], clicks: boolean): Step | null {
-  return STEPS.slice(STEPS.indexOf(from) + 1).find(s => !done.includes(s) && stepOn(s, clicks)) ?? null
+export function nextStep(from: Step, done: Step[], clicks: boolean, missed: Step[] = []): Step | null {
+  return STEPS.slice(STEPS.indexOf(from) + 1).find(s => !done.includes(s) && stepOn(s, clicks, missed)) ?? null
 }
 
 /** The person's steps the row shows, in order: those whose feature is on, and those done. */
 function shownSteps(t: TourState, clicks: boolean): Step[] {
-  return STEPS.filter(s => s !== 'answer' && (t.done.includes(s) || stepOn(s, clicks)))
+  return STEPS.filter(s => s !== 'answer' && (t.done.includes(s) || stepOn(s, clicks, t.missed)))
 }
 
 /** Whether a click and a selection reach thimble, as the last drawing saw the layout. */
@@ -247,7 +263,7 @@ export function placeIntro($: Engine): Promise<void> {
 
 /** The step that waits goes on to the next one, or to the end. The step row draws again from the state. */
 async function goOn($: Engine, t: Tour, done: Step[], missed: Step[]): Promise<void> {
-  const next = nextStep(t.at, done, await clicksNow($))
+  const next = nextStep(t.at, done, await clicksNow($), missed)
   await save($, { ...t, at: next ?? 'end', done, missed })
 }
 
@@ -301,7 +317,7 @@ async function turnEnded($: Engine, turn: TurnRec | null): Promise<void> {
     }
     const k = t.k + 1
     const moved = { ...t, k, moved: `tour-step-${k}` }
-    if (stepOn(t.at, await clicksNow($))) await save($, moved)
+    if (stepOn(t.at, await clicksNow($), t.missed)) await save($, moved)
     else await goOn($, moved, t.done, t.missed)
     await place($, moved.moved)
   })
@@ -313,14 +329,9 @@ export async function turnTour($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the marks
 
-/** The words the step that waits acts on, in the sample answer's text: the words to select for e, the citation of the
- *  refunds to open for cite. [start, end) in `text`; null when the step acts on no words or they are not there. */
+/** The words the step that waits acts on, in the sample answer's text: the citation of the refunds to open for cite.
+ *  [start, end) in `text`; null when the step marks no words (e names its words instead) or they are not there. */
 export function markedWords(step: Step, text: string): { start: number; end: number } | null {
-  if (step === 'e') {
-    const words = 'average order value'
-    const i = text.toLowerCase().indexOf(words)
-    return i < 0 ? null : { start: i, end: i + words.length }
-  }
   if (step === 'cite') {
     const m = /refunded (\[[^\]\n]+\]\(#\))/.exec(text)
     return m ? { start: m.index + 'refunded '.length, end: m.index + m[0].length } : null
@@ -328,24 +339,31 @@ export function markedWords(step: Step, text: string): { start: number; end: num
   return null
 }
 
-/** The mark on the sample answer's words while e or cite waits: a fill in thimble's purple, the words bold. A citation
- *  keeps its own press, so the mark has none. */
+/** The mark on the wrong number in the sample answer while cite waits: a fill in thimble's purple, the words bold. A
+ *  citation keeps its own press, so the mark has none. */
 export async function tourSpans($: Engine, row: string, text: string): Promise<Span[]> {
   const t = await tourNow($)
-  if (!t || (t.at !== 'e' && t.at !== 'cite')) return []
+  if (!t || t.at !== 'cite') return []
   if ((await $.state.get(SAMPLE)).value !== row) return []
   const at = markedWords(t.at, text)
   if (!at) return []
   const fill = (await themeNow($)) === 'light' ? '#dcc8ff' : '#4b2d80'
-  return [{ id: `tour-${t.at}`, ...at, look: { backgroundColor: fill, bold: true }, label: t.at === 'e' ? 'the tour: select these words' : 'the tour: click this number' }]
+  return [{ id: `tour-${t.at}`, ...at, look: { backgroundColor: fill, bold: true }, label: 'the tour: click this number' }]
 }
 
 // ------------------------------------------------------------------------------------------------ the rows
 
-/** A line of words with each `{k}` drawn as a key, in thimble's color. */
+/** A line of words with each `{k}` drawn as a key, in thimble's color, and each `**words**` drawn bold. */
 function withKeys(els: Any, text: string, key: string, look: Any = {}): Any {
-  const parts = text.split(/\{([^}]+)\}/)
-  return els.Text({ key, ...look, children: parts.map((p, i) => (i % 2 ? els.Text({ key: `k${i}`, color: accent(), bold: true, children: p }) : p)) })
+  // split keeps both groups of each match: a part's place mod 3 says what it is (words, a key, bold words)
+  const parts = text.split(/\{([^}]+)\}|\*\*([^*]+)\*\*/)
+  const children = parts.flatMap((p, i) => {
+    if (!p) return []
+    if (i % 3 === 1) return [els.Text({ key: `k${i}`, color: accent(), bold: true, children: p })]
+    if (i % 3 === 2) return [els.Text({ key: `b${i}`, bold: true, children: p })]
+    return [p]
+  })
+  return els.Text({ key, ...look, children })
 }
 
 /** The frame of the rows: a border in thimble's color, a bold title, a blank row, then the lines. As wide as a card's
@@ -371,7 +389,7 @@ export function stepRowEl(els: Any, t: TourState, clicks: boolean, cols: number,
   const lines: Any[] = []
   for (const s of steps) {
     if (t.done.includes(s)) lines.push(els.Text({ key: `d-${s}`, dimColor: true, children: `✓ ${stepDone(s, t.missed.includes(s))}` }))
-    else if (s === t.at && !past) lines.push(withKeys(els, `› ${stepAction(s, clicks)}`, `a-${s}`, { bold: true }))
+    else if (s === t.at && !past) lines.push(withKeys(els, `› ${stepAction(s, clicks)}`, `a-${s}`))
   }
   if (t.at === 'end') lines.push(...(lines.length ? [els.Text({ key: 'gap2', children: ' ' })] : []), ...END(clicks).map((l, i) => els.Text({ key: `e${i}`, children: l })))
   return frame(els, `tour-row-${t.startedAt}-${t.moved ?? 'under'}`, cols, title, lines, look)

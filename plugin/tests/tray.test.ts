@@ -138,24 +138,25 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test("the tour (tour/tour.ts): while its citation step waits, a citation of another answer than the sample is not that step", { options: { citations: 'auto cite + verify', cards: 'off', explain: 'off' } }, async ($, on) => {
+test("the tour (tour/tour.ts): while its citation step waits, a citation of another answer than the sample is not that step", { options: { citations: 'auto cite + verify', cards: 'off', explain: 'off', squeezeAnswers: false } }, async ($, on) => {
   on('ui.place', (_$: unknown, e: Any) => ({ value: { isPlaced: true, requestId: `r-${e.id}` } }))
   const { clock } = await resumed($, on, QUOTED)
   // the sample answer draws the step row at its end
   const row = async () => textOf(await $.ui.render(answer('row-t2', 'A made-up sample answer.')))
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  // the turn that writes the sample answer ends: Explainers are off, so the tour waits for the citation step
+  // the turn that writes the sample answer ends: Explainers, Cards and Simplify are off, so the tour waits for the
+  // citation step
   await $.turn.start({ text: '<command-name>/thimble:tour</command-name>', turnId: 't2' } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'A made-up sample answer.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t2' } as never)
   await $.turn.complete({ turnId: 't2', reason: 'answer', answer: 'A made-up sample answer.', durationMs: 10, isAborted: false } as never)
   await clock.advance(100)
-  expect(await row()).toContain('Click the highlighted number')
+  expect(await row()).toContain('Scroll up to the tea shop answer and click the highlighted number.')
   // { picks the earlier answer with the citation; ] opens it, and the tour still waits
   await $.prompt.edit(key('{'))
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(10)
   expect(textOf(await $.ui.render(above()))).toContain('12 of 40')
-  expect(await row()).toContain('Click the highlighted number')
+  expect(await row()).toContain('Scroll up to the tea shop answer and click the highlighted number.')
 })
 
 test('v with the tray open closes it, so the card that draws under the answer shows; a letter right after v puts it back', CITES, async ($, on) => {
