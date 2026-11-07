@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -75,6 +76,19 @@ SKIP_VERSION_CHECK_ENV = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
 SCRUBBED_ENV = ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
                 "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL")
+# A fork's `claude -p` (marks._claude_fork, proposer._fork) takes its prompt on stdin, which Claude Code waits 3 s for
+# before it starts without one ("no stdin data received in 3s"); a resumed session with no prompt then stops with "No
+# deferred tool marker found", which names no cause. A busy machine can keep Claude Code from reading a prompt written
+# at once, so a fork that missed it runs again, at most STDIN_TRIES times in all, STDIN_RETRY_WAIT_S apart.
+STDIN_MISSED_RE = re.compile(r"no stdin data received|No deferred tool marker found")
+STDIN_MISSED_TEXT = "Claude Code did not receive its prompt in time, which a busy machine can cause, so it started without one"
+STDIN_TRIES = 3
+STDIN_RETRY_WAIT_S = 1.0
+
+
+def stdin_missed(code: Any, stderr: str) -> bool:
+    """Whether a `claude -p` that exited with `code` and wrote `stderr` started without the prompt piped to it."""
+    return code not in (0, None) and STDIN_MISSED_RE.search(stderr or "") is not None
 
 
 class CallSettingsError(ValueError):

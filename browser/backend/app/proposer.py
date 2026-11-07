@@ -507,7 +507,10 @@ def classify(st: dict[str, Any], obj: dict[str, Any] | None, timed_out: bool = F
 
 
 def error_line(st: dict[str, Any], stderr: str = "", code: Any = None) -> str:
-    """What went wrong in a few words, for the notice: Claude Code's own error line, else its result's, else its exit."""
+    """What went wrong in a few words, for the notice: that Claude Code started without the prompt (sdk.stdin_missed),
+    else its own error line, else its result's, else its exit."""
+    if sdk.stdin_missed(code, stderr):
+        return sdk.STDIN_MISSED_TEXT
     res = st.get("result") or {}
     for t in [*(st.get("error_texts") or []), *[str(e) for e in res.get("errors") or []],
               str(res.get("result") or "") if res.get("is_error") else ""]:
@@ -599,32 +602,41 @@ async def _fork(lv: Any, cut: str, prompt: str, model_id: str, effort: str, spee
     t0 = time.monotonic()
     out: dict[str, Any] = {"code": None, "stdout": "", "stderr": "", "timed_out": False}
     async with model._semaphore():
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv, cwd=str(lv.cwd), env=_env(lv), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, start_new_session=True)
-        except OSError as e:
-            out.update(stderr=f"Claude Code could not start: {e}", seconds=0.0)
-            cap.finish("error", out["stderr"])
-            return out
-        _procs.add(proc)
-        model._STRUCTURED_CHILDREN[proc.pid] = time.monotonic()
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), FORK_TIMEOUT_S)
-            out.update(code=proc.returncode, stdout=stdout.decode("utf-8", "replace"),
-                       stderr=stderr.decode("utf-8", "replace"))
-        except asyncio.TimeoutError:
-            _kill(proc)
-            out["timed_out"] = True
-        except asyncio.CancelledError:
-            _kill(proc)
-            raise
-        finally:
-            _procs.discard(proc)
-            model._STRUCTURED_CHILDREN.pop(proc.pid, None)
-            if proc.returncode is None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), 5)
+        # a fork that started without the prompt (sdk.stdin_missed) runs again, at most sdk.STDIN_TRIES times in all
+        for attempt in range(1, sdk.STDIN_TRIES + 1):
+            if attempt > 1:
+                log.info("the view proposer's fork started without its prompt (try %d of %d): it runs again",
+                         attempt - 1, sdk.STDIN_TRIES)
+                await asyncio.sleep(sdk.STDIN_RETRY_WAIT_S)
+            out = {"code": None, "stdout": "", "stderr": "", "timed_out": False}
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *argv, cwd=str(lv.cwd), env=_env(lv), stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+            except OSError as e:
+                out.update(stderr=f"Claude Code could not start: {e}", seconds=0.0)
+                cap.finish("error", out["stderr"])
+                return out
+            _procs.add(proc)
+            model._STRUCTURED_CHILDREN[proc.pid] = time.monotonic()
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), FORK_TIMEOUT_S)
+                out.update(code=proc.returncode, stdout=stdout.decode("utf-8", "replace"),
+                           stderr=stderr.decode("utf-8", "replace"))
+            except asyncio.TimeoutError:
+                _kill(proc)
+                out["timed_out"] = True
+            except asyncio.CancelledError:
+                _kill(proc)
+                raise
+            finally:
+                _procs.discard(proc)
+                model._STRUCTURED_CHILDREN.pop(proc.pid, None)
+                if proc.returncode is None:
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(proc.wait(), 5)
+            if out["timed_out"] or not sdk.stdin_missed(out["code"], out["stderr"]):
+                break
     out["seconds"] = round(time.monotonic() - t0, 1)
     cap.text("Output (stream-json)", out["stdout"])
     cap.finish("timeout" if out["timed_out"] else f"exit {out['code']}", out["stderr"][-600:])

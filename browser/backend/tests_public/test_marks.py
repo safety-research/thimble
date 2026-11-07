@@ -10,8 +10,9 @@ import re
 from pathlib import Path
 
 import pytest
+from conftest import NO_MARKER, STDIN_WARNING, late_stdin_claude
 
-from app import agents, config, marks, session
+from app import agents, config, marks, sdk, session
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-0000000000aa"
@@ -25,7 +26,7 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     session._live.clear()
     told: list[tuple[str, str]] = []
     monkeypatch.setattr(marks, "_tell", lambda c, text: told.append((c, text)))
-    monkeypatch.setattr(marks, "_notice", lambda c, text: told.append((c, "notice: " + text)))
+    monkeypatch.setattr(marks, "_notice", lambda c, text, details=None: told.append((c, "notice: " + text)))
     yield told
     session._live.clear()
 
@@ -224,3 +225,60 @@ def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monke
     assert len(items) == 4
     for m in items:
         assert (m["status"], m["reason"]) == ("failed", OUTSIDE), m
+
+
+def test_a_fork_that_started_without_its_prompt_runs_again(tmp_path, monkeypatch):
+    """Claude Code waits 3 s for a prompt piped to it, then starts without it: the resumed fork stops with "No deferred
+    tool marker found" (sdk.stdin_missed). The fork runs again, and its second run reads the prompt and answers."""
+    monkeypatch.setattr(sdk, "STDIN_RETRY_WAIT_S", 0.0)
+    bin_, runs = late_stdin_claude(tmp_path, misses=1)
+    got = asyncio.run(marks._claude_fork([str(bin_)], tmp_path, {"PATH": "/usr/bin:/bin"}, "check the marks"))
+    assert got["error"] is None and got["answer"] == "Read: check the marks", got
+    assert len(runs.read_text().splitlines()) == 2
+
+
+def test_a_fork_that_never_gets_its_prompt_stops_and_the_notice_says_why_whole(_fresh, tmp_path, monkeypatch):
+    """A fork that starts without its prompt on every try (sdk.STDIN_TRIES) stops the check: its marks are unchecked
+    with the whole error, which says in plain words that the prompt came too late and keeps Claude Code's own words, and
+    the notice ends as a sentence does, with every word of the error in its text or its details (Show more)."""
+    monkeypatch.setattr(sdk, "STDIN_RETRY_WAIT_S", 0.0)
+    bin_, runs = late_stdin_claude(tmp_path, misses=99)
+    shown: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(marks, "_notice", lambda c, text, details=None: shown.append((text, details)))
+
+    async def fork(c, main, cut, prompt):
+        return await marks._claude_fork([str(bin_)], tmp_path, {"PATH": "/usr/bin:/bin"}, prompt)
+
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+
+    async def go():
+        await marks.start_check(CORPUS, main, turn, ["It says [ask for a review](#)."], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert len(runs.read_text().splitlines()) == sdk.STDIN_TRIES
+    error = f"{sdk.STDIN_MISSED_TEXT}. Claude Code said: {NO_MARKER}"
+    assert STDIN_WARNING not in error
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert (m["status"], m["reason"]) == ("unchecked", f"the check ended: {error}"), m
+    ((text, details),) = shown
+    assert text == marks.STOPPED_TEXT.format(why=sdk.STDIN_MISSED_TEXT), text
+    assert details == marks.STOPPED_TEXT.format(why=error.rstrip(".")), details
+
+
+def test_a_short_error_is_the_notice_s_whole_text(_fresh, monkeypatch):
+    """An error that fits shows whole in the notice, which then has no details."""
+    shown: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(marks, "_notice", lambda c, text, details=None: shown.append((text, details)))
+    marks._stopped(CORPUS, "it took too long")
+    assert shown == [("The check of the citations stopped (it took too long), so some are not checked. The next reply "
+                      "is checked again.", None)]
+
+
+def test_a_failed_fork_s_error_keeps_its_last_stderr_lines():
+    """A fork that failed for another reason: its error is its stderr's last lines, whole, not only the last one."""
+    said = marks.stderr_error(1, "\nTypeError: x is undefined\n    at run (cli.js:1:2)\n  at main (cli.js:3:4)\n\n")
+    assert said == "TypeError: x is undefined at run (cli.js:1:2) at main (cli.js:3:4)"
+    assert marks.stderr_error(2, "") == "Claude Code exited with code 2"
+    assert marks.stderr_error(1, STDIN_WARNING) == sdk.STDIN_MISSED_TEXT

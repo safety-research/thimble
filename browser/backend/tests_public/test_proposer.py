@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import NO_MARKER, STDIN_WARNING, late_stdin_claude
 
-from app import config, notices, proposer, session, views
+from app import config, notices, proposer, sdk, session, views
 
 # model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
 pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
@@ -151,3 +152,29 @@ async def test_an_analyst_s_turn_end_runs_one_fork_at_its_cut_and_shows_the_card
     assert run["cost_usd"] == 2.5 and run["after"] == ["main"] and run["cut"] == "cut-1"
     assert proposer.pending(CORPUS) is None
     assert _shown_notice() is None
+
+
+@pytest.mark.parametrize("misses", [1, 99])
+def test_the_proposer_s_fork_runs_again_when_it_started_without_its_prompt(tmp_path, monkeypatch, misses):
+    """Claude Code waits 3 s for the prompt piped to it, then starts without it (sdk.stdin_missed): the fork runs again,
+    and answers once a run reads the prompt; one that never does stops after sdk.STDIN_TRIES runs, and its error line
+    says so in plain words rather than as Claude Code's deferred-tool error."""
+    from types import SimpleNamespace
+
+    from app import runtime, runtime_api
+
+    monkeypatch.setattr(sdk, "STDIN_RETRY_WAIT_S", 0.0)
+    bin_, runs = late_stdin_claude(tmp_path, misses=misses)
+    monkeypatch.setattr(runtime, "engine", lambda: "cc")
+    monkeypatch.setattr(runtime_api, "cc_main_session", lambda c: SID)
+    monkeypatch.setattr(runtime_api, "cc_main_cut", lambda c: None)
+    monkeypatch.setattr(proposer, "_argv", lambda *a: [str(bin_)])
+    lv = SimpleNamespace(sid=SID, cwd=tmp_path, config=None, config_known=False, c=CORPUS)
+    out = asyncio.run(proposer._fork(lv, "cut-1", "propose a view", "claude-opus-5-5", "high", "standard"))
+    if misses == 1:
+        assert out["code"] == 0 and "Read: propose a view" in out["stdout"], out
+        assert len(runs.read_text().splitlines()) == 2
+    else:
+        assert out["code"] == 1 and NO_MARKER in out["stderr"] and STDIN_WARNING in out["stderr"], out
+        assert len(runs.read_text().splitlines()) == sdk.STDIN_TRIES
+        assert proposer.error_line({}, out["stderr"], out["code"]) == sdk.STDIN_MISSED_TEXT

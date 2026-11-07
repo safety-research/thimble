@@ -667,6 +667,39 @@ def fake_claude_bin(folder: Path, status: dict) -> Path:
     return bin_
 
 
+# what Claude Code writes to stderr when a prompt piped to `claude -p --resume` comes after its 3 s wait for stdin
+STDIN_WARNING = ("Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect "
+                 "stdin explicitly: < /dev/null to skip, or wait longer.")
+NO_MARKER = ("Error: No deferred tool marker found in the resumed session. Either the session was not deferred, the "
+             "marker is stale (tool already ran), or it exceeds the tail-scan window. Provide a prompt to continue the "
+             "conversation.")
+
+
+def late_stdin_claude(folder: Path, misses: int) -> tuple[Path, Path]:
+    """A stand-in `claude` in `folder` for a fork that resumes a session: its first `misses` runs start without the
+    prompt, as Claude Code does when the prompt comes after its 3 s wait for stdin (STDIN_WARNING, NO_MARKER, exit 1);
+    a later run reads the prompt and answers with it in stream-json. Each run adds a line to the returned runs file.
+    (the stand-in, its runs file)"""
+    import sys
+
+    runs = folder / "runs.txt"
+    bin_ = folder / "late-claude"
+    bin_.write_text(f"""#!{sys.executable}
+import json, sys
+with open({str(runs)!r}, "a") as f:
+    f.write("run\\n")
+if len(open({str(runs)!r}).read().splitlines()) <= {misses}:
+    sys.stderr.write({STDIN_WARNING!r} + "\\n" + {NO_MARKER!r} + "\\n")
+    sys.exit(1)
+text = "Read: " + sys.stdin.read()
+for rec in ({{"type": "assistant", "message": {{"content": [{{"type": "text", "text": text}}]}}}},
+            {{"type": "result", "subtype": "success", "is_error": False, "result": text}}):
+    print(json.dumps(rec))
+""")
+    bin_.chmod(0o755)
+    return bin_, runs
+
+
 @pytest.fixture()
 def fake_claude(tmp_path, monkeypatch) -> Path:
     """fake_claude_bin on a claude.ai login as config.CLI_PATH and THIMBLE_CLAUDE_BIN, with THIMBLE_SKIP_KEY off; a test
