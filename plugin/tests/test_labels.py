@@ -192,6 +192,35 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     assert "chose not to run it over its 420 records" in run(root, "label", "spam").stdout
 
 
+def test_the_labels_pane_applies_a_sample_the_ask_picked_again_over_its_same_records(root: Path):
+    with open(root / "chat" / "big.jsonl", "w") as f:
+        for i in range(420):
+            f.write(json.dumps({"agent": "wren", "text": f"message {i}", "n": i}) + "\n")
+    st = Store(root)
+    spam = ["label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam."]
+    run(root, *spam, "--limit", "25")
+    run(root, *spam)
+    got = json.loads(run(root, "label", "spam", "--answer", "sample", "--ask", feed(root)[-1]["ask"]).stdout)
+    assert got["reads"] == 300
+    held = set(LB.held(LB.load(st, "spam")))
+    assert len(held) == 300
+    # the pane's change of its model: a new version over the same 300 records, still a trial of the 420, so its reads
+    # start without an ask
+    r = run(root, *spam, "--model", "haiku", "--same-records", "--json")
+    assert r.returncode == 0, r.stdout + r.stderr
+    lab = LB.load(st, "spam")
+    assert lab["model"] == "haiku" and lab["version"] == 2 and lab["trial"] is True and lab["matched"] == 420
+    assert set(lab["units"]) == held and all(u.get("wait") for u in lab["units"].values())
+    assert lab["run"]["state"] == "asked" and feed(root)[-1]["kind"] == "label"
+    # the same change over the whole scope reads all 420, so it asks first, its cost on the label's own model; --json
+    # says the run waits for that ask, by its id, so the pane asks the person who ran it (labels/edit.ts)
+    got = json.loads(run(root, *spam, "--model", "sonnet", "--json").stdout)
+    lab = LB.load(st, "spam")
+    assert len(lab["units"]) == 420 and lab["trial"] is False and lab["run"]["state"] == "ask"
+    assert feed(root)[-1]["kind"] == "label_ask" and feed(root)[-1]["model"] == "sonnet"
+    assert got["run"]["state"] == "ask" and got["run"]["ask"]["id"] == feed(root)[-1]["ask"]
+
+
 # ------------------------------------------------------------------ a label belongs to its conversation
 
 

@@ -348,9 +348,9 @@ class Rec(dict):
 
 
 def records(st: Store, glob: str, where: str | None = None, within: tuple[str, str] | None = None,
-            limit: int | None = None, seed: int = 0) -> tuple[list[S.Row], int, list[str]]:
+            limit: int | None = None, seed: int = 0, only: set[str] | None = None) -> tuple[list[S.Row], int, list[str]]:
     """(the records, how many matched, the files) of a glob, narrowed by --where and --within; with a limit, that many
-    of them at random (a trial)."""
+    of them at random (a trial); with `only`, the ones it names (the records a label holds, applied again over them)."""
     # `x.db#prs` names one table of a database, as load() reads it; `x.json#/runs/*/steps` the records of a JSON
     # document at a pointer (S.pointer_values)
     pattern, _, place = glob.partition("#")
@@ -400,6 +400,8 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
                 if not ok:
                     continue
             matched += 1
+            if only is not None and row.ref not in only:
+                continue
             if not limit or len(kept) < limit:
                 kept.append(row)
             else:  # reservoir sampling: a trial is a random sample of every match
@@ -562,14 +564,18 @@ def _definition(kind: str, rule: str, glob: str | None, values: list[str], where
 
 def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[str] | None = None,
            where: str | None = None, within: tuple[str, str] | None = None, limit: int | None = None,
-           reason: bool = False, seed: int = 0, says: str | None = None, model: str | None = None) -> dict[str, Any]:
+           reason: bool = False, seed: int = 0, says: str | None = None, model: str | None = None,
+           same_records: bool = False) -> dict[str, Any]:
     """Define a label (or apply the same definition again) and apply it: regex and code at once, prompt as records that
     wait for the model. The same definition again keeps the values it has and applies it only to records it has not
     seen; a changed one is a new version, whose records start again (the person's checks of records that are still in
     it, with a value still on the list, are kept). Code with no `values` takes the values it returns, the most common
     first, and a None it returns leaves the record outside the label. `says`: the rule in one plain sentence, which the
     analyst reads in its place; a changed definition without one has none. `model`: the model that reads a prompt
-    label's records, part of its definition (none: the plugin's own). Returns {label, added, applied, errors}."""
+    label's records, part of its definition (none: the plugin's own). `same_records`: over the records the label holds
+    now, not its whole scope, and no --limit (the labels pane's change of a trial whose records the ask picked, which no
+    --limit picks again); it stays a trial while they are fewer than the scope's. Returns {label, added, applied,
+    errors}."""
     if kind not in ("regex", "code", "prompt"):
         raise LabelError(f"a label's predicate is --regex, --code or --prompt, not {kind}")
     given = bool(values) or kind != "code"
@@ -582,14 +588,18 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
         except re.error as e:
             raise LabelError(f"the regex does not compile: {e}") from e
     fn = _code_fn(rule) if kind == "code" else None
-    rows, matched, files = records(st, glob, where, within, limit, seed)
+    old = load(st, name)
+    only = set(held(old)) if same_records and old else None
+    if only is not None:
+        limit = None
+    rows, matched, files = records(st, glob, where, within, limit, seed, only)
     # the values are computed outside the lock, which other writers wait on; when one of them changed the label
     # meanwhile, they are computed again on its newer state, under the lock
     # a prompt label another conversation of the folder made the same: the model's reads it holds are not made again
     reuse = reads_elsewhere(st, name, _definition(kind, rule, glob, values, where, within, model)) if kind == "prompt" else {}
     job = {"kind": kind, "rule": rule, "glob": glob, "values": values, "given": given, "where": where, "within": within,
-           "model": model, "limit": limit, "seed": seed, "reason": reason, "says": " ".join((says or "").split()), "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse}
-    old = load(st, name)
+           "model": model, "limit": limit, "seed": seed, "reason": reason, "says": " ".join((says or "").split()), "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse,
+           "trial": bool(limit) or (only is not None and len(rows) < matched)}
     lab, added, errors, same = _apply(st, old, name, job)
     with locked(st, name):
         now = load(st, name)
@@ -625,7 +635,7 @@ def _apply(st: Store, old: dict[str, Any] | None, name: str,
     lab["reason"] = bool(job["reason"]) or bool(lab.get("reason"))
     if job.get("says"):
         lab["says"] = job["says"]
-    lab["trial"] = bool(job["limit"])
+    lab["trial"] = bool(job.get("trial", job["limit"]))
     # how it was applied, so it can be applied again the same way with one thing changed (the labels pane's edit)
     lab["limit"] = job["limit"]
     lab["seed"] = job.get("seed") or 0

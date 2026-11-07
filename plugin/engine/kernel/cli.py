@@ -474,21 +474,25 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 print("no code: pass a file with --code FILE, or the code on stdin, defining label(unit)")
                 return 2
         r = LB.define(st, name, kind, rule, a.glob, a.values.split(",") if a.values else None, a.where,
-                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says, a.model)
+                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says, a.model, a.same_records)
         lab = _load(st, name)
         s = LB.status(lab)
-        # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
-        # label and scope; the person's key answers with --answer, as the person (labels/use.ts)
+        # a big prompt label asks the person first (estimate.py), unless it is a trial (--limit, or a trial applied again
+        # over its same records) or they said yes to this exact label and scope; the person's key answers with --answer,
+        # as the person (labels/use.ts)
         ask = None
-        if kind == "prompt" and not a.limit and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
+        if kind == "prompt" and not lab.get("trial") and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
             units = LB.waiting(st, name)["units"]
             calls = len(LB.batches(units))
             ask = LB.hold_for_ask(st, name, calls)
             lab = _load(st, name)
+            # --json says the run waits for the ask, with its id (labels/edit.ts asks the person who ran it)
+            s = LB.status(lab)
             # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample. `chars`: the
-            # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs)
+            # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs),
+            # on the label's own model when it names one
             st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
-                     "chars": sum(len(u["text"]) + 40 for u in units),
+                     "chars": sum(len(u["text"]) + 40 for u in units), "model": lab.get("model"),
                      "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
                      "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(st, lab)} with Claude",
                      "meta": EST.calls_line(ask["calls"])})
@@ -710,6 +714,8 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--reason", action="store_true")
     p.add_argument("--model", help=argparse.SUPPRESS)  # a prompt label's model: the labels pane's edit of it
+    # the labels pane's edit of a trial the ask picked: over the records the label holds now, not its whole scope
+    p.add_argument("--same-records", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--set", dest="set_values", nargs="*", metavar="REF=VALUE")
     p.add_argument("--wait", nargs="?", type=float, const=600.0, metavar="SECONDS")
     p.add_argument("--again", action="store_true")
