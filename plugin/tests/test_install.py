@@ -110,10 +110,12 @@ NODE = ('case "$1" in\n'
             "missing": ["bubblewrap", "socat", "ripgrep"]}) + '\'; exit 1; fi ;;\n'
         'esac\n')
 # uv and npm: their versions, and what uv sync, npm ci and npm run build leave; uv logs each other call in uv.log
-# beside it
+# beside it, and fails it while FAKE_UV_FAILS is set
 UV = ('[ "$1" = --version ] && { echo "uv 0.9.5"; exit 0; }\n'
       'echo "$*" >> "$(dirname "$0")/uv.log"\n'
-      '[ "$1" = sync ] && mkdir -p "$3/.venv/bin" && echo made-up > "$3/.venv/bin/python"\nexit 0\n')
+      '[ -z "$FAKE_UV_FAILS" ] || { echo "error: made-up failure"; exit 1; }\n'
+      '[ "$1" = sync ] || exit 0\n'
+      'mkdir -p "$3/.venv/bin" && { [ -e "$3/.venv/bin/python" ] || echo made-up > "$3/.venv/bin/python"; }\n')
 NPM = ('[ "$1" = --version ] && { echo "10.9.2"; exit 0; }\n'
        'case "$3" in ci) mkdir -p "$2/node_modules" ;; '
        'run) mkdir -p "$2/dist" && echo "<title>thimble</title>" > "$2/dist/index.html" ;; esac\nexit 0\n')
@@ -328,6 +330,41 @@ def test_the_server_s_packages_are_compiled_and_an_install_that_left_them_uncomp
     p = w.install(PATH=path)
     assert p.returncode == 0, text_of(p)
     assert "The plugin, the workbench and the commands are in place." in p.stdout and w.uv() == [sync, sync], p.stdout
+
+
+def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_left_them_uncompiled(w):
+    """thimble-browser's start, for an install that thimble 0.10.12 or before made or updated (and a clone's): the
+    server's packages that have no mark of their compile are compiled once, by the install's command, before the server
+    starts. A compile that fails says so with what uv said, and the server starts all the same."""
+    browser = w.tmp / "clone" / "browser"
+    (browser / "scripts").mkdir(parents=True)
+    shutil.copy(ROOT / "browser" / "scripts" / "thimble-browser", browser / "scripts" / "thimble-browser")
+    stub(browser / "backend" / ".venv" / "bin" / "python", 'echo "server: $*"\n')
+    (browser / "frontend" / "dist").mkdir(parents=True)
+    (browser / "frontend" / "dist" / "index.html").write_text("<title>thimble</title>\n")
+    (w.home / "data").mkdir()
+    mark = browser / "backend" / ".venv" / IN.FX.COMPILED
+
+    def start(**env: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(browser / "scripts" / "thimble-browser"), str(w.home / "data")],
+                              capture_output=True, text=True, env=w.env(**env), cwd=w.home, timeout=60)
+
+    p = start(FAKE_UV_FAILS="1")
+    assert p.returncode == 0 and p.stdout.splitlines() == [
+        "thimble-browser: compiling the server's packages, once...",
+        f"server: -m app.cli browser --cwd {(w.home / 'data').resolve()} --session new"], text_of(p)
+    assert p.stderr.splitlines() == [
+        "error: made-up failure",
+        "thimble-browser: the server's packages are not compiled, so each kernel's start compiles them: after you fix "
+        "that, start thimble-browser again"], p.stderr
+    assert not mark.exists()
+    p = start()
+    assert p.returncode == 0 and p.stdout.splitlines()[0] == "thimble-browser: compiling the server's packages, once..."
+    sync = (f"sync --project {(browser / 'backend').resolve()} --frozen --no-dev --no-install-project --extra dev "
+            "--compile-bytecode")
+    assert w.uv() == [sync, sync] and mark.is_file() and p.stderr == ""
+    p = start()
+    assert p.returncode == 0 and p.stdout.splitlines()[0].startswith("server: ") and w.uv() == [sync, sync], text_of(p)
 
 
 @pytest.mark.parametrize("args, given", [
