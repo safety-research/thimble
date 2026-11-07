@@ -166,8 +166,8 @@ def download(ref: str, into: Path, then: str = "run thimble update again", archi
             _answered(status, then)
             got = sha256_of(path)
             if got != _sum_in(sums, name):
-                raise FX.FixError(f"{name} does not have the sha256 its SHA256SUMS gives, so the download is broken and "
-                                  f"nothing changed; {then}")
+                raise FX.FixError(f"the downloaded {name} does not have the sha256 its SHA256SUMS gives, so the "
+                                  f"download is broken and nothing changed; {then}")
             return {"path": path, "source": file_url(ref), "sha256": got, "file": True}
         if status != "404":
             _answered(status, then)
@@ -187,16 +187,16 @@ def _checked(members: list[tarfile.TarInfo], label: str) -> tuple[list[tarfile.T
     an empty, ., .., or .git part, one that is no file or folder (a link, a device, a fifo), or one outside the one
     folder at the top stops it, naming the member."""
     if not members:
-        raise FX.FixError(f"{label} holds no files, so thimble did not use it and nothing changed; report it at "
-                          f"{issues()}")
+        raise FX.FixError(f"the downloaded {label} holds no files, so thimble did not use it and nothing changed; "
+                          f"report it at {issues()}")
     top = members[0].name.split("/")[0]
     files: list[tarfile.TarInfo] = []
     for m in members:
         parts = m.name.split("/")
         if (m.name.startswith("/") or any(x in ("", ".", "..") or x.lower() == ".git" for x in parts)
                 or not (m.isfile() or m.isdir()) or parts[0] != top or (m.isfile() and len(parts) < 2)):
-            raise FX.FixError(f"{label} holds {m.name}, a link or a path out of its folder, so thimble did not use it "
-                              f"and nothing changed; report it at {issues()}")
+            raise FX.FixError(f"the downloaded {label} holds {m.name}, a link or a path out of its folder, so thimble "
+                              f"did not use it and nothing changed; report it at {issues()}")
         if m.isfile():
             files.append(m)
     return files, int(max(m.mtime for m in members))
@@ -215,9 +215,11 @@ def _quoted(path: str) -> bytes:
     return bytes(out + b'"')
 
 
-def _import(repo: Path, tar: tarfile.TarFile, files: list[tarfile.TarInfo], when: int, message: str) -> str:
-    """The commit of `files` (their paths without the top folder), streamed from the file into git fast-import, which
-    writes it to a ref of its own; the ref is read, then deleted. The new commit."""
+def _import(repo: Path, tar: tarfile.TarFile, files: list[tarfile.TarInfo], when: int, message: str, label: str,
+            then: str) -> str:
+    """The commit of `files` (their paths without the top folder), streamed from the file `label` into git
+    fast-import, which writes it to a ref of its own; the ref is read, then deleted. The new commit. When fast-import
+    fails, its own line, then `then`."""
     ref = f"refs/thimble/import/{os.getpid()}"
     FX.run(["git", "update-ref", "-d", ref], cwd=repo, check=False)
     who = f"{WHO} {when} +0000".encode()
@@ -249,7 +251,9 @@ def _import(repo: Path, tar: tarfile.TarFile, files: list[tarfile.TarInfo], when
             err.seek(0)
             said = [x.strip() for x in err.read().decode(errors="replace").splitlines() if x.strip()]
             FX.run(["git", "update-ref", "-d", ref], cwd=repo, check=False)
-            raise FX.FixError(f"git fast-import failed: {said[-1] if said else 'no message'}")
+            raise FX.FixError(f"thimble could not make the release commit from {label} (git fast-import: "
+                              f"{said[-1] if said else 'no message'}), so nothing changed. {_capital(then)}; if it says "
+                              f"this again, report it at {issues()}")
     new = FX.git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=repo)
     FX.run(["git", "update-ref", "-d", ref], cwd=repo, check=False)
     return new
@@ -273,9 +277,10 @@ def commit(repo: Path, path: Path, tag: str = "", name: str = "", then: str = "t
             github = str(tar.pax_headers.get("comment") or "")
             github = github if COMMIT_ID.match(github) else ""
             message = (f"thimble {tag}" if tag else f"thimble {name} at {github[:7]}" if github else f"thimble {name}")
-            new = _import(repo, tar, files, when, message)
+            new = _import(repo, tar, files, when, message, label, then)
     except (tarfile.TarError, EOFError, zlib.error, OSError) as e:
-        raise FX.FixError(f"{label} could not be read ({e}), so thimble did not use it and nothing changed; {then}")
+        raise FX.FixError(f"the downloaded {label} could not be read ({e}), so thimble did not use it and nothing "
+                          f"changed; {then}")
     return {"base": new, "commit": github, "time": when}
 
 

@@ -168,10 +168,24 @@ def test_a_file_that_holds_a_link_or_a_path_out_of_its_folder_adds_nothing(tmp_p
     r = new_repo(tmp_path / "live")
     with pytest.raises(FX.FixError) as e:
         R.commit(r, f, "v0.10.2")
-    assert str(e.value).startswith(f"thimble-0.10.2.tar.gz holds {bad}, a link or a path out of its folder, so thimble "
-                                   "did not use it and nothing changed; report it at https://github.com/")
+    assert str(e.value).startswith(f"the downloaded thimble-0.10.2.tar.gz holds {bad}, a link or a path out of its "
+                                   "folder, so thimble did not use it and nothing changed; report it at "
+                                   "https://github.com/")
     assert refs_and_commits(r) == ("", "")
     assert sh("git", "count-objects", cwd=r).startswith("0 objects") and not list((r / ".git" / "objects" / "pack").iterdir())
+
+
+def test_a_release_commit_git_cannot_make_says_what_to_do(tmp_path, gh, monkeypatch):
+    f = gh.root / "v0.10.2" / "thimble-0.10.2.tar.gz"
+    r = new_repo(tmp_path / "live")
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "no-repository"))
+    with pytest.raises(FX.FixError) as e:
+        R.commit(r, f, "v0.10.2", then="run thimble update again")
+    said = str(e.value)
+    assert said.startswith("thimble could not make the release commit from thimble-0.10.2.tar.gz (git fast-import: "
+                           "fatal: "), said
+    assert said.endswith("), so nothing changed. Run thimble update again; if it says this again, report it at "
+                         "https://github.com/safety-research/thimble/issues"), said
 
 
 # ------------------------------------------------------------------ finding and downloading a release
@@ -200,8 +214,8 @@ def test_download_checks_the_file_against_its_sha256sums_and_each_failure_says_w
         return str(e.value)
 
     gh.spoil("v0.10.3")
-    assert fails("v0.10.3") == ("thimble-0.10.3.tar.gz does not have the sha256 its SHA256SUMS gives, so the download "
-                                "is broken and nothing changed; run thimble update again")
+    assert fails("v0.10.3") == ("the downloaded thimble-0.10.3.tar.gz does not have the sha256 its SHA256SUMS gives, "
+                                "so the download is broken and nothing changed; run thimble update again")
     gh.drop("v0.10.3")
     assert fails("v0.10.3") == (
         "thimble 0.10.3 has no release file on GitHub (thimble-0.10.3.tar.gz), so nothing changed. Run thimble update "

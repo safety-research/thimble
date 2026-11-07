@@ -416,8 +416,8 @@ def test_an_update_that_cannot_download_the_release_changes_nothing_and_says_wha
     before = state_of_fixes()
     issues = "report it at https://github.com/safety-research/thimble/issues"
     for spoil, said in (
-            (gh.spoil, "thimble-0.10.3.tar.gz does not have the sha256 its SHA256SUMS gives, so the download is broken "
-                       "and nothing changed; run thimble update again"),
+            (gh.spoil, "the downloaded thimble-0.10.3.tar.gz does not have the sha256 its SHA256SUMS gives, so the "
+                       "download is broken and nothing changed; run thimble update again"),
             (gh.drop, "thimble 0.10.3 has no release file on GitHub (thimble-0.10.3.tar.gz), so nothing changed. Run "
                       f"thimble update again in a few minutes; if it says this again, {issues}"),
             (lambda tag: gh.stop(), f"thimble could not reach {gh.url} (")):

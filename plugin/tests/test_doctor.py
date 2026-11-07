@@ -93,3 +93,10 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
     assert "  ✓ Node 22.20.0" in out
     # the doctor looks for a newer release on a page, and downloads no release's file
     assert world["gh"].requests().count("GET /releases/latest") == 1 and world["gh"].files() == []
+    # a page that names no release: the line below says what GitHub answered, as a sentence
+    world["gh"].refuse(404)
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    i = out.index("  × thimble could not look for a newer release")
+    assert out[i + 1] == (f"      Thimble found no release at {world['gh'].url} (GitHub answered 404); run thimble "
+                          "update again")

@@ -618,6 +618,18 @@ def test_ref_to_a_prerelease_installs_its_file_by_its_name_beside_the_newest_rel
                             "/releases/download/v0.11.0-rc1/thimble-0.11.0-rc1.tar.gz"]
 
 
+def test_a_ref_whose_file_is_broken_says_so_in_a_sentence_and_moves_nothing(w):
+    assert w.install("--no-browser").returncode == 0
+    w.publish("v0.10.9")
+    w.gh.spoil("v0.10.9")
+    head = live_head(w)
+    p = w.install("--no-browser", "--ref", "v0.10.9")
+    assert p.returncode == 1 and p.stdout.splitlines()[-1] == (
+        "The downloaded thimble-0.10.9.tar.gz does not have the sha256 its SHA256SUMS gives, so the download is broken "
+        "and nothing changed; run the install again."), text_of(p)
+    assert live_head(w) == head and w.release()["tag"] == "v0.10.8"
+
+
 def update_as_before_release_files(w, tag: str) -> str:
     """thimble update to the release `tag` as a thimble from before release files makes it, with git: the tag fetched
     from thimble's repository into live, mine and the release checkout moved to GitHub's commit, and release.json given
