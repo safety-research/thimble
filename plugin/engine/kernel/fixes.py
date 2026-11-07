@@ -2702,6 +2702,9 @@ def _way_back() -> None:
 RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # the browser workbench's packages: (folder, its lock file, the packages it installs)
 BROWSER_LOCKS = (("backend", "uv.lock", ".venv"), ("frontend", "package-lock.json", "node_modules"))
+# the file that browser_packages leaves in the server's packages (backend/.venv) once uv compiled them to bytecode;
+# thimble-browser's start looks for it too. An install or update by thimble 0.10.12 or before left none
+COMPILED = "thimble-compiled"
 PROMPT_REAPPLY = PLUGIN / "prompts" / "reapply.md"
 
 
@@ -3006,9 +3009,16 @@ def _browser_behind(repo: Path, base: str) -> str:
         return ""
 
 
+def browser_compiled(b: Path) -> bool:
+    """Whether the server's packages in the browser folder `b` are compiled to bytecode: COMPILED is in them (a
+    hard-link copy of them takes it along)."""
+    return (b / "backend" / ".venv" / COMPILED).is_file()
+
+
 def browser_on_live() -> dict[str, Any]:
     """The browser workbench on live, when it is installed (its home exists): its Python and JS packages again only when
-    their lock files changed, then the page. thimble-browser runs from live while fixes/browser-ready is there."""
+    their lock files changed, or when the server's are not compiled to bytecode yet, then the page. thimble-browser runs
+    from live while fixes/browser-ready is there."""
     b = live_dir() / "browser"
     if not b.is_dir() or not browser_home().is_dir():
         return {"browser": "none"}
@@ -3021,7 +3031,7 @@ def browser_on_live() -> dict[str, Any]:
     try:
         for part, lock, pkgs in BROWSER_LOCKS:
             want, dest = _sha_of(b / part / lock), b / part / pkgs
-            if dest.exists() and stamps.get(lock) == want:
+            if dest.exists() and stamps.get(lock) == want and (part != "backend" or browser_compiled(b)):
                 continue
             src = seed / part / pkgs if seed else None
             if not dest.exists() and src and src.is_dir() and _sha_of(seed / part / lock) == want:
@@ -3030,6 +3040,10 @@ def browser_on_live() -> dict[str, Any]:
             else:
                 browser_packages(b, part, env)
                 did.append(f"{part} packages installed")
+            if part == "backend" and not browser_compiled(b):
+                # linked from an install that did not compile them: uv compiles them, with nothing to download
+                browser_packages(b, part, env)
+                did.append(f"{part} packages compiled")
             stamps[lock] = want
             write_json(home() / "browser.json", stamps)
         browser_build(b, env)
@@ -3042,11 +3056,12 @@ def browser_on_live() -> dict[str, Any]:
 def browser_packages(b: Path, part: str, env: dict[str, str]) -> None:
     """The workbench's packages of `part` in the browser folder `b`: the server's Python packages (uv sync, with the
     test extras, so that thimble's dev agent can run the server's tests, and compiled to bytecode, which a kernel never
-    writes, so a kernel's start does not compile pandas and ipykernel again), or the page's and its sandbox runtime's
-    (npm ci)."""
+    writes, so a kernel's start does not compile pandas and ipykernel again; COMPILED then says so), or the page's and
+    its sandbox runtime's (npm ci)."""
     if part == "backend":
         run(["uv", "sync", "--project", str(b / part), "--frozen", "--no-dev", "--no-install-project",
              "--extra", "dev", "--compile-bytecode"], env=env, timeout=1800)
+        (b / part / ".venv" / COMPILED).touch()
     else:
         run(["npm", "--prefix", str(b / part), "ci", "--no-audit", "--no-fund"], env=env, timeout=1800)
 

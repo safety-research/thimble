@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -419,3 +420,49 @@ def test_update_puts_back_the_fixes_that_fit_and_reapply_brings_back_the_one_tha
     assert sh("git", "rev-parse", "mine", cwd=live) == head
     FX.undo(a)
     assert "untouched ${m}" in live_file("plugin/legend.ts") and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+
+
+def test_the_workbench_s_server_packages_are_compiled_once_also_where_an_older_install_left_them_uncompiled(world,
+                                                                                                         monkeypatch):
+    """The workbench on live (browser_on_live, which thimble update and the install run): the server's packages again
+    when uv.lock changed, or when they are not compiled to bytecode, which a kernel never writes. An install or update
+    by thimble 0.10.12 or before left them uncompiled under the same uv.lock. Packages linked from a clone that were
+    never compiled are compiled in live, and the clone stays as it was."""
+    tmp = world["tmp"]
+    tools = tmp / "tools.log"
+    fake(tmp / "bin" / "uv", tools, 'mkdir -p "$3/.venv"')
+    fake(tmp / "bin" / "npm", tools, '[ "$3" = run ] && mkdir -p "$2/dist" && echo page > "$2/dist/index.html"')
+    monkeypatch.setenv("PATH", f"{tmp / 'bin'}:{os.environ['PATH']}")
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp / "bh"))
+    (tmp / "bh").mkdir()
+    b = FX.live_dir() / "browser"
+    for part, lock, pkgs in FX.BROWSER_LOCKS:
+        (b / part / pkgs).mkdir(parents=True)
+        (b / part / lock).write_text(f"made-up {lock}\n")
+    # as an install by thimble 0.10.12 left them: stamped with their lock files, and not compiled
+    FX.write_json(FX.home() / "browser.json", {lock: FX._sha_of(b / part / lock) for part, lock, _ in FX.BROWSER_LOCKS})
+    sync = f"sync --project {b / 'backend'} --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
+
+    def syncs() -> int:
+        return tools.read_text().splitlines().count(sync)
+
+    got = FX.browser_on_live()
+    assert (got["browser"], got["browser_did"], syncs()) == ("ready", ["backend packages installed"], 1)
+    assert FX.browser_compiled(b) and (FX.home() / "browser-ready").is_file()
+    assert (FX.browser_on_live()["browser_did"], syncs()) == ([], 1)
+    # packages linked from a clone whose install did not compile them: uv compiles them in live
+    clone = tmp / "clone" / "browser"
+    for part, lock, pkgs in FX.BROWSER_LOCKS:
+        (clone / part / pkgs).mkdir(parents=True)
+        (clone / part / pkgs / "made-up-package.txt").write_text("x\n")
+        (clone / part / lock).write_text(f"made-up {lock}\n")
+    (tmp / "bh" / "checkout").write_text(f"{clone}\n")
+    shutil.rmtree(b / "backend" / ".venv")
+    assert FX.browser_on_live()["browser_did"] == ["backend packages linked", "backend packages compiled"]
+    assert syncs() == 2 and FX.browser_compiled(b) and (b / "backend" / ".venv" / "made-up-package.txt").is_file()
+    assert not (clone / "backend" / ".venv" / FX.COMPILED).exists()
+    # a clone's packages that were compiled come linked with their mark, and uv has nothing to do
+    (clone / "backend" / ".venv" / FX.COMPILED).touch()
+    shutil.rmtree(b / "backend" / ".venv")
+    assert (FX.browser_on_live()["browser_did"], syncs()) == (["backend packages linked"], 2)
+    assert FX.browser_compiled(b)

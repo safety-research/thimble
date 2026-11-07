@@ -109,8 +109,10 @@ NODE = ('case "$1" in\n'
             "fix": "Install them: sudo apt-get install bubblewrap socat ripgrep",
             "missing": ["bubblewrap", "socat", "ripgrep"]}) + '\'; exit 1; fi ;;\n'
         'esac\n')
-# uv and npm: their versions, and what uv sync, npm ci and npm run build leave
+# uv and npm: their versions, and what uv sync, npm ci and npm run build leave; uv logs each other call in uv.log
+# beside it
 UV = ('[ "$1" = --version ] && { echo "uv 0.9.5"; exit 0; }\n'
+      'echo "$*" >> "$(dirname "$0")/uv.log"\n'
       '[ "$1" = sync ] && mkdir -p "$3/.venv/bin" && echo made-up > "$3/.venv/bin/python"\nexit 0\n')
 NPM = ('[ "$1" = --version ] && { echo "10.9.2"; exit 0; }\n'
        'case "$3" in ci) mkdir -p "$2/node_modules" ;; '
@@ -201,6 +203,11 @@ class World:
 
     def calls(self) -> list[str]:
         return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def uv(self) -> list[str]:
+        """What the fake uv was asked, but its version."""
+        log = self.bin / "uv.log"
+        return log.read_text().splitlines() if log.exists() else []
 
     def settings(self) -> dict:
         return json.loads((self.cc / "settings.json").read_text())
@@ -302,6 +309,25 @@ def test_both_products_build_the_workbench_in_live_and_link_its_command(w):
     assert IN.MARKER in launcher and f"exec {live / 'browser' / 'scripts' / 'thimble-browser'} \"$@\"" in launcher
     assert (live / "browser" / "scripts" / "setup-args").read_text().split() == ["--setup", "--keep"]
     assert (w.home / ".thimble-browser").stat().st_mode & 0o777 == 0o700
+
+
+def test_the_server_s_packages_are_compiled_and_an_install_that_left_them_uncompiled_compiles_them_once(w):
+    """The install compiles the server's packages to bytecode, which a kernel never writes, and marks them so
+    (fixes.COMPILED). An install by thimble 0.10.12 or before left no mark under the same uv.lock: the install run again
+    compiles them, once, and then has every part in place."""
+    path = f"{w.bin}:{w.home / '.local' / 'bin'}:/usr/bin:/bin"
+    assert w.install(PATH=path).returncode == 0
+    backend = w.th / "fixes" / "live" / "browser" / "backend"
+    sync = f"sync --project {backend} --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
+    assert w.uv() == [sync] and (backend / ".venv" / IN.FX.COMPILED).is_file()
+    (backend / ".venv" / IN.FX.COMPILED).unlink()
+    p = w.install(PATH=path)
+    assert p.returncode == 0, text_of(p)
+    assert "  Installing its packages and building its page (a few minutes)... done" in p.stdout, p.stdout
+    assert w.uv() == [sync, sync] and (backend / ".venv" / IN.FX.COMPILED).is_file()
+    p = w.install(PATH=path)
+    assert p.returncode == 0, text_of(p)
+    assert "The plugin, the workbench and the commands are in place." in p.stdout and w.uv() == [sync, sync], p.stdout
 
 
 @pytest.mark.parametrize("args, given", [

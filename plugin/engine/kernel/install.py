@@ -283,13 +283,14 @@ def head_of(folder: Path) -> str:
 
 
 def browser_ready() -> bool:
-    """Whether the workbench in live is built and runs from there (fixes.browser_on_live wrote browser-ready)."""
+    """Whether the workbench in live is built and runs from there (fixes.browser_on_live wrote browser-ready), with its
+    server's packages compiled to bytecode (fixes.browser_compiled)."""
     b = FX.live_dir() / "browser"
     try:
         ready = (FX.home() / "browser-ready").read_text().strip()
     except OSError:
         return False
-    return same(ready, b) and (b / "backend" / ".venv").is_dir() and (b / "frontend" / "dist" / "index.html").is_file()
+    return same(ready, b) and FX.browser_compiled(b) and (b / "frontend" / "dist" / "index.html").is_file()
 
 
 def launcher_target(p: Path) -> str:
