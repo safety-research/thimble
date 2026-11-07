@@ -81,7 +81,8 @@ export function failedWhy(p: Pick<Proposal, 'error' | 'stopped_by' | 'refused'> 
   return p?.error ?? ''
 }
 
-/** The Build menu: the run's model and effort, Settings' dev row unless the analyst picks others here. */
+/** The Build menu: the run's model and effort, Settings' dev row unless the analyst picks others here. Its trigger's
+ * click must reach the Menu's own wrapper, which opens the menu and keeps the click from what holds the chip. */
 function BuildMenu({ ws, name, values, onPick }: { ws: string; name: string; values: { model: string; effort: string }; onPick: (v: { model: string; effort: string }) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null)
   useEffect(() => {
@@ -103,7 +104,7 @@ function BuildMenu({ ws, name, values, onPick }: { ws: string; name: string; val
       label={`Build ${name} with`}
       items={items}
       trigger={
-        <button type="button" className="view-chip-values" aria-label={`Model and effort for ${name}`} data-model={values.model} data-effort={values.effort} onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="view-chip-values" aria-label={`Model and effort for ${name}`} data-model={values.model} data-effort={values.effort}>
           {[values.model ? modelLabel(values.model) : '', values.effort].filter(Boolean).join(' · ') || 'model'}
           <Icon name="chevron-down" size={10} />
         </button>
