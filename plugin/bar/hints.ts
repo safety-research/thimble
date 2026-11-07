@@ -2,12 +2,15 @@
 // hint (select a passage first) shows until the person has used that
 // feature once in the session; after each of main's answers, one reminder names a feature set to on demand (or
 // manual) that the session has not used yet, each at most once a session. Both are hints (notice.ts hintLine): the bar
-// shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt.
+// shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt. While the first
+// session's tour runs (intro.ts), no reminder shows: its steps name the same keys. A feature used is told to the tour
+// too.
 //
 //   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named)
 import type { EngineInterface } from 'claude-code'
 
 import { choiceOf, featureOn } from '../settings/features.mjs'
+import { tourRuns, tourUsed } from './intro'
 import { failLineNow, hintLine } from './notice'
 
 type Engine = EngineInterface
@@ -24,11 +27,12 @@ async function remindedNow($: Engine): Promise<string[]> {
   return list((await $.state.get(REMINDED)).value)
 }
 
-/** The person used a feature (`explain`, `cite`, `rewrite`): its how-to hint and its reminder
- *  stop for the rest of the session. */
+/** The person used a feature (`explain`, `cite`, `rewrite`, `visualize`, `evidence`): its how-to hint and its reminder
+ *  stop for the rest of the session, and the tour's step about it is done (intro.ts). */
 export async function hintUsed($: Engine, feature: string): Promise<void> {
   const used = await usedNow($)
   if (!used.includes(feature)) await $.state.set(USED, [...used, feature])
+  await tourUsed($, feature).catch(() => undefined)
 }
 
 /** A how-to hint, while the session has not used its feature. */
@@ -44,9 +48,10 @@ export const REMINDERS: { feature: string; on: () => boolean; text: string }[] =
 ]
 
 /** The end of one of main's answers: one reminder, of the first feature waiting to be asked that the session has
- *  neither used nor been reminded of. A line already showing (a failure, a hint) stays. */
+ *  neither used nor been reminded of. A line already showing (a failure, a hint) stays, and the tour gives none. */
 export async function remindAfterAnswer($: Engine): Promise<void> {
   if (await failLineNow($)) return
+  if (await tourRuns($).catch(() => false)) return
   const used = await usedNow($)
   const reminded = await remindedNow($)
   const r = REMINDERS.find(x => x.on() && !used.includes(x.feature) && !reminded.includes(x.feature))

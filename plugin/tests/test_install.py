@@ -247,6 +247,12 @@ def test_a_fresh_install_lays_the_release_out_in_thimbles_home_and_says_so(w):
         "thimble 0.10.8 is installed.",
         "",
         "Try it now: run claude in a folder of data files.",
+        "A quick tour, once Claude answers you (selecting and clicking need Claude Code's fullscreen layout):",
+        "  v      draws a card of the answer",
+        "  e      explains the words you select in an answer",
+        "  click  a citation (underlined words) to see its evidence: thimble checks it against the data, and corrects "
+        "the words or marks them failed when they are wrong",
+        "  s      writes a shorter, plainer version of a long answer below it",
         "",
         "Note: ~/.local/bin is not on your PATH, so a new terminal does not find thimble. Add this line to ~/.zshrc: "
         'export PATH="$HOME/.local/bin:$PATH"',
@@ -286,12 +292,18 @@ def test_both_products_build_the_workbench_in_live_and_link_its_command(w):
     assert re.fullmatch(r"  Installing its packages and building its page \(a few minutes\)\.\.\. done, \d+ MB\.",
                         section[0]), section
     assert section[1:] == ["  Sign-in: not chosen yet. The workbench asks when it starts."], section
-    assert out.rstrip().splitlines()[-6:] == [
+    assert out.rstrip().splitlines()[-11:] == [
         "The commands thimble and thimble-browser are in ~/.local/bin.",
         "",
         "thimble 0.10.8 is installed.",
         "",
         "Try it now: run claude in a folder of data files.",
+        "A quick tour, once Claude answers you (selecting and clicking need Claude Code's fullscreen layout):",
+        "  v      draws a card of the answer",
+        "  e      explains the words you select in an answer",
+        "  click  a citation (underlined words) to see its evidence: thimble checks it against the data, and corrects "
+        "the words or marks them failed when they are wrong",
+        "  s      writes a shorter, plainer version of a long answer below it",
         "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link "
         "it prints."], out
     live = w.th / "fixes" / "live"
@@ -401,9 +413,11 @@ def test_local_installs_from_the_clone_as_the_dev_install(w):
     p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh")
     assert p.returncode == 0, text_of(p)
     assert "  Added to Claude Code from ~/thimble." in p.stdout.splitlines()
-    assert before_notes(p.stdout)[-3:] == [
+    assert before_notes(p.stdout)[-8:-5] == [
         "thimble is installed from your clone ~/thimble.", "", "Try it now: run claude in a folder of data files."], \
         p.stdout
+    assert before_notes(p.stdout)[-5] == \
+        "A quick tour, once Claude answers you (selecting and clicking need Claude Code's fullscreen layout):", p.stdout
     assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
     assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(clone / "plugin" / "bin" / "thimble")
     assert not (w.th / "fixes").exists()

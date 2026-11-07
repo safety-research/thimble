@@ -70,7 +70,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
 | the observer: one look at each answer, a fork of the conversation, for the explainers, important details and claims (the claims on demand, f in their pane, unless Claims is auto); its lenses | `plugin/observer/` |
 | the features that act on answers, each meeting the rest through its `seam.ts` (`core/answerview.ts` calls them): squeeze, stretch and catch-up; the explainers and important details; the claims; the side threads; the citation and explanation tray | `plugin/squeeze/`, `plugin/explain/`, `plugin/claims/`, `plugin/threads/`, `plugin/tray/` |
-| the line above the prompt: busy step, failure line, counts | `plugin/bar/` |
+| the line above the prompt: busy step, failure line, counts, and the first session's hint and tour (`intro.ts`) | `plugin/bar/` |
 | the settings and coverage panes | `plugin/panes/` |
 | the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
 | `/thimble-fix`: the person's changes to their own thimble, made by the fixer in a scratch copy and applied with their key | `plugin/fix/` |
