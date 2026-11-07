@@ -1,7 +1,8 @@
 // client.tsx: the one Client module that draws every card. Claude Code runs it in the terminal's drawing thread; draw.ts
 // names it by this file and hands it the card's drawing as props: {tree, width, need, ack, tint, accent, theme, cap}, the plain tree the runner
 // made of the view (Box, Text and Button nodes with the props each element takes), or null before there is one. It
-// holds no data and no logic of the card. It sends the hooks module events:
+// holds no data and no logic of the card. What it draws of the tree is drawn.js's, which the runner measures the
+// drawing with. It sends the hooks module events:
 //
 //   {seen: true}                    once, when the instance is first drawn: the card is on screen, so it takes keys
 //   {draw: need}                    the drawing it needs (`<version>:<width>:<state>`, draw.ts needOf), once for each:
@@ -32,41 +33,15 @@
 // numbered; draw.ts handles each number once and answers the last one it handled as `ack`.
 import type { ClientModule, ClientSurface } from 'claude-code'
 
+import { cardElement } from './drawn.js'
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Node = { t: string; p?: Record<string, unknown>; c?: Array<Node | string> } | string
-
-const BOX = ['flexDirection', 'flexGrow', 'flexShrink', 'flexWrap', 'alignItems', 'alignSelf', 'justifyContent', 'gap',
-  'columnGap', 'rowGap', 'width', 'height', 'minWidth', 'minHeight', 'margin', 'marginX', 'marginY', 'marginTop',
-  'marginBottom', 'marginLeft', 'marginRight', 'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom',
-  'paddingLeft', 'paddingRight', 'borderStyle', 'borderColor', 'borderDimColor', 'backgroundColor', 'overflow',
-  'display', 'position', 'top', 'left', 'right', 'bottom']
-const TEXT = ['color', 'backgroundColor', 'dimColor', 'bold', 'italic', 'underline', 'strikethrough', 'inverse', 'wrap']
-const BUTTON = ['label', 'plain', 'dimColor', 'variant']
 
 type Instance = { id: string; n: number; queue: Array<Record<string, unknown>>; down: { x: number; y: number; button: string } | null; asked: string; rows: number }
 const instances = new WeakMap<object, Instance>()
 
-function pick(p: Record<string, unknown> | undefined, names: string[]): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  if (!p) return out
-  for (const k of names) {
-    const v = p[k]
-    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k] = v
-  }
-  return out
-}
-
-/** The words a node draws: a row's side by side, a column's one line under another. */
-function wordsOf(n: Node): string {
-  if (typeof n === 'string') return n
-  if (!n || typeof n !== 'object') return ''
-  const col = n.t === 'Box' && (n.p?.flexDirection === 'column' || n.p?.flexDirection === 'column-reverse')
-  return (Array.isArray(n.c) ? n.c : []).map(wordsOf).join(col ? '\n' : '')
-}
-
 const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
-  const E = surface.elements as Any
   const width = Number(props?.width) || surface.columns || 80
   let I = instances.get(surface)
   if (!I) {
@@ -103,101 +78,8 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     send({ pointer: { down: { x: d.x, y: d.y }, up: { x: ev.x, y: ev.y }, button: d.button }, width })
   })
 
-  // every run of words the view drew (a label, a bar, a number) takes a click: the item it stands in when the card's
-  // keys select one there (runner.mjs pick), else a side thread about the run (draw.ts). Each run shows it is
-  // clickable under the pointer: thimble's tint behind it (`tint`, the citations' hover, for the theme the drawing is in) and its words
-  // underlined; a bar of glyphs, which fills its cells and so hides a tint, takes thimble's color (`accent`) in place of
-  // its own. Never Claude Code's inverse of a plain Button. The Button holds only the run's one Text, as a Button holds
-  // strings and Text only (Claude Code draws no Button that holds a Box), so wrapping a run never breaks a card that
-  // drew without it. Not inside the view's own Buttons (a Button around lines is a Box with onPress), and not at all on
-  // a card that reads clicks by cell (the runner marks its tree `cells`), so the view's clicks come first
-  const cells = !!(props?.tree && typeof props.tree === 'object' && props.tree.p?.cells)
-  let asks = 0
-  const tint = typeof props?.tint === 'string' && props.tint ? { backgroundColor: props.tint } : {}
-  const accent = typeof props?.accent === 'string' && props.accent ? props.accent : ''
-  /** A run of words (a Text's props and children) that takes a click; `text` its words, `path` its place in the
-   *  tree. */
-  const askable = (p: Record<string, unknown>, children: Any[], text: string, line: string, path: number[]): Any => {
-    if (!text.trim()) return E.Text({ ...p, children })
-    const key = `ask-${++asks}`
-    const scope = `${me.id}-${key}`
-    const words = /[\p{L}\p{N}]/u.test(text)
-    const look = words ? { underline: true, ...tint } : accent ? { color: accent } : tint
-    return E.Button({
-      key, plain: true, label: `ask about ${text.trim().slice(0, 60)}`,
-      hover: { scope, inverse: false, ...look },
-      onPress: () => send({ ask: { text, line, path }, width }),
-      children: [E.Text({ ...p, hover: { scope, ...look }, children })],
-    })
-  }
-  // the screen's ground for the drawing's theme (core/theme.ts), which a bar's cells move toward under the pointer
-  const ground = props?.theme === 'light' ? [255, 255, 255] : [30, 30, 30]
-  /** A bar's color as the highlight draws it: its hex moved most of the way to the ground, so on the highlight (the
-   *  inverse of the words) the bar reads inverted and stays in view; a color by name keeps itself. */
-  const inverted = (color: string): string => {
-    const m = /^#([0-9a-f]{6})$/i.exec(color)
-    if (!m) return color
-    const rgb = [0, 2, 4].map((i, k) => Math.round(parseInt(m[1].slice(i, i + 2), 16) * 0.45 + ground[k] * 0.55))
-    return `#${rgb.map(v => v.toString(16).padStart(2, '0')).join('')}`
-  }
-  /** A Button's children, drawn as in a Text: while the pointer is on the Button (`scope`) the whole row shows
-   *  highlighted, each run of words inverse and each run of glyphs in a color (a bar) inverted on the highlight's
-   *  ground (Claude Code's inverse of a bar's block cells would turn them into the background's color). `color`: the
-   *  color the run inherits. A bar of blocks in no color keeps its look. */
-  const lit = (c: Array<Node | string> | undefined, scope: string, color = ''): Any[] => (Array.isArray(c) ? c : []).map(k => {
-    if (typeof k === 'string') {
-      if (/[\p{L}\p{N}]/u.test(k) || (!color && !/[\u2580-\u259f]/.test(k))) return E.Text({ hover: { scope, inverse: true }, children: k })
-      return color ? E.Text({ hover: { scope, color: inverted(color), backgroundColor: 'text' }, children: k }) : k
-    }
-    if (k && typeof k === 'object' && k.t === 'Text') {
-      const p = pick(k.p, TEXT)
-      return E.Text({ ...p, children: lit(k.c, scope, typeof p.color === 'string' ? p.color : color) })
-    }
-    return null
-  }).filter(x => x != null)
-  const kids = (c: Node[] | undefined, inText: boolean, line = '', owned = false, path: number[] = []): Any[] => (Array.isArray(c) ? c : []).map((k, i) => draw(k, inText, line, owned, [...path, i])).filter(x => x != null)
-  function draw(n: Node, inText: boolean, line = '', owned = false, path: number[] = []): Any {
-    if (typeof n === 'string') return inText ? n : owned || cells ? E.Text({ children: n }) : askable({}, [n], n, line || n, path)
-    if (!n || typeof n !== 'object') return null
-    if (n.t === 'Text') {
-      if (inText || owned || cells) return E.Text({ ...pick(n.p, TEXT), children: kids(n.c, true) })
-      const text = wordsOf(n)
-      return askable(pick(n.p, TEXT), kids(n.c, true), text, line || text, path)
-    }
-    if (inText) return null
-    if (n.t === 'Button') {
-      const press = n.p?.onPress
-      const key = typeof n.p?.key === 'string' ? `k${n.p.key}` : `b${String(press)}`
-      // under the pointer, the Button's words show inverse and its runs of glyphs (a bar) inverted (lit): Claude
-      // Code's inverse of the whole Button would turn a bar's cells into the background's color
-      const scope = `${me.id}-${key}`
-      return E.Button({
-        ...pick(n.p, BUTTON), key,
-        hover: { scope, inverse: false },
-        onPress: () => { if (typeof press === 'number') send({ press, width }) },
-        children: lit(n.c, scope),
-      })
-    }
-    if (n.t === 'Box') {
-      // a row's runs each ask about themselves on that row's line (a bar beside its label and number)
-      const row = n.p?.flexDirection !== 'column' && n.p?.flexDirection !== 'column-reverse'
-      // a border the view gives no color of its own is a hairline, dim as the card's own frame at rest
-      const p = pick(n.p, BOX)
-      if (typeof p.borderStyle === 'string' && p.borderColor === undefined && p.borderDimColor === undefined) p.borderDimColor = true
-      return E.Box({ ...p, children: kids(n.c, false, row ? line || wordsOf(n) : '', owned || typeof n.p?.onPress === 'number', path) })
-    }
-    return null
-  }
-
-  // the region the card's tree is laid out in, as layout.js's cardRoot lays it out for the text copy: what is wider is
-  // cut at its edge, as the copy says, so a view never draws over the frame. The frame hands only a drawing laid out at
-  // this width (draw.ts), and none while that drawing comes; should the region still be narrower (the frame squeezed
-  // in a chat narrower than it was told), the tree keeps its width and is cut at the region's edge: no row of it wraps
-  const tree = props?.tree ? draw(props.tree, false) : E.Text({ dimColor: true, children: 'drawing…' })
-  const laid = E.Box({ flexDirection: 'column', width, flexShrink: 0, children: [tree] })
-  // `cap`: the rows the frame shows of a drawing taller than that (draw.ts CARD_ROWS), the rest cut at their foot
-  const cap = Math.max(0, Math.floor(Number(props?.cap) || 0))
-  return E.Box({ flexDirection: 'column', width, overflow: 'hidden', ...(cap ? { height: cap } : {}), children: [laid] })
+  // the card's drawing (drawn.js), which the runner measures as Claude Code holds it before the card is shown
+  return cardElement(props, { E: surface.elements, id: me.id, width, send })
 }
 
 export default Card

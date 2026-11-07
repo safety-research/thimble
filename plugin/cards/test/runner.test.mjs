@@ -1,6 +1,7 @@
 // The card runner (cards/runner.mjs), started as the hooks start it: a card loads, keys, presses and clicks reach it,
-// and its state comes back; a view's error and time-out; actions and the card put back after them; and the sandbox
-// around a view, which keeps it from the runner, the files and other cards. All rows are made up.
+// and its state comes back; a view's error and time-out; a drawing no larger than Claude Code draws; actions and the
+// card put back after them; and the sandbox around a view, which keeps it from the runner, the files and other cards.
+// All rows are made up.
 //   node --test plugin/cards/test/runner.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -84,6 +85,29 @@ test('the tree holds only what Claude Code draws: a Button of words, and strings
   const r3 = (await load(ctrl)).r
   assert.equal(r3.ok, true)
   assert.deepEqual(r3.tree.c[0].c, ['a\\x80b\\x07c d'])
+})
+
+test('a card is no larger than Claude Code draws: too large with a Button around each run, it draws without them; too large even so, it does not draw and says what to change', async () => {
+  // `n` dots, a Text each, 30 to a row: a small tree, but the Client puts a Button around each dot (drawn.js)
+  const dots = n => `function view(p, s) {
+  const { Box, Text } = s.elements
+  const rows = []
+  for (let i = 0; i < ${n}; i += 30) {
+    const marks = []
+    for (let j = i; j < Math.min(${n}, i + 30); j++) marks.push(Text({ color: j % 3 ? '#67cda8' : '#f59183', children: '●' }))
+    rows.push(Box({ flexDirection: 'row', children: [Text({ children: 'run ' + (i + 1) + ' ' }), ...marks] }))
+  }
+  return Box({ flexDirection: 'column', children: rows })
+}`
+  let { r } = await load(dots(30))
+  assert.equal(r.ok, true, r.error)
+  assert.equal(r.tree.p.bare, undefined)
+  ;({ r } = await load(dots(600)))
+  assert.equal(r.ok, true, r.error)
+  assert.equal(r.tree.p.bare, true)
+  ;({ r } = await load(dots(3000)))
+  assert.equal(r.ok, false)
+  assert.match(r.error, /^the drawing is [\d,]+ characters as Claude Code holds it, and a card draws at most 95,000; draw fewer elements: group the rows, or show a page of them$/)
 })
 
 test('a card loads again with the state it kept', async () => {
