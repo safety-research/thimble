@@ -29,7 +29,9 @@ checkout of that commit which no fix changes. A fix may change any text file but
 of the sandbox, the hooks file and the command hooks, the launcher, thimble's scripts and the lock files (NOTICE_KINDS).
 
 The browser workbench runs from the checkout too: `thimble-browser FOLDER` builds the page again when its sources
-changed, so an edit to the page shows when you start it again.
+changed, so an edit to the page shows when you start it again. Use it now on a fix starts it from
+`~/.thimble/fixes/live` until the next `thimble-browser`, which starts the checkout again: Your fixes then lists that
+fix as off, and its Use it starts the workbench from your fixes again.
 
 ## Run the tests
 
