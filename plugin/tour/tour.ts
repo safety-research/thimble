@@ -108,7 +108,7 @@ const SAMPLE = { plugin: 'thimble', key: 'tourSample' } as const
 
 /** What the intro says. */
 export const INTRO = [
-  "thimble works on Claude's answers. It checks their numbers, draws cards, explains words, writes simpler versions and answers questions in side threads.",
+  "thimble works on Claude's answers: it checks numbers, draws cards, explains words, simplifies, and answers side questions.",
   'Below, Claude writes an answer about the made-up orders of a tea shop. One number in it is wrong on purpose.',
 ]
 
