@@ -15,6 +15,24 @@ import type { OverviewPaint } from './Tracks'
 
 export type ColorChoice = { by: 'off' } | { by: 'key'; key: string } | { by: 'label'; id: string }
 
+/** Where a choice's values come from, which Color by says beside the choice and in its menu's headings, since a key's
+ * values and a label's take the same palette and look alike: a key's are the person's own data, a field of the records
+ * as the file holds it (`data`); a label's thimble gave, by running the label over the records (`thimble`). */
+export interface ChoiceSource {
+  from: 'data' | 'thimble'
+  /** the words of the chip beside the choice */
+  word: string
+  /** what the chip says on hover */
+  tip: string
+}
+
+/** The source of a choice (ChoiceSource); null for Off. Pure. */
+export function choiceSource(c: ColorChoice): ChoiceSource | null {
+  if (c.by === 'key') return { from: 'data', word: 'from your data', tip: `${c.key} is a field of your records: its values come from your data, as the file holds them` }
+  if (c.by === 'label') return { from: 'thimble', word: 'thimble label', tip: 'A thimble label: thimble gave these values by running the label over your records; they are not in your file' }
+  return null
+}
+
 /** a choice as one string: `off`, `k:<key>` or `l:<label id>` */
 export const choiceId = (c: ColorChoice): string => (c.by === 'off' ? 'off' : c.by === 'key' ? `k:${c.key}` : `l:${c.id}`)
 
