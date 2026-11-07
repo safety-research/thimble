@@ -1,6 +1,7 @@
 """thimble doctor (engine/kernel/doctor.py): a checklist for a person in a shell, one line per part, ✓ when it works and
 × with the step that fixes it on the line below. The world is test_fixes.py's made-up thimble 0.10.2; claude and node
-are fakes, alone on PATH with git. All data here is made up."""
+are fakes, alone on PATH with git and curl (which reads the newest release from a stand-in for GitHub, upstream). All
+data here is made up."""
 from __future__ import annotations
 
 import json
@@ -29,6 +30,7 @@ def doctor_world(w, monkeypatch, claude="2.1.312", enabled=True, node="v22.20.0"
     bin_ = w["tmp"] / "doctor-bin"
     bin_.mkdir()
     (bin_ / "git").symlink_to(shutil.which("git"))
+    (bin_ / "curl").symlink_to(shutil.which("curl"))
     listed = json.dumps([{"id": "thimble@thimble", "version": "0.10.2", "enabled": enabled}])
     fake(bin_ / "claude", w["log"], f'case "$1 $2" in "--version ") echo "{claude} (Claude Code)";; '
                                     f"\"plugin list\") echo '{listed}';; esac")
@@ -89,3 +91,5 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
                   "bubblewrap (bwrap) not installed")
     assert out[i + 1] == "      Install it: sudo apt-get install bubblewrap"
     assert "  ✓ Node 22.20.0" in out
+    # the doctor looks for a newer release on a page, and downloads no release's file
+    assert world["gh"].requests().count("GET /releases/latest") == 1 and world["gh"].files() == []

@@ -2,8 +2,9 @@
 home, as thimble update leaves it (live, the release checkout, release.json), has Claude Code load the plugin from there
 with its settings as they were, builds the workbench there, and links the commands; it says what it does in the lines
 the person reads. The world is made up: thimble's repository is a bare repository in the test's folder
-(THIMBLE_UPDATE_URL), whose release holds this repository's kernel and scripts; `claude` is a fake that keeps Claude
-Code's records as Claude Code does; node, uv and npm are fakes. All data here is made up."""
+(THIMBLE_UPDATE_URL), whose release holds this repository's kernel and scripts, and GitHub's release pages and files
+are a server on 127.0.0.1 (releases_server.py, THIMBLE_RELEASES_URL), where each release has its file; `claude` is a
+fake that keeps Claude Code's records as Claude Code does; node, uv and npm are fakes. All data here is made up."""
 from __future__ import annotations
 
 import json
@@ -18,8 +19,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugin" / "engine"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from kernel import install as IN  # noqa: E402
+from releases_server import Releases  # noqa: E402
 
 GIT_ID = {"GIT_AUTHOR_NAME": "Release", "GIT_AUTHOR_EMAIL": "release@example.invalid",
           "GIT_COMMITTER_NAME": "Release", "GIT_COMMITTER_EMAIL": "release@example.invalid"}
@@ -153,8 +156,8 @@ def commit_all(repo: Path, message: str, tag: str = "") -> str:
 
 
 class World:
-    """The test's machine: thimble's repository (`bare`), the person's home, Claude Code's config, the fakes, and what
-    the fake claude was asked."""
+    """The test's machine: thimble's repository (`bare`), its releases on GitHub (`gh`), the person's home, Claude
+    Code's config, the fakes, and what the fake claude was asked."""
 
     def __init__(self, tmp: Path):
         self.tmp, self.home, self.bare = tmp, tmp / "home", tmp / "upstream.git"
@@ -166,6 +169,8 @@ class World:
         sh("git", "init", "-q", "-b", "main", str(self.work))
         commit_all(self.work, "thimble 0.10.8", "v0.10.8")
         sh("git", "clone", "-q", "--bare", str(self.work), str(self.bare))
+        self.gh = Releases(tmp / "releases", self.bare)
+        self.gh.publish(self.bare, "v0.10.8")
         (tmp / "claude.py").write_text(CLAUDE)
         stub(self.bin / "claude", f'exec "{sys.executable}" "{tmp / "claude.py"}" "$@"\n')
         stub(self.bin / "node", NODE)
@@ -175,19 +180,23 @@ class World:
             # the bash that runs the scripts: THIMBLE_TEST_BASH names another, such as the bash 3.2 that macOS has
             (self.bin / "bash").symlink_to(os.environ["THIMBLE_TEST_BASH"])
 
-    def publish(self, tag: str = "", branch: str = "main") -> str:
-        """One more commit on `branch` of thimble's repository, tagged `tag` when it is a release."""
+    def publish(self, tag: str = "", branch: str = "main", file: bool = True) -> str:
+        """One more commit on `branch` of thimble's repository, tagged `tag` when it is a release, and then, with `file`,
+        the release's file attached on GitHub, which makes it the newest release."""
         sh("git", "checkout", "-q", "-B", branch, cwd=self.work)
         (self.work / "README.md").write_text(f"{tag or branch} {len(self.calls())}\n")
         commit = commit_all(self.work, f"thimble {tag or branch}", tag)
         sh("git", "push", "-q", str(self.bare), branch, *([tag] if tag else []), cwd=self.work)
+        if tag and file:
+            self.gh.publish(self.bare, tag)
         return commit
 
     def env(self, **more: str) -> dict[str, str]:
         return {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.home), "THIMBLE_PYTHON": sys.executable,
                 "CLAUDE_CONFIG_DIR": str(self.cc), "THIMBLE_HOME": str(self.th),
                 "THIMBLE_BROWSER_HOME": str(self.home / ".thimble-browser"), "TMPDIR": str(self.tmp / "tmp"),
-                "THIMBLE_UPDATE_URL": str(self.bare), "FAKE_CLAUDE_LOG": str(self.log), "SHELL": "/bin/zsh",
+                "THIMBLE_UPDATE_URL": str(self.bare), "THIMBLE_RELEASES_URL": self.gh.url,
+                "FAKE_CLAUDE_LOG": str(self.log), "SHELL": "/bin/zsh",
                 "LANG": "C.UTF-8", **GIT_ID, "GIT_CONFIG_NOSYSTEM": "1", **more}
 
     def install(self, *args: str, script: Path | None = None, **env: str) -> subprocess.CompletedProcess:
@@ -211,7 +220,9 @@ class World:
 
 @pytest.fixture
 def w(tmp_path) -> World:
-    return World(tmp_path)
+    world = World(tmp_path)
+    yield world
+    world.gh.stop()
 
 
 def text_of(p: subprocess.CompletedProcess) -> str:
@@ -373,10 +384,24 @@ def test_thimble_update_moves_the_install_to_a_newer_release_in_place(w):
     assert w.install("--no-browser").returncode == 0
     v9 = w.publish("v0.10.9")
     link = w.home / ".local" / "bin" / "thimble"
+    downloaded = w.gh.files()
+    # the checks read the newest release from a page, and download no release's file
+    got = subprocess.run([str(link), "update", "--check"], capture_output=True, text=True, env=w.env())
+    assert got.stdout.strip() == "thimble 0.10.9 is out (you have 0.10.8): thimble update in a shell", text_of(got)
+    subprocess.run([str(link), "doctor"], capture_output=True, text=True, env=w.env())
+    assert w.gh.files() == downloaded
     p = subprocess.run([str(link), "update"], capture_output=True, text=True, env=w.env())
     assert p.returncode == 0, text_of(p)
     assert p.stdout.splitlines()[0] == "Updated thimble 0.10.8 → 0.10.9 (terminal plugin)"
-    assert sh("git", "rev-parse", "mine", cwd=w.th / "fixes" / "live") == v9 and w.release()["tag"] == "v0.10.9"
+    # the release commit made from 0.10.9's file, downloaded once: its tree is the tag's, and GitHub's commit is kept
+    live = w.th / "fixes" / "live"
+    made = sh("git", "rev-parse", "refs/thimble/releases/v0.10.9", cwd=live)
+    assert sh("git", "rev-parse", "mine", cwd=live) == made
+    assert sh("git", "rev-parse", f"{made}^{{tree}}", cwd=live) == sh("git", "rev-parse", "v0.10.9^{tree}", cwd=w.bare)
+    rel = w.release()
+    assert (rel["kind"], rel["tag"], rel["commit"], rel["base"]) == ("release", "v0.10.9", v9, made)
+    assert w.gh.files() == [*downloaded, "/releases/download/v0.10.9/thimble-0.10.9.tar.gz"]
+    assert sh("git", "rev-parse", "HEAD", cwd=w.th / "fixes" / "release") == made
     assert w.calls()[-1] == "plugin update thimble@thimble"
 
 

@@ -14,8 +14,10 @@ import pytest
 
 ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from kernel import fixes as FX  # noqa: E402
+from releases_server import Releases  # noqa: E402
 
 GIT_ID = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
           "GIT_COMMITTER_EMAIL": "t@example.com"}
@@ -241,7 +243,9 @@ def as_github(w) -> Path:
 @pytest.fixture
 def upstream(world, tmp_path, monkeypatch):
     """thimble's repository as a made-up upstream: a bare repository whose tag v0.10.2 is the installed release, and
-    publish(files, tag) adds a release on top of the newest one. The install is a GitHub one."""
+    publish(files, tag) adds a release on top of the newest one. Each release has its file attached on a stand-in for
+    GitHub (releases_server.py, THIMBLE_RELEASES_URL; world["gh"]), as the release's Action attaches it. The install is
+    a GitHub one, as an install before release files made it."""
     as_github(world)
     bare = tmp_path / "upstream.git"
     sh("git", "clone", "-q", "--bare", str(world["rel"]), str(bare))
@@ -249,6 +253,9 @@ def upstream(world, tmp_path, monkeypatch):
     work = tmp_path / "upstream-work"
     sh("git", "clone", "-q", str(bare), str(work))
     monkeypatch.setenv("THIMBLE_UPDATE_URL", str(bare))
+    gh = world["gh"] = Releases(tmp_path / "releases", bare)
+    gh.publish(bare, "v0.10.2")
+    monkeypatch.setenv("THIMBLE_RELEASES_URL", gh.url)
 
     def publish(files: dict[str, str], tag: str, version: str | None = None) -> str:
         for path, text in files.items():
@@ -262,9 +269,11 @@ def upstream(world, tmp_path, monkeypatch):
         sh("git", "commit", "-q", "-m", f"thimble {tag}", cwd=work)
         sh("git", "tag", "-a", tag, "-m", tag, cwd=work)
         sh("git", "push", "-q", "origin", "HEAD:refs/heads/main", tag, cwd=work)
+        gh.publish(bare, tag)
         return sh("git", "rev-parse", "HEAD", cwd=work)
 
-    return publish
+    yield publish
+    gh.stop()
 
 
 def three_fixes(world) -> tuple[int, int, int]:
@@ -296,13 +305,20 @@ def test_update_puts_back_the_fixes_that_fit_and_reapply_brings_back_the_one_tha
     calls_before = len(calls(world))
     out = FX.update()
     assert (out["from"], out["to"], out["back"], out["had"], out["aside"]) == ("0.10.2", "0.10.3", [a], [b], [c])
-    # the bar's word is on again, on top of 0.10.3; the note is 0.10.3's own; the legend is 0.10.3's
+    # the bar's word is on again, on top of 0.10.3, whose release commit the update made from its file (downloaded once);
+    # the note is 0.10.3's own; the legend is 0.10.3's
     live = FX.live_dir()
-    assert sh("git", "rev-parse", "mine^", cwd=live) == new and "read ${n}" in live_file("plugin/bar/bar.tsx")
+    made = sh("git", "rev-parse", "refs/thimble/releases/v0.10.3", cwd=live)
+    assert world["gh"].files() == ["/releases/download/v0.10.3/thimble-0.10.3.tar.gz"]
+    assert sh("git", "rev-parse", f"{made}^{{tree}}", cwd=live) == sh("git", "rev-parse", "v0.10.3^{tree}",
+                                                                       cwd=world["tmp"] / "upstream.git")
+    assert sh("git", "rev-parse", "mine^", cwd=live) == made and "read ${n}" in live_file("plugin/bar/bar.tsx")
     assert live_file("plugin/legend.ts") == "const legend = `quiet ${n} files`\n"
     assert sh("git", "log", "--format=%s|%an", "-1", "mine", cwd=live) == "Bar says read|thimble"
-    assert FX.release()["tag"] == "v0.10.3" and FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
-    assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new  # the way back runs from the new release
+    rel = FX.release()
+    assert (rel["kind"], rel["tag"], rel["base"], rel["commit"]) == ("release", "v0.10.3", made, new)
+    assert made in (FX.home() / "off.sh").read_text()
+    assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == made  # the way back runs from the new release
     assert FX.get(a)["state"] == "on" and FX.get(a)["commit"] == sh("git", "rev-parse", "mine", cwd=live)
     assert FX.get(a)["commit"] == sh("git", "rev-parse", f"refs/thimble/fixes/{a}", cwd=live)
     assert (FX.get(b)["state"], FX.get(b)["released_in"]) == ("released", "0.10.3")
@@ -372,3 +388,42 @@ def test_update_puts_back_the_fixes_that_fit_and_reapply_brings_back_the_one_tha
     assert sh("git", "rev-parse", "mine", cwd=live) == head
     FX.undo(a)
     assert "untouched ${m}" in live_file("plugin/legend.ts") and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+
+
+def state_of_fixes() -> dict:
+    """What an update changes when it moves: mine, release.json, the records, the fixes' refs, the set-aside files, the
+    release checkout, and the refs of releases in live."""
+    live = FX.live_dir()
+    pending = FX.home() / "pending"
+    return {"mine": sh("git", "rev-parse", "mine", cwd=live), "release.json": (FX.home() / "release.json").read_text(),
+            "fixes.jsonl": (FX.home() / "fixes.jsonl").read_text(),
+            "refs": sh("git", "for-each-ref", "refs/thimble/", cwd=live),
+            "pending": sorted(str(p.relative_to(pending)) for p in pending.rglob("*")) if pending.exists() else [],
+            "release": sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()),
+            "scratch": sorted(p.name for p in FX.home().iterdir() if p.name.startswith(("download-", ".live-new-")))}
+
+
+def test_an_update_that_cannot_download_the_release_changes_nothing_and_says_what_to_do(world, upstream, monkeypatch):
+    """A release with no file (its Action has not attached it yet), one whose bytes are not those its SHA256SUMS gives,
+    and GitHub out of reach: thimble update says why and what to do, and the fixes, live and the release checkout stay
+    as they were."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "The bar's coverage item says read.")
+    FX.apply(a["id"], press(a["id"]))
+    upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    gh = world["gh"]
+    before = state_of_fixes()
+    issues = "report it at https://github.com/safety-research/thimble/issues"
+    for spoil, said in (
+            (gh.spoil, "thimble-0.10.3.tar.gz does not have the sha256 its SHA256SUMS gives, so the download is broken "
+                       "and nothing changed; run thimble update again"),
+            (gh.drop, "thimble 0.10.3 has no release file on GitHub (thimble-0.10.3.tar.gz), so nothing changed. Run "
+                      f"thimble update again in a few minutes; if it says this again, {issues}"),
+            (lambda tag: gh.stop(), f"thimble could not reach {gh.url} (")):
+        spoil("v0.10.3")
+        with pytest.raises(FX.FixError) as e:
+            FX.update()
+        assert str(e.value).startswith(said), str(e.value)
+        assert state_of_fixes() == before
+        assert FX.get(a["id"])["state"] == "on" and "read ${n}" in live_file("plugin/bar/bar.tsx")
