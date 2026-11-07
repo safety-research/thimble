@@ -212,11 +212,13 @@ def test_the_labels_pane_applies_a_sample_the_ask_picked_again_over_its_same_rec
     assert lab["model"] == "haiku" and lab["version"] == 2 and lab["trial"] is True and lab["matched"] == 420
     assert set(lab["units"]) == held and all(u.get("wait") for u in lab["units"].values())
     assert lab["run"]["state"] == "asked" and feed(root)[-1]["kind"] == "label"
-    # the same change over the whole scope reads all 420, so it asks first, its cost on the label's own model
-    run(root, *spam, "--model", "sonnet")
+    # the same change over the whole scope reads all 420, so it asks first, its cost on the label's own model; --json
+    # says the run waits for that ask, by its id, so the pane asks the person who ran it (labels/edit.ts)
+    got = json.loads(run(root, *spam, "--model", "sonnet", "--json").stdout)
     lab = LB.load(st, "spam")
     assert len(lab["units"]) == 420 and lab["trial"] is False and lab["run"]["state"] == "ask"
     assert feed(root)[-1]["kind"] == "label_ask" and feed(root)[-1]["model"] == "sonnet"
+    assert got["run"]["state"] == "ask" and got["run"]["ask"]["id"] == feed(root)[-1]["ask"]
 
 
 # ------------------------------------------------------------------ a label belongs to its conversation

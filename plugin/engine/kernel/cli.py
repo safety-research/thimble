@@ -485,6 +485,8 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             calls = len(LB.batches(units))
             ask = LB.hold_for_ask(st, name, calls)
             lab = _load(st, name)
+            # --json says the run waits for the ask, with its id (labels/edit.ts asks the person who ran it)
+            s = LB.status(lab)
             # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample. `chars`: the
             # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs),
             # on the label's own model when it names one
