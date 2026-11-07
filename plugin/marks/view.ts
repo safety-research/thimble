@@ -57,7 +57,7 @@ import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, type Theme } from '../core/theme'
-import { blocks, cardRef, inline, marksWithin, runsText, tableOf, withoutCardLinks, wrapRuns } from './message.js'
+import { blocks, cardRef, inline, marksWithin, runsText, tableOf, withoutCardLinks, WORDS_CHANGED, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -500,7 +500,7 @@ export function lostSpansEl(els: Any, lost: LostSpan[], key: string): Any | null
     // the pointer over the line: the words' stronger fill and their underline, as on the reply (spanEl), no inverse;
     // the press heats the group, the words (a Text in its Text) take the fill
     const hover = { scope: spanScope(key, i), ...(hoverBg ? { backgroundColor: hoverBg } : {}), ...(l.onPress ? { underline: true } : {}) }
-    const words = [Text({ key: 'w', ...look, hover, children: l.words }), Text({ key: 'd', dimColor: true, children: ` ${l.kind} · the check of the citations changed these words` })]
+    const words = [Text({ key: 'w', ...look, hover, children: l.words }), Text({ key: 'd', dimColor: true, children: ` ${l.kind} · ${WORDS_CHANGED}` })]
     return l.onPress
       ? Button({ key: `${key}-${i}`, plain: true, label: `${l.label} (the check changed its words)`.slice(0, 120), hover: { scope: hover.scope, inverse: false }, onPress: () => l.onPress!(), children: [Text({ key: 't', children: words })] })
       : Text({ key: `${key}-${i}`, children: words })

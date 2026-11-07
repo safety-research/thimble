@@ -10,7 +10,7 @@
 // the comment's check mark does where it stands.
 import { useMemo, useState } from 'react'
 import { useCanvasComments } from '../canvas/CommentLayer'
-import { plainQuote, useAnswerComments } from '../chat/answerComments'
+import { plainQuote, useAnswerComments, useDrawnQuotes } from '../chat/answerComments'
 import { Button } from '../components/Button'
 import { bus } from '../lib/bus'
 import { teleport } from '../lib/teleport'
@@ -61,6 +61,8 @@ export function useCommentItems(ws: string) {
   const cards = useCanvasComments(ws)
   const docs = useDocs(ws)
   const answers = useAnswerComments(ws)
+  // a comment's passage on Claude's answer as main's chat draws it, the check of the citations' corrections in it
+  const drawn = useDrawnQuotes()
   const items = useMemo<CommentItem[]>(() => {
     // the report's comments say "the report" while it alone has any; else each names its document
     const named = docs.filter((d) => d.comments.length).length > 1
@@ -100,10 +102,10 @@ export function useCommentItems(ws: string) {
           details: c.details ?? '',
           ref: c.ref,
           where: "Claude's answer",
-          quote: plainQuote(c.quote) || null,
+          quote: drawn.get(c.id) || plainQuote(c.quote) || null,
         })),
     ]
-  }, [cards.comments, docs, answers.comments])
+  }, [cards.comments, docs, answers.comments, drawn])
   return { items, cards, answers }
 }
 

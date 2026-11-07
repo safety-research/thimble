@@ -12,6 +12,7 @@
 //   rewritesIn(text, items)    -> that text, and the marks whose rewrite stands in it
 //   withCorrections(text, items) -> the text with each corrected mark's words in place of its own
 //   carrier(was, now)          -> where a place on a text stands in the version of it the checks made (null: nowhere)
+//   WORDS_CHANGED              -> what is said of words a place stood on that the checks changed (carrier: nowhere)
 //   plainSentence(sentence)    -> that sentence as a person reads it: no markdown, a table row's cells joined by ` · `
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
@@ -330,6 +331,11 @@ export function carrier(was, now) {
     return x != null && y != null && y > x ? { start: x, end: y } : null
   }
 }
+
+/** What is said of the words an explainer, a heads-up or a comment stood on that the checks changed, so that it stands
+ *  nowhere on the text now (carrier): the terminal's line under the reply (view.ts lostSpansEl), and the workbench's
+ *  comment card (browser chat/AnswerComment.tsx). */
+export const WORDS_CHANGED = 'the check of the citations changed these words'
 
 /** A sentence of sentenceOf as a person reads it: no heading, quote or list marker, a table row's cells joined by
  *  ` · `, each mark's words without its brackets, and no code marks. */
