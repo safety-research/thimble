@@ -340,8 +340,8 @@ test("the sample answer's check is held until c: then each citation is checked a
     expect(await tourRuns($)).toBe(false)
     const t = parsed(await $.state.get({ plugin: 'thimble', key: 'tour' }))
     expect(t.done).toEqual(['answer', 'cite'])
-    expect(t.checked).toEqual({ n: 3, corrected: 1, failed: 0 })
-    expect(checkedWords(t.checked)).toBe('thimble checked 3 numbers and corrected 1.')
+    expect(t.checked).toMatchObject({ n: 3, corrected: 1, failed: 0, fix: { was: '7 orders', now: '4 orders' } })
+    expect(checkedWords(t.checked)).toBe('thimble checked 3 numbers and corrected 1: 7 orders → 4 orders.')
   } finally {
     setOptions({})
   }
@@ -425,6 +425,7 @@ test('the step row counts the steps it shows, names the words of e in bold and i
 
 test('what the check did, in words', () => {
   expect(checkedWords({ n: 6, corrected: 1, failed: 0 })).toBe('thimble checked 6 numbers and corrected 1.')
+  expect(checkedWords({ n: 6, corrected: 1, failed: 0, fix: { was: '7 orders', now: '4 orders' } })).toBe('thimble checked 6 numbers and corrected 1: 7 orders → 4 orders.')
   expect(checkedWords({ n: 6, corrected: 1, failed: 2 })).toBe('thimble checked 6 numbers, corrected 1 and could not confirm 2.')
   expect(checkedWords({ n: 6, corrected: 0, failed: 1 })).toBe('thimble checked 6 numbers and could not confirm 1.')
   expect(checkedWords({ n: 6, corrected: 0, failed: 0 })).toBe('thimble checked 6 numbers and found each right.')

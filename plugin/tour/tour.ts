@@ -93,7 +93,7 @@ export type Step = 'answer' | 'e' | 'v' | 's' | 'cite'
 export const STEPS: Step[] = ['answer', 'e', 'v', 's', 'cite']
 
 /** What the cite step's check did: the citations it checked, those it corrected, those it could not confirm. */
-export type Checked = { n: number; corrected: number; failed: number }
+export type Checked = { n: number; corrected: number; failed: number; fix?: { was: string; now: string } | null }
 
 /** The tour: the step that waits (`end` once all are done), the steps done, those that did not work, when it started,
  *  and the row of its sample answer (null until Claude ends it). Its placed rows: the intro (null until placed) and the
@@ -174,7 +174,7 @@ export function stepAction(s: Step, checking = false): string {
 export function checkedWords(c: Checked): string {
   const numbers = (k: number) => `${k} number${k === 1 ? '' : 's'}`
   if (c.corrected && c.failed) return `thimble checked ${numbers(c.n)}, corrected ${c.corrected} and could not confirm ${c.failed}.`
-  if (c.corrected) return `thimble checked ${numbers(c.n)} and corrected ${c.corrected}.`
+  if (c.corrected) return `thimble checked ${numbers(c.n)} and corrected ${c.corrected}${c.fix ? `: ${c.fix.was} → ${c.fix.now}` : ''}.`
   if (c.failed) return `thimble checked ${numbers(c.n)} and could not confirm ${c.failed}.`
   return `thimble checked ${numbers(c.n)} and found ${c.n === 1 ? 'it' : 'each'} right.`
 }
@@ -223,7 +223,7 @@ function parse(x: unknown): TourState | null {
     at: t.at, done: steps(t.done), missed: steps(t.missed),
     startedAt: Number(t.startedAt) || 0, k: Number(t.k) || 0, intro: id(t.intro), sample: id(t.sample), moved: id(t.moved),
     checkAt: Number(t.checkAt) || null,
-    checked: c && typeof c === 'object' ? { n: Number(c.n) || 0, corrected: Number(c.corrected) || 0, failed: Number(c.failed) || 0 } : null,
+    checked: c && typeof c === 'object' ? { n: Number(c.n) || 0, corrected: Number(c.corrected) || 0, failed: Number(c.failed) || 0, ...(c.fix && typeof c.fix.was === 'string' && typeof c.fix.now === 'string' ? { fix: { was: c.fix.was, now: c.fix.now } } : {}) } : null,
   }
 }
 
@@ -401,7 +401,11 @@ export function tourChecked($: Engine): Promise<void> {
     if (!key || !items.length || items.some(m => m.status === 'checking' || m.status === 'deferred') || repairsDue(key)) return
     // Claude's numbers alone (not words the person cited), and a narrowing changes no value (designer/v.ts checkedSince)
     const own = items.filter(m => !m.asked)
-    const checked: Checked = { n: own.length, corrected: own.filter(m => m.status === 'corrected' && !m.narrowed).length, failed: own.filter(m => m.status === 'failed').length }
+    const fixed = own.filter(m => m.status === 'corrected' && !m.narrowed)
+    // the one correction, named, since the simpler version above the step row keeps the old words (as designer/v.ts)
+    const one = fixed.length === 1 ? fixed[0] as { was?: string; words?: string; shown?: string } : null
+    const was = String(one?.was ?? one?.words ?? ''), now = String(one?.shown ?? '')
+    const checked: Checked = { n: own.length, corrected: fixed.length, failed: own.filter(m => m.status === 'failed').length, ...(was && now && was !== now ? { fix: { was, now } } : {}) }
     await goOn($, { ...t, checked }, [...t.done, 'cite'], t.missed)
     const startedAt = t.startedAt
     $.clock.after(DONE_MS, () => { void showStepRow($, startedAt).catch(() => undefined) })
