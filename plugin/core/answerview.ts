@@ -209,18 +209,16 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
 
 /** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, then the keys that act on
  *  the selected words, each in its color while words are selected: c cite (purple), e explain (teal), a ask (blue).
- *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached, `rewrite for…` while the prompt
- *  box holds /rewrite), the left names only those. An item whose key what holds the keys takes now (`held`, heldKeys:
- *  the open tray's keys are in its header) is left out: each key shows once, where it acts. */
+ *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached), the left names only those. An
+ *  item whose key what holds the keys takes now (`held`, heldKeys: the open tray's keys are in its header) is left
+ *  out: each key shows once, where it acts. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
   const free = keyFree(preview ? new Set() : held ?? (await heldKeys($)))
-  // while the tray holds the keys, what squeeze says with no key (`rewrite for…`) waits
-  const holds = tray.some(x => x.focus) || (!preview && (await safe(trayHolds($), false)))
   return [
     // the keys of a card ] reached are the tray's own
     ...tray.filter(x => x.focus || free(x)),
-    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => (x.key ? free(x) : !holds)),
+    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(free),
     ...items(await safe(citeBar($, on, preview), []), preview).filter(free),
     ...items(await safe(explainBar($, on, preview), []), preview).filter(free),
     ...items(await safe(askBar($, on, preview), []), preview).filter(free),
@@ -253,7 +251,7 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray (while open its own keys, 0 closes it;
- *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, +, 0), { } over the answers, then the
+ *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, 0), { } over the answers, then the
  *  keys that act on the selected words, while they wait (else typed): e, c and a; then w (the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   return (await safe(trayKey($, key, until), null))

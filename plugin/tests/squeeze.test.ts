@@ -5,8 +5,10 @@
 // and b undone puts that simpler version back; a key hook of s or b does not wait for their writes, so a slow write does
 // not close the word window; a catch-up read and removed still counts as read after s; s while main's turn runs
 // simplifies its answer when it ends; an answer rewritten in place in an earlier release shows its original again when
-// s simplifies it; a choice at its end leaves the row, a letter right after a choice undoes it, and a click on a choice
-// does what its key does; a simpler version kept before very short was added keeps its levels. All data is made up.
+// s simplifies it; the row stays whole while a version is written; a choice at its end stays in its place, dim, and its
+// key does nothing; a letter right after a choice undoes it, and a click on a choice does what its key does; there is
+// no + choice and no /rewrite; a simpler version kept before very short was added keeps its levels. All data is made
+// up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
@@ -56,10 +58,13 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
   on('tool.register', () => ({ value: undefined }))
-  on('command.register', () => ({ value: { command: 'x' } }))
+  // the commands thimble registers, and what it fills into the prompt box, kept for a test to read
+  const commands: string[] = []
+  const fills: string[] = []
+  on('command.register', (_$: unknown, e: { name: string }) => { commands.push(e.name); return { value: { command: 'x' } } })
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', () => ({ value: undefined }))
-  on('prompt.fill', () => ({ isFilled: true }) as never)
+  on('prompt.fill', (_$: unknown, e: { text: string }) => { fills.push(e.text); return { isFilled: true } as never })
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   // the observer's look finds nothing to add
@@ -85,13 +90,24 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, turn, press, bar, files, conversation, beneath, slow }
+  return { clock, asked, ask, turn, press, bar, files, conversation, beneath, slow, commands, fills }
+}
+
+/** The look of the key of the row's item `id` (its first Text): its color, bold or dim. */
+function keyOf(n: Any, id: string): Any {
+  if (!n || typeof n !== 'object') return null
+  if (n.props?.key === id) return n.children?.[0]?.props ?? null
+  for (const c of [...(Array.isArray(n) ? n : []), ...[].concat(n.props?.children ?? []), ...[].concat(n.children ?? [])]) {
+    const f = keyOf(c, id)
+    if (f) return f
+  }
+  return null
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
 
 const SHORT = 'The build failed on [3 of 12](#) runs: the cache key changed.'
-const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · + your own · 0 remove'
+const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · 0 remove'
 
 test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 removes it with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, [SHORT, 'The build failed on [3 of 12](#) runs, because the cache key changed when the lockfile moved, in more words.'])
@@ -115,9 +131,10 @@ test('s writes a simpler version below the answer in one press, at Length short 
   expect(host.indexOf('the cache key changed.')).toBeLessThan(host.indexOf(ROW))
   // the row names its keys, so the bar no longer names s
   expect(await t.bar()).not.toContain('s simplify')
-  // 2 makes it longer at once: one more call, written below the answer, never in place of it; the row says so meanwhile
+  // 2 makes it longer at once: one more call, written below the answer, never in place of it; the row stays whole
+  // meanwhile, with 2 saying what it does
   expect(await t.press('2')).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('making it longer…')
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('1 shorter · 2 making it longer… · 3 explain more · 4 assume more · 0 remove')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(2)
   expect(String(t.asked[1].prompt)).toContain('Length: as written.')
@@ -300,7 +317,7 @@ test('an answer s rewrote in place in an earlier release still draws its version
   expect(host).toContain('the cache key changed.')
 })
 
-test('a choice at its end leaves the row and its key types; a letter right after a choice undoes it; a click on a choice does what its key does', async ($, on) => {
+test('a choice at its end stays in its place, dim, and its key does nothing: no call, and a letter right after it types both; a letter right after a choice undoes it; a click on a choice does what its key does; no + choice and no /rewrite', async ($, on) => {
   const t = await setup($, on, [SHORT, 'Build failed: cache key.', 'The build failed because a key changed.'])
   await t.turn('t1', LONG)
   await t.press('s')
@@ -310,12 +327,16 @@ test('a choice at its end leaves the row and its key types; a letter right after
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(2)
   expect(String(t.asked[1].prompt)).toContain('Length: very short. One or two sentences')
-  const shortest = textOf(await $.ui.render(answer('row-t1', LONG)))
-  expect(shortest).toContain('Build failed: cache key.')
-  // Length goes no further: shorter leaves the row, and 1 types as usual
-  expect(shortest).toContain('2 longer · 3 explain more · 4 assume more · + your own · 0 remove')
-  expect(shortest).not.toContain('shorter')
-  await t.press('1')
+  const shortest = await $.ui.render(answer('row-t1', LONG))
+  expect(textOf(shortest)).toContain('Build failed: cache key.')
+  // Length goes no further: shorter stays in its place, its key and words dim, no longer in thimble's color
+  expect(textOf(shortest)).toContain(ROW)
+  expect(keyOf(shortest, 'c1')).toEqual({ dimColor: true })
+  expect(keyOf(shortest, 'c2')).toMatchObject({ bold: true })
+  // 1 is taken and asks nothing: `1x` typed at the empty prompt puts both into the box, since 1 has nothing to undo
+  expect(await $.prompt.edit(key('1'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('x'))) as Any).text).toBe('1x')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(2)
   // `2x` typed at the empty prompt: 2 asks for longer, and x right after undoes it; the very short version stays
@@ -333,6 +354,16 @@ test('a choice at its end leaves the row and its key types; a letter right after
   expect(t.asked.length).toBe(3)
   expect(String(t.asked[2].prompt)).toContain('Background: novice.')
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('The build failed because a key changed.')
+  // there is no + choice: + is not taken and fills nothing into the box, and thimble registers no /rewrite
+  const host = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(host).not.toContain('+')
+  expect(host).not.toContain('your own')
+  await t.press('+')
+  await t.clock.advance(5000)
+  expect(t.fills).toEqual([])
+  expect(t.asked.length).toBe(3)
+  expect(t.commands).toContain('thimble-settings')
+  expect(t.commands).not.toContain('rewrite')
 })
 
 test('a simpler version kept before very short was added keeps its levels: its version at short comes back at short, with no call', async ($, on) => {

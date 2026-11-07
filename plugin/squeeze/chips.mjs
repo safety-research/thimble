@@ -6,8 +6,9 @@
 //                       a shorter version leaves parts out, a longer one explains more and adds detail.
 //   Background          new · learning · working · expert: the reader's background, how much of the field the text
 //                       explains and how much it takes as known. The original stands at working, and reads "as written".
-//   a chip the person typed, after +: their own words ("for my manager", "more skeptical", "as a timeline",
-//                       "engineer → manager"), as written · a little · more · fully. The original stands at as written.
+//   a chip the person typed in an earlier release: their own words ("for my manager", "more skeptical"), as written ·
+//                       a little · more · fully. The original stands at as written. A record kept then may still
+//                       hold one: it draws and counts in each rewrite, but no new one is made.
 // Each level is defined once, here (MEANS), and the request carries only the definition of the level picked (pickLine).
 // The person moves them with the choices under a simpler version or a catch-up (CHOICES): shorter and longer move
 // Length one level, explain more moves Background one level toward novice, assume more one level toward expert.
@@ -37,7 +38,7 @@
 //   {row, text, at, shown, squeeze, catchup?}
 //   squeeze: {
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
-//     own:      [{id, words}]         the chips the person typed for this message (at most three)
+//     own:      [{id, words}]         the chips the person typed for this message in an earlier release
 //     scale:    6                     the chips' scales now: Length very short · short · as written · longer · much
 //                                     longer, and the Background chip. A record kept at scale 5 (no very short) is
 //                                     read with its Length levels one higher (upgradeSqueeze)
@@ -131,9 +132,7 @@ export function upgradeSqueeze(s) {
 
 /** The levels of a chip the person typed: from the original (0) to all the way their words ask. */
 export const OWN_LEVELS = Object.freeze(['as written', 'a little', 'more', 'fully'])
-const MAX_OWN = 3
 
-const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 const sq = rec => (rec && rec.squeeze && typeof rec.squeeze === 'object' ? rec.squeeze : {})
 
 /** The dots of a chip at level v: one ● at its place among ○, as `○●○○○` for Length short. */
@@ -168,31 +167,6 @@ export const atOf = rec => levelsAt(sq(rec))
 /** A chip the person typed, as a chip: its words are its name, and its levels run from the original to fully. */
 function ownChip(c) {
   return { id: c.id, kind: 'own', name: c.words, words: c.words, levels: [...OWN_LEVELS], level0: 0 }
-}
-
-/** What the person typed after +, as a chip's words: one line, at most 40 characters, the + dropped. '' for none. */
-export function ownWords(typed) {
-  return str(String(typed || '').replace(/^\s*\+\s*/, ''), 40).replace(/[.,;:]+$/, '')
-}
-
-/** The record's squeeze with a chip the person typed added (or kept, when those words have one), its id, and the
- *  oldest of more than MAX_OWN gone. Null for empty words. */
-export function withOwn(rec, typed) {
-  const words = ownWords(typed)
-  if (!words) return null
-  const s = sq(rec)
-  const own = (Array.isArray(s.own) ? s.own : []).filter(c => c && c.id)
-  const have = own.find(c => c.words.toLowerCase() === words.toLowerCase())
-  if (have) return { squeeze: s, id: have.id }
-  const base = `x-${String(words).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'own'}`
-  const used = new Set([...CHIPS.map(c => c.id), ...own.map(c => c.id)])
-  let id = base
-  for (let i = 2; used.has(id); i++) id = `${base.slice(0, 18)}-${i}`
-  const next = [...own, { id, words }]
-  const gone = next.length > MAX_OWN ? next.shift() : null
-  const at = { ...(s.at || {}) }
-  if (gone) delete at[gone.id]
-  return { squeeze: { ...s, own: next, at }, id }
 }
 
 /** Every chip of the message, in the order drawn: the fixed ones, then the ones the person typed. Each with `level0`,

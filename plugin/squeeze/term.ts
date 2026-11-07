@@ -331,10 +331,9 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const done = [...(changed?.done ?? []), ...leftOut]
   const cards = answer && done.length ? cardsAfter(answer.orig, rec.row, done) : null
   if (stale()) return
-  // the record as it is now (the person may have added a chip meanwhile)
+  // the record as it is now
   const fresh = (await recOf($, id)) || rec
-  const fs = (fresh.squeeze ?? {}) as Any
-  const next = applyRewrite({ ...fresh, squeeze: { ...fs, own: fs.own ?? s.own } }, {
+  const next = applyRewrite(fresh, {
     text: placed.text, at: want.at,
     made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: 'squeeze' }, problems: [...checked.problems, ...cardProblems],
     cards, origCards: answer ? answer.orig : null,

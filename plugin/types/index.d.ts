@@ -171,10 +171,6 @@ declare module 'claude-code' {
       squeezeUi: StateFamily<unknown>
       /** what Claude was told of each record's version, and the version waiting for the next prompt, by its id */
       squeezeTold: Record<string, { told: string; pending: string | null }>
-      /** + put /rewrite in the prompt box for the block `id`: the bar says `rewrite for…` (squeeze/ui.ts) */
-      squeezeHint: { id: string } | null
-      /** the words the person typed after /rewrite this session, newest last */
-      squeezeOwn: string[]
       /** s pressed while main's turn ran: the turn whose answer s acts on once it ends (squeeze/ui.ts) */
       squeezeWait: { turn: string } | null
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
