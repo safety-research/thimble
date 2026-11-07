@@ -2140,9 +2140,13 @@ button.chat-strip-head:hover {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-/* the state wraps like the title, for one that says why it is off */
 .chat-fixes-state {
-  flex: 0 1 auto;
+  flex: none;
+  color: var(--text-secondary);
+}
+/* why a fix is off where the server runs (the server's `why`), under its name */
+.chat-fixes-why {
+  display: block;
   color: var(--text-secondary);
 }
 /* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,

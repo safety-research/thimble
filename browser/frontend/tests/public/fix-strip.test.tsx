@@ -68,7 +68,8 @@ test('Your fixes says why a fix that is on is off where the server runs, and Use
   await act(async () => bus.emit('fixList', { open: true }))
   await settle()
   const item = el.querySelector('.chat-fixes-list li')!
-  expect(item.querySelector('.chat-fixes-state')?.textContent).toBe(`off: ${why}`)
+  expect(item.querySelector('.chat-fixes-state')?.textContent).toBe('off')
+  expect(item.querySelector('.chat-fixes-why')?.textContent).toBe(why)
   await click(button(item, 'Use it'))
   expect(sent).toEqual(['POST /fixes/3/apply'])
 })

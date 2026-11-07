@@ -245,8 +245,8 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
   )
 }
 
-/** Your fixes: every fix, newest first, with its state, and why it is off when the server says (`why`); Use it on a
- * ready or off fix, Undo on one that is on. */
+/** Your fixes: every fix, newest first, with its state, and under its name why it is off when the server says (`why`);
+ * Use it on a ready or off fix, Undo on one that is on. */
 function YourFixes({ onClose, onUse, busy }: { onClose: () => void; onUse: (r: FixRow) => void; busy: boolean }) {
   const [rows, setRows] = useState<FixRow[] | null>(null)
   const [why, setWhy] = useState('')
@@ -282,8 +282,11 @@ function YourFixes({ onClose, onUse, busy }: { onClose: () => void; onUse: (r: F
               const can = !r.phase && (r.state === 'ready' || r.state === 'off' || r.state === 'on')
               return (
                 <li key={r.id} data-fix={r.id} data-state={r.state}>
-                  <span className="chat-fixes-title">{r.title || r.words}</span>
-                  <span className="chat-fixes-state">{r.phase ? 'Claude works on it' : `${STATE_WORDS[r.state] ?? r.state}${r.why ? `: ${r.why}` : ''}`}</span>
+                  <span className="chat-fixes-title">
+                    {r.title || r.words}
+                    {r.why && !r.phase && <span className="chat-fixes-why">{r.why}</span>}
+                  </span>
+                  <span className="chat-fixes-state">{r.phase ? 'Claude works on it' : (STATE_WORDS[r.state] ?? r.state)}</span>
                   {can && (
                     <Button variant={r.state === 'on' ? 'secondary' : 'primary'} size="sm" disabled={busy} onClick={() => onUse(r)}>
                       {r.state === 'on' ? 'Undo' : 'Use it'}
