@@ -339,6 +339,8 @@ export interface Concept {
   shown?: boolean
   /** a trial: apply_label ran it on a few units with `limit` (backend concepts.py, Trials); no label until it runs on everything */
   trial?: boolean
+  /** a label over records that ran only over the records another label gave one value (backend concepts.py, Within) */
+  within?: { label: string; value: string } | null
   /** GET /concepts carries these too: the last kept run (the Files pane's outcome line) and the live run record */
   last_run?: ConceptApplication | null
   run?: ConceptRun | null
