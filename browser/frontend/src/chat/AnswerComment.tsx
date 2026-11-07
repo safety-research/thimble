@@ -9,11 +9,14 @@
 // where its words are. It follows the passage while the chat scrolls and hides while the passage is out of view. Esc or
 // a press outside it closes it; a press on a tinted passage, a citation's words in it too, leaves it to the passage's
 // own click, which opens the next mark over the words (chat/markdown MdMark). A citation's label pinned open outside it
-// closes it.
+// closes it. A comment whose words the check of the citations took away opens beside the answer they stood in, and says
+// so under its statement, as the terminal's line under the reply says it.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { WORDS_CHANGED } from '../../../../plugin/marks/message.js'
 import { placeBeside } from '../components/RefChip'
 import { bus } from '../lib/bus'
+import { anchorEl } from '../lib/teleport'
 import { CommentCard, type CommentView } from '../report/CommentCard'
 import { plainQuote, tintOf, type AnswerComment } from './answerComments'
 
@@ -55,6 +58,7 @@ export function AnswerCommentCard({ comment, ws, anchor, onDone, onClose }: Card
       onActivate={() => setActive(true)}
       onResolve={resolve}
       thread={{ anchor, passage: plainQuote(comment.quote), surface: 'chat' }}
+      note={comment.gone ? `“${plainQuote(comment.words || comment.quote)}” · ${WORDS_CHANGED}` : undefined}
       className="answer-cm"
       cardRef={(node) => void (el.current = node)}
       attrs={{ role: 'note', 'data-check': comment.check, 'data-answer-comment': comment.id }}
@@ -69,7 +73,7 @@ function piecesOf(id: string): HTMLElement[] {
 
 /** The comment card as a popover beside its passage, portaled to the body. */
 export function AnswerCommentPop(props: CardProps) {
-  const { comment, onClose } = props
+  const { comment, anchor, onClose } = props
   const popEl = useRef<HTMLDivElement | null>(null)
   const close = useRef(onClose)
   close.current = onClose
@@ -79,10 +83,14 @@ export function AnswerCommentPop(props: CardProps) {
     if (!el) return
     const place = () => {
       const pieces = piecesOf(comment.id)
-      const first = pieces[0]
-      if (!first) return
+      // beside its words, else beside the answer's text (its words gone), never at the page's corner
+      const first = pieces[0] ?? anchorEl(anchor)
+      if (!first) {
+        el.style.visibility = 'hidden'
+        return
+      }
       const rect = first.getBoundingClientRect()
-      const last = pieces[pieces.length - 1].getBoundingClientRect()
+      const last = (pieces[pieces.length - 1] ?? first).getBoundingClientRect()
       const column = (first.closest('.chat') ?? first.closest('.chat-text') ?? first).getBoundingClientRect()
       const bounds = first.closest('.chat-list')?.getBoundingClientRect() ?? column
       // a passage scrolled out of the list hides its comment, unless the analyst is typing in it
@@ -95,14 +103,14 @@ export function AnswerCommentPop(props: CardProps) {
     window.addEventListener('resize', place)
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place)
     ro?.observe(el)
-    const flow = piecesOf(comment.id)[0]?.closest('.chat-flow')
+    const flow = (piecesOf(comment.id)[0] ?? anchorEl(anchor))?.closest('.chat-flow')
     if (flow) ro?.observe(flow)
     return () => {
       window.removeEventListener('scroll', place, true)
       window.removeEventListener('resize', place)
       ro?.disconnect()
     }
-  }, [comment.id])
+  }, [comment.id, anchor])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

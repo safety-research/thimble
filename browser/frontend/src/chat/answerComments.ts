@@ -15,7 +15,12 @@
 // A comment names the turn it is on (`turn`, the id the turn's `done` record names, chat/model.ts TextRow.turn) and
 // quotes its passage raw, as Claude wrote it. The chat draws the answer as markdown, so the passage is found in the drawn
 // words (plainQuote: the quote without markdown's marks, a citation as the value it shows), and its words in the passage.
-import { useEffect, useMemo, useState } from 'react'
+// Once the check of the citations settled, the chat draws the words as the check left them (marks/marks.ts asChecked), so
+// a comment's passage and words are carried from Claude's words into those, as the terminal carries an explainer's
+// (placedOn); the Comments sidebar quotes the passage as the chat draws it (noteDrawn). A comment whose words the check
+// took away (a sentence it rewrote) has no tint, and its card says so beside the answer.
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { carrier } from '../../../../plugin/marks/message.js'
 import { checksApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { colourVar } from '../files/labels'
@@ -39,6 +44,8 @@ export interface AnswerComment {
   details?: string
   status: 'open' | 'dismissed'
   at?: string
+  /** the check of the citations took its words away (placedOn): it has no tint, and its card says so */
+  gone?: boolean
 }
 
 /** What GET /ws/{c}/answer-comments answers. */
@@ -64,19 +71,78 @@ export interface AnswerMark {
 /** A comment's tint color: its check's palette place, as checkColour draws a check's. Pure. */
 export const tintOf = (c: Pick<AnswerComment, 'color'>): string => colourVar(c.color)
 
-/** A raw passage as the chat draws its words: a `[[value|ref]]` citation as its value (a bare `[[ref]]` as nothing), a
- * link as its text, code and emphasis without their marks, a list item or heading without its lead. Pure. */
+// markdown's marks as the chat drops them, each with the groups of its match it keeps: a `[[value|ref]]` citation as its
+// value (a bare `[[ref]]` as nothing), a link as its text, code and emphasis without their marks, a list item or heading
+// without its lead (backend answer_comments._PLAIN)
+const PLAIN: readonly (readonly [RegExp, readonly number[]])[] = [
+  [/\[\[([^\]|]*)\|[^\]]*\]\]/dg, [1]],
+  [/\[\[[^\]]*\]\]/dg, []],
+  [/!?\[([^\]]*)\]\([^)]*\)/dg, [1]],
+  [/`+([^`]*)`+/dg, [1]],
+  [/(\*\*|__|~~)(.+?)\1/dg, [2]],
+  [/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,;:!?]|$)/dg, [1, 2]],
+  [/^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+/dgm, []],
+]
+
+/** A raw passage as the chat draws its words (PLAIN), white space as one space. Pure. */
 export function plainQuote(raw: string): string {
-  return raw
-    .replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')
-    .replace(/\[\[[^\]]*\]\]/g, '')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/`+([^`]*)`+/g, '$1')
-    .replace(/(\*\*|__|~~)(.+?)\1/g, '$2')
-    .replace(/(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,;:!?]|$)/g, '$1$2')
-    .replace(/^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+/gm, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  let s = raw
+  for (const [re, keep] of PLAIN) s = s.replace(re, (...m: string[]) => keep.map((g) => m[g] ?? '').join(''))
+  return s.replace(/\s+/g, ' ').trim()
+}
+
+/** plainQuote's words, with the place in `raw` of each of their characters (`at`). Pure. */
+export function plainPlaces(raw: string): { text: string; at: number[] } {
+  let text = raw
+  let at = Array.from({ length: raw.length }, (_, i) => i)
+  const keep = (re: RegExp, groups: readonly number[]) => {
+    let s = ''
+    let a: number[] = []
+    let last = 0
+    for (const m of text.matchAll(re)) {
+      const i = m.index ?? 0
+      s += text.slice(last, i)
+      a = a.concat(at.slice(last, i))
+      for (const g of groups) {
+        const [x, y] = m.indices?.[g] ?? [i, i]
+        s += text.slice(x, y)
+        a = a.concat(at.slice(x, y))
+      }
+      last = i + m[0].length
+    }
+    text = s + text.slice(last)
+    at = a.concat(at.slice(last))
+  }
+  for (const [re, groups] of PLAIN) keep(re, groups)
+  // each run of white space as one space, and none at either end
+  keep(/(\s)\s*/dg, [1])
+  text = text.replace(/\s/g, ' ')
+  const lead = text.length - text.trimStart().length
+  const end = Math.max(lead, text.trimEnd().length)
+  return { text: text.slice(lead, end), at: at.slice(lead, end) }
+}
+
+/** Where comment `c` stands on its row's words as the chat draws them, `drawn`, the version of `text` (Claude's words, as
+ * the row holds them) the check of the citations made (marks/marks.ts asChecked): its passage carried from Claude's words
+ * into the drawn ones as the terminal carries an explainer's (plugin/marks/message.js carrier), and its words found
+ * there again, or, when the check changed them, carried onto the check's words for them. `gone` when the check took the
+ * passage or its words away (a sentence it rewrote). A passage the row does not hold as written stands as it is. Pure. */
+export function placedOn(c: AnswerComment, text: string, drawn: string): AnswerComment {
+  if (drawn === text || !c.quote) return c
+  const at = text.startsWith(c.quote, c.start) ? c.start : text.indexOf(c.quote)
+  if (at < 0) return c
+  const carry = carrier(text, drawn)
+  const p = carry(at, at + c.quote.length)
+  if (!p) return { ...c, gone: true }
+  const quote = drawn.slice(p.start, p.end)
+  const words = plainQuote(c.words ?? '')
+  const was = plainPlaces(c.quote)
+  const w = words ? findQuote(was.text, words) : null
+  if (!w || findQuote(plainQuote(quote), words)) return { ...c, quote }
+  const to = carry(at + was.at[w[0]], at + was.at[w[1] - 1] + 1)
+  const now = plainPlaces(quote)
+  const kept = to ? now.at.flatMap((i, k) => (p.start + i >= to.start && p.start + i < to.end ? [k] : [])) : []
+  return kept.length ? { ...c, quote, words: now.text.slice(kept[0], kept[kept.length - 1] + 1) } : { ...c, gone: true }
 }
 
 /** The open comments of one text row: those on its turn whose passage its text holds. Pure. */
@@ -153,6 +219,34 @@ export function answeredAsk(ask: AnswerAsk): void {
 export function commentAsked(comments: readonly AnswerComment[], ask: AnswerAsk): AnswerComment | null {
   const open = comments.filter((c) => c.ref === ask.ref && c.status === 'open')
   return open.find((c) => c.id === ask.comment) ?? open[0] ?? null
+}
+
+// the passages of the comments as main's chat draws them now (Rows, placedOn), by comment, which the Comments sidebar
+// quotes; none for a comment whose words the check of the citations took away
+let drawnQuotes: ReadonlyMap<string, string> = new Map()
+const drawnSubs = new Set<() => void>()
+
+/** The comments as main's chat draws them now (placedOn): the sidebar quotes their passages. */
+export function noteDrawn(comments: readonly AnswerComment[]): void {
+  const next = new Map(drawnQuotes)
+  for (const c of comments) {
+    if (c.gone) next.delete(c.id)
+    else next.set(c.id, plainQuote(c.quote))
+  }
+  if (next.size === drawnQuotes.size && [...next].every(([id, q]) => drawnQuotes.get(id) === q)) return
+  drawnQuotes = next
+  drawnSubs.forEach((f) => f())
+}
+
+/** The passages main's chat draws now, by comment (noteDrawn). */
+export function useDrawnQuotes(): ReadonlyMap<string, string> {
+  return useSyncExternalStore(
+    (f) => {
+      drawnSubs.add(f)
+      return () => void drawnSubs.delete(f)
+    },
+    () => drawnQuotes,
+  )
 }
 
 /** The workspace's comments on Claude's answers, read again on the stream's `answer-comments` record, when a check
