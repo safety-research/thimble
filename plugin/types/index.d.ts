@@ -168,16 +168,11 @@ declare module 'claude-code' {
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, `<host row>#cu` for a catch-up, `<row>#s` for a simpler version): { running, want,
-       *  asked, error, reveal } (squeeze/term.ts SqzUi) */
+       *  doing, asked, error, reveal } (squeeze/term.ts SqzUi) */
       squeezeUi: StateFamily<unknown>
       /** what Claude was told of each record's version, and the version waiting for the next prompt, by its id */
       squeezeTold: Record<string, { told: string; pending: string | null }>
-      /** the record the chips are open on, the picked chip, the chip at its edge, what is typed after +, whether a
-       *  click gave the chips the keyboard, whether the bar says how to type a chip of one's own (squeeze/ui.ts) */
-      squeezeOpen: { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean } | null
-      /** the chips the person typed this session, newest last */
-      squeezeOwn: string[]
-      /** s pressed while main's turn ran: the turn whose answer the chips open on once it ends (squeeze/ui.ts) */
+      /** s pressed while main's turn ran: the turn whose answer s acts on once it ends (squeeze/ui.ts) */
       squeezeWait: { turn: string } | null
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
        *  shown, what the version shown did to each (squeeze/cards.ts) */
@@ -189,9 +184,16 @@ declare module 'claude-code' {
       observerLooks: { session: string; msgs: unknown[] } | null
 
       // ---- the tour (tour/tour.ts)
-      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `cite`, `v`, `s`), the steps done, and the
-       *  person's own prompts while that step waits; null when no tour runs */
-      tour: { at: 'answer' | 'e' | 'cite' | 'v' | 's'; done: ('answer' | 'e' | 'cite' | 'v' | 's')[]; asides: number } | null
+      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `v`, `ask`, `s`, `cite`, or `end`), the
+       *  steps done and those that did not work, when it started, the row of its sample answer, the ids of its placed
+       *  rows (the intro, the step row placed under a later reply) and how many were placed; null with no tour */
+      tour: {
+        at: 'answer' | 'e' | 'v' | 'ask' | 's' | 'cite' | 'end'; done: ('answer' | 'e' | 'v' | 'ask' | 's' | 'cite')[]
+        missed: ('answer' | 'e' | 'v' | 'ask' | 's' | 'cite')[]; startedAt: number; k: number
+        intro: string | null; sample: string | null; moved: string | null
+      } | null
+      /** the tours started before the one that runs, as they were then: their rows still draw them */
+      tourPast: unknown[] | null
       /** the row of the tour's sample answer, which the observer does not look at; kept after the tour ends */
       tourSample: string | null
 

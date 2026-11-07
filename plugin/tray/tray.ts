@@ -57,7 +57,7 @@
 // does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
 // the person sends a prompt, and gives way to the side pane a or + opens; while they scroll the transcript it stays as
 // it is, until 0 closes it or they open another mark. What the person opens reaches main through core/engaged.ts. A
-// citation opened is a step of the tour done (tour/tour.ts).
+// citation the tour marks, opened, is a step of the tour done (tour/tour.ts).
 //
 //   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
 //   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
@@ -90,9 +90,9 @@ import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
+import { squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
-import { tourDid } from '../tour/tour'
+import { tourOpened } from '../tour/tour'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
@@ -194,7 +194,7 @@ export async function closeOnRow($: Engine, row: string): Promise<void> {
   if (tray?.stack[0]?.row === row) await closeTray($)
 }
 
-/** The tray gives way to what takes the keys from it (the squeeze chips, s): it closes, and a card ] reached gives its
+/** The tray gives way to what takes the keys from it (v): it closes, and a card ] reached gives its
  *  keys back. Returns what puts it back as it stood (the key undone: a letter right after it). */
 export async function giveWay($: Engine): Promise<() => Promise<void>> {
   const was = await keptNow($)
@@ -457,9 +457,9 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   // a citation that waits to be checked until it is opened (Citations auto cite, or words asked about with c) starts
   // its check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
-  // a citation opened is a step of the tour done (tour/tour.ts), after the key's hook, which has only a few
-  // milliseconds and must not wait on the reads this takes
-  if (f.kind === 'citation') $.clock.after(0, () => { void tourDid($, 'cite').catch(() => undefined) })
+  // the citation the tour marks, opened, is a step of the tour done (tour/tour.ts), after the key's hook, which has
+  // only a few milliseconds and must not wait on the reads this takes
+  if (f.kind === 'citation') $.clock.after(0, () => { void tourOpened($, f.row, f.n).catch(() => undefined) })
   await setTray($, open(f) as Tray)
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)
@@ -575,19 +575,13 @@ async function repair($: Engine, f: Frame): Promise<boolean> {
 
 // ------------------------------------------------------------------------------------------------ the keys
 
-/** Whether the squeeze chips hold the keys now (their items show as the bar's focus): [ and ] are theirs then. */
-async function chipsOpen($: Engine): Promise<boolean> {
-  try { return await squeezeHolds($) } catch { return false }
-}
-
-/** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always (but while the squeeze chips
- *  are open at rest), its own while it is open, a's and 0 on a card ] reached. */
+/** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always, its own while it is open,
+ *  a's and 0 on a card ] reached. */
 export async function trayKey($: Engine, key: string, until = 0): Promise<Any | null> {
   const k = await keptNow($)
   const tray = k.tray
   const stand = tray ? null : k.stand
   if (key === ']' || key === '[') {
-    if (!tray && !stand && (await chipsOpen($))) return null
     // with nothing to step to, ] and [ are the prompt's
     if (!tray && !stand && !(await allStops($)).length) return null
     return { now: () => stepMark($, key === ']' ? 1 : -1) }

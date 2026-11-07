@@ -31,11 +31,8 @@ When someone asks you to install thimble, ask what they want, run the install sc
    that command only on their yes, then run the script again.
 
 3. When it is done, reply with the script's last lines, word for word, with each command in backticks. Add only what
-   does not work yet, if anything.
-
-4. Then ask, with your question tool: "Do you want a two-minute tour of thimble?" (yes or no). On yes, say in one
-   line: "Type /reload-plugins, then /thimble:tour." You cannot run either. When they tell you they reloaded, start
-   the tour skill (`thimble:tour`) yourself.
+   does not work yet, if anything. Its last lines say to type /reload-plugins, which you cannot run, and how the
+   two-minute tour starts. Do not start the tour yourself.
 
 To work on thimble's own code, clone this repository and run `scripts/install.sh --local` in the clone. Only do this
 when they ask for it.

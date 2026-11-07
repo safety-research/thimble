@@ -1,7 +1,7 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws
 // in focus; its card shows the check and the evidence; a question typed with it open carries nothing of it and closes
 // the tray; a press on a citation opens it too; 0 closes it; v closes it so the card shows, and a letter after v puts
-// it back. A citation opened while the tour waits for it sends Claude the tour's next step. All data is made up. `claude plugin test plugin`.
+// it back. While the tour waits for its citation, a citation of another answer does not count. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
@@ -138,26 +138,25 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test("the tour (tour/tour.ts): while its citation step waits, ] on a citation sends Claude the next step, once", { options: { citations: 'auto cite + verify', cards: 'off', explain: 'off' } }, async ($, on) => {
-  const { submitted, clock } = await resumed($, on, QUOTED)
-  const tour = () => submitted.map(e => String(e.text)).filter(t => t.startsWith('(thimble tour)'))
+test("the tour (tour/tour.ts): while its citation step waits, a citation of another answer than the sample is not that step", { options: { citations: 'auto cite + verify', cards: 'off', explain: 'off', squeezeAnswers: false } }, async ($, on) => {
+  on('ui.place', (_$: unknown, e: Any) => ({ value: { isPlaced: true, requestId: `r-${e.id}` } }))
+  const { clock } = await resumed($, on, QUOTED)
+  // the sample answer draws the step row at its end
+  const row = async () => textOf(await $.ui.render(answer('row-t2', 'A made-up sample answer.')))
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  // the turn that writes the sample answer ends: Explainers are off, so the tour goes on to the citation step
+  // the turn that writes the sample answer ends: Explainers, Cards and Simplify are off, so the tour waits for the
+  // citation step
   await $.turn.start({ text: '<command-name>/thimble:tour</command-name>', turnId: 't2' } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'A made-up sample answer.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t2' } as never)
   await $.turn.complete({ turnId: 't2', reason: 'answer', answer: 'A made-up sample answer.', durationMs: 10, isAborted: false } as never)
   await clock.advance(100)
-  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 2.'])
-  // { picks the answer with the citation; ] opens it
+  expect(await row()).toContain('Scroll up to the tea shop answer and click the highlighted number.')
+  // { picks the earlier answer with the citation; ] opens it, and the tour still waits
   await $.prompt.edit(key('{'))
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(10)
-  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 2.', '(thimble tour) Step 2 done. Say step 4.'])
-  // the same citation opened again: no second prompt
-  await $.prompt.edit(key('0'))
-  await $.prompt.edit(key(']'))
-  await clock.advance(10)
-  expect(tour().length).toBe(2)
+  expect(textOf(await $.ui.render(above()))).toContain('12 of 40')
+  expect(await row()).toContain('Scroll up to the tea shop answer and click the highlighted number.')
 })
 
 test('v with the tray open closes it, so the card that draws under the answer shows; a letter right after v puts it back', CITES, async ($, on) => {

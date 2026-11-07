@@ -113,7 +113,7 @@ test("the tour's sample answer gets no look (tour/tour.ts tourSample): Claude wr
   setOptions({ claimsMode: 'auto' })
   const s = setup([READ])
   // the tour waits for its sample answer: the turn that ends now writes it
-  await s.$.state.set({ plugin: 'thimble', key: 'tour' }, { at: 'answer', done: [], asides: 0 })
+  await s.$.state.set({ plugin: 'thimble', key: 'tour' }, { at: 'answer', done: [], missed: [], startedAt: 0, k: 1, intro: 'tour-intro-1', sample: null, moved: null })
   await answered(s, { id: 't1', prompt: '/thimble:tour', rows: ['Customers placed [36 orders](#) in March 2026.'] })
   expect(s.forks.length).toBe(0)
   // the tour ended; its sample answer is kept by its row, and an answer of the person's own gets its look

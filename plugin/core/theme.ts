@@ -26,7 +26,7 @@ export type Theme = 'dark' | 'light'
  *  merged pull request, a purple in every theme: #8700ff on the light ones (contrast 6.0 on white), #af87ff on the
  *  dark ones (6.1 on #1e1e1e), magenta on the ANSI ones. Every drawing asks for it as it draws, never keeps it in a
  *  constant, so a change here reaches all of thimble. The pure modules get it from the module that draws them
- *  (core/askcell.js as `color`, the Client squeeze/chips.tsx in its props). */
+ *  (core/askcell.js as `color`). */
 export function accent(): string {
   return 'merged'
 }

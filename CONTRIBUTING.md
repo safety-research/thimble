@@ -74,8 +74,8 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | the settings and coverage panes | `plugin/panes/` |
 | the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
 | `/thimble-fix`: the person's changes to their own thimble, made by the fixer in a scratch copy and applied with their key | `plugin/fix/` |
-| the skills Claude calls: `fix-thimble`, which starts the fix the person asks for; `tour`, the words of each step of the tour (`/thimble:tour`) | `plugin/skills/` |
-| the tour: the made-up sample data it works on, and the prompt that tells Claude to say the next step when the person did one (`tour.ts`) | `plugin/tour/` |
+| the skills Claude calls: `fix-thimble`, which starts the fix the person asks for; `tour`, the sample answer that starts the tour (`/thimble:tour`) | `plugin/skills/` |
+| the tour: the made-up sample data it works on, and the rows thimble draws for its steps (`tour.ts`) | `plugin/tour/` |
 | a `--prompt` label's model reads, and the labels pane; the labels an answer or a card used, and the ask before a large label run (`use.ts`) | `plugin/labels/` |
 | each model call and turn in the session's events, per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | every `$.state` key, one block per module | `plugin/types/index.d.ts` |

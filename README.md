@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
 - **Claims** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. thimble pulls the claims out of every reply in the background; set Claims to on demand to pull them out only when you ask (`f` in the pane).
-- **Simplify** (`s`): a shorter, plainer version of the last answer, below it; press `s` again to make it longer, for a novice or an expert, or as you describe it.
+- **Simplify** (`s`): a shorter, plainer version of the last answer, below it; under it, `1`–`4` make it shorter, longer, plainer or more expert, and `0` removes it.
 - **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 
 ## Installation

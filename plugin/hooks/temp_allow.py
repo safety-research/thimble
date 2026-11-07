@@ -1,4 +1,5 @@
-"""temp_allow.py: Read, Grep, Glob and a fork's Write in thimble's temp folder need no dialog.
+"""temp_allow.py: Read, Grep, Glob and a fork's Write in thimble's temp folder need no dialog, nor a read of the
+tour's sample data (tour/sample in this plugin), which the tour's answer cites.
 
 thimble asks Claude to write a card's rows in the session's temp folder (core/home.ts tempDir: `thimble/` in the
 person's TMPDIR, else $THIMBLE_HOME/tmp; a folder only this user can open), which is outside the working folder, so
@@ -57,11 +58,36 @@ def real_of(path):
     return os.path.join(os.path.realpath(folder or "/"), name)
 
 
+def sample_folder():
+    """The real path of the tour's sample data in this plugin (tour/sample), or None."""
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    folder = os.path.join(here, "tour", "sample")
+    return os.path.realpath(folder) if os.path.isdir(folder) else None
+
+
+def sample_read(tool, inp):
+    """Whether a Read, Grep or Glob looks only in the tour's sample data. The tour's answer cites it, and thimble's
+    checker reads it from the plugin's folder, which is outside the person's working folder."""
+    sample = sample_folder()
+    if not sample or tool == "Write":
+        return False
+    if tool == "Glob" and (not isinstance(inp.get("pattern"), str) or inp["pattern"].startswith("/")
+                           or ".." in inp["pattern"].split("/")):
+        return False
+    p = inp.get("file_path") if tool == "Read" else inp.get("path")
+    if not isinstance(p, str) or not p.startswith("/") or not os.path.lexists(p):
+        return False
+    real = os.path.realpath(p)
+    return real == sample or real.startswith(sample + "/")
+
+
 def verdict(e, env):
     """'allow', or None for no answer."""
     tool = e.get("tool_name")
     if tool not in TOOLS:
         return None
+    if sample_read(tool, e.get("tool_input") or {}):
+        return "allow"
     opt = env.get("CLAUDE_PLUGIN_OPTION_CARDS", env.get("CLAUDE_PLUGIN_OPTION_cards", "true"))
     if str(opt).strip().lower() in ("off", "false"):
         return None
@@ -93,7 +119,7 @@ def main():
         return 0
     if v:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": v,
-                                                 "permissionDecisionReason": "a file in thimble's temp folder"}}))
+                                                 "permissionDecisionReason": "a file in thimble's temp folder or the tour's sample data"}}))
     return 0
 
 

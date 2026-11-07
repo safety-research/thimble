@@ -54,9 +54,8 @@ type Any = any
 export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'labels') => unknown }
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
- *  what holds the keys now (a card ] reached), or what the prompt box asks for (`rewrite for…`); while any shows, the
- *  bar's left names only those, after the busy step. (The open tray's keys are in its header and the open chips' in the
- *  chips, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: the key and its words
+ *  what holds the keys now (a card ] reached); while any shows, the bar's left names only those, after the busy step.
+ *  (The open tray's keys are in its header, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: the key and its words
  *  drawn lit (`s ● short`), in the color of what the key gives (`e explain`, teal), or as a failure, not dim.
  *  `shorter`: the words in fewer cells, longest first, which a narrow bar draws after
  *  coverage's file counts gave way: the first of them it keeps longer than the busy step's words, and before any count

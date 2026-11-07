@@ -42,13 +42,14 @@ Ask Claude Code:
     claude "install thimble from https://github.com/safety-research/thimble"
 
 Claude asks whether you want both products or the plugin alone, and how the workbench reaches Claude, then runs the
-script; its steps are in CLAUDE.md, "Installing thimble for a user". At the end, Claude offers a two-minute tour of
-thimble in the same session: type `/reload-plugins`, then `/thimble:tour`. Or run the script yourself:
+script; its steps are in CLAUDE.md, "Installing thimble for a user". At the end, type `/reload-plugins`: a two-minute
+tour of thimble starts in the same session. Or run the script yourself:
 
     curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 
-Its last lines name the tour: `thimble tour` copies made-up sample data into `~/.thimble/tour` and opens Claude Code
-there. Claude then shows you thimble one step at a time, and goes on to the next step when you do the one before.
+In a terminal, it ends with the question whether to take the tour now. `thimble tour` copies made-up sample data into
+`~/.thimble/tour` and opens Claude Code there. Claude writes an answer about the data, and thimble shows you one step
+at a time under it, and goes on to the next step when you do the one before.
 
 Options go after `bash -s --`:
 

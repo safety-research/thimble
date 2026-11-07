@@ -1,215 +1,200 @@
-// The feature tour (tour/tour.ts, skills/tour/SKILL.md): /thimble:tour or Claude's Skill call starts it, and when a
-// step is done (the sample answer written, or what the person does), thimble sends Claude one prompt of its own that
-// names the next step, only while a tour runs and once per step. A step done early, a step whose feature is off and
-// step 1 where no click reaches thimble are left out; v that drew no card lets the tour go on. After the sample answer,
-// the tour's turns and the replies to the person's own prompts answer nothing, so s acts on the sample answer. The
-// person's own prompt gets the step again; the third at one step ends the tour, and Claude says so. All data is made
-// up. `claude plugin test plugin`.
+// The feature tour (tour/tour.ts, skills/tour/SKILL.md): /thimble:tour or Claude's Skill call starts it. thimble
+// places its intro, and the sample answer draws the step row at its end; thimble draws both itself and sends Claude no
+// prompt. Each step done redraws the row in place. A tour started again keeps the earlier tour's rows. A step done early, a step whose feature is off and the selection step where no
+// click reaches thimble are left out; v that drew no card lets the tour go on, and leaves out ask. Step e names its
+// words in bold; while cite waits, the sample answer marks the wrong number. After the sample answer, the replies to the
+// person's own prompts answer nothing, so s acts on the sample answer, and the step row is placed under the reply; a
+// fork's end moves nothing. After an install inside Claude Code, the
+// person's /reload-plugins runs /thimble:tour once in that session, soon after the install only. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { remindAfterAnswer } from '../bar/hints'
 import { failLineNow } from '../bar/notice'
 import { noteViewport } from '../cards/draw'
-import { cardIdOf } from '../cards/store'
-import { spawnFork } from '../core/forks'
-import { registerDesigner } from '../designer/v'
-import { setOptions } from '../settings/features.mjs'
 import { answersNothing } from '../core/answers'
-import { aside, STOPPED, TAG, tourDid, tourMissed, tourNow, tourPrompt, tourRuns, tourStart, turnTour } from '../tour/tour'
+import { setOptions } from '../settings/features.mjs'
+import { NEXT_MS, placeIntro, stepRowEl, tourDid, tourMissed, tourNow, tourOpened, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** A made-up engine with what the tour reads: the session's state, the environment, and the prompts it sends. */
+/** A made-up engine with what the tour reads: the session's state, the environment, the clock, and the rows it places. */
 function fake() {
   const state = new Map<string, unknown>()
-  const sent: string[] = []
+  const placed: string[] = []
   const $: Any = {
     state: {
       get: async (k: Any) => ({ value: state.get(JSON.stringify(k)), version: 0 }),
       set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true, version: 1 } },
     },
     env: { get: async () => undefined },
-    prompt: { submit: async (a: Any) => { sent.push(String(a.text)); return { text: a.text } } },
-    ui: { invalidate: () => undefined },
+    clock: { now: async () => 0 },
+    config: { list: async () => [] },
+    ui: { invalidate: () => undefined, place: async (a: Any) => { placed.push(a.id); return { isPlaced: true, requestId: a.id } } },
   }
-  return { $, sent }
+  return { $, placed }
 }
 
-/** The prompts sent so far, after their sends (not awaited by the tour) ran. */
-async function sentNow(sent: string[]): Promise<string[]> {
-  await new Promise(r => setTimeout(r, 0))
-  return [...sent]
+/** The steps the tour waited for, in order, as each step is done. */
+async function walk($: Any, steps: Any[]): Promise<string[]> {
+  const at: string[] = []
+  for (const s of steps) {
+    await tourDid($, s)
+    at.push((await tourNow($))?.at ?? 'end')
+  }
+  return at
 }
 
-test('each step done sends one prompt that names the next step, and step 5 ends the tour', async () => {
+test('each step done moves the tour to the next step that is on and not done; the intro is placed once per start', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
-  const { $, sent } = fake()
-  // no tour: a step done sends nothing
+  const { $, placed } = fake()
   await tourDid($, 'v')
-  expect(await sentNow(sent)).toEqual([])
-  await tourStart($)
-  expect(await tourRuns($)).toBe(true)
-  await tourDid($, 'answer')
-  await tourDid($, 'e')
-  // a step done again sends nothing more
-  await tourDid($, 'e')
-  await tourDid($, 'cite')
-  await tourDid($, 'v')
-  await tourDid($, 'v')
-  await tourDid($, 's')
-  expect(await sentNow(sent)).toEqual([
-    `${TAG} Step 0 done. Say step 1.`,
-    `${TAG} Step 1 done. Say step 2.`,
-    `${TAG} Step 2 done. Say step 3.`,
-    `${TAG} Step 3 done. Say step 4.`,
-    `${TAG} Step 4 done. Say step 5.`,
-  ])
-  expect(await tourRuns($)).toBe(false)
-  // the tour over, steps send nothing
-  await tourDid($, 'v')
-  expect((await sentNow(sent)).length).toBe(5)
-})
-
-test('a step done before its turn is left out; /thimble:tour again starts over', async () => {
-  setOptions({})
-  noteViewport({ isFullscreen: true })
-  const { $, sent } = fake()
-  await tourStart($)
-  await tourDid($, 'answer')
-  // the person pressed s and v while step 1 waited: no prompt yet
-  await tourDid($, 's')
-  await tourDid($, 'v')
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`])
-  await tourDid($, 'e')
-  await tourDid($, 'cite')
-  expect((await sentNow(sent)).slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`, `${TAG} Step 2 done. Say step 5.`])
   expect(await tourRuns($)).toBe(false)
   await tourStart($)
-  expect(await tourNow($)).toEqual({ at: 'answer', done: [], asides: 0 })
+  await placeIntro($)
+  // the command and the skill both start it: one start, one intro
+  await tourStart($)
+  await placeIntro($)
+  expect(placed).toEqual(['tour-intro-1'])
+  expect(await walk($, ['answer', 'e', 'e', 'v', 'ask', 's', 'cite'])).toEqual(['e', 'v', 'v', 'ask', 's', 'cite', 'end'])
+  expect(await tourRuns($)).toBe(false)
+  // a step done early is left out when its turn comes
+  const b = fake()
+  await tourStart(b.$)
+  expect(await walk(b.$, ['answer', 's', 'v', 'e'])).toEqual(['e', 'e', 'e', 'ask'])
+  // v that drew no card goes on, only while v waits
+  await tourMissed(b.$, 'v')
+  expect((await tourNow(b.$))?.at).toBe('ask')
+  expect(await walk(b.$, ['ask', 'cite'])).toEqual(['cite', 'end'])
+  // while v waits, v that drew no card goes on past ask, which has no card to ask about
+  const c = fake()
+  await tourStart(c.$)
+  expect(await walk(c.$, ['answer', 'e'])).toEqual(['e', 'v'])
+  await tourMissed(c.$, 'v')
+  expect((await tourNow(c.$))?.at).toBe('s')
+  expect((await tourNow(c.$))?.missed).toEqual(['v'])
 })
 
-test('where no click reaches thimble, step 1 is left out, and steps 2k and 5k name the keyboard path; a feature that is off is left out', async () => {
+test('where no click reaches thimble the selection step is left out; a feature that is off is left out', async () => {
   setOptions({})
-  const { $, sent } = fake()
   noteViewport({ isFullscreen: false })
+  const { $ } = fake()
   await tourStart($)
-  await tourDid($, 'answer')
-  await tourDid($, 'cite')
-  await tourDid($, 'v')
-  await tourDid($, 's')
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 2k.`, `${TAG} Step 2k done. Say step 3.`, `${TAG} Step 3 done. Say step 4.`, `${TAG} Step 4 done. Say step 5k.`])
-  // Simplify off: the card step is the last before the end
+  expect(await walk($, ['answer'])).toEqual(['v'])
   noteViewport({ isFullscreen: true })
   setOptions({ squeezeAnswers: false })
   const b = fake()
   await tourStart(b.$)
-  await tourDid(b.$, 'answer')
-  await tourDid(b.$, 'e')
-  await tourDid(b.$, 'cite')
-  await tourDid(b.$, 'v')
-  expect((await sentNow(b.sent)).slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`, `${TAG} Step 2 done. Say step 3.`, `${TAG} Step 3 done. Say step 5.`])
+  expect(await walk(b.$, ['answer', 'e', 'v', 'ask', 'cite'])).toEqual(['e', 'v', 'ask', 'cite', 'end'])
+  // with Cards off, v draws no card, so ask is left out too
+  setOptions({ cards: 'off' })
+  const c = fake()
+  await tourStart(c.$)
+  expect(await walk(c.$, ['answer', 'e', 's'])).toEqual(['e', 's', 'cite'])
   setOptions({})
 })
 
-test('v that drew no card lets the tour go on, once, and only while step 3 waits', async () => {
-  setOptions({})
-  noteViewport({ isFullscreen: true })
-  const { $, sent } = fake()
-  await tourStart($)
-  await tourDid($, 'answer')
-  // step 1 waits: a design that failed changes nothing
-  await tourMissed($, 'v')
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`])
-  await tourDid($, 'e')
-  await tourDid($, 'cite')
-  await tourMissed($, 'v')
-  await tourMissed($, 'v')
-  expect((await sentNow(sent)).slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`, `${TAG} Step 2 done. Say step 3.`, `${TAG} Step 3 did not work. Say step 4.`])
-})
-
-test("while step 3 waits, a card call of v's copy that drew a version sends step 3 done, once; one that did not draw sends nothing", async () => {
+test('while e waits the sample answer marks nothing; while cite waits it marks the refunds citation, which alone is the step, then nothing', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
-  const { $, sent } = fake()
-  // the designer's hooks (designer/v.ts) on this made-up engine, and v's copy started
-  const hooks: Record<string, Any[]> = {}
-  const on: Any = (event: string, a: Any, b?: Any) => {
-    ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
-    return { catch: () => undefined }
-  }
-  registerDesigner(on, {} as never)
-  $.agent = { spawn: async () => ({ model: 'claude-made-up', agentId: 'agent-made-up-v' }) }
-  const fork = await spawnFork($, { kind: 'designer', prompt: 'PROMPT designer', description: 'card of the last answer (v)' })
-  expect(fork.agentId).toBe('agent-made-up-v')
+  const { $ } = fake()
+  const text = 'That is an average order value of [$52](#). The shop refunded [7 orders](#). Most arrived on time.'
   await tourStart($)
+  await $.state.set({ plugin: 'thimble', key: 'tourSample' }, 'row-sample')
   await tourDid($, 'answer')
-  await tourDid($, 'e')
-  await tourDid($, 'cite')
-  const before = (await sentNow(sent)).length
-  // a card call of the copy, whose result the card tool kept: `calls`, each call of the card with its version or error
-  const id = cardIdOf('toolu_made_up_1')
-  const card = async (toolUseId: string, version: number, calls: Record<string, unknown>) => {
-    await $.state.set({ plugin: 'thimble', key: 'cardCall', id: toolUseId }, { id })
-    await $.state.set({ plugin: 'thimble', key: 'card', id }, { id, version, calls })
-    const next = Object.assign(async () => ({ result: 'made up' }), { called: true, origin: { plugin: 'thimble' } })
-    await hooks['tool.call']![0]($, { tool: 'mcp__thimble__card', agentId: fork.agentId, tool_use_id: toolUseId }, next)
-    await sentNow(sent)
-  }
-  // the view did not parse: no version is on the screen
-  await card('toolu_made_up_1', 0, { toolu_made_up_1: { version: 0, error: 'the view does not parse' } })
-  expect((await sentNow(sent)).length).toBe(before)
-  // the next call drew version 1
-  await card('toolu_made_up_2', 1, { toolu_made_up_1: { version: 0, error: 'the view does not parse' }, toolu_made_up_2: { version: 1 } })
-  expect((await sentNow(sent)).slice(before)).toEqual([`${TAG} Step 3 done. Say step 4.`])
-  // version 2 sends nothing more
-  await card('toolu_made_up_3', 2, { toolu_made_up_2: { version: 1 }, toolu_made_up_3: { version: 2 } })
-  expect((await sentNow(sent)).length).toBe(before + 1)
+  const words = (s: Any[]) => s.map(x => text.slice(x.start, x.end))
+  expect((await tourNow($))?.at).toBe('e')
+  expect(await tourSpans($, 'row-sample', text)).toEqual([])
+  await walk($, ['e', 'v', 'ask', 's'])
+  expect(words(await tourSpans($, 'row-sample', text))).toEqual(['[7 orders](#)'])
+  // another row is not marked
+  expect(await tourSpans($, 'row-other', text)).toEqual([])
+  // the refunds citation is the second of the answer: opening the first, or one of another answer, is not the step. A
+  // click on it in the simpler version opens it by the sample's row and its number there (squeeze/ui.ts), as here
+  await $.state.set({ plugin: 'thimble', key: 'answerMsg', id: 'row-sample' }, { row: 'row-sample', turnId: 't1', text, at: 0 })
+  await tourOpened($, 'row-sample', 1)
+  await tourOpened($, 'row-other', 2)
+  expect((await tourNow($))?.at).toBe('cite')
+  await tourOpened($, 'row-sample', 2)
+  expect(await tourRuns($)).toBe(false)
+  expect(await tourSpans($, 'row-sample', text)).toEqual([])
 })
 
-test('no reminder shows while the tour runs; a /clear ends it', async () => {
+/** Elements as plain objects, for reading what the step row draws. */
+const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any) => ({ type, props }) })
+const nodes = (n: Any, out: Any[] = []): Any[] => {
+  if (!n || typeof n !== 'object') return out
+  if (Array.isArray(n)) { n.forEach(x => nodes(x, out)); return out }
+  out.push(n)
+  nodes(n.props?.children, out)
+  return out
+}
+
+test('the step row counts the steps it shows, names the words of e in bold and its keys in color, and words ask with and without clicks', () => {
+  setOptions({})
+  const at = (step: Any, done: Any[], missed: Any[] = []): TourState => ({ at: step, done, missed, startedAt: 0, k: 1, intro: null, sample: 'row-sample', moved: null })
+  const row = (t: TourState, clicks = true) => stepRowEl(els, t, clicks, 100)
+  // e waits: its words bold, in the default color; its key in thimble's color; the line itself not bold
+  const e = row(at('e', ['answer']))
+  expect(textOf(e)).toContain('thimble tour · 1 of 5')
+  expect(textOf(e)).toContain('› Select average order value in the answer with the mouse, then press e.')
+  const bold = nodes(e).find(n => n.type === 'Text' && n.props?.children === 'average order value')
+  expect(bold?.props).toMatchObject({ bold: true })
+  expect(bold?.props?.color).toBeUndefined()
+  expect(nodes(e).find(n => n.type === 'Text' && n.props?.children === 'e')?.props).toMatchObject({ bold: true })
+  expect(nodes(e).find(n => n.props?.key === 'a-e')?.props?.bold).toBeUndefined()
+  // v waits: 2 of 5
+  expect(textOf(row(at('v', ['answer', 'e'])))).toContain('thimble tour · 2 of 5')
+  // ask, with clicks and without (no e then, so 2 of 4)
+  const ask = textOf(row(at('ask', ['answer', 'e', 'v'])))
+  expect(ask).toContain('thimble tour · 3 of 5')
+  expect(ask).toContain('✓ v drew a card.')
+  expect(ask).toContain('› Click ask at the top right of the card, type a question about it, and press Enter.')
+  const keys = textOf(row(at('ask', ['answer', 'v']), false))
+  expect(keys).toContain('thimble tour · 2 of 4')
+  expect(keys).toContain('› Press ] until it reaches the card, press a, type a question about it, and press Enter.')
+  // cite, last: where the answer is, with clicks; ] without
+  const cite = textOf(row(at('cite', ['answer', 'e', 'v', 'ask', 's'])))
+  expect(cite).toContain('thimble tour · 5 of 5')
+  expect(cite).toContain('✓ You asked a side thread about the card.')
+  expect(cite).toContain('› One number was wrong on purpose. Scroll up to the tea shop answer and click the highlighted number.')
+  expect(textOf(row(at('cite', ['answer', 'v', 'ask', 's']), false))).toContain('› One number was wrong on purpose. Press ] until the tray above the prompt shows the highlighted number.')
+  // v that drew no card: ask is not shown
+  const missed = textOf(row(at('s', ['answer', 'e', 'v'], ['v'])))
+  expect(missed).toContain('thimble tour · 3 of 4')
+  expect(missed).toContain('✓ v drew no card this time.')
+  expect(missed).not.toContain('side thread')
+})
+
+test('no reminder shows while the tour runs; answers are held after the sample answer; a /clear ends the tour', async () => {
   setOptions({ explain: 'on demand' })
   const { $ } = fake()
-  $.clock = { after: () => ({ cancel() {} }) }
+  $.clock.after = () => ({ cancel() {} })
   await tourStart($)
   await remindAfterAnswer($)
   expect(await failLineNow($)).toBeNull()
+  expect(await answersNothing($, 't-mine')).toBe(false)
+  await tourDid($, 'answer')
+  expect(await answersNothing($, 't-mine')).toBe(true)
   await turnTour($)
   expect(await tourRuns($)).toBe(false)
+  expect(await answersNothing($, 't-mine')).toBe(false)
   await remindAfterAnswer($)
   expect((await failLineNow($))?.text).toContain('press e')
   setOptions({})
 })
 
-test("a turn the tour's prompt started answers nothing; the person's own answers nothing only after the sample answer", async () => {
-  noteViewport({ isFullscreen: true })
-  expect(tourPrompt({ text: `${TAG} Step 1 done. Say step 2.`, by: 'plugin' })).toBe(true)
-  expect(tourPrompt({ text: `The thimble plugin sent a message:\n${TAG} Step 1 done. Say step 2.`, by: 'unknown' })).toBe(true)
-  expect(tourPrompt({ text: `${TAG} Step 1 done. Say step 2.`, by: 'composer' })).toBe(false)
-  expect(tourPrompt({ text: 'Why did two runs fail?', by: 'plugin' })).toBe(false)
-  // a turn of the person's own (its record aside): it answers nothing only while the tour runs after its sample answer
-  const { $ } = fake()
-  expect(await answersNothing($, 't-mine')).toBe(false)
-  await tourStart($)
-  // the turn that writes the sample answer is an answer
-  expect(await answersNothing($, 't-mine')).toBe(false)
-  await tourDid($, 'answer')
-  expect(await answersNothing($, 't-mine')).toBe(true)
-  await turnTour($)
-  expect(await answersNothing($, 't-mine')).toBe(false)
-})
-
-const NO_FILES = (on: Any) => {
+const NO_FILES = (on: Any, files: Record<string, string> = {}) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   on('session.id', () => ({ value: 's-tour' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
-  on('fs.write', () => ({ value: undefined }))
+  on('fs.read', (_$: unknown, e: { path: string }) => (e.path in files ? { value: files[e.path] } : { value: promptStub(e.path) ?? '' }))
+  on('fs.write', (_$: unknown, e: { path: string; text: string }) => { files[e.path] = e.text; return { value: undefined } })
   on('fs.list', () => ({ value: [] }))
   on('fs.exists', () => ({ value: false }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
@@ -228,21 +213,28 @@ const NO_FILES = (on: Any) => {
 }
 
 const SAMPLE = 'Customers placed [36 orders](#) in March 2026. The shop refunded [7 orders](#). Most of the refunded orders arrived on time, so late delivery does not explain the refunds.'
-const STEP4 = 'Press s for a shorter, plainer version of the Fernhill Tea answer.'
 
-/** A session where the tour's steps run through the whole hooks module: the prompts as they reach Claude (with what
- *  thimble put beside them), Simplify's calls, and a turn of main's. */
-async function session($: Any, on: Any) {
-  NO_FILES(on)
+function textOf(n: Any): string {
+  if (n == null || n === false) return ''
+  if (typeof n === 'string' || typeof n === 'number') return String(n)
+  if (Array.isArray(n)) return n.map(textOf).join('')
+  return textOf(n.props?.children) + textOf(n.children)
+}
+
+/** A session where the tour runs through the whole hooks module: the prompts that reach Claude, the rows placed,
+ *  Simplify's calls, and a turn of main's. */
+async function session($: Any, on: Any, files: Record<string, string> = {}) {
+  NO_FILES(on, files)
   const clock = mock.clock(on, { now: 0 })
-  const got: { text: string; by: string; context: string[] }[] = []
+  const got: { text: string; by: string }[] = []
+  const placed: string[] = []
+  const ran: Any[] = []
   const asked: Any[] = []
-  on('prompt.submit', (_$: unknown, e: Any) => {
-    got.push({ text: String(e.text), by: String(e.origin?.kind ?? ''), context: [...(e.context ?? [])] })
-    return { text: e.text }
-  })
+  on('prompt.submit', (_$: unknown, e: Any) => { got.push({ text: String(e.text), by: String(e.origin?.kind ?? '') }); return { text: e.text } })
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('prompt.fill', () => ({ isFilled: true }) as never)
+  on('ui.place', (_$: unknown, e: Any) => { placed.push(e.id); return { value: { isPlaced: true, requestId: `r-${e.id}` } } })
+  on('command.run', (_$: unknown, e: Any) => { ran.push(e); return {} as never })
   on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: '<text>\nThe shop refunded a few orders.\n</text>', usage: {} } } })
   on('tool.call', (_$: unknown, e: Any) => ({ result: `ran ${e.tool}` }))
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
@@ -253,35 +245,54 @@ async function session($: Any, on: Any) {
     await $.turn.complete({ turnId: id, reason: 'answer', answer, durationMs: 10, isAborted: false } as never)
     await clock.advance(100)
   }
-  const tour = () => got.filter(p => p.by !== 'composer' && p.text.startsWith(TAG)).map(p => p.text)
+  const row = async (id: string) => textOf(await $.ui.render({ plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: `r-${id}`, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { id, plugin: 'thimble' } } as never))
+  const answer = async (id: string, text: string) => textOf(await $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: id, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never))
   const ask = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
   const press = async (k: string) => { const r = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never); await clock.advance(400); return r }
-  return { clock, got, asked, turn, tour, ask, press }
+  return { clock, got, placed, ran, asked, turn, row, answer, ask, press }
 }
 
-test("in a session: the person's question at step 4 gets the step again, and s still simplifies the sample answer; the simpler version sends step 4 done, once", { options: { cards: 'off', explain: 'off', citations: 'off' } }, async ($, on) => {
+test("in a session: thimble draws the intro and the step row under the sample answer, sends Claude nothing, places the row under a reply, s simplifies the sample answer, and a second tour keeps the first one's rows", { options: { cards: 'off', explain: 'off', citations: 'off' } }, async ($, on) => {
   noteViewport({ isFullscreen: true })
   const t = await session($, on)
-  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
+  const tour = () => $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
+  await tour()
+  expect(t.placed).toEqual(['tour-intro-1'])
+  expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  // the sample answer is step 0 done; Cards, Explainers and Citations are off, so the tour goes on to step 4
-  expect(t.tour()).toEqual([`${TAG} Step 0 done. Say step 4.`])
-  await t.turn('t2', t.tour()[0]!, STEP4)
-  // the person's own question: Claude reads beside it to answer and say step 4 again
+  // Cards, Explainers and Citations are off: the one step is s. The sample answer draws the row at its end
+  expect(t.placed).toEqual(['tour-intro-1'])
+  const first = await t.answer('row-t1', SAMPLE)
+  expect(first.indexOf('thimble tour · 1 of 1')).toBeGreaterThan(first.indexOf('late delivery'))
+  expect(first).toContain('Press s for a shorter, plainer version of the tea shop answer.')
+  // a fork's turn ends (a side thread's answer, say): it is no turn of main's, and the row stays under the sample answer
+  await $.turn.complete({ turnId: 'f1', agentId: 'agent-made-up', reason: 'answer', answer: 'A side answer.', durationMs: 10, isAborted: false } as never)
+  expect(t.placed).toEqual(['tour-intro-1'])
+  expect(await t.answer('row-t1', SAMPLE)).toContain('thimble tour · 1 of 1')
+  // the person's own question: Claude answers it, and the row is placed under the reply instead
   await t.ask('What does s do?')
-  expect(t.got.at(-1)?.context).toContain(aside('4'))
-  await t.turn('t3', 'What does s do?', `It writes a simpler version of the answer. ${STEP4}`)
-  // neither the step nor the reply is an answer: s acts on the sample answer
+  await t.turn('t2', 'What does s do?', 'It writes a simpler version of the answer.')
+  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2'])
+  expect(await t.answer('row-t1', SAMPLE)).not.toContain('thimble tour')
+  expect(await t.answer('row-t2', 'It writes a simpler version of the answer.')).not.toContain('thimble tour')
+  // the reply is no answer: s simplifies the sample answer
   await t.press('s')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(1)
-  const prompt = String(t.asked[0].prompt)
-  expect(prompt).toContain('late delivery does not explain the refunds')
-  expect(prompt).not.toContain('It writes a simpler version')
-  expect(t.tour()).toEqual([`${TAG} Step 0 done. Say step 4.`, `${TAG} Step 4 done. Say step 5.`])
-  // the tour is over: the person's next prompt is no aside
-  await t.ask('Thanks.')
-  expect(t.got.at(-1)?.context.join('\n') ?? '').not.toContain(TAG)
+  expect(String(t.asked[0].prompt)).toContain('late delivery does not explain the refunds')
+  expect(String(t.asked[0].prompt)).not.toContain('It writes a simpler version')
+  const end = await t.row('tour-step-2')
+  expect(end).toContain('thimble tour · done')
+  expect(end).toContain('✓ s wrote a simpler version.')
+  expect(end).toContain('Type /thimble:tour to take the tour again.')
+  // the tour sends Claude no prompt of its own
+  expect(t.got.filter(p => p.by === 'plugin')).toEqual([])
+  // the tour again: a new intro, and the first tour's rows still draw it
+  await t.clock.advance(20_000)
+  await tour()
+  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2', 'tour-intro-3'])
+  expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
+  expect(await t.row('tour-step-2')).toContain('thimble tour · done')
 })
 
 test("in a session: Claude's Skill call starts the tour, and the turn that called it holds the sample answer", { options: { cards: 'off', explain: 'off', citations: 'off', squeezeAnswers: false } }, async ($, on) => {
@@ -290,28 +301,34 @@ test("in a session: Claude's Skill call starts the tour, and the turn that calle
   await t.ask('Yes, show me the tour.')
   await t.turn('t1', 'Yes, show me the tour.', SAMPLE, () => $.tool.call({ tool: 'Skill', skill: 'thimble:tour', tool_use_id: 'toolu_made_up_1' } as never))
   // with every step's feature off, the sample answer goes on to the end
-  expect(t.tour()).toEqual([`${TAG} Step 0 done. Say step 5.`])
+  expect(t.placed).toEqual(['tour-intro-1'])
+  expect(await t.answer('row-t1', SAMPLE)).toContain('The tour is over.')
 })
 
-test("in a session: the third prompt of the person's own at one step ends the tour, Claude says so, and its reply is an answer again", { options: { cards: 'off', explain: 'off', citations: 'off' } }, async ($, on) => {
-  noteViewport({ isFullscreen: true })
-  const t = await session($, on)
-  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  expect(t.tour()).toEqual([`${TAG} Step 0 done. Say step 4.`])
-  await t.turn('t2', t.tour()[0]!, STEP4)
-  for (const [i, q] of ['What is Simplify?', 'Is it slow?'].entries()) {
-    await t.ask(q)
-    expect(t.got.at(-1)?.context).toContain(aside('4'))
-    await t.turn(`t${3 + i}`, q, `A short reply. ${STEP4}`)
-  }
-  await t.ask('Show me the late orders.')
-  expect(t.got.at(-1)?.context).toContain(STOPPED)
-  expect(STOPPED).toContain('Type /thimble:tour to start it again.')
-  await t.turn('t5', 'Show me the late orders.', 'Six orders arrived late. The tour stopped. Type /thimble:tour to start it again.')
-  // the tour ended: the reply is an answer again, which s simplifies, and s sends no step
-  await t.press('s')
-  await t.clock.advance(5000)
-  expect(String(t.asked.at(-1)?.prompt)).toContain('Six orders arrived late')
-  expect(t.tour()).toEqual([`${TAG} Step 0 done. Say step 4.`])
+test("the person's /reload-plugins soon after an install in this session runs /thimble:tour once; a later one, or another session's, does not", async ($, on) => {
+  const file = '/made-up/.thimble/tour-next'
+  const files: Record<string, string> = { [file]: 's-tour 0\n' }
+  const t = await session($, on, files)
+  // thimble loads at the reload
+  await t.clock.advance(1000)
+  expect(t.ran.map(e => e.command)).toEqual(['thimble:tour'])
+  expect(files[file]).toBe('')
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await t.clock.advance(1000)
+  expect(t.ran.length).toBe(1)
+  // thimble was loaded already: it hears the reload end
+  files[file] = 's-tour 2'
+  await $.command.run({ command: 'reload-plugins', args: '' } as never)
+  await t.clock.advance(1000)
+  expect(t.ran.map(e => e.command)).toEqual(['thimble:tour', 'reload-plugins', 'thimble:tour'])
+  // a file from long ago (a session resumed later) starts nothing, and is emptied
+  await t.clock.advance(NEXT_MS)
+  files[file] = 's-tour 1'
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await t.clock.advance(1000)
+  expect(files[file]).toBe('')
+  files[file] = `s-another ${Math.floor((NEXT_MS + 4000) / 1000)}`
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await t.clock.advance(1000)
+  expect(t.ran.length).toBe(3)
 })
