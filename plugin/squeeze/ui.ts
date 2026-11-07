@@ -12,10 +12,12 @@
 // one catch-up of them, drawn below the newest of them as one more answer, while the replies still show as written
 // (term.ts catchUp), in place of a simpler version that stood there; the chips stay closed (s opens them on the
 // catch-up). A letter right after s or b undoes it (hooks/keys.ts word window): b undone puts back the simpler version
-// or catch-up it replaced. The chips that s opens take the keys: an open tray, which holds them over the chips, gives
-// way (tray/seam.ts trayGiveWay), and s with the tray open over open chips gives the keys back to them. A message's own
-// versions that s rewrote in place in 0.10.12 and earlier still draw in a resumed session (viewOf); s on such an answer
-// shows its original again before it writes the simpler version, and s never opens the chips on a message itself.
+// or catch-up it replaced. The hook of s or b returns before their writes end, since Claude Code runs the next key's
+// hook only after it returns; the undo runs after those writes (startedTake). The chips that s opens take the keys: an
+// open tray, which holds them over the chips, gives way (tray/seam.ts trayGiveWay), and s with the tray open over open
+// chips gives the keys back to them. A message's own versions that s rewrote in place in 0.10.12 and earlier still draw
+// in a resumed session (viewOf); s on such an answer shows its original again before it writes the simpler version, and
+// s never opens the chips on a message itself.
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey). The chips name
 // each where it acts (chips.tsx), as the tray names its keys in its header, and the bar names none of them, so each key
 // shows once (heldKeys there):
@@ -312,17 +314,29 @@ export async function simplifyNow($: Engine, row: string): Promise<string | null
   return id
 }
 
-/** s: the simpler version written; undone (a letter right after it), it goes. The key's hook does not wait for the
- *  writes: Claude Code runs the next key's hook after this one returns, so a hook that waited would close the word
- *  window before it reads a letter typed right after s. The undo waits for them. */
-function simplifyTake($: Engine, row: string): Take {
-  let made: Promise<string | null> = Promise.resolve(null)
+/**
+ * A key whose writes its hook starts but does not wait for (s, b), and their undo (a letter right after the key).
+ * Claude Code runs the next key's hook only after this one returns, so a hook that waited for the writes would close
+ * the word window before it reads a letter typed right after the key. The undo runs after the writes, in the same chain
+ * as they do: the letter's hook reads the state as it stood when that hook began, so an undo run in that hook would not
+ * find writes that ended after it began. A failure of the writes shows on the failure line, as a key's failure does.
+ */
+function startedTake<T>($: Engine, key: string, write: () => Promise<T | null>, undo: (made: T | null) => Promise<unknown>): Take {
+  let ask = () => {}
+  let undone: Promise<unknown> = Promise.resolve()
   return {
     now: async () => {
-      made = simplifyNow($, row).catch(err => { failNotice($, `The s key did not run: ${reasonOf(err, 200)}`); return null })
+      const asked = new Promise<void>(go => { ask = go })
+      const made = write().catch(err => { failNotice($, `The ${key} key did not run: ${reasonOf(err, 200)}`); return null })
+      undone = Promise.all([made, asked]).then(([m]) => undo(m))
     },
-    undo: async () => { const id = await made; if (id) await dismissNow($, id, true) },
+    undo: async () => { ask(); await undone },
   }
+}
+
+/** s: the simpler version written; undone, it goes. */
+function simplifyTake($: Engine, row: string): Take {
+  return startedTake($, 's', () => simplifyNow($, row), async id => { if (id) await dismissNow($, id, true) })
 }
 
 /** Whether a simpler version's first call failed: no version of it shows, none is on its way, and the call said why.
@@ -374,20 +388,16 @@ export async function catchUpNow($: Engine): Promise<string | null> {
   return (await catchUpWith($))?.id ?? null
 }
 
-/** b: the catch-up written; undone (a letter right after it), it goes, the simpler version or catch-up it replaced
- *  stands again, and the chips stand as they were. */
+/** b: the catch-up written; undone, it goes, the simpler version or catch-up it replaced stands again, and the chips
+ *  stand as they were. */
 function catchUpTake($: Engine, open: Open | null): Take {
-  let made: { id: string; was: Rec[] } | null = null
-  return {
-    now: async () => { made = await catchUpWith($) },
-    undo: async () => {
-      if (made) {
-        await dismissNow($, made.id, true)
-        for (const rec of made.was) await standAgain($, rec)
-      }
-      if (open) await writeOpen($, open); else await setOpen($, null)
-    },
-  }
+  return startedTake($, CATCH_UP_KEY, () => catchUpWith($), async cu => {
+    if (cu) {
+      await dismissNow($, cu.id, true)
+      for (const rec of cu.was) await standAgain($, rec)
+    }
+    if (open) await writeOpen($, open); else await setOpen($, null)
+  })
 }
 
 /** The key that writes a catch-up, named on the bar while replies piled up (squeeze/seam.ts SQUEEZE_KEYS). */

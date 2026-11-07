@@ -1,10 +1,11 @@
 // Simplify and catch-up in the terminal (squeeze/): s at an empty prompt writes a simpler version of the answer below
 // it in one press, at Length short and Background learning; s again opens the chips on it, ] asks one more call, Claude
 // hears the version with the next prompt, and 0 removes it; a letter right after s undoes it; with two replies since
-// the person's last prompt, b writes one catch-up of them below the newest, in place of a simpler version there, and
-// b undone puts that simpler version back; a catch-up read and removed still counts as read after s; s while main's
-// turn runs simplifies its answer when it ends; an answer rewritten in place in an earlier release shows its original
-// again when s simplifies it; an arrow or tab in the chips changes nothing. All data is made up.
+// the person's last prompt, b writes one catch-up of them below the newest, in place of a simpler version there, and b
+// undone puts that simpler version back; a key hook of s or b does not wait for their writes, so a slow write does not
+// close the word window; a catch-up read and removed still counts as read after s; s while main's turn runs simplifies
+// its answer when it ends; an answer rewritten in place in an earlier release shows its original again when s
+// simplifies it; an arrow or tab in the chips changes nothing. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
@@ -44,7 +45,14 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
-  on('fs.write', (_$: unknown, e: { path: string; text: string }) => { files[e.path] = String(e.text); return { value: undefined } })
+  // a write that takes time on the clock, once, for a test that times the key hooks: in Claude Code, the next key's
+  // hook runs only after this key's hook returns
+  const slow = { writeMs: 0 }
+  on('fs.write', async (_$: unknown, e: { path: string; text: string }) => {
+    if (slow.writeMs) { const ms = slow.writeMs; slow.writeMs = 0; await clock.advance(ms) }
+    files[e.path] = String(e.text)
+    return { value: undefined }
+  })
   // a folder's files, so a session started again reads back the turns its conversation kept (core/answers.ts)
   on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(files).filter(f => f.startsWith(`${e.path}/`) && !f.slice(e.path.length + 1).includes('/')).map(f => ({ name: f.slice(e.path.length + 1), kind: 'file' })) }))
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
@@ -80,7 +88,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, turn, press, bar, files, conversation, beneath }
+  return { clock, asked, ask, turn, press, bar, files, conversation, beneath, slow }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -157,6 +165,19 @@ test('a letter right after s undoes it: the word goes into the box whole, and no
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).not.toContain('simpler version')
 })
 
+test('a letter right after s undoes it while the writes of s still run: the key hook does not wait for them', async ($, on) => {
+  const t = await setup($, on, [SHORT])
+  await t.turn('t1', LONG)
+  // the first write of s takes 400 ms, longer than the word window
+  t.slow.writeMs = 400
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('h'))) as Any).text).toBe('sh')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(0)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).not.toContain('simpler version')
+})
+
 test('with two replies since the last prompt, the bar names b apart from s; a simpler version of the newest does not count as a catch-up, and b writes one catch-up below the newest in its place, the replies still showing', async ($, on) => {
   const t = await setup($, on, ['The retry passed.', 'Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
@@ -198,7 +219,7 @@ test('with two replies since the last prompt, the bar names b apart from s; a si
   expect(t.asked.length).toBe(asked)
 })
 
-test('b undone by the letter after it puts back the simpler version it replaced', async ($, on) => {
+test('b undone by the letter after it, while the writes of b still run, puts back the simpler version it replaced', async ($, on) => {
   const t = await setup($, on, ['Simpler.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
@@ -206,7 +227,9 @@ test('b undone by the letter after it puts back the simpler version it replaced'
   await t.press('s')
   await t.clock.advance(5000)
   expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('Simpler.')
-  // `by` typed at the empty prompt: b writes a catch-up, and y undoes it
+  // `by` typed at the empty prompt: b writes a catch-up, and y undoes it, though the first write of b takes 400 ms,
+  // longer than the word window
+  t.slow.writeMs = 400
   expect(await $.prompt.edit(key('b'))).toEqual({ text: '', cursor: 0 })
   await t.clock.advance(100)
   expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('by')
