@@ -65,7 +65,8 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', () => ({ value: undefined }))
   on('prompt.fill', (_$: unknown, e: { text: string }) => { fills.push(e.text); return { isFilled: true } as never })
-  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
+  // a key no hook takes is typed into the box, as Claude Code types it
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text + (e.inputText ?? ''), cursor: e.cursor + (e.inputText ?? '').length }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   // the observer's look finds nothing to add
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
@@ -358,7 +359,7 @@ test('a choice at its end stays in its place, dim, and its key does nothing: no 
   const host = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(host).not.toContain('+')
   expect(host).not.toContain('your own')
-  await t.press('+')
+  expect(await t.press('+')).toEqual({ text: '+', cursor: 1 })
   await t.clock.advance(5000)
   expect(t.fills).toEqual([])
   expect(t.asked.length).toBe(3)

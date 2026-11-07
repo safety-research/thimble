@@ -7,7 +7,7 @@
 //                                    changed, n later, u undo (a failed fix: y try again, d ask Claude, n dismiss)
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
-//                                    run's ask, s and b and the row under a simpler version (1–4, +, 0), { } over
+//                                    run's ask, s and b and the row under a simpler version (1–4, 0), { } over
 //                                    the answers, the keys that act on
 //                                    the selected words (e an explainer, c a citation, a a side thread),
 //                                    w (the claims), t
