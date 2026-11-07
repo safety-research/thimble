@@ -4,7 +4,7 @@
 // follows `$` only into functions a file declares or imports, so a list of handlers that take `$` cannot be called):
 //
 //   marks/register.ts  AssistantMessage   textView (the text a row shows), spansFor (explainers and heads-ups on its
-//                                         words, the tour's mark), markFocus (the
+//                                         words, the tour's mark on the wrong number), markFocus (the
 //                                         citation the tray shows), underText (lines under the row's words),
 //                                         markPressed (a press on a citation), passagesFor (what the margin of
 //                                         each passage asks: a side thread about it)
@@ -110,7 +110,7 @@ export function checkSpans(given: unknown, text: string, marks: { start: number;
 }
 
 /** The features' spans on a row's words (the explainers and heads-ups, and first the words being explained on demand,
- *  which cover the marks they overlap; last the tour's mark on what to select or click), checked (checkSpans). */
+ *  which cover the marks they overlap; last the tour's mark on the number to click), checked (checkSpans). */
 export async function spansFor($: Engine, row: string, text: string, marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
   const given = [...await safe(pendingSpans($, row, text), [] as Span[]), ...await safe(explainSpans($, row, text, marks), [] as Span[]), ...await safe(tourSpans($, row, text), [] as Span[])]
   const focus = await safe(trayFocus($, row), null)

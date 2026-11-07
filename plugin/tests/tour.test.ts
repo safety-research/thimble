@@ -1,9 +1,10 @@
 // The feature tour (tour/tour.ts, skills/tour/SKILL.md): /thimble:tour or Claude's Skill call starts it. thimble
 // places its intro, and the sample answer draws the step row at its end; thimble draws both itself and sends Claude no
 // prompt. Each step done redraws the row in place. A tour started again keeps the earlier tour's rows. A step done early, a step whose feature is off and the selection step where no
-// click reaches thimble are left out; v that drew no card lets the tour go on. While e or cite waits, the sample answer
-// marks what to select or click. After the sample answer, the replies to the person's own prompts answer nothing, so s
-// acts on the sample answer, and the step row is placed under the reply. After an install inside Claude Code, the
+// click reaches thimble are left out; v that drew no card lets the tour go on, and leaves out ask. Step e names its
+// words in bold; while cite waits, the sample answer marks the wrong number. After the sample answer, the replies to the
+// person's own prompts answer nothing, so s acts on the sample answer, and the step row is placed under the reply; a
+// fork's end moves nothing. After an install inside Claude Code, the
 // person's /reload-plugins runs /thimble:tour once in that session, soon after the install only. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
@@ -12,7 +13,7 @@ import { failLineNow } from '../bar/notice'
 import { noteViewport } from '../cards/draw'
 import { answersNothing } from '../core/answers'
 import { setOptions } from '../settings/features.mjs'
-import { NEXT_MS, placeIntro, tourDid, tourMissed, tourNow, tourOpened, tourRuns, tourSpans, tourStart, turnTour } from '../tour/tour'
+import { NEXT_MS, placeIntro, stepRowEl, tourDid, tourMissed, tourNow, tourOpened, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -58,17 +59,23 @@ test('each step done moves the tour to the next step that is on and not done; th
   await tourStart($)
   await placeIntro($)
   expect(placed).toEqual(['tour-intro-1'])
-  expect(await walk($, ['answer', 'e', 'e', 'cite', 'v', 's'])).toEqual(['e', 'cite', 'cite', 'v', 's', 'end'])
+  expect(await walk($, ['answer', 'e', 'e', 'v', 'ask', 's', 'cite'])).toEqual(['e', 'v', 'v', 'ask', 's', 'cite', 'end'])
   expect(await tourRuns($)).toBe(false)
   // a step done early is left out when its turn comes
   const b = fake()
   await tourStart(b.$)
-  expect(await walk(b.$, ['answer', 's', 'v', 'e'])).toEqual(['e', 'e', 'e', 'cite'])
+  expect(await walk(b.$, ['answer', 's', 'v', 'e'])).toEqual(['e', 'e', 'e', 'ask'])
   // v that drew no card goes on, only while v waits
   await tourMissed(b.$, 'v')
-  expect((await tourNow(b.$))?.at).toBe('cite')
-  await tourDid(b.$, 'cite')
-  expect(await tourRuns(b.$)).toBe(false)
+  expect((await tourNow(b.$))?.at).toBe('ask')
+  expect(await walk(b.$, ['ask', 'cite'])).toEqual(['cite', 'end'])
+  // while v waits, v that drew no card goes on past ask, which has no card to ask about
+  const c = fake()
+  await tourStart(c.$)
+  expect(await walk(c.$, ['answer', 'e'])).toEqual(['e', 'v'])
+  await tourMissed(c.$, 'v')
+  expect((await tourNow(c.$))?.at).toBe('s')
+  expect((await tourNow(c.$))?.missed).toEqual(['v'])
 })
 
 test('where no click reaches thimble the selection step is left out; a feature that is off is left out', async () => {
@@ -76,16 +83,21 @@ test('where no click reaches thimble the selection step is left out; a feature t
   noteViewport({ isFullscreen: false })
   const { $ } = fake()
   await tourStart($)
-  expect(await walk($, ['answer'])).toEqual(['cite'])
+  expect(await walk($, ['answer'])).toEqual(['v'])
   noteViewport({ isFullscreen: true })
   setOptions({ squeezeAnswers: false })
   const b = fake()
   await tourStart(b.$)
-  expect(await walk(b.$, ['answer', 'e', 'cite', 'v'])).toEqual(['e', 'cite', 'v', 'end'])
+  expect(await walk(b.$, ['answer', 'e', 'v', 'ask', 'cite'])).toEqual(['e', 'v', 'ask', 'cite', 'end'])
+  // with Cards off, v draws no card, so ask is left out too
+  setOptions({ cards: 'off' })
+  const c = fake()
+  await tourStart(c.$)
+  expect(await walk(c.$, ['answer', 'e', 's'])).toEqual(['e', 's', 'cite'])
   setOptions({})
 })
 
-test('while e waits the sample answer marks the words to select, while cite waits the refunds citation, which alone is the step, then nothing', async () => {
+test('while e waits the sample answer marks nothing; while cite waits it marks the refunds citation, which alone is the step, then nothing', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
   const { $ } = fake()
@@ -94,19 +106,67 @@ test('while e waits the sample answer marks the words to select, while cite wait
   await $.state.set({ plugin: 'thimble', key: 'tourSample' }, 'row-sample')
   await tourDid($, 'answer')
   const words = (s: Any[]) => s.map(x => text.slice(x.start, x.end))
-  expect(words(await tourSpans($, 'row-sample', text))).toEqual(['average order value'])
+  expect((await tourNow($))?.at).toBe('e')
+  expect(await tourSpans($, 'row-sample', text)).toEqual([])
+  await walk($, ['e', 'v', 'ask', 's'])
+  expect(words(await tourSpans($, 'row-sample', text))).toEqual(['[7 orders](#)'])
   // another row is not marked
   expect(await tourSpans($, 'row-other', text)).toEqual([])
-  await tourDid($, 'e')
-  expect(words(await tourSpans($, 'row-sample', text))).toEqual(['[7 orders](#)'])
-  // the refunds citation is the second of the answer: opening the first, or one of another answer, is not the step
+  // the refunds citation is the second of the answer: opening the first, or one of another answer, is not the step. A
+  // click on it in the simpler version opens it by the sample's row and its number there (squeeze/ui.ts), as here
   await $.state.set({ plugin: 'thimble', key: 'answerMsg', id: 'row-sample' }, { row: 'row-sample', turnId: 't1', text, at: 0 })
   await tourOpened($, 'row-sample', 1)
   await tourOpened($, 'row-other', 2)
   expect((await tourNow($))?.at).toBe('cite')
   await tourOpened($, 'row-sample', 2)
-  expect((await tourNow($))?.at).toBe('v')
+  expect(await tourRuns($)).toBe(false)
   expect(await tourSpans($, 'row-sample', text)).toEqual([])
+})
+
+/** Elements as plain objects, for reading what the step row draws. */
+const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any) => ({ type, props }) })
+const nodes = (n: Any, out: Any[] = []): Any[] => {
+  if (!n || typeof n !== 'object') return out
+  if (Array.isArray(n)) { n.forEach(x => nodes(x, out)); return out }
+  out.push(n)
+  nodes(n.props?.children, out)
+  return out
+}
+
+test('the step row counts the steps it shows, names the words of e in bold and its keys in color, and words ask with and without clicks', () => {
+  setOptions({})
+  const at = (step: Any, done: Any[], missed: Any[] = []): TourState => ({ at: step, done, missed, startedAt: 0, k: 1, intro: null, sample: 'row-sample', moved: null })
+  const row = (t: TourState, clicks = true) => stepRowEl(els, t, clicks, 100)
+  // e waits: its words bold, in the default color; its key in thimble's color; the line itself not bold
+  const e = row(at('e', ['answer']))
+  expect(textOf(e)).toContain('thimble tour · 1 of 5')
+  expect(textOf(e)).toContain('› Select average order value in the answer with the mouse, then press e.')
+  const bold = nodes(e).find(n => n.type === 'Text' && n.props?.children === 'average order value')
+  expect(bold?.props).toMatchObject({ bold: true })
+  expect(bold?.props?.color).toBeUndefined()
+  expect(nodes(e).find(n => n.type === 'Text' && n.props?.children === 'e')?.props).toMatchObject({ bold: true })
+  expect(nodes(e).find(n => n.props?.key === 'a-e')?.props?.bold).toBeUndefined()
+  // v waits: 2 of 5
+  expect(textOf(row(at('v', ['answer', 'e'])))).toContain('thimble tour · 2 of 5')
+  // ask, with clicks and without (no e then, so 2 of 4)
+  const ask = textOf(row(at('ask', ['answer', 'e', 'v'])))
+  expect(ask).toContain('thimble tour · 3 of 5')
+  expect(ask).toContain('✓ v drew a card.')
+  expect(ask).toContain('› Click ask at the top right of the card, type a question about it, and press Enter.')
+  const keys = textOf(row(at('ask', ['answer', 'v']), false))
+  expect(keys).toContain('thimble tour · 2 of 4')
+  expect(keys).toContain('› Press ] until it reaches the card, press a, type a question about it, and press Enter.')
+  // cite, last: where the answer is, with clicks; ] without
+  const cite = textOf(row(at('cite', ['answer', 'e', 'v', 'ask', 's'])))
+  expect(cite).toContain('thimble tour · 5 of 5')
+  expect(cite).toContain('✓ You asked a side thread about the card.')
+  expect(cite).toContain('› One number was wrong on purpose. Scroll up to the tea shop answer and click the highlighted number.')
+  expect(textOf(row(at('cite', ['answer', 'v', 'ask', 's']), false))).toContain('› One number was wrong on purpose. Press ] until the tray above the prompt shows the highlighted number.')
+  // v that drew no card: ask is not shown
+  const missed = textOf(row(at('s', ['answer', 'e', 'v'], ['v'])))
+  expect(missed).toContain('thimble tour · 3 of 4')
+  expect(missed).toContain('✓ v drew no card this time.')
+  expect(missed).not.toContain('side thread')
 })
 
 test('no reminder shows while the tour runs; answers are held after the sample answer; a /clear ends the tour', async () => {
@@ -205,6 +265,10 @@ test("in a session: thimble draws the intro and the step row under the sample an
   const first = await t.answer('row-t1', SAMPLE)
   expect(first.indexOf('thimble tour · 1 of 1')).toBeGreaterThan(first.indexOf('late delivery'))
   expect(first).toContain('Press s for a shorter, plainer version of the tea shop answer.')
+  // a fork's turn ends (a side thread's answer, say): it is no turn of main's, and the row stays under the sample answer
+  await $.turn.complete({ turnId: 'f1', agentId: 'agent-made-up', reason: 'answer', answer: 'A side answer.', durationMs: 10, isAborted: false } as never)
+  expect(t.placed).toEqual(['tour-intro-1'])
+  expect(await t.answer('row-t1', SAMPLE)).toContain('thimble tour · 1 of 1')
   // the person's own question: Claude answers it, and the row is placed under the reply instead
   await t.ask('What does s do?')
   await t.turn('t2', 'What does s do?', 'It writes a simpler version of the answer.')
