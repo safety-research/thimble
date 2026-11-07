@@ -15,11 +15,11 @@
 // names (settings/features.mjs choicesIn).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
-// choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
-// the ui.focus hook); onto another row it lands on that row's choice set, which changes nothing. A click on a choice
-// sets it and picks its row, a click on a name picks its row; ↵ on a choice sets it. A change goes through Claude Code
-// (settings/term.ts settingsAction), which keeps the value and loads the plugin again with it; the pane and the bar
-// draw it at once.
+// choice set. tab and shift+tab move the ring along the row's choices (Claude Code's keys for a pane's ring: a pane
+// takes no ← or →), and the ring landing on one sets it (settingsFocus, the ui.focus hook); onto another row it lands
+// on that row's choice set, which changes nothing. A click on a choice sets it and picks its row, a click on a name
+// picks its row; ↵ on a choice sets it. A change goes through Claude Code (settings/term.ts settingsAction), which
+// keeps the value and loads the plugin again with it; the pane and the bar draw it at once.
 import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
@@ -81,7 +81,7 @@ async function choose($: Engine, s: Switch, c: string): Promise<boolean> {
   return !(typeof said === 'string' && said)
 }
 
-/** A click on a choice: its row is picked and the ring lands on the choice chosen, as ← → leave it (Minimal's is set
+/** A click on a choice: its row is picked and the ring lands on the choice chosen, as tab leaves it (Minimal's is set
  *  last, after the rows it sets: settings/term.ts), or on the one set when it was refused; a click does not move the
  *  ring by itself, which stayed on the row picked before and drew there as a second choice set. */
 async function chooseHere($: Engine, s: Switch, c: string): Promise<void> {
@@ -161,6 +161,6 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   return Box({ flexDirection: 'column', width, children: [
     preview,
     ...rows,
-    Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: '↑↓ setting · ←→ choice' })] }),
+    Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: '↑↓ setting · tab choice' })] }),
   ] })
 }
