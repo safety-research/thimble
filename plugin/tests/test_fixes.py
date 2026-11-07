@@ -164,6 +164,53 @@ def test_undo_takes_the_commit_out_and_keeps_it_for_on(world):
     assert FX.get(r["id"])["state"] == "on" and "read ${n}" in live_file("plugin/bar/bar.tsx")
 
 
+def on_with_a_round(world, path="plugin/bar/bar.tsx", text=None) -> int:
+    """A fix that is on, and a round of it that waits for the person's y (on · change ready)."""
+    if text is None:
+        r = made(world)
+    else:
+        r = FX.new("a note")
+        (Path(r["work"]) / path).write_text(text)
+    FX.done(r["id"], "A fix", "")
+    FX.apply(r["id"], press(r["id"]))
+    x = FX.round_(r["id"], "more of it")
+    p = Path(x["work"]) / path
+    p.write_text(p.read_text().replace("read", "read read") if text is None else text + "more\n")
+    FX.done(r["id"], "A fix", "")
+    assert FX.state_word(FX.get(r["id"])) == "on · change ready"
+    return r["id"]
+
+
+def test_off_and_remove_take_out_a_fix_changed_in_place(world):
+    fid = on_with_a_round(world)
+    # off while a round waits: the version on comes out, and the new version still waits for the person's key
+    assert FX.one_off(fid)["said"].startswith(f"Fix {fid} is off")
+    assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and FX.state_word(FX.get(fid)) == "ready"
+    FX.apply(fid, press(fid))
+    assert "read read ${n}" in live_file("plugin/bar/bar.tsx")
+    # off after that y is off, not the version before; on brings back the newest version
+    FX.one_off(fid)
+    assert FX.get(fid)["state"] == "off" and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+    FX.apply(fid, press(fid))
+    assert "read read ${n}" in live_file("plugin/bar/bar.tsx")
+    FX.remove(fid)
+    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
+    # remove while a round waits: the fix stays out when mine is made again for another fix
+    note = on_with_a_round(world, "plugin/notes.md", "made-up note\n")
+    FX.remove(note)
+    c = made(world)
+    FX.done(c["id"], "Bar says read", "")
+    FX.apply(c["id"], press(c["id"]))
+    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "thimble 0.10.2"]
+
+
+def test_u_after_y_on_a_fix_changed_in_place_brings_back_the_version_before(world):
+    fid = on_with_a_round(world)
+    FX.apply(fid, press(fid))
+    assert FX.undo(fid)["back"] is True
+    assert FX.get(fid)["state"] == "on" and "read ${n}" in live_file("plugin/bar/bar.tsx")
+
+
 def test_off_and_on_and_off_sh(world):
     r = made(world)
     FX.done(r["id"], "Bar says read", "")
