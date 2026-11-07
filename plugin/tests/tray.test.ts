@@ -1,12 +1,12 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws
 // in focus; its card shows the check and the evidence; a question typed with it open carries nothing of it and closes
-// the tray; a press on a citation opens it too; 0 closes it. A citation opened while the tour waits for it sends Claude
-// the tour's next step. All data is made up. `claude plugin test plugin`.
+// the tray; a press on a citation opens it too; 0 closes it; v closes it so the card shows, and a letter after v puts
+// it back. A citation opened while the tour waits for it sends Claude the tour's next step. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
 import { test } from './kit'
-import { promptStub } from './stubs'
+import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -35,7 +35,7 @@ const above = (maxRows = 20) => ({ plugin: 'thimble', component: 'AbovePrompt', 
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
 /** A resumed session with one answer, TEXT, whose citation the check left as `item`. */
-async function resumed($: Any, on: Any, item: Any): Promise<{ submitted: Any[]; clock: Any }> {
+async function resumed($: Any, on: Any, item: Any, more: Record<string, string> = {}): Promise<{ submitted: Any[]; clock: Any }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -46,6 +46,7 @@ async function resumed($: Any, on: Any, item: Any): Promise<{ submitted: Any[]; 
   const kept: Record<string, string> = {
     'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [item] }),
     'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: TEXT, at: 1 }] }),
+    ...more,
   }
   const keptOf = (path: string) => Object.keys(kept).find(k => path.endsWith(`/${k}`))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: keptOf(e.path) ? kept[keptOf(e.path)!] : promptStub(e.path) ?? '' }))
@@ -61,7 +62,7 @@ async function resumed($: Any, on: Any, item: Any): Promise<{ submitted: Any[]; 
   on('ui.scroll', () => ({ value: undefined }))
   on('ui.panes', () => ({ value: [] }) as never)
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-repair-1' }) as never)
   on('agent.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
@@ -141,20 +142,47 @@ test("the tour (tour/tour.ts): while its citation step waits, ] on a citation se
   const { submitted, clock } = await resumed($, on, QUOTED)
   const tour = () => submitted.map(e => String(e.text)).filter(t => t.startsWith('(thimble tour)'))
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  // the turn that writes the sample answer ends: Cards and Explainers are off, so the tour goes on to the citation step
+  // the turn that writes the sample answer ends: Explainers are off, so the tour goes on to the citation step
   await $.turn.start({ text: '<command-name>/thimble:tour</command-name>', turnId: 't2' } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'A made-up sample answer.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t2' } as never)
   await $.turn.complete({ turnId: 't2', reason: 'answer', answer: 'A made-up sample answer.', durationMs: 10, isAborted: false } as never)
   await clock.advance(100)
-  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 3.'])
+  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 2.'])
   // { picks the answer with the citation; ] opens it
   await $.prompt.edit(key('{'))
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(10)
-  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 3.', '(thimble tour) Step 3 done. Say step 4.'])
+  expect(tour()).toEqual(['(thimble tour) Step 0 done. Say step 2.', '(thimble tour) Step 2 done. Say step 4.'])
   // the same citation opened again: no second prompt
   await $.prompt.edit(key('0'))
   await $.prompt.edit(key(']'))
   await clock.advance(10)
   expect(tour().length).toBe(2)
+})
+
+test('v with the tray open closes it, so the card that draws under the answer shows; a letter right after v puts it back', CITES, async ($, on) => {
+  // what the box holds once a key is typed
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  // the answer v draws: main's last answer row, as a resumed session reads it back
+  const { clock } = await resumed($, on, QUOTED, { 'answer.json': JSON.stringify({ row: 'row-t1' }) })
+  // ] opens the tray; a letter right after ] would make a word of both, so the test waits out the word window
+  const open = async () => {
+    await $.prompt.edit(key(']'))
+    expect(textOf(await $.ui.render(above()))).toContain('✓ verified')
+    await clock.advance(1000)
+  }
+  await open()
+  // a letter right after v: the person types a word, and the tray stands as it was
+  await $.prompt.edit(key('v'))
+  expect(textOf(await $.ui.render(above()))).not.toContain('✓ verified')
+  await $.prompt.edit({ ...(key('e') as Any), text: 'v', cursor: 1, start: 1, end: 1 } as never)
+  await clock.advance(10)
+  expect(textOf(await $.ui.render(above()))).toContain('✓ verified')
+  // v alone: the tray stays closed
+  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'backspace' }, text: '', cursor: 0, start: 0, end: 0, inputText: '' } as never)
+  await clock.advance(1000)
+  await open()
+  await $.prompt.edit(key('v'))
+  await clock.advance(1000)
+  expect(textOf(await $.ui.render(above()))).not.toContain('✓ verified')
 })

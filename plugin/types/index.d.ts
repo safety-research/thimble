@@ -188,9 +188,11 @@ declare module 'claude-code' {
       observerLooks: { session: string; msgs: unknown[] } | null
 
       // ---- the tour (tour/tour.ts)
-      /** the tour /thimble:tour started: the step that waits (`answer`, `v`, `e`, `cite`, `s`), the steps done, and the
+      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `cite`, `v`, `s`), the steps done, and the
        *  person's own prompts while that step waits; null when no tour runs */
-      tour: { at: 'answer' | 'v' | 'e' | 'cite' | 's'; done: ('answer' | 'v' | 'e' | 'cite' | 's')[]; asides: number } | null
+      tour: { at: 'answer' | 'e' | 'cite' | 'v' | 's'; done: ('answer' | 'e' | 'cite' | 'v' | 's')[]; asides: number } | null
+      /** the row of the tour's sample answer, which the observer does not look at; kept after the tour ends */
+      tourSample: string | null
 
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */

@@ -166,7 +166,7 @@ test('e explains the words selected in an answer, on the row the selection lies 
   setOptions({})
 })
 
-test('the tour (tour/tour.ts): while its step 2 waits, the explainer of the selected words shown sends Claude step 2 done, once', async () => {
+test('the tour (tour/tour.ts): while its step 1 waits, the explainer of the selected words shown sends Claude step 1 done, once', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
   const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '' }) })
@@ -175,18 +175,17 @@ test('the tour (tour/tour.ts): while its step 2 waits, the explainer of the sele
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
   await tourStart(s.$)
   await tourDid(s.$, 'answer')
-  await tourDid(s.$, 'v')
   await settle()
-  expect(sent).toEqual([`${TAG} Step 0 done. Say step 1.`, `${TAG} Step 1 done. Say step 2.`])
+  expect(sent).toEqual([`${TAG} Step 0 done. Say step 1.`])
   await pressE(s, { text: 'the client', requestId: 't1-row' })
   await settle()
-  expect(sent.slice(2)).toEqual([`${TAG} Step 2 done. Say step 3.`])
+  expect(sent.slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`])
   // the same explainer opened again: no second prompt
   const again = await explainKey(s.$, 'e', 0)
   await again?.now?.()
   await again?.later?.()
   await settle()
-  expect(sent.length).toBe(3)
+  expect(sent.length).toBe(2)
 })
 
 test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {

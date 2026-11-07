@@ -50,7 +50,10 @@ def test_the_tour_copies_the_sample_into_its_own_folder_and_opens_claude_there_w
     assert started["argv"] == ["/made-up/bin/claude", "/thimble:tour"]
     # the fullscreen layout, where the tour's clicks and selections reach thimble
     assert started["env"][TR.FULLSCREEN] == "1"
-    assert "starts the tour" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "starts the tour" in out
+    # Claude Code's question about a new folder exits on its first choice: the line says which one to take
+    assert "Yes, I trust this folder" in out
 
 
 def test_a_layout_the_person_chose_stays(started, monkeypatch):

@@ -2,7 +2,8 @@
 (plugin/tour/sample) into a folder of its own, $THIMBLE_HOME/tour, and opens Claude Code there with /thimble:tour as
 its first prompt (skills/tour/SKILL.md), in Claude Code's fullscreen layout, where the tour's clicks and selections
 reach thimble. A copy of the sample that is already there is replaced, so each tour starts from the same data; other
-files in the folder stay."""
+files in the folder stay. Before it opens Claude Code, it says to answer yes when Claude Code asks whether the person
+trusts the folder: there, the first choice exits."""
 from __future__ import annotations
 
 import os
@@ -18,6 +19,8 @@ SAMPLE = Path(__file__).resolve().parents[2] / "tour" / "sample"
 FIRST = "/thimble:tour"
 # what makes Claude Code draw its fullscreen layout in this one session
 FULLSCREEN = "CLAUDE_CODE_NO_FLICKER"
+# Claude Code asks once whether the person trusts a new folder, and its first choice exits
+TRUST = "If Claude Code asks whether you trust this folder, choose \"Yes, I trust this folder\"."
 IN_CLAUDE_CODE = "it opens Claude Code, so run it in a shell. In this Claude Code session, type /thimble:tour."
 
 
@@ -57,7 +60,8 @@ def cmd(a) -> int:
         print(f"thimble tour: could not copy the sample data into {_tilde(folder())} ({e.strerror or e}).",
               file=sys.stderr)
         return 1
-    print(f"Claude Code opens in {_tilde(Path(r['cwd']))}, with made-up sample data, and starts the tour.", flush=True)
+    print(f"Claude Code opens in {_tilde(Path(r['cwd']))}, with made-up sample data, and starts the tour.\n"
+          f"{TRUST}", flush=True)
     try:
         os.chdir(r["cwd"])
         os.execvpe(r["argv"][0], r["argv"], r["env"])

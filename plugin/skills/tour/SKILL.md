@@ -27,23 +27,23 @@ The shop refunded [7 orders](#). Most of the refunded orders arrived on time, so
 
 ## Step 1
 
-One number in the answer above is wrong on purpose: watch thimble check it. Press v to draw a card of the answer.
+Select the words “average order value” in the Fernhill Tea answer with the mouse, then press e.
 
 ## Step 2
 
-Select the words “average order value” in the answer with the mouse, then press e.
+One number in the Fernhill Tea answer was wrong on purpose. Click the number of refunded orders to see thimble's check of it.
+
+## Step 2k
+
+One number in the Fernhill Tea answer was wrong on purpose. Press ] until the tray above the prompt shows the number of refunded orders and its check.
 
 ## Step 3
 
-The number of refunded orders was wrong on purpose. Click it to see thimble's check.
-
-## Step 3k
-
-The number of refunded orders was wrong on purpose. Press ] until the tray above the prompt shows that number and its check.
+Press v to draw a card of the Fernhill Tea answer.
 
 ## Step 4
 
-Press s for a shorter, plainer version of the answer.
+Press s for a shorter, plainer version of the Fernhill Tea answer.
 
 ## Step 5
 

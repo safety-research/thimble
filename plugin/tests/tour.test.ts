@@ -1,7 +1,7 @@
 // The feature tour (tour/tour.ts, skills/tour/SKILL.md): /thimble:tour or Claude's Skill call starts it, and when a
 // step is done (the sample answer written, or what the person does), thimble sends Claude one prompt of its own that
 // names the next step, only while a tour runs and once per step. A step done early, a step whose feature is off and
-// step 2 where no click reaches thimble are left out; v that drew no card lets the tour go on. After the sample answer,
+// step 1 where no click reaches thimble are left out; v that drew no card lets the tour go on. After the sample answer,
 // the tour's turns and the replies to the person's own prompts answer nothing, so s acts on the sample answer. The
 // person's own prompt gets the step again; the third at one step ends the tour, and Claude says so. All data is made
 // up. `claude plugin test plugin`.
@@ -54,11 +54,12 @@ test('each step done sends one prompt that names the next step, and step 5 ends 
   await tourStart($)
   expect(await tourRuns($)).toBe(true)
   await tourDid($, 'answer')
-  await tourDid($, 'v')
-  // a step done again, or a second card of the same design, sends nothing more
-  await tourDid($, 'v')
+  await tourDid($, 'e')
+  // a step done again sends nothing more
   await tourDid($, 'e')
   await tourDid($, 'cite')
+  await tourDid($, 'v')
+  await tourDid($, 'v')
   await tourDid($, 's')
   expect(await sentNow(sent)).toEqual([
     `${TAG} Step 0 done. Say step 1.`,
@@ -79,56 +80,58 @@ test('a step done before its turn is left out; /thimble:tour again starts over',
   const { $, sent } = fake()
   await tourStart($)
   await tourDid($, 'answer')
-  // the person pressed s and opened a citation while step 1 waited: no prompt yet
+  // the person pressed s and v while step 1 waited: no prompt yet
   await tourDid($, 's')
-  await tourDid($, 'cite')
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`])
   await tourDid($, 'v')
+  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`])
   await tourDid($, 'e')
+  await tourDid($, 'cite')
   expect((await sentNow(sent)).slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`, `${TAG} Step 2 done. Say step 5.`])
   expect(await tourRuns($)).toBe(false)
   await tourStart($)
   expect(await tourNow($)).toEqual({ at: 'answer', done: [], asides: 0 })
 })
 
-test('where no click reaches thimble, step 2 is left out, and steps 3k and 5k name the keyboard path; a feature that is off is left out', async () => {
+test('where no click reaches thimble, step 1 is left out, and steps 2k and 5k name the keyboard path; a feature that is off is left out', async () => {
   setOptions({})
   const { $, sent } = fake()
   noteViewport({ isFullscreen: false })
   await tourStart($)
   await tourDid($, 'answer')
-  await tourDid($, 'v')
   await tourDid($, 'cite')
+  await tourDid($, 'v')
   await tourDid($, 's')
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`, `${TAG} Step 1 done. Say step 3k.`, `${TAG} Step 3k done. Say step 4.`, `${TAG} Step 4 done. Say step 5k.`])
-  // Simplify off: the citation step is the last before the end
+  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 2k.`, `${TAG} Step 2k done. Say step 3.`, `${TAG} Step 3 done. Say step 4.`, `${TAG} Step 4 done. Say step 5k.`])
+  // Simplify off: the card step is the last before the end
   noteViewport({ isFullscreen: true })
   setOptions({ squeezeAnswers: false })
   const b = fake()
   await tourStart(b.$)
   await tourDid(b.$, 'answer')
-  await tourDid(b.$, 'v')
   await tourDid(b.$, 'e')
   await tourDid(b.$, 'cite')
+  await tourDid(b.$, 'v')
   expect((await sentNow(b.sent)).slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`, `${TAG} Step 2 done. Say step 3.`, `${TAG} Step 3 done. Say step 5.`])
   setOptions({})
 })
 
-test('v that drew no card lets the tour go on, once, and only while step 1 waits', async () => {
+test('v that drew no card lets the tour go on, once, and only while step 3 waits', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
   const { $, sent } = fake()
   await tourStart($)
-  // step 0 waits: a design that failed changes nothing
-  await tourMissed($, 'v')
-  expect(await sentNow(sent)).toEqual([])
   await tourDid($, 'answer')
+  // step 1 waits: a design that failed changes nothing
+  await tourMissed($, 'v')
+  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`])
+  await tourDid($, 'e')
+  await tourDid($, 'cite')
   await tourMissed($, 'v')
   await tourMissed($, 'v')
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`, `${TAG} Step 1 did not work. Say step 2.`])
+  expect((await sentNow(sent)).slice(1)).toEqual([`${TAG} Step 1 done. Say step 2.`, `${TAG} Step 2 done. Say step 3.`, `${TAG} Step 3 did not work. Say step 4.`])
 })
 
-test("while step 1 waits, a card call of v's copy that drew a version sends step 1 done, once; one that did not draw sends nothing", async () => {
+test("while step 3 waits, a card call of v's copy that drew a version sends step 3 done, once; one that did not draw sends nothing", async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
   const { $, sent } = fake()
@@ -144,6 +147,9 @@ test("while step 1 waits, a card call of v's copy that drew a version sends step
   expect(fork.agentId).toBe('agent-made-up-v')
   await tourStart($)
   await tourDid($, 'answer')
+  await tourDid($, 'e')
+  await tourDid($, 'cite')
+  const before = (await sentNow(sent)).length
   // a card call of the copy, whose result the card tool kept: `calls`, each call of the card with its version or error
   const id = cardIdOf('toolu_made_up_1')
   const card = async (toolUseId: string, version: number, calls: Record<string, unknown>) => {
@@ -155,13 +161,13 @@ test("while step 1 waits, a card call of v's copy that drew a version sends step
   }
   // the view did not parse: no version is on the screen
   await card('toolu_made_up_1', 0, { toolu_made_up_1: { version: 0, error: 'the view does not parse' } })
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`])
+  expect((await sentNow(sent)).length).toBe(before)
   // the next call drew version 1
   await card('toolu_made_up_2', 1, { toolu_made_up_1: { version: 0, error: 'the view does not parse' }, toolu_made_up_2: { version: 1 } })
-  expect(await sentNow(sent)).toEqual([`${TAG} Step 0 done. Say step 1.`, `${TAG} Step 1 done. Say step 2.`])
+  expect((await sentNow(sent)).slice(before)).toEqual([`${TAG} Step 3 done. Say step 4.`])
   // version 2 sends nothing more
   await card('toolu_made_up_3', 2, { toolu_made_up_2: { version: 1 }, toolu_made_up_3: { version: 2 } })
-  expect((await sentNow(sent)).length).toBe(2)
+  expect((await sentNow(sent)).length).toBe(before + 1)
 })
 
 test('no reminder shows while the tour runs; a /clear ends it', async () => {
@@ -222,7 +228,7 @@ const NO_FILES = (on: Any) => {
 }
 
 const SAMPLE = 'Customers placed [36 orders](#) in March 2026. The shop refunded [7 orders](#). Most of the refunded orders arrived on time, so late delivery does not explain the refunds.'
-const STEP4 = 'Press s for a shorter, plainer version of the answer.'
+const STEP4 = 'Press s for a shorter, plainer version of the Fernhill Tea answer.'
 
 /** A session where the tour's steps run through the whole hooks module: the prompts as they reach Claude (with what
  *  thimble put beside them), Simplify's calls, and a turn of main's. */

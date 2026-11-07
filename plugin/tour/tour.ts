@@ -3,27 +3,31 @@
 // with one number wrong on purpose. Each later step names one key or one click.
 //
 // When a step is done, thimble sends Claude a short prompt of its own, such as `(thimble tour) Step 1 done. Say step
-// 2.`, so Claude says the next step at once. The person never types to go on. A step is done at the moment it shows
-// its result:
+// 2.`, so Claude says the next step at once. The person never types to go on. Claude Code shows each such prompt under
+// the plugin's name, and raises no render hook for its row, so thimble cannot draw it shorter. A step is done at the
+// moment it shows its result:
 //
 //   0         main's turn that says step 0 ends with an answer: the sample answer
-//   1  v      the first card that v's designer draws is on the screen (designer/v.ts). A design that ends with no card
-//             sends `Step 1 did not work`, so the tour goes on
-//   2  e      the explainer of the selected words shows in the tray (explain/seam.ts)
-//   3  click  a citation opens in the tray with its check (tray/tray.ts). Step 3k says ] in place of the click
+//   1  e      the explainer of the selected words shows in the tray (explain/seam.ts)
+//   2  click  a citation opens in the tray with its check (tray/tray.ts). Step 2k says ] in place of the click. By
+//             then the checker has corrected the wrong number, so the tray shows the old value and the check
+//   3  v      the first card that v's designer draws is on the screen (designer/v.ts). A design that ends with no card
+//             sends `Step 3 did not work`, so the tour goes on
 //   4  s      the first text of the simpler version shows (squeeze/term.ts)
 //   5         the end: where the settings are. The tour is over. Step 5k names the command alone
 //
-// The next step is the first one after the current step that is not done and whose feature is on. Step 2 needs a
-// selection, so it is left out where no click reaches thimble (Claude Code's classic layout: bar/intro.ts
-// clicksReach). Step 3 is then 3k, and step 5 is 5k. A step the person did before its turn is left out when its turn
-// comes. Each prompt goes once. When main's turn ends while the current step's feature is off, the tour goes on to the
-// next step.
+// The steps that act on the words of the answer come first, while the answer is still on the screen: the card and the
+// simpler version draw under it and push it up. The next step is the first one after the current step that is not done
+// and whose feature is on. Step 1 needs a selection, so it is left out where no click reaches thimble (Claude Code's
+// classic layout: bar/intro.ts clicksReach). Step 2 is then 2k, and step 5 is 5k. A step the person did before its turn
+// is left out when its turn comes. Each prompt goes once. When main's turn ends while the current step's feature is
+// off, the tour goes on to the next step.
 //
 // After the sample answer, main's turns answer nothing for thimble's features while the tour runs (core/answers.ts
 // holdAnswers): the turns that say a step, and the turns that answer the person's own prompts. A turn that the tour's
 // prompt started answers nothing even after the tour ended (answerless): the turn that says step 5. So v, e, ], s and the
-// observer act on the sample answer, not on the words of a step or of a reply.
+// observer act on the sample answer, not on the words of a step or of a reply. The observer does not look at the sample
+// answer itself (tourSample): Claude wrote it without reading the data, on purpose, and the checker checks its numbers.
 //
 // The person's own prompt while a step waits: Claude reads beside it to answer briefly and say the step again. The
 // third such prompt at the same step ends the tour: the person went on with their own work, and their answers must
@@ -32,13 +36,14 @@
 // ends it (hooks/turnover.ts). Where thimble's drawing does not show (core/host.ts), no tour runs.
 //
 //   tourStart($)          the skill started (the person's /thimble:tour, or Claude's Skill call): step 0 waits
-//   tourDid($, step)      a step done: `answer`, `v`, `e`, `cite` or `s`
+//   tourDid($, step)      a step done: `answer`, `e`, `cite`, `v` or `s`
 //   tourMissed($, step)   a step that the person did but that did not work (v drew no card): the tour goes on
 //   tourRuns($)           whether a tour runs (bar/hints.ts gives no reminder meanwhile)
+//   tourSample($, row)    whether a row is the tour's sample answer, or the answer of the turn that writes it now
 //   turnTour($)           a /clear or a /resume: the tour ends
 //   registerTour          the skill's start, the person's own prompts, and the end of main's turn
 //
-//   state: tour ({ at, done, asides } | null)
+//   state: tour ({ at, done, asides } | null), tourSample (the row of the sample answer, kept after the tour ends)
 import type { EngineInterface, Register } from 'claude-code'
 
 import { clicksReach } from '../bar/intro'
@@ -52,8 +57,8 @@ import { featureOn } from '../settings/features.mjs'
 type Engine = EngineInterface
 
 /** A step that is done, in the order the tour asks for them: the sample answer, then what the person does. */
-export type Step = 'answer' | 'v' | 'e' | 'cite' | 's'
-export const STEPS: Step[] = ['answer', 'v', 'e', 'cite', 's']
+export type Step = 'answer' | 'e' | 'cite' | 'v' | 's'
+export const STEPS: Step[] = ['answer', 'e', 'cite', 'v', 's']
 
 /** The tour now: the step that waits (`at`), the steps done, and how many of the person's own prompts came while `at`
  *  waits. */
@@ -75,6 +80,7 @@ export const aside = (step: string) => `${TAG} The tour waits for step ${step}. 
 export const STOPPED = `${TAG} The tour stopped: the person went on with their own work. Answer their prompt. Then add one line, word for word: "The tour stopped. Type /thimble:tour to start it again." Do not say the tour's steps again.`
 
 const TOUR = { plugin: 'thimble', key: 'tour' } as const
+const SAMPLE = { plugin: 'thimble', key: 'tourSample' } as const
 
 /** Whether a turn's prompt is one of the tour's: the features act on the answers before its turn, not on its words. A
  *  plugin's prompt (or one whose sender the record did not learn) with a line that opens with TAG: Claude Code may put
@@ -82,7 +88,7 @@ const TOUR = { plugin: 'thimble', key: 'tour' } as const
 export const tourPrompt = (p: { text: string; by: string }): boolean =>
   (p.by === 'plugin' || p.by === 'unknown') && String(p.text).split('\n').some(l => l.trimStart().startsWith(TAG))
 
-/** Whether a step's feature is on now. Step 2 needs a selection, which only a click reaches. */
+/** Whether a step's feature is on now. Step 1 needs a selection, which only a click reaches. */
 function stepOn(s: Step, clicks: boolean): boolean {
   if (s === 'answer') return true
   if (s === 'v') return featureOn('cards') === true
@@ -91,10 +97,10 @@ function stepOn(s: Step, clicks: boolean): boolean {
   return featureOn('squeezeAnswers') === true
 }
 
-/** A step's name in the skill: its number. Where no click reaches thimble, the citation step is 3k and the end is 5k. */
+/** A step's name in the skill: its number. Where no click reaches thimble, the citation step is 2k and the end is 5k. */
 export function stepName(s: Step | null, clicks: boolean): string {
   if (!s) return clicks ? '5' : '5k'
-  if (s === 'cite') return clicks ? '3' : '3k'
+  if (s === 'cite') return clicks ? '2' : '2k'
   return String(STEPS.indexOf(s))
 }
 
@@ -122,6 +128,14 @@ async function save($: Engine, t: Tour | null): Promise<void> {
 
 export async function tourRuns($: Engine): Promise<boolean> {
   return !!(await tourNow($))
+}
+
+/** Whether `row` is the tour's sample answer: the row kept when step 0 was done, or, while step 0 waits, the answer of
+ *  the turn that ends now. */
+export async function tourSample($: Engine, row: string | null | undefined): Promise<boolean> {
+  if (!row) return false
+  if ((await $.state.get(SAMPLE)).value === row) return true
+  return (await tourNow($))?.at === 'answer'
 }
 
 /** The skill started: step 0 waits, whatever an earlier tour had done. Where thimble's drawing does not show (claude
@@ -184,7 +198,7 @@ export function tourMissed($: Engine, step: Step): Promise<void> {
   })
 }
 
-/** The end of main's turn: a step that waits while its feature is off goes on, since the person cannot do it. Step 2
+/** The end of main's turn: a step that waits while its feature is off goes on, since the person cannot do it. Step 1
  *  with Explainers on is off only for the layout. */
 async function offStep($: Engine): Promise<void> {
   await inTurn(async () => {
@@ -246,8 +260,11 @@ export const registerTour: Register = on => {
     if (e.agentId !== undefined) return r
     try {
       const t = await tourNow($)
-      if (t?.at === 'answer' && e.turnId && (await turnOf($, e.turnId))?.answer) await tourDid($, 'answer')
-      else await offStep($)
+      const answer = t?.at === 'answer' && e.turnId ? (await turnOf($, e.turnId))?.answer : null
+      if (answer) {
+        await $.state.set(SAMPLE, answer)
+        await tourDid($, 'answer')
+      } else await offStep($)
     } catch {
       // the turn ends whatever the tour makes of it
     }

@@ -4,12 +4,16 @@
 // busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
 // main, but main reads the cards it drew
 // with the person's next prompt. Its first card on the screen is a step of the tour done (tour/tour.ts), and a design
-// that ends with no card lets the tour go on.
+// that ends with no card lets the tour go on. When Claude wrote messages after the answer (the tour's steps, say), the
+// prompt quotes the answer, so the fork draws that one and not the newest message.
+//
+// v closes an open tray, as s does (tray/seam.ts trayGiveWay), so that the tray's rows do not hide the card.
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
-// "very"). The fork is spawned inside the keys' prompt.edit hook, so Claude Code skips only that hook for the fork and
-// this plugin's other hooks serve it (its card calls, its end). This module's agent.spawn hook holds the spawn until the
-// word window closes, and refuses it when a letter came: so a word typed after v starts nothing at all.
+// "very"), and that letter puts the tray back as it stood. The fork is spawned inside the keys' prompt.edit hook, so
+// Claude Code skips only that hook for the fork and this plugin's other hooks serve it (its card calls, its end). This
+// module's agent.spawn hook holds the spawn until the word window closes, and refuses it when a letter came: so a word
+// typed after v starts nothing at all.
 //
 // v starts a design only when there is an answer to draw (main's last text row, as session.append stored it, in a turn
 // that answers something: core/answers.ts answersNothing), main is not working, Cards is on, and no other design runs. Otherwise v types as any letter. A design whose fork Claude Code
@@ -32,7 +36,7 @@ import { busyWhile } from '../bar/busy'
 import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { anchoredAt, callOf, type CardMeta, inTemp, metaOf } from '../cards/store'
-import { answersNothing } from '../core/answers'
+import { answersNothing, messageOf, textRows } from '../core/answers'
 import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
@@ -45,6 +49,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { tourDid, tourMissed } from '../tour/tour'
+import { trayGiveWay } from '../tray/seam'
 
 type Engine = EngineInterface
 
@@ -65,6 +70,8 @@ export type Design = {
 
 /** The words the fork shows as in /tasks, and how this module's agent.spawn hook knows the spawn as v's. */
 const DESCRIPTION = 'card of the last answer (v)'
+/** The most of an older answer the fork's prompt quotes (olderAnswer). */
+const ANSWER_CHARS = 4000
 /** The most of a card's text copy main reads. */
 const TELL_CHARS = 3000
 /** The most of the fork's last words a failure line quotes, in cells: their first paragraph, cut at a word. */
@@ -142,6 +149,17 @@ async function checkedSince($: Engine, row: string): Promise<string> {
   const lines = changed.map(m => (m.status === 'corrected' ? (m.rewrite ? `- "${plainSentence(m.sentence)}" is wrong; it is "${plainSentence(m.rewrite)}"` : `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"`)
     : m.failedBy === 'check' ? `- "${m.words}" is wrong${m.reason ? `: ${m.reason}` : ''}` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
   return `\n\nSince that answer, thimble checked its citations against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
+}
+
+/** The answer v was pressed under, quoted, when Claude wrote other messages after it: the prompt says "your last
+ *  answer", and the fork, a copy of the whole conversation, would draw the newest message. The tour's steps and the
+ *  replies to the person's own prompts during the tour are such messages (core/answers.ts holdAnswers). */
+async function olderAnswer($: Engine, row: string): Promise<string> {
+  const rows = await textRows($)
+  if (!rows.includes(row) || rows.at(-1) === row) return ''
+  const text = (await messageOf($, row))?.text ?? ''
+  if (!text.trim()) return ''
+  return `\n\nThe answer v was pressed under is not your last message: you wrote other messages after it. Draw this answer, and none of the messages after it. It reads:\n${fenced(cut(text, ANSWER_CHARS))}`
 }
 
 /** The card an earlier v drew under this answer, for the fork to draw a new version of: v again on the same answer
@@ -228,18 +246,22 @@ export async function vKey($: Engine, key: string, until: number): Promise<{ now
     if (await forkAlive($, current)) return null
     await end($, current, 'failed')
   }
-  const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: await tempDir($) })}${await checkedSince($, row)}${await earlierCard($, row)}`
+  const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: await tempDir($) })}${await olderAnswer($, row)}${await checkedSince($, row)}${await earlierCard($, row)}`
   const at = Number(await $.clock.now())
   const d: Design = { key: `d${at.toString(36)}`, anchorRow: row, agentId: null, status: 'held', at, until, cards: [] }
+  let back: (() => Promise<void>) | null = null
   return {
     now: async () => {
       current = d
       await save($, d)
       await $.state.set(NOW, d.key)
+      // the tray closes, as for s, so that its rows do not hide the card that draws under the answer
+      back = await trayGiveWay($).catch(() => null)
       void start($, d, prompt)
     },
     undo: async () => {
       if (d.status === 'held') await end($, d, 'cancelled')
+      await back?.()
     },
   }
 }

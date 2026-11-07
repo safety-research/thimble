@@ -1,7 +1,7 @@
 // The tour's skill (skills/tour/SKILL.md) and its hooks (tour/tour.ts): the skill is named tour, the person may start
 // it as /thimble:tour, it names the sample by the plugin's folder, and it holds each step that the hooks' prompts name
-// (tour.ts stepName: 0 to 5, 3k and 5k), each under its own heading. The fixed answer of step 0 cites six numbers and
-// holds none of the tour's own words.
+// (tour.ts stepName: 0 to 5, 2k and 5k), each under its own heading. The fixed answer of step 0 cites six numbers and
+// holds none of the tour's own words. The later steps name the sample answer by its shop.
 //   node --test plugin/tour/test/skill.test.mjs
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -17,11 +17,15 @@ test('the skill is tour, the person may start it, and it holds each step the hoo
   assert.match(head, /^name: tour$/m)
   assert.match(head, /^description: \S/m)
   assert.doesNotMatch(head, /user-invocable: false/)
-  for (const step of ['0', '1', '2', '3', '3k', '4', '5', '5k']) assert.ok(text.includes(`\n## Step ${step}\n`), `step ${step}`)
+  for (const step of ['0', '1', '2', '2k', '3', '4', '5', '5k']) assert.ok(text.includes(`\n## Step ${step}\n`), `step ${step}`)
   // step 0 is the answer alone: its citations, and no step's words, which v, s and the observer would read as answer
   const answer = /\n-{10}\n([\s\S]*?)\n-{10}\n/.exec(text)?.[1] ?? ''
   assert.equal(answer.match(/\]\(#\)/g)?.length, 6)
   assert.doesNotMatch(answer, /press|wrong on purpose/i)
+  // a step said again after a reply to the person names the sample answer, never "the answer above", which then reads
+  // as that reply
+  const steps = text.slice(text.indexOf('\n## Step 1\n'))
+  assert.doesNotMatch(steps, /answer above/)
   // the step that says where the settings are names no click where no click reaches thimble
   assert.doesNotMatch(/\n## Step 5k\n([\s\S]*?)(\n## |$)/.exec(text)?.[1] ?? 'click', /click/i)
   // Claude Code fills in the plugin's folder, wherever it is installed
