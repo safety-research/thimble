@@ -166,6 +166,16 @@ def release(a: Any, r: Run) -> int:
         return installed(a, r, rel)
     if not a.file and not a.from_:
         raise FX.FixError("thimble is not installed in this home, and no release was given to install (--file)")
+    to = target(a.ref) if a.ref else {}
+    tag = a.tag or to.get("tag", "")
+    if a.file and not tag and not to:
+        raise FX.FixError("thimble install release --file needs the release the file is (--tag) or the branch (--ref)")
+    src = Path(a.from_).resolve() if a.from_ and not a.file else None
+    if src is not None and not FX._own_checkout(src):
+        # git would walk up to a repository around the folder, and take that one for thimble's
+        raise FX.FixError(f"--from takes a git clone of thimble, and {tilde(src)} is not one; give the release's "
+                          "file with --file")
+    based_on = FX.latest_release(then="run the install again")["tag"] if a.ref and not tag else ""
     if rel and (live / ".git").exists():
         clone = tilde(rel.get("repo") or "")
         to = aside("dev")
@@ -180,16 +190,6 @@ def release(a: Any, r: Run) -> int:
         got = installed(a, r, FX.release())
         # the script goes on to the plugin's step, which points Claude Code at it again
         return 0 if got == IN_PLACE else got
-    to = target(a.ref) if a.ref else {}
-    tag = a.tag or to.get("tag", "")
-    if a.file and not tag and not to:
-        raise FX.FixError("thimble install release --file needs the release the file is (--tag) or the branch (--ref)")
-    based_on = FX.latest_release(then="run the install again")["tag"] if a.ref and not tag else ""
-    src = Path(a.from_).resolve() if a.from_ and not a.file else None
-    if src is not None and not FX._own_checkout(src):
-        # git would walk up to a repository around the folder, and take that one for thimble's
-        raise FX.FixError(f"--from takes a git clone of thimble, and {tilde(src)} is not one; give the release's "
-                          "file with --file")
     with FX.Lock():
         if os.path.lexists(live):
             # a live thimble cannot use (no release.json it can read beside it, or no git copy) may hold the person's
