@@ -122,7 +122,13 @@ UV = ('[ "$1" = --version ] && { echo "uv 0.9.5"; exit 0; }\n'
       'echo "$*" >> "$(dirname "$0")/uv.log"\n'
       '[ -z "$FAKE_UV_FAILS" ] || { echo "error: made-up failure"; exit 1; }\n'
       '[ "$1" = sync ] || exit 0\n'
-      'mkdir -p "$3/.venv/bin" && { [ -e "$3/.venv/bin/python" ] || echo made-up > "$3/.venv/bin/python"; }\n')
+      'mkdir -p "$3/.venv/bin" && { [ -e "$3/.venv/bin/python" ] || cp "$(dirname "$0")/venv-python" "$3/.venv/bin/python"; }\n')
+# the server's python that uv sync leaves, for the workbench's check of its headless Chromium (python -m app.headless,
+# backend/app/headless.py): it logs its arguments in python.log beside claude.log, and answers that the Chromium is
+# there, or, while FAKE_CHROMIUM is set, what it says and a made-up fix
+VENV_PYTHON = ('echo "$*" >> "$(dirname "$FAKE_CLAUDE_LOG")/python.log"\n'
+               'if [ -z "$FAKE_CHROMIUM" ]; then echo \'{"ok": true}\'\n'
+               'else echo "{\\"ok\\": false, \\"why\\": \\"$FAKE_CHROMIUM\\", \\"fix\\": \\"Fetch it: made-up command\\"}"; fi\n')
 NPM = ('[ "$1" = --version ] && { echo "10.9.2"; exit 0; }\n'
        'case "$3" in ci) mkdir -p "$2/node_modules" ;; '
        'run) mkdir -p "$2/dist" && echo "<title>thimble</title>" > "$2/dist/index.html" ;; esac\nexit 0\n')
@@ -181,6 +187,7 @@ class World:
         self.gh.publish(self.bare, "v0.10.8")
         (tmp / "claude.py").write_text(CLAUDE)
         stub(self.bin / "claude", f'exec "{sys.executable}" "{tmp / "claude.py"}" "$@"\n')
+        stub(self.bin / "venv-python", VENV_PYTHON)
         stub(self.bin / "node", NODE)
         stub(self.bin / "uv", UV)
         stub(self.bin / "npm", NPM)
@@ -222,6 +229,11 @@ class World:
     def uv(self) -> list[str]:
         """What the fake uv was asked, but its version."""
         log = self.bin / "uv.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def python(self) -> list[str]:
+        """What the server's fake python was asked (VENV_PYTHON)."""
+        log = self.tmp / "python.log"
         return log.read_text().splitlines() if log.exists() else []
 
     def settings(self) -> dict:
@@ -355,6 +367,30 @@ def test_the_server_s_packages_are_compiled_and_an_install_that_left_them_uncomp
     p = w.install(PATH=path)
     assert p.returncode == 0, text_of(p)
     assert "The plugin, the workbench and the commands are in place." in p.stdout and w.uv() == [sync, sync], p.stdout
+
+
+def test_the_install_fetches_the_headless_chromium_cards_are_checked_in_and_says_when_it_could_not(w):
+    """The workbench checks a card by its picture, which it draws in a headless Chromium: where it finds no system
+    browser, Playwright's, which the install fetches by the workbench's own check (python -m app.headless --fetch).
+    While it is still missing, the install says so, with the command that fetches it, and does not count it in place:
+    the install run again fetches it again, until every part is in place."""
+    path = f"{w.bin}:{w.home / '.local' / 'bin'}:/usr/bin:/bin"
+    why = "no headless Chromium, so cards are not checked (its download failed: made-up)"
+    note = f"Note: the browser workbench has {why}. Fetch it: made-up command"
+    p = w.install(PATH=path, FAKE_CHROMIUM=why)
+    assert p.returncode == 0, text_of(p)
+    section = p.stdout.split("\nThe workbench\n", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert section[1] == "  Cards are not checked yet: the note at the end says why.", section
+    assert p.stdout.rstrip().splitlines()[-1] == note, p.stdout
+    assert w.python() == ["-m app.headless --fetch"]
+    every = "The plugin, the workbench and the commands are in place."
+    p = w.install(PATH=path, FAKE_CHROMIUM=why)
+    assert p.returncode == 0 and every not in p.stdout, text_of(p)
+    assert "  Its packages and page are in place, 0 MB." in p.stdout and p.stdout.rstrip().splitlines()[-1] == note
+    assert w.python()[1:] == ["-m app.headless", "-m app.headless --fetch"]
+    p = w.install(PATH=path)
+    assert every in p.stdout and "Note:" not in p.stdout, p.stdout
+    assert w.python()[3:] == ["-m app.headless"]
 
 
 def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_left_them_uncompiled(w):

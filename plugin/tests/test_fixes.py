@@ -484,6 +484,35 @@ def test_the_workbench_s_server_packages_are_compiled_once_also_where_an_older_i
     assert FX.browser_compiled(b)
 
 
+def test_an_update_says_when_the_headless_chromium_the_workbench_checks_cards_in_could_not_be_fetched(world,
+                                                                                                     monkeypatch):
+    """The workbench on live (browser_on_live, which thimble update and the install run) ends with the headless Chromium
+    it draws cards in, where it uses Playwright's: the workbench's own check fetches what is missing (python -m
+    app.headless --fetch). When it is still missing, the update's lines say so, with the command that fetches it."""
+    tmp = world["tmp"]
+    tools = tmp / "tools.log"
+    fake(tmp / "bin" / "uv", tools, 'mkdir -p "$3/.venv"')
+    fake(tmp / "bin" / "npm", tools, '[ "$3" = run ] && mkdir -p "$2/dist" && echo page > "$2/dist/index.html"')
+    monkeypatch.setenv("PATH", f"{tmp / 'bin'}:{os.environ['PATH']}")
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp / "bh"))
+    (tmp / "bh").mkdir()
+    b = FX.live_dir() / "browser"
+    for part, lock, pkgs in FX.BROWSER_LOCKS:
+        (b / part / pkgs).mkdir(parents=True)
+        (b / part / lock).write_text(f"made-up {lock}\n")
+    (b / "backend" / ".venv" / "bin").mkdir()
+    lacks = {"ok": False, "why": "no headless Chromium, so cards are not checked (its download failed: made-up)",
+             "fix": "Fetch it: made-up command"}
+    fake(b / "backend" / ".venv" / "bin" / "python", tools, f"echo '{json.dumps(lacks)}'")
+    got = FX.browser_on_live()
+    assert got["browser"] == "ready" and "-m app.headless --fetch" in tools.read_text().splitlines()
+    assert got["chromium"] == [f"has {lacks['why']}", "Fetch it: made-up command"]
+    assert (f"The browser workbench has {lacks['why']}. Fetch it: made-up command"
+            in FX._summary({"from": "0.10.12", "to": "0.10.13", **got}))
+    fake(b / "backend" / ".venv" / "bin" / "python", tools, "echo '{\"ok\": true}'")
+    assert "chromium" not in FX.browser_on_live()
+
+
 def state_of_fixes() -> dict:
     """What an update changes when it moves: mine, release.json, the records, the fixes' refs, the set-aside files, the
     release checkout, and the refs of releases in live."""
@@ -521,3 +550,17 @@ def test_an_update_that_cannot_download_the_release_changes_nothing_and_says_wha
         assert str(e.value).startswith(said), str(e.value)
         assert state_of_fixes() == before
         assert FX.get(a["id"])["state"] == "on" and "read ${n}" in live_file("plugin/bar/bar.tsx")
+
+
+def test_words_an_older_thimble_kept_with_the_fixer_s_closing_fence_show_without_it(world):
+    """thimble 0.10.12 and before kept what a fix does as its fixer wrote it, and a fixer may close its end in a code
+    fence. The fix's record, which thimble fix show, the reapply prompt, an issue's text, the terminal's line and the
+    workbench all read, gives those words without the fence, as a fixer's end gives them now."""
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    FX.put({**FX.get(r["id"]), "summary": "The bar's coverage item says read.\n```"})
+    stored = json.loads((FX.home() / "fixes.jsonl").read_text().splitlines()[-1])
+    assert stored["summary"].endswith("```")
+    assert FX.get(r["id"])["summary"] == FX.records()[r["id"]]["summary"] == "The bar's coverage item says read."
+    shown = FX.show_lines(r["id"], 100)
+    assert "  Claude did    The bar's coverage item says read." in shown and "```" not in "\n".join(shown), shown

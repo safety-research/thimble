@@ -12,7 +12,7 @@ One script installs both, or the plugin alone, in `~/.thimble`.
   installed it: then that package manager does (`brew upgrade claude-code`,
   `npm install -g @anthropic-ai/claude-code@latest`, or your system's), and the install names the one for yours.
 - For the workbench: **[uv](https://docs.astral.sh/uv/) 0.8 or later**, **npm** (it comes with Node.js), and about
-  1 GB of disk.
+  2 GB of disk.
 - On Linux, **bubblewrap, socat and ripgrep**, for Anthropic's [sandbox
   runtime](https://github.com/anthropics/sandbox-runtime), which the code Claude writes for a card runs in (on Ubuntu:
   `sudo apt-get install bubblewrap socat ripgrep`). macOS has its own sandbox.
@@ -82,6 +82,8 @@ place any part that is missing. It does the same when you run it from a download
 - `~/.thimble/fixes/release`: the plain release, which no fix changes. `thimble fix off` and the rest of the way back
   from your fixes run from here.
 - `~/.thimble/fixes/live/browser`: the workbench, with its packages and its page (about 1 GB).
+- `~/.cache/ms-playwright` (`~/Library/Caches/ms-playwright` on macOS): the headless Chromium the workbench draws
+  cards in, which the install downloads where it finds no Chrome, Edge or Chromium (about 650 MB).
 - `~/.thimble`: also the plugin's records (labels, coverage) and the sandbox runtime (`~/.thimble/srt`).
   `THIMBLE_HOME` sets another folder.
 - `~/.thimble-browser`: the workbench's workspaces and how it reaches Claude. `THIMBLE_BROWSER_HOME` sets another
@@ -112,7 +114,8 @@ GitHub counts the downloads of each release's file; thimble sends nothing else.
     rm -rf ~/.thimble ~/.thimble-browser
 
 The last line also deletes your fixes, the workbench's workspaces and the plugin's labels. Your data folders stay as
-they are (delete a `thimble/` folder that a build before 0.10.0 made in a data folder).
+they are (delete a `thimble/` folder that a build before 0.10.0 made in a data folder). The workbench's headless
+Chromium stays in `~/.cache/ms-playwright`: delete it if nothing else uses it.
 
 ## The dev install
 
@@ -138,8 +141,9 @@ script stops when it finds 0.9, says what it found and prints the commands that 
 again. In a terminal, `--remove-0.9` runs them after you answer y, and first offers to move 0.9's workspaces (its
 cards, notebooks, labels and reports, which 0.10 cannot open) to `~/thimble-0.9-workspaces`. Restart the `claude`
 sessions that were open, or type `/reload-plugins` in them: until then they say "Plugin directory does not exist" after
-each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about 650 MB): delete it if nothing else
-uses it.
+each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about 650 MB). Where the install
+downloads the workbench's own there, it removes the builds that nothing uses; elsewhere, delete the folder if nothing
+else uses it.
 
 ## When something does not work
 

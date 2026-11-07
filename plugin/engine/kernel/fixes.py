@@ -257,7 +257,9 @@ def short(words: str, n: int = 48) -> str:
 
 def records() -> dict[int, dict[str, Any]]:
     """Each fix's record: the last line of its id in fixes.jsonl. A record stored before thimble kept a notice (0.10.4
-    and older) gets the one its files have now, as put would give it, so that the person is told before they use it."""
+    and older) gets the one its files have now, as put would give it, so that the person is told before they use it.
+    Words stored by thimble 0.10.12 or older end without the code fence the fixer closed its end with, as the fixer's
+    end (plugin/fix/fixer.ts endOf) gives them now."""
     out: dict[int, dict[str, Any]] = {}
     try:
         lines = (home() / "fixes.jsonl").read_text().splitlines()
@@ -274,6 +276,8 @@ def records() -> dict[int, dict[str, Any]]:
             notice = notice_of([str(f.get("path") or "") for f in r.get("files") or [] if isinstance(f, dict)])
             if notice:
                 r["notice"] = notice
+        if isinstance(r.get("summary"), str):
+            r["summary"] = re.sub(r"\s*`{3,}\s*$", "", r["summary"])
     return out
 
 
@@ -3057,8 +3061,9 @@ def browser_compiled(b: Path) -> bool:
 
 def browser_on_live() -> dict[str, Any]:
     """The browser workbench on live, when it is installed (its home exists): its Python and JS packages again only when
-    their lock files changed, or when the server's are not compiled to bytecode yet, then the page. thimble-browser runs
-    from live while fixes/browser-ready is there."""
+    their lock files changed, or when the server's are not compiled to bytecode yet, then the page, then the headless
+    Chromium it draws cards in when that is missing (browser_chromium; `chromium`, what is wrong and its fix, when it
+    still is). thimble-browser runs from live while fixes/browser-ready is there."""
     b = live_dir() / "browser"
     if not b.is_dir() or not browser_home().is_dir():
         return {"browser": "none"}
@@ -3090,7 +3095,8 @@ def browser_on_live() -> dict[str, Any]:
     except FixError as e:
         return {"browser": "failed", "browser_error": str(e)}
     ready.write_text(str(b) + "\n")
-    return {"browser": "ready", "browser_dir": str(b), "browser_did": did}
+    chromium = browser_chromium(b, fetch=True)
+    return {"browser": "ready", "browser_dir": str(b), "browser_did": did, **({"chromium": chromium} if chromium else {})}
 
 
 def browser_packages(b: Path, part: str, env: dict[str, str]) -> None:
@@ -3109,6 +3115,28 @@ def browser_packages(b: Path, part: str, env: dict[str, str]) -> None:
 def browser_build(b: Path, env: dict[str, str]) -> None:
     """The workbench's page, built in the browser folder `b` (frontend/dist, which the server serves)."""
     run(["npm", "--prefix", str(b / "frontend"), "run", "build"], env=env, timeout=900)
+
+
+def browser_chromium(b: Path, fetch: bool = False) -> list[str]:
+    """Whether the workbench in the browser folder `b` has the browser it draws cards and loads views in: where it finds
+    no Chrome, Edge or Chromium of the system's, Playwright's headless Chromium, one build for its server and one for
+    its page. The workbench's own check says (backend app/headless.py); with `fetch` it first fetches the builds that
+    are missing (about 200 MB). [] when it has it, else [what is wrong, as said after "the browser workbench", the
+    command that fixes it]."""
+    backend = b / "backend"
+    see = f"See why: cd {_tilde(str(backend))} && .venv/bin/python -m app.headless"
+    try:
+        p = subprocess.run([str(backend / ".venv" / "bin" / "python"), "-m", "app.headless", *(["--fetch"] * fetch)],
+                           cwd=backend, env={**os.environ, "THIMBLE_HOME": str(browser_home())}, capture_output=True,
+                           text=True, timeout=1800 if fetch else 60, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"could not check its headless Chromium ({type(e).__name__})", see]
+    try:
+        d = json.loads(p.stdout.strip().splitlines()[-1])
+        return [] if d["ok"] else [f"has {d['why']}", str(d["fix"])]
+    except (ValueError, IndexError, KeyError, TypeError):
+        said = p.stderr.strip().splitlines()
+        return ["could not check its headless Chromium" + (f" ({said[-1]})" if said else ""), see]
 
 
 def _set_aside(ids: list[int], recs: dict[int, dict[str, Any]], version: str, key: str, now: str) -> None:
@@ -3839,6 +3867,8 @@ def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
     if d.get("browser") == "failed":
         out.append(f"The browser workbench stays on the release it had: {d.get('browser_error')}. Run thimble update "
                    "again after you correct that.")
+    if d.get("chromium"):
+        out.append(f"The browser workbench {d['chromium'][0]}. {d['chromium'][1]}")
     k = len(d.get("aside") or [])
     n = f"{k} local fix{'' if k == 1 else 'es'}"
     if k and d.get("unchecked"):

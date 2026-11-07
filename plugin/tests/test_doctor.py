@@ -100,3 +100,29 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
     i = out.index("  × thimble could not look for a newer release")
     assert out[i + 1] == (f"      Thimble found no release at {world['gh'].url} (GitHub answered 404); run thimble "
                           "update again")
+
+
+def test_a_workbench_without_the_headless_chromium_it_checks_cards_in_says_so_with_the_command_that_fetches_it(
+        world, monkeypatch, capsys):
+    """The workbench checks a card by its picture, which it draws in a headless Chromium: Playwright's, where it finds
+    no system browser. thimble doctor asks the workbench's own check (python -m app.headless): one that lacks it is a
+    × line, with the command that fetches it on the line below; one that has it adds no line."""
+    doctor_world(world, monkeypatch)
+    b = world["tmp"] / "live-browser"
+    (b / "scripts").mkdir(parents=True)
+    (b / "backend" / ".venv" / "bin").mkdir(parents=True)
+    fake(b / "scripts" / "thimble-browser", world["log"])
+    lacks = {"ok": False, "why": "no headless Chromium, so cards are not checked", "fix": "Fetch it: made-up command"}
+    fake(b / "backend" / ".venv" / "bin" / "python", world["log"], f"echo '{json.dumps(lacks)}'")
+    FX.home().mkdir(parents=True, exist_ok=True)
+    (FX.home() / "browser-ready").write_text(f"{b}\n")
+    assert cli.main(["doctor", "--offline"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    i = out.index("  × the browser workbench has no headless Chromium, so cards are not checked")
+    assert out[i - 1:i + 2] == [f"  ✓ the browser workbench: {FX._tilde(str(b / 'scripts' / 'thimble-browser'))}",
+                                "  × the browser workbench has no headless Chromium, so cards are not checked",
+                                "      Fetch it: made-up command"]
+    assert "-m app.headless" in world["log"].read_text().splitlines()
+    fake(b / "backend" / ".venv" / "bin" / "python", world["log"], "echo '{\"ok\": true}'")
+    cli.main(["doctor", "--offline"])
+    assert "headless Chromium" not in capsys.readouterr().out

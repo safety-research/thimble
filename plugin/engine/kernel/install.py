@@ -330,7 +330,8 @@ def write_launcher(p: Path, to: Path) -> None:
 
 def in_place(browser: bool, bin_: Path) -> bool:
     """Whether every part of the release install is in place: Claude Code loads the plugin from live, the workbench is
-    built there when it is asked for (or there all the same), and the commands start them."""
+    built there when it is asked for (or there all the same), with the headless Chromium it draws cards in, and the
+    commands start them."""
     live = FX.live_dir()
     plugin = (FX.release().get("pointed") and from_folder(FX._marketplace().get("source"), live)
               and installed_in_claude_code())
@@ -338,7 +339,10 @@ def in_place(browser: bool, bin_: Path) -> bool:
     cli = link.is_symlink() and same(link, FX.release_dir() / "plugin" / "bin" / "thimble")
     ready = browser_ready()
     web = not ready or same(launcher_target(bin_ / "thimble-browser"), live / "browser" / "scripts" / "thimble-browser")
-    return bool(plugin and cli and web and (ready or not browser))
+    if not (plugin and cli and web and (ready or not browser)):
+        return False
+    # the headless Chromium the workbench draws cards in, which the workbench's step fetches (fixes.browser_chromium)
+    return not (ready and browser) or not FX.browser_chromium(live / "browser")
 
 
 # ------------------------------------------------------------------ the plugin
@@ -439,7 +443,8 @@ def sandbox(a: Any, r: Run) -> int:
 def browser(a: Any, r: Run) -> int:
     """The workbench's packages and page: in live/browser by fixes.browser_on_live, which thimble update runs too (it
     links the packages of an earlier install's folder when their lock files are the same), or in the clone --folder
-    names. Its home (~/.thimble-browser) is made first, readable by the person alone."""
+    names; then the headless Chromium it draws cards in, where it uses Playwright's (fixes.browser_chromium). Its home
+    (~/.thimble-browser) is made first, readable by the person alone."""
     folder = Path(a.folder).resolve() if a.folder else None
     home = FX.browser_home()
     home.mkdir(parents=True, exist_ok=True)
@@ -448,6 +453,7 @@ def browser(a: Any, r: Run) -> int:
     seed = FX._browser_seed()
     if not folder and browser_ready():
         say(f"  Its packages and page are in place, {size(b)}.")
+        chromium = FX.browser_chromium(b, fetch=True)
     else:
         say("  Installing its packages and building its page (a few minutes)...", end="")
         try:
@@ -456,15 +462,20 @@ def browser(a: Any, r: Run) -> int:
                 for part, _, _ in FX.BROWSER_LOCKS:
                     FX.browser_packages(b, part, env)
                 FX.browser_build(b, env)
+                chromium = FX.browser_chromium(b, fetch=True)
             else:
                 got = FX.browser_on_live()
                 if got.get("browser") != "ready":
                     raise FX.FixError(got.get("browser_error") or f"{tilde(b)} holds no workbench")
+                chromium = got.get("chromium") or []
         except FX.FixError as e:
             say(f" failed: {str(e).rstrip('.')}.")
             r.note(f"the workbench is not installed: {str(e).rstrip('.')}. After you fix that, run the install again.")
             return 1
         say(f" done, {size(b)}.")
+    if chromium:
+        say("  Cards are not checked yet: the note at the end says why.")
+        r.note(f"the browser workbench {chromium[0]}. {chromium[1]}")
     if folder:
         # thimble update links this clone's packages into live while their lock files are the same
         (home / "checkout").write_text(f"{b}\n")
