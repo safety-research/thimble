@@ -145,3 +145,15 @@ test("a large run the person starts in the labels pane: they are asked at once i
   const told = Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value as Record<string, string>).join('\n')
   expect(told).toContain("The analyst chose a random sample of 300 of the label spam's 420 records")
 })
+
+test('the person makes no choice at the ask the labels pane made (the dialog dismissed, or their own words): nothing runs, a line says so, and Claude reads that it waits', async () => {
+  resetLabelUse()
+  const ask = { kind: 'label_ask', name: 'spam', root: '/made-up/data', ask: 'a8', units: 420, calls: 9, sample: 300, chars: 30000, text: 'Read 420 records of chat.jsonl with Claude', meta: '9 model calls', t: 3 }
+  const { $, ran, asked } = rerunEngine({ name: 'spam', records: 420, waiting: 420, counts: {}, run: { state: 'ask', ask: { id: 'a8' }, waiting: 420 } }, ask, 9)
+  expect(await rerunLabel($, '/made-up/data', { ...SPAM, trial: false, records: 420 }, { model: 'haiku' })).toBeNull()
+  expect(asked).toHaveLength(1)
+  expect(ran.some(a => a.includes('--answer'))).toBe(false)
+  expect((await $.state.get({ plugin: 'thimble', key: 'failLine' })).value).toMatchObject({ kind: 'notice', text: 'The label spam did not start: no choice was made. Ask Claude to run it again.' })
+  const told = Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value as Record<string, string>).join('\n')
+  expect(told).toContain('The label spam waits for the analyst\'s choice before the model reads its records, and they made none: nothing runs.')
+})
