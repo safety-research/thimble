@@ -3,7 +3,7 @@
 // with the `card` tool and fixes it from the card's text copy. Its cards draw under the answer v was pressed on; the
 // busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
 // main, but main reads the cards it drew
-// with the person's next prompt.
+// with the person's next prompt. Its first card on the screen is a step of the tour done (tour/tour.ts).
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
 // "very"). The fork is spawned inside the keys' prompt.edit hook, so Claude Code skips only that hook for the fork and
@@ -28,7 +28,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { hintUsed } from '../bar/hints'
 import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { anchoredAt, type CardMeta, inTemp, metaOf } from '../cards/store'
@@ -43,6 +42,7 @@ import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
+import { tourDid } from '../tour/tour'
 
 type Engine = EngineInterface
 
@@ -67,8 +67,10 @@ const DESCRIPTION = 'card of the last answer (v)'
 const TELL_CHARS = 3000
 /** The most of the fork's last words a failure line quotes, in cells: their first paragraph, cut at a word. */
 const SAID_CELLS = 400
+/** The card tool, as the fork calls it. */
+const CARD_TOOL = 'mcp__thimble__card'
 /** The tools the fork may call; Write only into the temp folder. */
-const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', 'mcp__thimble__card'])
+const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', CARD_TOOL])
 
 const DESIGNS = { plugin: 'thimble', key: 'designs' } as const
 const NOW = { plugin: 'thimble', key: 'designNow' } as const
@@ -169,8 +171,6 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
     d.agentId = r.agentId
     d.status = 'running'
     await save($, d)
-    // the person drew a card: the first session's tour goes on (bar/intro.ts)
-    await hintUsed($, 'visualize').catch(() => undefined)
     await busyWhile($, 'drawing a card', () => designStep($, d))
   } catch (err) {
     await end($, d, 'failed', `× v could not start drawing a card: ${reason(err)}`)
@@ -305,11 +305,15 @@ export const registerDesigner: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder
+  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder. A card it drew is a step
+  // of the tour done (tour/tour.ts), once it is on the screen
   on('tool.call', { agentId: /\S/ }, async ($, e, next) => {
     if (forkOf(e.agentId)?.kind !== 'designer') return next(e)
     const no = await denial($, e as never)
-    return no ? { deny: no } : next(e)
+    if (no) return { deny: no }
+    const r = await next(e)
+    if (String(e.tool) === CARD_TOOL && !('deny' in r && r.deny !== undefined) && !r.isError) void tourDid($, 'v').catch(() => undefined)
+    return r
   }).catch(($, e, next) => (next.called ? next(e) : forkOf(e.agentId)?.kind === 'designer' ? { deny: "thimble could not check this call of the card's copy" } : next(e)))
 
   // v's spawn waits out the word window, and is refused when a letter came in it

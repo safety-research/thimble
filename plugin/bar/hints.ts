@@ -2,15 +2,14 @@
 // hint (select a passage first) shows until the person has used that
 // feature once in the session; after each of main's answers, one reminder names a feature set to on demand (or
 // manual) that the session has not used yet, each at most once a session. Both are hints (notice.ts hintLine): the bar
-// shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt. While the first
-// session's tour runs (intro.ts), no reminder shows: its steps name the same keys. A feature used is told to the tour
-// too.
+// shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt. While the tour
+// runs (tour/tour.ts), no reminder shows: Claude names the keys there.
 //
 //   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named)
 import type { EngineInterface } from 'claude-code'
 
 import { choiceOf, featureOn } from '../settings/features.mjs'
-import { tourRuns, tourUsed } from './intro'
+import { tourRuns } from '../tour/tour'
 import { failLineNow, hintLine } from './notice'
 
 type Engine = EngineInterface
@@ -27,12 +26,11 @@ async function remindedNow($: Engine): Promise<string[]> {
   return list((await $.state.get(REMINDED)).value)
 }
 
-/** The person used a feature (`explain`, `cite`, `rewrite`, `visualize`, `evidence`): its how-to hint and its reminder
- *  stop for the rest of the session, and the tour's step about it is done (intro.ts). */
+/** The person used a feature (`explain`, `cite`, `rewrite`): its how-to hint and its reminder
+ *  stop for the rest of the session. */
 export async function hintUsed($: Engine, feature: string): Promise<void> {
   const used = await usedNow($)
   if (!used.includes(feature)) await $.state.set(USED, [...used, feature])
-  await tourUsed($, feature).catch(() => undefined)
 }
 
 /** A how-to hint, while the session has not used its feature. */

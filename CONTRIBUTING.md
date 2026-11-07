@@ -58,7 +58,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | What | Where |
 |---|---|
 | the manifest: name, the switches (Minimal, Citations (its modes), Checker and Effort (the citation checker's model and effort), Cards (its modes), Simplify, Catch-up, Comments (Explainers, Heads-ups, with their modes), Claims (its modes), Labels, Coverage; the old fields they replaced, and defaultsAt, stay, hidden); no version, since a release names its version by its tag: Claude Code names the copy it installs by its commit, and `thimble --version` names the release from `~/.thimble/fixes/release.json` | `plugin/.claude-plugin/plugin.json` |
-| the `thimble` command (`label`, `coverage`, `fix` and `fixes`, `file`, `update`, `reapply`, `doctor`, `install`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
+| the `thimble` command (`label`, `coverage`, `fix` and `fixes`, `file`, `update`, `reapply`, `doctor`, `tour`, `install`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), a `thimble` command in Claude Code's Bash sandbox run outside it (`handoff.ts`, with `engine/kernel/handoff.py`; a label's code such a command gives runs in thimble's sandbox, `engine/kernel/codebox.py`), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
 | shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer, side thread), what thimble tells Claude with the next prompt, or sooner of a card Claude drew (`tell.ts`, the one way a report reaches Claude; `engaged.ts`, what the person opened and asked), the change feed, the one side pane, the record of main's turns and answers (`answers.ts`), and where the features that act on answers draw and take keys (`answerview.ts`) | `plugin/core/` |
@@ -70,11 +70,12 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
 | the observer: one look at each answer, a fork of the conversation, for the explainers, important details and claims (the claims on demand, f in their pane, unless Claims is auto); its lenses | `plugin/observer/` |
 | the features that act on answers, each meeting the rest through its `seam.ts` (`core/answerview.ts` calls them): squeeze, stretch and catch-up; the explainers and important details; the claims; the side threads; the citation and explanation tray | `plugin/squeeze/`, `plugin/explain/`, `plugin/claims/`, `plugin/threads/`, `plugin/tray/` |
-| the line above the prompt: busy step, failure line, counts, and the first session's hint and tour (`intro.ts`) | `plugin/bar/` |
+| the line above the prompt: busy step, failure line, counts | `plugin/bar/` |
 | the settings and coverage panes | `plugin/panes/` |
 | the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
 | `/thimble-fix`: the person's changes to their own thimble, made by the fixer in a scratch copy and applied with their key | `plugin/fix/` |
-| the skills Claude calls: `fix-thimble`, which starts the fix the person asks for | `plugin/skills/` |
+| the skills Claude calls: `fix-thimble`, which starts the fix the person asks for; `tour`, the words of each step of the tour (`/thimble:tour`) | `plugin/skills/` |
+| the tour: the made-up sample data it works on, and the prompt that tells Claude to say the next step when the person did one (`tour.ts`) | `plugin/tour/` |
 | a `--prompt` label's model reads, and the labels pane; the labels an answer or a card used, and the ask before a large label run (`use.ts`) | `plugin/labels/` |
 | each model call and turn in the session's events, per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | every `$.state` key, one block per module | `plugin/types/index.d.ts` |

@@ -42,7 +42,7 @@ It installs thimble in `~/.thimble`. Adding `-s -- --no-browser` after `bash` in
 
 ### Terminal plugin
 
-Run `claude` in a folder with files you'd like to analyze. By default, thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off. Run `/plugin` to turn the thimble plugin off.
+Run `claude` in a folder with files you'd like to analyze. By default, thimble is on in every session. For a two-minute tour on made-up data, run `thimble tour` in a shell, or type `/thimble:tour` in Claude Code. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off. Run `/plugin` to turn the thimble plugin off.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 

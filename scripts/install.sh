@@ -240,20 +240,17 @@ signin() {
 }
 
 # finish WHAT: the end: what is installed, how to try it (in the Claude Code session that runs the install, which sets
-# CLAUDECODE for its commands, or in a terminal) with a short tour of thimble's keys, then what does not work yet
+# CLAUDECODE for its commands, or in a terminal), then what does not work yet. In a terminal it names the tour
+# (thimble tour, plugin/engine/kernel/tour.py); in Claude Code, Claude offers the tour itself (CLAUDE.md)
 finish() {
   say ""
   say "$1."
   say ""
   if [ -n "${CLAUDECODE:-}" ]; then say "Try it now: type /reload-plugins in this Claude Code session."
-  else say "Try it now: run claude in a folder of data files."; fi
-  # the steps of the first session's tour (plugin/bar/intro.ts TOUR_STEPS), with the default Citations (Claude cites)
-  say "A quick tour, once Claude answers you (selecting and clicking need Claude Code's fullscreen layout):"
-  say "  v      draws a card of the answer"
-  say "  e      explains the words you select in an answer"
-  say "  click  a citation (underlined words) to see its evidence: thimble checks it against the data, and corrects" \
-    "the words or marks them failed when they are wrong"
-  say "  s      writes a shorter, plainer version of a long answer below it"
+  else
+    say "Try it now: run claude in a folder of data files."
+    say "Take the two-minute tour: run thimble tour"
+  fi
   if [ "$built" = 1 ]; then
     say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
       "it prints."

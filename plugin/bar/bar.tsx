@@ -1,8 +1,7 @@
 // bar.tsx: the bar, thimble's line above the prompt, as one drawing. Its rows, top down:
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
-//                  the whole failure shows. A hint stands here only when the bar has no room for it whole (`Hint: …`),
-//                  and a step of the first session's tour always (`Tour 1/4: …`, bar/intro.ts), so the bar keeps its keys
+//                  the whole failure shows. A hint stands here only when the bar has no room for it whole (`Hint: …`)
 //   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
 //                  later), on (u undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
@@ -158,7 +157,7 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 
 /** The bar's rows: the failure line (or a hint the bar has no room for) when there is one, and the bar, `width` cells
  *  wide, on as many rows as its items need. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string; tour?: { lead: string; words: string } } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
@@ -180,18 +179,12 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const spare = (l: Item[], r: Item[]) => width - 9 - lenOf(l) - (r.length ? lenOf(r) + 2 : 0)
   // a hint: in place of the left's keys, after the busy step, while it fits there whole beside what the bar keeps (the
   // busy step's glyph and seconds, the right's keys); an item it names (“a ask”) stays after it, on the right too.
-  // Longer, it stands above the bar, and the bar keeps its keys. A step of the first session's tour (bar/intro.ts)
-  // always stands above the bar: it shows for several answers, and the keys it would hide act meanwhile (a card's, the
-  // selection's, the tray's, a rewrite's status)
-  const notice = preview ? null : await hintNow($).catch(() => null)
-  const tour = preview || notice || o.intro ? null : o.tour ?? null
-  const hint = preview ? null : (notice ?? o.intro ?? tour?.words ?? null)
-  // a hint's lead: `Hint:`, or the tour's (`Tour 1/4:`)
-  const lead = tour ? tour.lead : 'Hint:'
+  // Longer, it stands above the bar, and the bar keeps its keys
+  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
   const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
-  const hinted: Item[] = hint ? [{ id: 'hint', glyph: lead, words: hint }, ...keys.filter(named)] : []
-  const hintIn = !!hint && !tour && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
+  const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
+  const hintIn = !!hint && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
   const whole = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
   let left = whole
   if (!preview) {
@@ -270,7 +263,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a hint the bar has no room for: above it, whole, where the failure line stands (a hint and a failure never show
   // together)
   const hintRow = Box({ key: 'hint-line', flexDirection: 'row', width, children: [Text({ key: 'hint-text', wrap: 'wrap', children: [
-    Text({ key: 'g', color: accent(), children: `${lead} ` }), Text({ key: 'w', dimColor: true, children: hint }),
+    Text({ key: 'g', color: accent(), children: 'Hint: ' }), Text({ key: 'w', dimColor: true, children: hint }),
   ] })] })
   const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf, held)
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's

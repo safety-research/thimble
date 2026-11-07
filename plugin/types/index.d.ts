@@ -80,8 +80,6 @@ declare module 'claude-code' {
       hintsUsed: string[]
       /** the features a reminder named in the session, each once (bar/hints.ts) */
       hintsReminded: string[]
-      /** main answered in this session, so the first session's tour may show (bar/intro.ts) */
-      tourAnswered: boolean
 
       // ---- labels (labels/)
       /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's
@@ -186,6 +184,11 @@ declare module 'claude-code' {
       /** the messages queued for a look or being looked at, and the conversation's key: { session, msgs: [LookMsg] };
        *  a reload of the plugin queues them again */
       observerLooks: { session: string; msgs: unknown[] } | null
+
+      // ---- the tour (tour/tour.ts)
+      /** the tour /thimble:tour started: the step that waits (`v`, `e`, `cite`, `s`), the steps done, and the person's
+       *  own prompts while that step waits; null when no tour runs */
+      tour: { at: 'v' | 'e' | 'cite' | 's'; done: ('v' | 'e' | 'cite' | 's')[]; asides: number } | null
 
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */

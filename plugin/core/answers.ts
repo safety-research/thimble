@@ -5,9 +5,9 @@
 //   a turn     {turnId, n, prompt: {text, by, row}, rows, answer, reason, startedAt, endedAt, labels, cards, seq}:
 //              the prompt that started it and who sent it (prompt.submit's origin kind: composer, bridge, plugin,
 //              task-notification, peer, ...), its text rows in order, its answer (its last text row; none for a turn
-//              that ended in an error), the `thimble label` commands its Bash calls ran and the cards its card calls
-//              drew, each with its place in the turn (`seq`, shared by both lists; a card also with the number of text
-//              rows above it, `after`)
+//              that ended in an error, or for one of the tour's steps), the `thimble label` commands its Bash calls
+//              ran and the cards its card calls drew, each with its place in the turn (`seq`, shared by both lists; a
+//              card also with the number of text rows above it, `after`)
 //   a message  {row, turnId, text, at, parts}: one text row of Claude's, by its id (session.append's uuid, which is
 //              the AssistantMessage's requestId and the marks' row). `parts` holds what each feature keeps of the
 //              message, by the feature's name (partOf, setPart): one feature never writes another's part
@@ -23,6 +23,7 @@
 //                                     turn of main's gives the keys back to its answer (s squeezes the newest alone)
 //   sinceLast($)                      since the person's last prompt: the prompt, Claude's text rows, the answers
 //   expectPrompt(text)                a prompt of thimble's own that Claude reads as the person's, whose turn is theirs
+//   answerless(test)                  a kind of prompt of thimble's own whose turns answer nothing (the tour's steps)
 //   questionOf($, row)                the words of the prompt the row's turn answers
 //   partOf($, row, feature), setPart($, row, feature, value)   a feature's own part of a message
 //   labelsOf($, turnId, beforeSeq?)   the labels the turn's `thimble label` commands ran, before a step of the turn
@@ -80,6 +81,20 @@ export function expectPrompt(text: string, by = 'plugin'): () => void {
   const p: Prompt = { text: text.slice(0, PROMPT_MAX), by, row: null }
   wait(p)
   return () => unwait(p)
+}
+
+/** The kinds of prompt of thimble's own whose turns answer nothing (the tour's steps, tour/tour.ts): the features act
+ *  on the answers before such a turn, not on its words. */
+const answerlessTests = new Set<(p: Prompt) => boolean>()
+
+/** A kind of prompt whose turns answer nothing, by a test of the turn's prompt. */
+export function answerless(test: (p: Prompt) => boolean): void {
+  answerlessTests.add(test)
+}
+
+/** Whether a turn answers nothing: it ended in an error, or a prompt that answerless names started it. */
+function answersNothing(t: TurnRec, reason: string): boolean {
+  return reason === 'error' || [...answerlessTests].some(f => { try { return f(t.prompt) } catch { return false } })
 }
 
 /** The waiting prompt a turn that starts with `text` takes: the oldest with its words, or for a slash command's turn
@@ -442,12 +457,12 @@ export const registerAnswers: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // main's turn ends: its answer is its last text row (set before the modules inside this one hear the end, so they
-  // read it); a turn that ended in an error answered nothing
+  // read it); a turn that ended in an error, or that a prompt answerless names started, answered nothing
   on('turn.complete', { turnId: /\S/ }, async ($, e, next) => {
     if (e.agentId === undefined) {
       try {
         const at = Number(await $.clock.now())
-        await editTurn($, e.turnId, t => ({ ...t, reason: e.reason, endedAt: at, answer: e.reason === 'error' ? null : t.rows.at(-1) ?? null }))
+        await editTurn($, e.turnId, t => ({ ...t, reason: e.reason, endedAt: at, answer: answersNothing(t, e.reason) ? null : t.rows.at(-1) ?? null }))
       } catch {
         // the turn ends whatever the record makes of it
       }

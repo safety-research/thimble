@@ -19,7 +19,8 @@
 // seen before comes back from the record with no call. A call waits 1 s after the last change (settings.json
 // settleMs), and one record has one call at a time: a change while a call runs stops that call, and the rewrite starts
 // over at the new levels once the wait after the change ends. While a call runs the old text dims; when the new text
-// is there it writes itself in from the top at a model's pace.
+// is there it writes itself in from the top at a model's pace. A simpler version's first text is a step of the tour
+// done (tour/tour.ts).
 //
 // The chips belong to the whole answer, so with the squeeze switch for cards on, the request also shows the cards
 // drawn in the answer's turn (cards.ts), and a change of a card the reply asks for is made through the card runner as
@@ -42,6 +43,7 @@ import { lookAtCatchUp } from '../observer/observer'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 import { tracked } from '../telemetry/telemetry'
+import { tourDid } from '../tour/tour'
 import { trayOffRow } from '../tray/seam'
 import { answerCards, applyCards, placeCatchUpCards, showCards, type Answer } from './cards'
 import {
@@ -365,6 +367,8 @@ async function settled($: Engine, id: string, rec: Rec, o: { written: boolean })
     // explainers and heads-ups as an answer is
     if (typeof before?.shown !== 'string') await $.ui.scroll({ to: { key: blockKey(rec) }, block: 'start' }).catch(() => undefined)
     void lookAtCatchUp($, drawnAt(rec), rec.shown, { simpler: isSimplify(rec) }).catch(() => undefined)
+    // a simpler version's first text: a step of the tour done (tour/tour.ts)
+    if (isSimplify(rec) && typeof before?.shown !== 'string') void tourDid($, 's').catch(() => undefined)
   }
   if (now !== was && o.written) { await writeIn($, id, now.length); return }
   // a write-in still running for the version before stops: this one shows whole

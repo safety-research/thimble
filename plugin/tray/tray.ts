@@ -56,7 +56,8 @@
 // A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray
 // does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
 // the person sends a prompt, and gives way to the side pane a or + opens; while they scroll the transcript it stays as
-// it is, until 0 closes it or they open another mark. What the person opens reaches main through core/engaged.ts.
+// it is, until 0 closes it or they open another mark. What the person opens reaches main through core/engaged.ts. A
+// citation opened is a step of the tour done (tour/tour.ts).
 //
 //   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
 //   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
@@ -64,7 +65,6 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { spinNow } from '../bar/busy'
-import { hintUsed } from '../bar/hints'
 import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
@@ -92,6 +92,7 @@ import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
+import { tourDid } from '../tour/tour'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
@@ -456,9 +457,9 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   // a citation that waits to be checked until it is opened (Citations auto cite, or words asked about with c) starts
   // its check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
-  // a citation's evidence opened: the first session's tour goes on (bar/intro.ts), after the key's hook, which has only
-  // a few milliseconds and must not wait on the reads this takes
-  if (f.kind === 'citation') $.clock.after(0, () => { void hintUsed($, 'evidence').catch(() => undefined) })
+  // a citation opened is a step of the tour done (tour/tour.ts), after the key's hook, which has only a few
+  // milliseconds and must not wait on the reads this takes
+  if (f.kind === 'citation') $.clock.after(0, () => { void tourDid($, 'cite').catch(() => undefined) })
   await setTray($, open(f) as Tray)
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)

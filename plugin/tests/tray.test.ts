@@ -1,6 +1,7 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws
 // in focus; its card shows the check and the evidence; a question typed with it open carries nothing of it and closes
-// the tray; a press on a citation opens it too; 0 closes it. All data is made up. `claude plugin test plugin`.
+// the tray; a press on a citation opens it too; 0 closes it. A citation opened while the tour waits for it sends Claude
+// the tour's next step. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
@@ -134,4 +135,23 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('failed: 12')
   expect(band).not.toContain('a ask')
+})
+
+test("the tour (tour/tour.ts): while its citation step waits, ] on a citation sends Claude the next step, once", { options: { citations: 'auto cite + verify', cards: 'off', explain: 'off' } }, async ($, on) => {
+  const { submitted, clock } = await resumed($, on, QUOTED)
+  const tour = () => submitted.map(e => String(e.text)).filter(t => t.startsWith('(thimble tour)'))
+  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
+  // the turn that said step 1 ends: Cards and Explainers are off, so the tour goes on to the citation step
+  await $.turn.start({ text: '<command-name>/thimble:tour</command-name>', turnId: 't2' } as never)
+  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: '', durationMs: 10, isAborted: false } as never)
+  await clock.advance(100)
+  expect(tour()).toEqual(['(thimble tour) Step 1 is off in the settings. Say step 3.'])
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(10)
+  expect(tour()).toEqual(['(thimble tour) Step 1 is off in the settings. Say step 3.', '(thimble tour) Step 3 done. Say step 4.'])
+  // the same citation opened again: no second prompt
+  await $.prompt.edit(key('0'))
+  await $.prompt.edit(key(']'))
+  await clock.advance(10)
+  expect(tour().length).toBe(2)
 })
