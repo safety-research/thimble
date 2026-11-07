@@ -237,11 +237,14 @@ download() {
     failed "$(basename "$file") could not be unpacked ($(sed '/^ *$/d' "$work/err" | tail -n 1))" "$(again)"
   fi
   code="$work/release/$code"
-  # a release from before release files has a kernel that cannot install from one: its own script can
+  # a release from before release files has a kernel that cannot install from one: its own script can, with the
+  # command on a line of its own, to copy
   why="https://raw.githubusercontent.com/safety-research/thimble/$1/scripts/install.sh"
-  grep -q -- '"--file"' "$code/plugin/engine/kernel/cli.py" 2>/dev/null ||
-    failed "thimble ${1#v} comes from before thimble's releases had files, so this script cannot install it" \
-      "Its own script can: curl -fsSL $why | bash -s -- --ref $1."
+  grep -q -- '"--file"' "$code/plugin/engine/kernel/cli.py" 2>/dev/null || {
+    say " failed: thimble ${1#v} comes from before thimble's releases had files, so this script cannot install it."
+    say "Nothing was installed. Its own script installs it:"
+    say "  curl -fsSL $why | bash -s -- --ref $1"
+    exit 1; }
 }
 
 # no09 DIR: stops while thimble 0.9 is here, with what it found and the commands that remove it (DIR's

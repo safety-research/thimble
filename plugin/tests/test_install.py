@@ -561,11 +561,12 @@ def test_ref_to_a_release_from_before_release_files_gives_its_own_script(w):
     cli.write_text(cli.read_text().replace('"--file"', '"--from-file"'))
     w.publish("v0.10.7", file=False)
     p = w.install("--no-browser", "--ref", "v0.10.7")
-    assert p.returncode == 1 and p.stdout.splitlines()[-2:] == [
+    assert p.returncode == 1 and p.stdout.splitlines()[-3:] == [
         "Downloading thimble 0.10.7 into ~/.thimble... failed: thimble 0.10.7 comes from before thimble's releases had "
         "files, so this script cannot install it.",
-        "Its own script can: curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/v0.10.7/scripts/"
-        "install.sh | bash -s -- --ref v0.10.7. Nothing was installed."], text_of(p)
+        "Nothing was installed. Its own script installs it:",
+        "  curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/v0.10.7/scripts/install.sh | bash -s -- "
+        "--ref v0.10.7"], text_of(p)
     assert w.gh.requests()[-2:] == ["GET /releases/download/v0.10.7/SHA256SUMS", "GET /archive/v0.10.7.tar.gz"]
     nothing_installed(w)
 
