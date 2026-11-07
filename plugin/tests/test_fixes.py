@@ -484,6 +484,35 @@ def test_the_workbench_s_server_packages_are_compiled_once_also_where_an_older_i
     assert FX.browser_compiled(b)
 
 
+def test_an_update_says_when_the_headless_chromium_the_workbench_checks_cards_in_could_not_be_fetched(world,
+                                                                                                     monkeypatch):
+    """The workbench on live (browser_on_live, which thimble update and the install run) ends with the headless Chromium
+    it draws cards in, where it uses Playwright's: the workbench's own check fetches what is missing (python -m
+    app.headless --fetch). When it is still missing, the update's lines say so, with the command that fetches it."""
+    tmp = world["tmp"]
+    tools = tmp / "tools.log"
+    fake(tmp / "bin" / "uv", tools, 'mkdir -p "$3/.venv"')
+    fake(tmp / "bin" / "npm", tools, '[ "$3" = run ] && mkdir -p "$2/dist" && echo page > "$2/dist/index.html"')
+    monkeypatch.setenv("PATH", f"{tmp / 'bin'}:{os.environ['PATH']}")
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp / "bh"))
+    (tmp / "bh").mkdir()
+    b = FX.live_dir() / "browser"
+    for part, lock, pkgs in FX.BROWSER_LOCKS:
+        (b / part / pkgs).mkdir(parents=True)
+        (b / part / lock).write_text(f"made-up {lock}\n")
+    (b / "backend" / ".venv" / "bin").mkdir()
+    lacks = {"ok": False, "why": "no headless Chromium, so cards are not checked (its download failed: made-up)",
+             "fix": "Fetch it: made-up command"}
+    fake(b / "backend" / ".venv" / "bin" / "python", tools, f"echo '{json.dumps(lacks)}'")
+    got = FX.browser_on_live()
+    assert got["browser"] == "ready" and "-m app.headless --fetch" in tools.read_text().splitlines()
+    assert got["chromium"] == [f"has {lacks['why']}", "Fetch it: made-up command"]
+    assert (f"The browser workbench has {lacks['why']}. Fetch it: made-up command"
+            in FX._summary({"from": "0.10.12", "to": "0.10.13", **got}))
+    fake(b / "backend" / ".venv" / "bin" / "python", tools, "echo '{\"ok\": true}'")
+    assert "chromium" not in FX.browser_on_live()
+
+
 def state_of_fixes() -> dict:
     """What an update changes when it moves: mine, release.json, the records, the fixes' refs, the set-aside files, the
     release checkout, and the refs of releases in live."""
