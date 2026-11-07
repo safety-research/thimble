@@ -112,14 +112,17 @@ export function describe(chain: readonly ChainNode[]): ElementInfo {
 
 export const describeElement = (el: Element): ElementInfo => describe(chainOf(el))
 
-/** The nearest element that holds all of `els` (the first when there is one), for a ⌘-drag over several anchors. */
+/** The nearest element that holds all of `els` (the first when there is one), for a ⌘-drag over several anchors. A
+ * holder too big to draw whole, or one of no size, such as the canvas's plane (it places the cards, and is itself a
+ * point at the board's origin, out of sight once the board is panned), stands for nothing on screen: the first of `els`
+ * stands for them. */
 export function commonElement(els: readonly HTMLElement[]): HTMLElement | null {
   if (!els.length) return null
   let cur: HTMLElement | null = els[0]
   while (cur && !els.every((e) => cur!.contains(e))) cur = cur.parentElement
   if (!cur || cur === document.body || cur === document.documentElement) return els[0]
   const r = cur.getBoundingClientRect()
-  return r.width * r.height > MAX_CAPTURE_PX ? els[0] : cur
+  return r.width * r.height > MAX_CAPTURE_PX || !r.width || !r.height ? els[0] : cur
 }
 
 // The page's fonts as CSS with the font files inlined, read once (about half a second) and reused, so a picture shows

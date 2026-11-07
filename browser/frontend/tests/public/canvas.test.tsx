@@ -7,6 +7,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { Canvas } from '../../src/canvas/Canvas.tsx'
 import { boardOf, CARD_W, GAP, HEAD, layoutBoard, moveLocal, overlaps, PAD, placeFree, ROOT_Y, toPlane, UNMEASURED_H, type Rect, type View } from '../../src/canvas/layout.ts'
+import { api } from '../../src/lib/api.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import type { CanvasResponse, Cell, Group, Pos } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -71,6 +72,40 @@ test('a card Claude draws shows its question while the card check holds it, then
   expect(shown.text).toContain('Every one of the 56 runs')
   expect(shown.text).toContain('14 of the 56 runs failed.')
   expect(shown.at).toEqual(held.at)
+})
+
+test("a key pressed on a control in another part of the page, such as a button in the chat, is that control's, not the board's", async () => {
+  data = { groups: [group('g1', { title: 'Deploys' })], cells: [note('a', 'g1'), note('b', 'g1')] }
+  const el = await mount(<Canvas ws="ws" active={true} />)
+  await settle()
+  // a card selected on the board, and a button in the chat
+  const face = el.querySelector<HTMLElement>('[data-cell="a"]')!
+  await act(async () => {
+    face.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+  })
+  const chat = document.body.appendChild(document.createElement('div'))
+  chat.setAttribute('data-panel', 'chat')
+  const button = chat.appendChild(document.createElement('button'))
+  const press = (target: EventTarget, key: string) => {
+    const down = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    act(() => void target.dispatchEvent(down))
+    act(() => void target.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true })))
+    return down.defaultPrevented
+  }
+  const deleted = vi.spyOn(api, 'deleteCell').mockResolvedValue({ ok: true })
+  expect(press(button, ' '), 'Space presses the button, not the board').toBe(false)
+  expect(press(button, 'Enter'), 'Enter presses the button, not the board').toBe(false)
+  expect(press(button, 'Delete'), 'Delete deletes no card').toBe(false)
+  await settle()
+  expect(el.querySelector('.bfocus')).toBeNull()
+  expect(deleted).not.toHaveBeenCalled()
+  deleted.mockRestore()
+  // the same keys with the focus on no control are the board's: Space pans, Enter opens the selected card in focus mode
+  expect(press(document.body, ' ')).toBe(true)
+  expect(press(document.body, 'Enter')).toBe(true)
+  await settle()
+  expect(el.querySelector('.bfocus')).not.toBeNull()
 })
 
 test('Card makes a loose card where the analyst is looking, clear of what is drawn, and no group', async () => {

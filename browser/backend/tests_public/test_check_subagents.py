@@ -69,3 +69,20 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     subagents.run_ended(CORPUS, agent, "done", "Commented on 0 of 3 passages.", source="handback")
     await _until(lambda: _run("explainers").get("status") == "done", "the run never ended")
     assert _run("explainers")["summary"] == "Commented on 0 of 3 passages."
+
+
+async def test_main_s_stop_check_turns_the_check_off_stops_its_run_and_says_so_in_one_line(doc, bridge):
+    await _write()
+    _writer_done()
+    await _until(lambda: _run("judgment").get("agent_id"), "the check did not start at the writer's end")
+    agent = _run("judgment")["agent_id"]
+    r = await tools.call(CORPUS, "stop_check", {"name": "Judgment calls"})
+    assert not r.is_error, r.text
+    assert "Judgment calls turned off, its runs stopped on report:report" in r.text
+    assert checks.read(CORPUS, "judgment")["shown"] is False
+    assert [s["agent"] for s in bridge.ops("stop")] == [agent], "the run's agent was asked to stop"
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="handback")
+    await _until(lambda: _run("judgment").get("status") == "stopped", "the run never ended stopped")
+    again = await tools.call(CORPUS, "stop_check", {"name": "Judgment calls"})
+    assert not again.is_error, again.text
+    assert "Judgment calls turned off, with no run running" in again.text
