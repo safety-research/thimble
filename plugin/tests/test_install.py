@@ -247,10 +247,11 @@ def test_a_fresh_install_lays_the_release_out_in_thimbles_home_and_says_so(w):
         "thimble 0.10.8 is installed.",
         "",
         "Try it now: run claude in a folder of data files.",
-        "A quick tour, once Claude answers you:",
+        "A quick tour, once Claude answers you (selecting words needs Claude Code's fullscreen layout):",
         "  v  draws a card of the answer",
         "  e  explains the words you select in an answer",
-        "  c  checks the words you select against the data, and corrects them when they are wrong",
+        "  c  cites the words you select: thimble checks them against the data, and corrects them or marks them failed "
+        "when they are wrong",
         "  s  writes a shorter, plainer version of a long answer below it",
         "",
         "Note: ~/.local/bin is not on your PATH, so a new terminal does not find thimble. Add this line to ~/.zshrc: "
@@ -297,10 +298,11 @@ def test_both_products_build_the_workbench_in_live_and_link_its_command(w):
         "thimble 0.10.8 is installed.",
         "",
         "Try it now: run claude in a folder of data files.",
-        "A quick tour, once Claude answers you:",
+        "A quick tour, once Claude answers you (selecting words needs Claude Code's fullscreen layout):",
         "  v  draws a card of the answer",
         "  e  explains the words you select in an answer",
-        "  c  checks the words you select against the data, and corrects them when they are wrong",
+        "  c  cites the words you select: thimble checks them against the data, and corrects them or marks them failed "
+        "when they are wrong",
         "  s  writes a shorter, plainer version of a long answer below it",
         "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link "
         "it prints."], out
@@ -414,7 +416,8 @@ def test_local_installs_from_the_clone_as_the_dev_install(w):
     assert before_notes(p.stdout)[-8:-5] == [
         "thimble is installed from your clone ~/thimble.", "", "Try it now: run claude in a folder of data files."], \
         p.stdout
-    assert before_notes(p.stdout)[-5] == "A quick tour, once Claude answers you:", p.stdout
+    assert before_notes(p.stdout)[-5] == \
+        "A quick tour, once Claude answers you (selecting words needs Claude Code's fullscreen layout):", p.stdout
     assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
     assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(clone / "plugin" / "bin" / "thimble")
     assert not (w.th / "fixes").exists()

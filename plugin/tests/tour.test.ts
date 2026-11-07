@@ -1,11 +1,12 @@
-// The first session's tour (bar/intro.ts): after the intro and main's first answer, one step at a time in the bar's hint
-// row, `Tour 1/4: …`. A step goes when the person does what it says or after two prompts; a step whose feature is off
-// is skipped; once done, it never shows again, and while it runs no reminder shows. All data is made up.
+// The first session's tour (bar/intro.ts): after the intro and main's first answer in a session, one step at a time in
+// the row above the bar, `Tour 1/4: …`, with the bar's keys kept. A step goes when the person does what it says or
+// after two prompts sent while it showed; a step whose feature is off is skipped; once done, it never shows again, and
+// while it runs no reminder shows. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { hintUsed, remindAfterAnswer } from '../bar/hints'
-import { introDone, introHint, tourHint, tourPrompt, tourRuns, tourStart } from '../bar/intro'
+import { introDone, introHint, tourHint, tourPrompt, tourRuns, tourShown, tourStart } from '../bar/intro'
 import { failLineNow } from '../bar/notice'
 import { setOptions } from '../settings/features.mjs'
 import { test } from './kit'
@@ -42,10 +43,14 @@ async function answeredOnce($: Any): Promise<void> {
   await tourStart($)
 }
 
+/** The step as the bar draws it, told to the tour as register.ts tells it. */
 const words = async ($: Any, clicks = true) => {
   const t = await tourHint($, clicks)
+  tourShown(t?.id ?? null)
   return t ? `${t.lead} ${t.words}` : null
 }
+
+const CHECKED = 'thimble checks it against the data, and corrects the words or marks them × when they are wrong.'
 
 test('the tour shows its steps in order after the first answer, each going when the person does what it says, and never again once done', async () => {
   setOptions({})
@@ -58,7 +63,7 @@ test('the tour shows its steps in order after the first answer, each going when 
   await hintUsed($, 'visualize')
   expect(await words($)).toBe('Tour 2/4: select a few words in the answer and press e to explain them.')
   await hintUsed($, 'explain')
-  expect(await words($)).toBe('Tour 3/4: click an underlined citation to see its evidence: thimble checks it against the data and corrects its words when they are wrong.')
+  expect(await words($)).toBe(`Tour 3/4: click a citation to see its evidence: ${CHECKED}`)
   await hintUsed($, 'evidence')
   expect(await words($)).toBeNull()
   expect(await tourRuns($)).toBe(false)
@@ -73,13 +78,15 @@ test('a step goes after the person sent two prompts while it showed; c is the ci
   setOptions({})
   const { $ } = fake()
   await answeredOnce($)
+  expect(await words($)).toMatch(/^Tour 1\/4: press v/)
   await tourPrompt($)
   expect(await words($)).toMatch(/^Tour 1\/4: press v/)
   await tourPrompt($)
   expect(await words($)).toMatch(/^Tour 2\/4: select a few words/)
   await tourPrompt($)
+  expect(await words($)).toMatch(/^Tour 2\/4/)
   await tourPrompt($)
-  expect(await words($)).toMatch(/^Tour 3\/4: click an underlined citation/)
+  expect(await words($)).toMatch(/^Tour 3\/4: click a citation/)
   await hintUsed($, 'cite')
   expect(await words($)).toBe('Tour 4/4: press s for a shorter, plainer version of the answer.')
   // the count starts again for each step: one prompt is not enough
@@ -89,6 +96,41 @@ test('a step goes after the person sent two prompts while it showed; c is the ci
   expect(await words($)).toBeNull()
 })
 
+test('a prompt sent while the bar did not show the step does not count for it', async () => {
+  setOptions({})
+  const { $ } = fake()
+  await answeredOnce($)
+  expect(await words($)).toMatch(/^Tour 1\/4/)
+  // a failure line (or main at work) hid the step: register.ts drew none
+  tourShown(null)
+  await tourPrompt($)
+  await tourPrompt($)
+  expect(await words($)).toMatch(/^Tour 1\/4/)
+  // two prompts with no drawing between them count once
+  await tourPrompt($)
+  await tourPrompt($)
+  expect(await words($)).toMatch(/^Tour 1\/4/)
+  await tourPrompt($)
+  expect(await words($)).toMatch(/^Tour 2\/4/)
+})
+
+test('a tour not done goes on in the next session only after main answered there', async () => {
+  setOptions({})
+  const { $, nextSession } = fake()
+  await answeredOnce($)
+  await hintUsed($, 'visualize')
+  expect(await words($)).toMatch(/^Tour 2\/4/)
+  nextSession()
+  expect(await introHint($)).toBeNull()
+  // the session's start: no answer yet, so no step, and its first prompt does not count
+  expect(await words($)).toBeNull()
+  await tourPrompt($)
+  await tourStart($)
+  expect(await words($)).toMatch(/^Tour 2\/4: select a few words/)
+  await tourPrompt($)
+  expect(await words($)).toMatch(/^Tour 2\/4/)
+})
+
 test('a step whose feature is off is skipped, and the citation step says how citations work in each mode', async () => {
   const { $ } = fake()
   setOptions({ cards: 'off', squeezeAnswers: false })
@@ -96,10 +138,10 @@ test('a step whose feature is off is skipped, and the citation step says how cit
   expect(await words($)).toBe('Tour 1/2: select a few words in the answer and press e to explain them.')
   setOptions({ cards: 'off', squeezeAnswers: false, citations: 'manual' })
   await hintUsed($, 'explain')
-  expect(await words($)).toBe('Tour 2/2: select a claim in the answer and press c: thimble checks it against the data and corrects its words when they are wrong.')
+  expect(await words($)).toBe(`Tour 2/2: select a claim in the answer and press c: ${CHECKED}`)
   // where no click or selection reaches thimble: no e step, and Claude's citations open with ]
   setOptions({ cards: 'off', squeezeAnswers: false })
-  expect(await words($, false)).toBe('Tour 1/1: press ] to open a citation and its evidence: thimble checks it against the data and corrects its words when they are wrong.')
+  expect(await words($, false)).toBe(`Tour 1/1: press ] to open a citation and its evidence: ${CHECKED}`)
   // nothing left to show: the tour is over, and stays over when the features come back
   setOptions({ cards: 'off', squeezeAnswers: false, citations: 'off', explain: 'off' })
   expect(await words($)).toBeNull()
@@ -143,7 +185,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-test('in a session: the bar shows the intro, then after the first answer the tour step in place of its keys', { options: { labels: false, coverage: false } }, async ($, on) => {
+test('in a session: the bar shows the intro, then after the first answer the tour step above it, and keeps its keys', { options: { labels: false, coverage: false } }, async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
   const clock = mock.clock(on, { now: 0 })
   mock.store(on)
@@ -173,12 +215,15 @@ test('in a session: the bar shows the intro, then after the first answer the tou
   await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
   await clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
-  expect(line).toContain('Tour 1/4: press v to draw a card of this answer.')
+  // the step in the row above the bar, which keeps its keys
+  expect(line).toContain('Tour 1/4: press v to draw a card of this answer.thimble  v visualize')
   expect(line).not.toContain('Hint:')
-  // two prompts while it showed: the next step
+  // two prompts while it showed (the bar drawn before each): the next step
   for (const text of ['And the third?', 'Thanks.']) {
     await $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
     await $.turn.complete({ turnId: `t-${text}`, reason: 'answer', answer: 'Yes.', durationMs: 10, isAborted: false } as never)
+    await clock.advance(100)
+    await $.ui.render(BAND)
   }
   await clock.advance(100)
   expect(textOf(await $.ui.render(BAND))).toContain('Tour 2/4: select a few words in the answer and press e to explain them.')

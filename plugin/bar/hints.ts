@@ -3,7 +3,8 @@
 // feature once in the session; after each of main's answers, one reminder names a feature set to on demand (or
 // manual) that the session has not used yet, each at most once a session. Both are hints (notice.ts hintLine): the bar
 // shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt. While the first
-// session's tour runs (intro.ts), no reminder shows: its steps name the same keys. A feature used is told to the tour too.
+// session's tour runs (intro.ts), no reminder shows: its steps name the same keys. A feature used is told to the tour
+// too.
 //
 //   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named)
 import type { EngineInterface } from 'claude-code'

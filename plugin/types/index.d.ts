@@ -80,6 +80,8 @@ declare module 'claude-code' {
       hintsUsed: string[]
       /** the features a reminder named in the session, each once (bar/hints.ts) */
       hintsReminded: string[]
+      /** main answered in this session, so the first session's tour may show (bar/intro.ts) */
+      tourAnswered: boolean
 
       // ---- labels (labels/)
       /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's

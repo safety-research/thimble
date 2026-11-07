@@ -4,8 +4,8 @@
 //                aboveBar). /thimble-settings and a click on `thimble` open the settings (the command is one in every
 //                session, and when no pane opened its answer says so and names Claude Code's command that changes
 //                them); the person's next prompt takes the failure line and the line at the first session's start
-//                (intro.ts), and counts toward the tour's step; the end of main's turn starts the tour; the counts at
-//                each load of the plugin and after each of main's turns (counts.ts)
+//                (intro.ts), and counts toward the tour's step the bar showed; the end of main's turn lets the tour show
+//                in the session; the counts at each load of the plugin and after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵, the labels' number keys that check
 //                records), and esc closes it; coverage's r close is a click, so an r typed in it reaches the prompt,
@@ -20,7 +20,7 @@ import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { clicksReach, introDone, introHint, tourHint, tourPrompt, tourStart } from './intro'
+import { clicksReach, introDone, introHint, tourHint, tourPrompt, tourShown, tourStart } from './intro'
 import { remindAfterAnswer } from './hints'
 import { failLineNow, failNotice, promptTyped } from './notice'
 
@@ -145,12 +145,14 @@ export const registerBar: Register = on => {
       drawnPane = shows && (await paneShows($, shows).catch(() => false)) ? shows : null
       const width = Math.max(20, e.props.bodyColumns)
       // the hint at the first session's start that says where the settings are (intro.ts), in the bar: the click on
-      // `thimble`, or the command where no click reaches it; once it went, the tour's step, while no failure line, notice
-      // or other hint shows (a step that does not fit beside the keys would stand in the failure line's place)
+      // `thimble`, or the command where no click reaches it; once it went, the tour's step above the bar, while no
+      // failure line, notice or other hint shows (it would stand in the failure line's place). The step drawn is told to
+      // the tour, so a prompt counts only for a step the person saw
       const clicks = await clicksReach($, e).catch(() => true)
       const intro = await introHint($, clicks).catch(() => null)
       const tour = intro || (await failLineNow($).catch(() => null)) ? null : await tourHint($, clicks).catch(() => null)
-      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : tour ? { intro: tour.words, lead: tour.lead } : {}) })
+      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : tour ? { tour } : {}) })
+      tourShown(tour?.id ?? null)
       // what the features put above the bar (the tray), a blank row, and the bar (its rows as drawn: a failure line or a
       // hint wraps). Claude Code shows the band whole while it has at most maxRows rows: the tray takes at most the rows
       // the band has over the bar, so the bar, with ] and [, stays in view under it, and the blank row too when it does
