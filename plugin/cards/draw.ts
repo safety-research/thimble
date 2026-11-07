@@ -591,7 +591,9 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     // another row's line points to it
     if (meta.anchorRow && !here.includes(meta.anchorRow)) {
       const E = $.ui.resolve(e) as Any
-      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” is drawn under an earlier answer` })] })
+      // a simpler version of the answer the card is drawn under stands right below that card
+      const where = here.includes(`${meta.anchorRow}#s`) ? 'is drawn above' : 'is drawn under an earlier answer'
+      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }
     // a card stands in one place: the newest row that placed it (or a catch-up of the replies, `<row>#cu`, drawn below

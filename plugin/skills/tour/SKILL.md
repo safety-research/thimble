@@ -7,7 +7,7 @@ You give the person a short tour of thimble. Say each step's words exactly as wr
 
 The sample data is ${CLAUDE_PLUGIN_ROOT}/tour/sample/orders.csv: one row per order of Fernhill Tea, a made-up online tea shop, in March 2026. Step 0 is a fixed answer about it. One number in that answer is wrong on purpose, so that the person sees thimble check it. These two rules are for your own messages only: do not read the file to write step 0, and do not correct the wrong number in your messages. thimble's checker reads the file, checks each cited number, and corrects the wrong one.
 
-thimble sees what the person does. When a step is done, a prompt from thimble that starts with "(thimble tour)" names the step to say next. Say that step at once. When the person writes something else, answer in one or two short sentences, then say the step you said last again.
+thimble sees what the person does. When a step is done, a prompt from thimble that starts with "(thimble tour)" names the step to say next. Say that step at once. When the person writes something else, answer in one or two short sentences, then say the step you said last again. After step 5 the tour is over: answer as usual and say no step.
 
 ## Step 0
 
