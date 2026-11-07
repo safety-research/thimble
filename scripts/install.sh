@@ -4,12 +4,14 @@
 #   curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash -s -- OPTIONS
 #
-# It downloads the newest release with git into ~/.thimble/fixes/live (a git copy, so that /thimble-fix can keep your
-# fixes as commits), with the plain release beside it in ~/.thimble/fixes/release, adds the plugin to Claude Code from
-# there, builds the workbench there, and puts the commands thimble and thimble-browser in ~/.local/bin. thimble update
-# moves both products to a newer release later. Run from a downloaded release or a clone, it does the same; only
-# --local, in a clone, installs from that clone. The steps that change ~/.thimble and Claude Code are thimble's own
-# code, in the release it downloads (plugin/engine/kernel/install.py).
+# It downloads the newest release's file from GitHub (thimble-X.Y.Z.tar.gz, checked against its SHA256SUMS) and makes
+# it ~/.thimble/fixes/live, a git repository of its own, so that /thimble-fix can keep your fixes as commits, with the
+# plain release beside it in ~/.thimble/fixes/release; it adds the plugin to Claude Code from there, builds the
+# workbench there, and puts the commands thimble and thimble-browser in ~/.local/bin. thimble update moves both
+# products to a newer release later. GitHub counts the downloads of each release's file; thimble sends nothing else.
+# Run from a downloaded release or a clone, it does the same; only --local, in a clone, installs from that clone. The
+# steps that change ~/.thimble and Claude Code are thimble's own code, in the release it downloads
+# (plugin/engine/kernel/install.py). THIMBLE_RELEASES_URL stands in for GitHub's address in tests (a 127.0.0.1 server).
 set -euo pipefail
 
 usage() {
@@ -28,8 +30,9 @@ install in ~/.thimble stays as it is, with your fixes, and thimble update moves 
                      elsewhere the workbench asks when it starts
   --wif-file PATH    your WIF config file, for --sign-in wif
   --bin-dir DIR      put the commands thimble and thimble-browser in DIR, not in ~/.local/bin
-  --ref REF          install this branch or tag of thimble, not the newest release (to try a branch before its
-                     release); --version X.Y.Z is the same as --ref vX.Y.Z
+  --ref REF          install this branch or tag of thimble, not the newest release: a release's file when the tag has
+                     one, else GitHub's archive of it (to try a branch before its release); --version X.Y.Z is the
+                     same as --ref vX.Y.Z
   --local            in a clone of thimble: install from the clone (the dev install, for work on thimble's own code).
                      thimble update then follows the clone, which you pull yourself. A release installed in ~/.thimble
                      goes aside with its fixes, and the install without --local brings it back
@@ -49,9 +52,41 @@ terminal() { [ -t 1 ] && (exec </dev/tty) 2>/dev/null; }
 kernel() { "$py" -B "$code/plugin/engine/thimble.py" "$@" --notes "$notes" --state "$state"; }
 # browser 1: the kernel's option for a step that has the workbench to install, or installed
 browser() { if [ "$1" = 1 ]; then echo --browser; fi; }
-# remote ARGS...: git against thimble's repository, from / and with no ext:: transport, so that the config of a
-# repository around the person's folder cannot turn thimble's address into a command
-remote() { (cd / && git -c protocol.ext.allow=never "$@"); }
+# web ARGS...: curl as thimble reads its releases: no ~/.curlrc (-q), over HTTPS alone (plain http too while
+# THIMBLE_RELEASES_URL stands in for GitHub), its error line in $work/err
+web() {
+  local proto="=https"
+  [ -z "${THIMBLE_RELEASES_URL:-}" ] || proto="=http,https"
+  curl -q --proto "$proto" --proto-redir "$proto" -sS --connect-timeout 20 --retry 2 "$@" 2>"$work/err"
+}
+# why_curl: what curl said in $work/err, in one line, without its `curl: (N) `
+why_curl() { local why; why="$(sed -n 's/^curl: ([0-9]*) //p' "$work/err" | tail -n 1)"; printf '%s' "${why%.}"; }
+# failed WHY FIX: the end of the download's line, then what to do; nothing was installed, and the install stops
+failed() { say " failed: ${1%.}."; say "$2 Nothing was installed."; exit 1; }
+# again: what to do after a download that failed
+again() {
+  if [ -n "$asked" ]; then printf 'Check the network and the name %s, then run the install again.' "$asked"
+  else printf 'Check the network, then run the install again.'; fi
+}
+# sha FILE: its sha256 (macOS has shasum, Linux sha256sum; both have the Python that step 1 checked)
+sha() {
+  (cd / && "$py" -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1")
+}
+# unpack FILE DIR: the archive FILE into DIR, its one folder named on stdout; every member is checked before anything
+# is written: an absolute path, a .. part, anything but a file or a folder (a link, a device), or a second folder at
+# the top refuses it, with the member's name on stderr (Python's data filter, where it has one, checks again)
+unpack() {
+  (cd / && "$py" -I -c 'import sys, tarfile; t = tarfile.open(sys.argv[1]); m = t.getmembers(); '\
+'top = {x.name.split("/")[0] for x in m}; bad = [x.name for x in m if x.name.startswith("/") or ".." in '\
+'x.name.split("/") or not (x.isfile() or x.isdir()) or len(top) != 1]; bad and sys.exit("refused: " + bad[0]); '\
+'safe = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}; t.extractall(sys.argv[2], m, **safe); '\
+'print(*top)' "$1" "$2")
+}
+# newest: the newest release's tag, from where GitHub's page of the latest release points, which reads no file
+newest() {
+  web -o /dev/null -w '%{redirect_url}' --max-time 60 "$releases/releases/latest" |
+    sed -n 's|.*/releases/tag/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p'
+}
 
 # ver_ge HAVE WANT: whether the version HAVE is WANT or later, comparing up to three dotted numbers
 ver_ge() {
@@ -76,6 +111,7 @@ fix() {
       python) say "brew install python" ;;
       git) say "xcode-select --install" ;;
       uv) say "brew install uv" ;;
+      curl) say "brew install curl" ;;
     esac
     return 0
   fi
@@ -112,8 +148,9 @@ claude_update() {
   esac
 }
 
-# needs: what thimble needs, checked before anything is installed: Node.js, Python and git, Claude Code for the plugin,
-# uv and npm for the workbench. It says each version, or what is missing with its fix, and then installs nothing
+# needs: what thimble needs, checked before anything is installed: Node.js, Python and git, curl to download the
+# release, Claude Code for the plugin, uv and npm for the workbench. It says each version, or what is missing with its
+# fix, and then installs nothing
 needs() {
   say "Checking what thimble needs..."
   local have=() missing=() v
@@ -124,6 +161,8 @@ needs() {
   else missing+=("Python 3.10 or later${v:+ (the one here is $v)}: $(fix python)"); fi
   if v=$(git --version 2>/dev/null | awk '{print $3}') && [ -n "$v" ]; then have+=("git $v")
   else missing+=("git: $(fix git)"); fi
+  # every system has curl, so it is named only when it is missing; the dev install downloads no release
+  [ "$local" = 1 ] || command -v curl >/dev/null 2>&1 || missing+=("curl: $(fix curl)")
   v=$(claude --version 2>/dev/null | awk '{print $1}') || v=""
   if [ -n "$v" ] && ver_ge "$v" 2.1.307; then have+=("Claude Code $v")
   elif [ -n "$v" ]; then missing+=("Claude Code 2.1.307 or later (the one here is $v): $(claude_update)")
@@ -149,23 +188,54 @@ needs() {
   say "  ${v%, }: all here."
 }
 
-# why_git: what git said in $work/err, in one line: its first error (fatal: ...), else its last line
-why_git() {
-  local why
-  why="$(sed -n 's/^fatal: //p' "$work/err" | head -n 1)"
-  [ -n "$why" ] || why="$(sed '/^ *$/d' "$work/err" | tail -n 1)"
-  printf '%s' "${why%.}"
-}
-
-# download REF DIR: thimble's branch or tag REF from its repository, one commit deep, into DIR; on a failure, what git
-# said and what to do, and the install stops
+# download REF: thimble's release REF (vX.Y.Z): its SHA256SUMS, then its file, which must have the sha256 that
+# SHA256SUMS gives; with --ref, a branch, or a tag that has no file, is GitHub's archive of it (which GitHub does not
+# count). Then the file is unpacked, with $file, $tag (for a release's file) and $code (its folder) set. On a failure,
+# what went wrong and what to do, and the install stops
 download() {
-  if ! remote -c advice.detachedHead=false clone -q --depth 1 --branch "$1" "$url" "$2" </dev/null 2>"$work/err"; then
-    say " failed: $(why_git)."
-    if [ -n "$asked" ]; then say "Check the network and the name $1, then run the install again. Nothing was installed."
-    else say "Check the network, then run the install again. Nothing was installed."; fi
-    exit 1
+  local name got at why want
+  file="" tag="" name="thimble-${1#v}.tar.gz" at="$releases/releases/download/$1"
+  mkdir -p "$work/get"
+  case "$1" in
+    v[0-9]*)
+      got=$(web -L -o "$work/get/SHA256SUMS" -w '%{http_code}' --max-time 120 "$at/SHA256SUMS") ||
+        failed "$(why_curl)" "$(again)"
+      if [ "$got" = 200 ]; then
+        got=$(web -L -o "$work/get/$name" -w '%{http_code}' --max-time 600 "$at/$name") || {
+          [ $? = 23 ] && failed "$(why_curl)" "Make room on the disk (${TMPDIR:-/tmp}), then run the install again."
+          failed "$(why_curl)" "$(again)"; }
+        [ "$got" != 404 ] || failed "thimble ${1#v}'s release file is missing on GitHub ($name)" \
+          "Run the install again in a few minutes; if it says this again, report it at $issues."
+        [ "$got" = 200 ] || failed "GitHub answered $got" "$(again)"
+        want="$(awk -v n="$name" '$2 == n || $2 == "*" n { print tolower($1) }' "$work/get/SHA256SUMS")"
+        why="$name does not have the sha256 its SHA256SUMS gives, so the download is broken"
+        [ -n "$want" ] && [ "$want" = "$(sha "$work/get/$name")" ] || failed "$why" "Run the install again."
+        file="$work/get/$name" tag="$1"
+      elif [ "$got" != 404 ]; then failed "GitHub answered $got" "$(again)"
+      elif [ -z "$asked" ]; then failed "thimble ${1#v} has no release file on GitHub ($name)" \
+        "Run the install again in a few minutes; if it says this again, report it at $issues."
+      fi ;;
+  esac
+  if [ -z "$file" ]; then
+    file="$work/get/thimble-$(printf '%s' "$1" | tr / -).tar.gz"
+    got=$(web -L -o "$file" -w '%{http_code}' --max-time 600 "$releases/archive/$1.tar.gz") || {
+      [ $? = 23 ] && failed "$(why_curl)" "Make room on the disk (${TMPDIR:-/tmp}), then run the install again."
+      failed "$(why_curl)" "$(again)"; }
+    [ "$got" != 404 ] || failed "GitHub has no branch or tag named $1" "Check the name $1, then run the install again."
+    [ "$got" = 200 ] || failed "GitHub answered $got" "$(again)"
   fi
+  mkdir "$work/release"
+  if ! code="$(unpack "$file" "$work/release" 2>"$work/err")"; then
+    why="$(sed -n 's/^refused: //p' "$work/err" | head -n 1)"
+    [ -z "$why" ] || failed "$(basename "$file") holds $why, a link or a path out of its folder" "Report it at $issues."
+    failed "$(basename "$file") could not be unpacked ($(sed '/^ *$/d' "$work/err" | tail -n 1))" "$(again)"
+  fi
+  code="$work/release/$code"
+  # a release from before release files has a kernel that cannot install from one: its own script can
+  why="https://raw.githubusercontent.com/safety-research/thimble/$1/scripts/install.sh"
+  grep -q -- '"--file"' "$code/plugin/engine/kernel/cli.py" 2>/dev/null ||
+    failed "thimble ${1#v} comes from before thimble's releases had files, so this script cannot install it" \
+      "Its own script can: curl -fsSL $why | bash -s -- --ref $1."
 }
 
 # no09 DIR: stops while thimble 0.9 is here, with what it found and the commands that remove it (DIR's
@@ -278,6 +348,9 @@ main() {
     esac
     shift
   done
+  # the name goes into an address on GitHub
+  case "$asked" in *[!A-Za-z0-9._/+@-]* | *..* | [-/]*)
+    stop "--ref takes the name of a branch or tag of thimble, such as main or v0.10.13" ;; esac
   case "$sign_in" in "" | claude-code | api-key | wif) ;; *) stop "--sign-in is claude-code, api-key or wif" ;; esac
   [ -z "$wif_file" ] || [ -n "$sign_in" ] || sign_in=wif
   [ "$sign_in" != wif ] || [ -n "$wif_file" ] || terminal ||
@@ -285,7 +358,8 @@ main() {
   [ "$web" = 1 ] || [ -z "$sign_in" ] || stop "--sign-in sets up the workbench, which --no-browser leaves out"
   case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) stop "thimble runs on Windows only inside WSL 2. In PowerShell:" \
     "wsl --install (restart if asked), then open Ubuntu from the Start menu and run this install command there." ;; esac
-  py="${THIMBLE_PYTHON:-python3}" url="${THIMBLE_UPDATE_URL:-https://github.com/safety-research/thimble.git}"
+  py="${THIMBLE_PYTHON:-python3}" releases="${THIMBLE_RELEASES_URL:-https://github.com/safety-research/thimble}"
+  releases="${releases%/}" issues="https://github.com/safety-research/thimble/issues"
   home="${THIMBLE_HOME:-$HOME/.thimble}" fixes="${THIMBLE_HOME:-$HOME/.thimble}/fixes"
   # the install's own folder: the kernel takes --notes and --state only in one so named (install.py in_work)
   work="$(mktemp -d "${TMPDIR:-/tmp}/thimble-install.XXXXXX")"
@@ -324,19 +398,16 @@ main() {
     return 0
   fi
 
-  # 2. the release: the newest, or the branch or tag that --ref names
+  # 2. the release: the newest, which GitHub's page of the latest release names, or the branch or tag that --ref names
   if [ -n "$asked" ]; then
     ref="$asked"
   else
-    ref="$(remote ls-remote --tags --refs "$url" 'refs/tags/v*' 2>"$work/err" |
-      sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' |
-      sort -t. -k1.2,1n -k2,2n -k3,3n | tail -n 1)" || ref=""
+    ref="$(newest)" || ref=""
     if [ -z "$ref" ]; then
       printf 'Downloading thimble into %s...' "$(tilde "$home")"
-      why="$(why_git)"
-      say " failed: ${why:-$url has no release}."
-      say "Check the network, then run the install again. Nothing was installed."
-      exit 1
+      why="$(why_curl)"
+      failed "${why:-https://github.com/safety-research/thimble has no release}" \
+        "Check the network, then run the install again."
     fi
   fi
   name="$ref"
@@ -347,9 +418,8 @@ main() {
     # 3. an install in ~/.thimble stays, with its fixes; it runs its own code, unless it is older than this install
     code="$fixes/release"
     if [ ! -f "$code/plugin/engine/kernel/install.py" ]; then
-      code="$work/thimble"
       printf 'Downloading thimble %s for its install steps...' "$name"
-      download "$ref" "$code"
+      download "$ref"
       say " done."
     fi
     no09 "$code"
@@ -358,17 +428,17 @@ main() {
       exit 1
     }
   else
-    # 3. the release, downloaded with git into a folder of its own, then made ~/.thimble/fixes/live. A dev install's
-    # fixes there (--local) go aside first, and the release that --local set aside comes back in place of the download
-    code="$work/thimble" back=""
+    # 3. the release's file, downloaded and checked, then made ~/.thimble/fixes/live. A dev install's fixes there
+    # (--local) go aside first, and the release that --local set aside comes back in place of the download
+    back=""
     for d in "$fixes"-release-*; do if [ -e "$d/live/.git" ] && [ -f "$d/release.json" ]; then back=1; fi; done
     if [ -n "$back" ]; then printf 'Downloading thimble %s for its install steps...' "$name"
     else printf 'Downloading thimble %s into %s...' "$name" "$(tilde "$home")"; fi
     open=1
-    download "$ref" "$code"
+    download "$ref"
     no09 "$code"
-    if out="$(kernel install release --from "$code" ${asked:+--ref "$asked"} --bin-dir "$bin_dir" $(browser "$web") \
-      2>&1)"; then say " done."
+    if out="$(kernel install release --file "$file" ${tag:+--tag "$tag"} ${asked:+--ref "$asked"} \
+      --bin-dir "$bin_dir" $(browser "$web") 2>&1)"; then say " done."
     else say " failed: $out"; exit 1; fi
     open=0
     [ -z "$out" ] || say "$out"

@@ -7,12 +7,15 @@ are a server on 127.0.0.1 (releases_server.py, THIMBLE_RELEASES_URL), where each
 fake that keeps Claude Code's records as Claude Code does; node, uv and npm are fakes. All data here is made up."""
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -264,14 +267,24 @@ def test_a_fresh_install_lays_the_release_out_in_thimbles_home_and_says_so(w):
     ], text_of(p)
     live, rel = w.th / "fixes" / "live", w.release()
     v8 = sh("git", "rev-parse", "v0.10.8", cwd=w.bare)
-    # the layout thimble update makes: live at the release on mine, its origin thimble's repository, and the release
-    # checkout
-    assert sh("git", "rev-parse", "mine", cwd=live) == v8
+    # the layout thimble update makes: live, a git repository of its own whose release commit, made from the release's
+    # file, has the tag's files and no parent, on mine; and the release checkout
+    made = sh("git", "rev-parse", "mine", cwd=live)
+    assert sh("git", "rev-parse", "mine^{tree}", cwd=live) == sh("git", "rev-parse", "v0.10.8^{tree}", cwd=w.bare)
+    assert sh("git", "log", "-1", "--format=%P|%an|%s", "mine", cwd=live) == "|thimble|thimble v0.10.8"
     assert sh("git", "symbolic-ref", "--short", "HEAD", cwd=live) == "mine"
-    assert sh("git", "remote", "get-url", "origin", cwd=live) == str(w.bare)
-    assert sh("git", "rev-parse", "HEAD", cwd=w.th / "fixes" / "release") == v8
-    assert (rel["kind"], rel["base"], rel["tag"], rel["pointed"]) == ("github", v8, "v0.10.8", True)
-    assert rel["repo"] == str(live)
+    assert sh("git", "remote", cwd=live) == ""
+    assert sh("git", "rev-parse", "HEAD", cwd=w.th / "fixes" / "release") == made
+    # release.json: where it came from, GitHub's commit of the release, and the file's sha256
+    f = w.gh.root / "v0.10.8" / "thimble-0.10.8.tar.gz"
+    assert (rel["kind"], rel["base"], rel["commit"], rel["tag"], rel["pointed"]) == ("release", made, v8, "v0.10.8",
+                                                                                     True)
+    assert rel["source"] == f"{w.gh.url}/releases/download/v0.10.8/thimble-0.10.8.tar.gz"
+    assert rel["sha256"] == hashlib.sha256(f.read_bytes()).hexdigest() and rel["repo"] == str(live)
+    # GitHub: the newest release's page, then its SHA256SUMS and its file, each once; no archive
+    assert w.gh.requests() == ["GET /releases/latest", "GET /releases/download/v0.10.8/SHA256SUMS",
+                               "GET /assets/v0.10.8/SHA256SUMS", "GET /releases/download/v0.10.8/thimble-0.10.8.tar.gz",
+                               "GET /assets/v0.10.8/thimble-0.10.8.tar.gz"]
     # Claude Code loads it from live, with each setting's default
     manifest = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())
     assert w.calls()[1:] == [f"plugin marketplace add {live}",
@@ -327,7 +340,10 @@ def test_the_options_that_cannot_work_stop_before_anything(w):
     for args, said in ((("--sign-in", "key"), "--sign-in is claude-code, api-key or wif"),
                        (("--sign-in", "wif"), "--sign-in wif needs --wif-file PATH"),
                        (("--no-browser", "--sign-in", "api-key"), "--sign-in sets up the workbench"),
-                       (("--made-up",), "unknown option --made-up")):
+                       (("--made-up",), "unknown option --made-up"),
+                       (("--ref", "main;made-up"), "--ref takes the name of a branch or tag of thimble, such as main or "
+                                                  "v0.10.13"),
+                       (("--ref", "../../made-up/fork"), "--ref takes the name of a branch or tag")):
         p = w.install(*args)
         assert p.returncode == 2 and said in p.stderr, text_of(p)
     assert not w.th.exists()
@@ -403,6 +419,133 @@ def test_thimble_update_moves_the_install_to_a_newer_release_in_place(w):
     assert w.gh.files() == [*downloaded, "/releases/download/v0.10.9/thimble-0.10.9.tar.gz"]
     assert sh("git", "rev-parse", "HEAD", cwd=w.th / "fixes" / "release") == made
     assert w.calls()[-1] == "plugin update thimble@thimble"
+
+
+def nothing_installed(w) -> None:
+    assert not (w.th / "fixes").exists() and not w.cc.exists()
+    assert not any((w.tmp / "tmp").iterdir()), "the download goes"
+
+
+def test_a_release_file_that_is_missing_broken_or_out_of_reach_says_what_to_do_and_installs_nothing(w):
+    w.publish("v0.10.9")
+    issues = "https://github.com/safety-research/thimble/issues"
+    w.gh.drop("v0.10.9")
+    p = w.install("--no-browser")
+    assert p.returncode == 1 and p.stdout.splitlines()[-2:] == [
+        "Downloading thimble 0.10.9 into ~/.thimble... failed: thimble 0.10.9 has no release file on GitHub "
+        "(thimble-0.10.9.tar.gz).",
+        f"Run the install again in a few minutes; if it says this again, report it at {issues}. Nothing was "
+        "installed."], text_of(p)
+    nothing_installed(w)
+    w.gh.publish(w.bare, "v0.10.9")
+    w.gh.spoil("v0.10.9")
+    p = w.install("--no-browser")
+    assert p.returncode == 1 and p.stdout.splitlines()[-2:] == [
+        "Downloading thimble 0.10.9 into ~/.thimble... failed: thimble-0.10.9.tar.gz does not have the sha256 its "
+        "SHA256SUMS gives, so the download is broken.",
+        "Run the install again. Nothing was installed."], text_of(p)
+    nothing_installed(w)
+    # a file that holds a link out of its folder, though its sha256 is the one SHA256SUMS gives
+    f = w.gh.root / "v0.10.9" / "thimble-0.10.9.tar.gz"
+    with tarfile.open(f, "w:gz") as t:
+        for name, kind in (("thimble-0.10.9", tarfile.DIRTYPE), ("thimble-0.10.9/plugin", tarfile.SYMTYPE)):
+            info = tarfile.TarInfo(name)
+            info.type, info.linkname = kind, "../../made-up"
+            t.addfile(info)
+    (f.parent / "SHA256SUMS").write_text(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  thimble-0.10.9.tar.gz\n")
+    p = w.install("--no-browser")
+    assert p.returncode == 1 and p.stdout.splitlines()[-2:] == [
+        "Downloading thimble 0.10.9 into ~/.thimble... failed: thimble-0.10.9.tar.gz holds thimble-0.10.9/plugin, a "
+        "link or a path out of its folder.",
+        f"Report it at {issues}. Nothing was installed."], text_of(p)
+    nothing_installed(w)
+    w.gh.stop()
+    p = w.install("--no-browser")
+    lines = p.stdout.splitlines()
+    assert p.returncode == 1 and lines[-2].startswith("Downloading thimble into ~/.thimble... failed: ") and \
+        "curl" not in lines[-2], text_of(p)
+    assert lines[-1] == "Check the network, then run the install again. Nothing was installed."
+    nothing_installed(w)
+
+
+def test_running_it_again_leaves_the_install_as_it_is_and_downloads_nothing(w):
+    assert w.install("--no-browser").returncode == 0
+    calls, asked = w.calls(), len(w.gh.requests())
+    p = w.install("--no-browser")
+    assert p.returncode == 0, text_of(p)
+    assert p.stdout.splitlines()[-1] == ("thimble 0.10.8 is installed in ~/.thimble. The plugin and the commands are "
+                                         "in place.")
+    assert "Downloading" not in p.stdout
+    assert w.calls()[len(calls):] == ["--version"], "nothing changes in Claude Code"
+    assert w.gh.requests()[asked:] == ["GET /releases/latest", "GET /releases/latest"], "the newest release's page"
+
+
+def test_a_newer_release_is_said_with_thimble_update(w):
+    assert w.install("--no-browser").returncode == 0
+    w.publish("v0.10.9")
+    p = w.install("--no-browser")
+    assert p.stdout.splitlines()[-2:] == [
+        "thimble 0.10.8 is installed in ~/.thimble. The plugin and the commands are in place.",
+        "thimble 0.10.9 is out: thimble update moves to it and keeps your fixes."], text_of(p)
+
+
+def test_ref_installs_a_release_from_its_file_and_a_branch_from_github_s_archive(w, tmp_path):
+    w.publish("v0.10.9")
+    p = w.install("--no-browser", "--ref", "v0.10.8")
+    assert p.returncode == 0, text_of(p)
+    assert "Downloading thimble 0.10.8 into ~/.thimble... done." in p.stdout.splitlines()
+    assert (w.release()["tag"], w.release()["kind"]) == ("v0.10.8", "release") and "ref" not in w.release()
+    assert w.gh.files() == ["/releases/download/v0.10.8/thimble-0.10.8.tar.gz"]
+    # a branch: GitHub's archive of it, which counts nothing, and the newest release then, which says whether a later
+    # release is newer
+    (tmp_path / "other").mkdir()
+    (tmp_path / "third").mkdir()
+    other = World(tmp_path / "other")
+    third = World(tmp_path / "third")
+    try:
+        other.publish("v0.10.9")
+        tip = other.publish(branch="try-r110")
+        p = other.install("--no-browser", "--ref", "try-r110")
+        assert p.returncode == 0, text_of(p)
+        assert "Downloading thimble try-r110 into ~/.thimble... done." in p.stdout.splitlines()
+        assert f"thimble try-r110 at {tip[:7]} is installed." in p.stdout.splitlines()
+        rel = other.release()
+        assert (rel["ref"], rel["based_on"], rel["commit"], "tag" in rel) == ("try-r110", "v0.10.9", tip, False)
+        assert rel["source"] == f"{other.gh.url}/archive/try-r110.tar.gz"
+        assert other.gh.files() == [] and "GET /archive/try-r110.tar.gz" in other.gh.requests()
+        link = other.home / ".local" / "bin" / "thimble"
+        got = subprocess.run([str(link), "update", "--check"], capture_output=True, text=True, env=other.env())
+        assert got.stdout.strip() == f"thimble try-r110 at {tip[:7]} is up to date; the newest release is 0.10.9.", \
+            text_of(got)
+        other.publish("v0.10.10")
+        got = subprocess.run([str(link), "update", "--check"], capture_output=True, text=True, env=other.env())
+        assert got.stdout.strip() == f"thimble 0.10.10 is out (you have try-r110 at {tip[:7]}): thimble update in a " \
+            "shell", text_of(got)
+        # a branch or tag that GitHub does not have
+        p = third.install("--no-browser", "--ref", "no-such-branch")
+        assert p.returncode == 1 and p.stdout.splitlines()[-2:] == [
+            "Downloading thimble no-such-branch into ~/.thimble... failed: GitHub has no branch or tag named "
+            "no-such-branch.",
+            "Check the name no-such-branch, then run the install again. Nothing was installed."], text_of(p)
+    finally:
+        other.gh.stop()
+        third.gh.stop()
+
+
+def test_ref_to_a_release_from_before_release_files_gives_its_own_script(w):
+    """A release from before release files has a kernel that cannot install from one: the script names that release's
+    own script, which installs it with git, as before."""
+    cli = w.work / "plugin" / "engine" / "kernel" / "cli.py"
+    cli.write_text(cli.read_text().replace('"--file"', '"--from-file"'))
+    w.publish("v0.10.7", file=False)
+    p = w.install("--no-browser", "--ref", "v0.10.7")
+    assert p.returncode == 1 and p.stdout.splitlines()[-2:] == [
+        "Downloading thimble 0.10.7 into ~/.thimble... failed: thimble 0.10.7 comes from before thimble's releases had "
+        "files, so this script cannot install it.",
+        "Its own script can: curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/v0.10.7/scripts/"
+        "install.sh | bash -s -- --ref v0.10.7. Nothing was installed."], text_of(p)
+    assert w.gh.requests()[-2:] == ["GET /releases/download/v0.10.7/SHA256SUMS", "GET /archive/v0.10.7.tar.gz"]
+    nothing_installed(w)
 
 
 def live_head(w) -> str:
