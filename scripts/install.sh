@@ -247,12 +247,13 @@ finish() {
   say ""
   if [ -n "${CLAUDECODE:-}" ]; then say "Try it now: type /reload-plugins in this Claude Code session."
   else say "Try it now: run claude in a folder of data files."; fi
-  say "A quick tour, once Claude answers you (selecting words needs Claude Code's fullscreen layout):"
-  say "  v  draws a card of the answer"
-  say "  e  explains the words you select in an answer"
-  say "  c  cites the words you select: thimble checks them against the data, and corrects them or marks them failed" \
-    "when they are wrong"
-  say "  s  writes a shorter, plainer version of a long answer below it"
+  # the steps of the first session's tour (plugin/bar/intro.ts TOUR_STEPS), with the default Citations (Claude cites)
+  say "A quick tour, once Claude answers you (selecting and clicking need Claude Code's fullscreen layout):"
+  say "  v      draws a card of the answer"
+  say "  e      explains the words you select in an answer"
+  say "  click  a citation (underlined words) to see its evidence: thimble checks it against the data, and corrects" \
+    "the words or marks them failed when they are wrong"
+  say "  s      writes a shorter, plainer version of a long answer below it"
   if [ "$built" = 1 ]; then
     say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
       "it prints."
