@@ -120,53 +120,6 @@
       "title": "Coverage",
       "description": "Press r to see which files Claude has read, by folder. No model call: thimble counts the files after each turn.",
       "default": true
-    },
-    "marks": {
-      "type": "boolean",
-      "title": "Citations (old setting)",
-      "description": "Replaced by Citations, which has its modes.",
-      "default": true
-    },
-    "citationChecks": {
-      "type": "string",
-      "title": "Citation checks (old setting)",
-      "description": "Replaced by Citations, which has its modes.",
-      "options": [
-        "auto",
-        "on demand",
-        "off"
-      ],
-      "default": "on demand"
-    },
-    "squeeze": {
-      "type": "boolean",
-      "title": "Squeeze and catch-up (old setting)",
-      "description": "Replaced by Simplify and Catch-up.",
-      "default": true
-    },
-    "counts": {
-      "type": "boolean",
-      "title": "Labels and coverage on the bar (old setting)",
-      "description": "Replaced by Labels and Coverage.",
-      "default": true
-    },
-    "squeezeCards": {
-      "type": "boolean",
-      "title": "Squeeze changes cards (old setting)",
-      "description": "Removed: a squeeze may move or leave out a card.",
-      "default": true
-    },
-    "claims": {
-      "type": "boolean",
-      "title": "Claims (old setting)",
-      "description": "Replaced by Claims, which has its modes.",
-      "default": true
-    },
-    "defaultsAt": {
-      "type": "string",
-      "title": "Defaults seen (internal)",
-      "description": "The thimble version whose defaults these settings have had.",
-      "default": "none"
     }
   }
 }

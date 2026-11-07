@@ -3,7 +3,7 @@
 // made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
-import { DEFAULTS, PRESET, setOptions } from '../settings/features.mjs'
+import { PRESET, setOptions } from '../settings/features.mjs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,7 +14,7 @@ const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', reques
 test('/thimble-settings opens the settings under their headings; a press on a choice sets it through Claude Code, and its items leave the preview', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
-  const rows: Record<string, boolean | string> = { marks: true, cards: 'auto', coverage: true, labels: true }
+  const rows: Record<string, boolean | string> = { cards: 'auto', coverage: true, labels: true }
   const set: Any[] = []
   const opened: Any[] = []
   on('config.list', () => ({ value: Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })) }))
@@ -37,7 +37,7 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
 
   await pane.press({ key: 'mode-coverage-off' })
-  // the change alone: no default moved, so nothing else is saved (each save loads the plugin again)
+  // the change alone: nothing else is saved (each save loads the plugin again)
   expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.coverage', value: false })])
   expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('No Coverage pane.')
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeUndefined()
@@ -83,7 +83,7 @@ function settingsWorld(on: Any, rows: Record<string, boolean | string>): Any[] {
 }
 
 test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Explainers and Heads-ups auto, and Simplify, Catch-up, Claims, Labels and Coverage off, which the rows and the preview show; off puts back what they had', async ($, on) => {
-  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: false, explain: 'on demand', details: 'off', claimsMode: 'auto', labels: true, coverage: true, defaultsAt: DEFAULTS.at }
+  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: false, explain: 'on demand', details: 'off', claimsMode: 'auto', labels: true, coverage: true }
   const set = settingsWorld(on, rows)
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
@@ -112,6 +112,25 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   await settleAll($)
   expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: false, explain: 'on demand', details: 'off', claimsMode: 'auto', labels: true, coverage: true })
   for (const w of [/^ simplify$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
+  await pane.unmount()
+  setOptions({})
+})
+
+/** The settings an install updated from 0.10.12 holds: modes the person set, which are not the defaults. */
+const UPDATED: Record<string, boolean | string> = { minimal: false, citations: 'manual', cards: 'on demand', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'auto', claimsMode: 'on demand', labels: false, coverage: true }
+
+// settings.json still holds the fields that the manifest had until 0.10.12, here with values an older release saved
+test('an install updated from 0.10.12 keeps the settings the person set: its session start saves nothing, and what the fields of the old manifest still hold changes nothing', { options: { ...UPDATED, marks: false, citationChecks: 'off', squeeze: false, counts: false, claims: false, defaultsAt: 'none' } }, async ($, on) => {
+  const set = settingsWorld(on, { ...UPDATED })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true })
+  expect(set).toEqual([])
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('Select words and press c')
+  expect((await pane.find({ key: 'says-cards' }))?.text).toContain('only when you ask for one')
+  expect((await pane.find({ key: 'says-squeezeAnswers' }))?.text).toContain('Press s')
+  expect((await pane.find({ key: 'says-claimsMode' }))?.text).toContain('only when you press f')
+  expect((await pane.find({ key: 'says-labels' }))?.text).toContain('No Labels pane')
   await pane.unmount()
   setOptions({})
 })

@@ -128,7 +128,7 @@ def defaults(manifest: dict[str, Any]) -> list[str]:
     """--config KEY=VALUE for each setting of the plugin (its userConfig) with its default, as `claude plugin install`
     takes them: a string bare (quotes would be kept as part of it), a boolean as true or false. An empty default stays
     unset: Claude Code refuses an empty value, and one refused value drops them all. A fresh install gets them, so that
-    no setting is left unset (settings/features.mjs, DEFAULTS)."""
+    no setting is left unset."""
     out: list[str] = []
     for key, field in (manifest.get("userConfig") or {}).items():
         d = field.get("default") if isinstance(field, dict) else None
