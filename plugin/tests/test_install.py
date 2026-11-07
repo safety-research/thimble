@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -423,7 +424,8 @@ def test_an_install_inside_claude_code_names_reload_plugins_and_the_tour_starts_
     assert before_notes(p.stdout)[-3:] == [
         "thimble is installed from your clone ~/thimble.", "",
         "Try it now: type /reload-plugins in this Claude Code session. A two-minute tour of thimble starts then."], p.stdout
-    assert (w.th / "tour-next").read_text() == "made-up-session\n"
+    named, at = (w.th / "tour-next").read_text().split()
+    assert named == "made-up-session" and abs(int(at) - time.time()) < 600
     assert "thimble tour" not in p.stdout
     (w.th / "tour-next").unlink()
     p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1")

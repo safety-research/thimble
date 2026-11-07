@@ -139,10 +139,10 @@ test('] opens the tray on a citation with its evidence; a question asked with it
 })
 
 test("the tour (tour/tour.ts): while its citation step waits, a citation of another answer than the sample is not that step", { options: { citations: 'auto cite + verify', cards: 'off', explain: 'off' } }, async ($, on) => {
-  const placed: string[] = []
-  on('ui.place', (_$: unknown, e: Any) => { placed.push(e.id); return { value: { isPlaced: true, requestId: `r-${e.id}` } } })
+  on('ui.place', (_$: unknown, e: Any) => ({ value: { isPlaced: true, requestId: `r-${e.id}` } }))
   const { clock } = await resumed($, on, QUOTED)
-  const row = async () => textOf(await $.ui.render({ plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: 'r-row', viewport: view, props: { id: placed.at(-1), plugin: 'thimble' } } as never))
+  // the sample answer draws the step row at its end
+  const row = async () => textOf(await $.ui.render(answer('row-t2', 'A made-up sample answer.')))
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
   // the turn that writes the sample answer ends: Explainers are off, so the tour waits for the citation step
   await $.turn.start({ text: '<command-name>/thimble:tour</command-name>', turnId: 't2' } as never)

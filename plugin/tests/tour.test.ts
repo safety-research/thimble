@@ -1,10 +1,10 @@
 // The feature tour (tour/tour.ts, skills/tour/SKILL.md): /thimble:tour or Claude's Skill call starts it. thimble
-// places its intro, then its step row under the sample answer, and draws both itself; it sends Claude no prompt. Each
-// step done redraws the row in place. A step done early, a step whose feature is off and the selection step where no
+// places its intro, and the sample answer draws the step row at its end; thimble draws both itself and sends Claude no
+// prompt. Each step done redraws the row in place. A tour started again keeps the earlier tour's rows. A step done early, a step whose feature is off and the selection step where no
 // click reaches thimble are left out; v that drew no card lets the tour go on. While e or cite waits, the sample answer
 // marks what to select or click. After the sample answer, the replies to the person's own prompts answer nothing, so s
-// acts on the sample answer, and the step row is placed again under the reply. After an install inside Claude Code,
-// thimble runs /thimble:tour once in that session. All data is made up. `claude plugin test plugin`.
+// acts on the sample answer, and the step row is placed under the reply. After an install inside Claude Code, the
+// person's /reload-plugins runs /thimble:tour once in that session, soon after the install only. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { remindAfterAnswer } from '../bar/hints'
@@ -12,7 +12,7 @@ import { failLineNow } from '../bar/notice'
 import { noteViewport } from '../cards/draw'
 import { answersNothing } from '../core/answers'
 import { setOptions } from '../settings/features.mjs'
-import { tourDid, tourMissed, tourNow, tourOpened, tourRuns, tourSpans, tourStart, turnTour } from '../tour/tour'
+import { NEXT_MS, placeIntro, tourDid, tourMissed, tourNow, tourOpened, tourRuns, tourSpans, tourStart, turnTour } from '../tour/tour'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -53,8 +53,10 @@ test('each step done moves the tour to the next step that is on and not done; th
   await tourDid($, 'v')
   expect(await tourRuns($)).toBe(false)
   await tourStart($)
+  await placeIntro($)
   // the command and the skill both start it: one start, one intro
   await tourStart($)
+  await placeIntro($)
   expect(placed).toEqual(['tour-intro-1'])
   expect(await walk($, ['answer', 'e', 'e', 'cite', 'v', 's'])).toEqual(['e', 'cite', 'cite', 'v', 's', 'end'])
   expect(await tourRuns($)).toBe(false)
@@ -184,40 +186,49 @@ async function session($: Any, on: Any, files: Record<string, string> = {}) {
     await clock.advance(100)
   }
   const row = async (id: string) => textOf(await $.ui.render({ plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: `r-${id}`, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { id, plugin: 'thimble' } } as never))
+  const answer = async (id: string, text: string) => textOf(await $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: id, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never))
   const ask = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
   const press = async (k: string) => { const r = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never); await clock.advance(400); return r }
-  return { clock, got, placed, ran, asked, turn, row, ask, press }
+  return { clock, got, placed, ran, asked, turn, row, answer, ask, press }
 }
 
-test("in a session: thimble draws the intro and the step row, sends Claude nothing, places the row again under a reply, and s simplifies the sample answer", { options: { cards: 'off', explain: 'off', citations: 'off' } }, async ($, on) => {
+test("in a session: thimble draws the intro and the step row under the sample answer, sends Claude nothing, places the row under a reply, s simplifies the sample answer, and a second tour keeps the first one's rows", { options: { cards: 'off', explain: 'off', citations: 'off' } }, async ($, on) => {
   noteViewport({ isFullscreen: true })
   const t = await session($, on)
-  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
+  const tour = () => $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
+  await tour()
   expect(t.placed).toEqual(['tour-intro-1'])
   expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  // Cards, Explainers and Citations are off: the one step is s
-  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2'])
-  const first = await t.row('tour-step-2')
-  expect(first).toContain('thimble tour · 1 of 1')
-  expect(first).toContain('Press s for a shorter, plainer version of the answer.')
-  // the person's own question: Claude answers it, and the row is placed again under the reply
+  // Cards, Explainers and Citations are off: the one step is s. The sample answer draws the row at its end
+  expect(t.placed).toEqual(['tour-intro-1'])
+  const first = await t.answer('row-t1', SAMPLE)
+  expect(first.indexOf('thimble tour · 1 of 1')).toBeGreaterThan(first.indexOf('late delivery'))
+  expect(first).toContain('Press s for a shorter, plainer version of the tea shop answer.')
+  // the person's own question: Claude answers it, and the row is placed under the reply instead
   await t.ask('What does s do?')
   await t.turn('t2', 'What does s do?', 'It writes a simpler version of the answer.')
-  expect(t.placed.at(-1)).toBe('tour-step-3')
-  expect(await t.row('tour-step-2')).toBe('')
+  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2'])
+  expect(await t.answer('row-t1', SAMPLE)).not.toContain('thimble tour')
+  expect(await t.answer('row-t2', 'It writes a simpler version of the answer.')).not.toContain('thimble tour')
   // the reply is no answer: s simplifies the sample answer
   await t.press('s')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(1)
   expect(String(t.asked[0].prompt)).toContain('late delivery does not explain the refunds')
   expect(String(t.asked[0].prompt)).not.toContain('It writes a simpler version')
-  const end = await t.row('tour-step-3')
+  const end = await t.row('tour-step-2')
   expect(end).toContain('thimble tour · done')
   expect(end).toContain('✓ s wrote a simpler version.')
   expect(end).toContain('Type /thimble:tour to take the tour again.')
   // the tour sends Claude no prompt of its own
   expect(t.got.filter(p => p.by === 'plugin')).toEqual([])
+  // the tour again: a new intro, and the first tour's rows still draw it
+  await t.clock.advance(20_000)
+  await tour()
+  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2', 'tour-intro-3'])
+  expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
+  expect(await t.row('tour-step-2')).toContain('thimble tour · done')
 })
 
 test("in a session: Claude's Skill call starts the tour, and the turn that called it holds the sample answer", { options: { cards: 'off', explain: 'off', citations: 'off', squeezeAnswers: false } }, async ($, on) => {
@@ -226,21 +237,34 @@ test("in a session: Claude's Skill call starts the tour, and the turn that calle
   await t.ask('Yes, show me the tour.')
   await t.turn('t1', 'Yes, show me the tour.', SAMPLE, () => $.tool.call({ tool: 'Skill', skill: 'thimble:tour', tool_use_id: 'toolu_made_up_1' } as never))
   // with every step's feature off, the sample answer goes on to the end
-  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2'])
-  expect(await t.row('tour-step-2')).toContain('The tour is over.')
+  expect(t.placed).toEqual(['tour-intro-1'])
+  expect(await t.answer('row-t1', SAMPLE)).toContain('The tour is over.')
 })
 
-test('thimble loading in the session that installed it runs /thimble:tour once; another session does not', async ($, on) => {
-  const files: Record<string, string> = { '/made-up/.thimble/tour-next': 's-tour\n' }
+test("the person's /reload-plugins soon after an install in this session runs /thimble:tour once; a later one, or another session's, does not", async ($, on) => {
+  const file = '/made-up/.thimble/tour-next'
+  const files: Record<string, string> = { [file]: 's-tour 0\n' }
   const t = await session($, on, files)
+  // thimble loads at the reload
   await t.clock.advance(1000)
   expect(t.ran.map(e => e.command)).toEqual(['thimble:tour'])
-  expect(files['/made-up/.thimble/tour-next']).toBe('')
+  expect(files[file]).toBe('')
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   await t.clock.advance(1000)
   expect(t.ran.length).toBe(1)
-  files['/made-up/.thimble/tour-next'] = 's-another'
+  // thimble was loaded already: it hears the reload end
+  files[file] = 's-tour 2'
+  await $.command.run({ command: 'reload-plugins', args: '' } as never)
+  await t.clock.advance(1000)
+  expect(t.ran.map(e => e.command)).toEqual(['thimble:tour', 'reload-plugins', 'thimble:tour'])
+  // a file from long ago (a session resumed later) starts nothing, and is emptied
+  await t.clock.advance(NEXT_MS)
+  files[file] = 's-tour 1'
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   await t.clock.advance(1000)
-  expect(t.ran.length).toBe(1)
+  expect(files[file]).toBe('')
+  files[file] = `s-another ${Math.floor((NEXT_MS + 4000) / 1000)}`
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await t.clock.advance(1000)
+  expect(t.ran.length).toBe(3)
 })

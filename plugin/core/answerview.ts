@@ -9,7 +9,7 @@
 //                                         markPressed (a press on a citation), passagesFor (what the margin of
 //                                         each passage asks: a side thread about it)
 //   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the catch-up
-//                                         of the replies it ends, the chips)
+//                                         of the replies it ends, the chips); last, the tour's step row (tourUnder)
 //   squeeze/ui.ts      a catch-up         spansOver: the explainers and heads-ups of its replies on its words
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
@@ -39,7 +39,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, askBar, askKey, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { tourSpans } from '../tour/tour'
+import { tourSpans, tourUnder } from '../tour/tour'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
@@ -296,6 +296,9 @@ export const registerAnswerView: Register = on => {
       const els = $.ui.resolve(e) as Any
       const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
       const tail = await underAll($, els, e.requestId, cols, async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
+      // last, under all that thimble draws under the answer: the tour's step row, when the answer is its sample answer
+      const step = await safe(tourUnder($, e), null)
+      if (step) tail.push(step)
       const drawn = tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
       // where the row's cards stand in it, so a card's keys go to it only while the screen shows it
       if (featureOn('cards')) noteFrames($, drawn, cols, e.props?.onScreen)
