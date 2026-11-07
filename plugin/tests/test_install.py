@@ -577,6 +577,38 @@ def test_ref_moves_an_install_that_is_there_and_downloads_only_what_it_moves_to(
     assert w.gh.requests()[-2:] == ["GET /archive/main.tar.gz", "GET /releases/latest"]
 
 
+def test_ref_to_a_prerelease_installs_its_file_by_its_name_beside_the_newest_release(w):
+    """A prerelease has its file too (the Action attaches one to each release that is published), but its version is no
+    release's: the install records it as it records a branch, by its name and beside the newest release then
+    (based_on), so that thimble update moves only to a newer release, never back to an older one. --ref on an install
+    that is there records it the same way, at the same commit."""
+    rc = w.publish("v0.11.0-rc1", file=False)
+    w.gh.publish(w.bare, "v0.11.0-rc1", latest=False)
+    p = w.install("--no-browser", "--ref", "v0.11.0-rc1")
+    assert p.returncode == 0, text_of(p)
+    assert f"thimble v0.11.0-rc1 at {rc[:7]} is installed." in p.stdout.splitlines()
+    rel, made = w.release(), live_head(w)
+    assert (rel["ref"], rel["based_on"], rel["commit"], "tag" in rel) == ("v0.11.0-rc1", "v0.10.8", rc, False)
+    assert rel["source"] == f"{w.gh.url}/releases/download/v0.11.0-rc1/thimble-0.11.0-rc1.tar.gz"
+    link = w.home / ".local" / "bin" / "thimble"
+    for args in (["update", "--check"], ["update"]):
+        got = subprocess.run([str(link), *args], capture_output=True, text=True, env=w.env())
+        assert got.stdout.strip() == (f"thimble v0.11.0-rc1 at {rc[:7]} is up to date; the newest release is "
+                                      "0.10.8."), text_of(got)
+    assert live_head(w) == made
+    # back to 0.10.8, then to the prerelease again, on the install that is there
+    assert w.install("--no-browser", "--ref", "v0.10.8").returncode == 0
+    p = w.install("--no-browser", "--ref", "v0.11.0-rc1")
+    assert p.returncode == 0, text_of(p)
+    rel = w.release()
+    assert (rel["ref"], rel["based_on"], rel["commit"], "tag" in rel) == ("v0.11.0-rc1", "v0.10.8", rc, False)
+    assert live_head(w) == made
+    # each install downloaded its release's file, which GitHub counts
+    assert w.gh.files() == ["/releases/download/v0.11.0-rc1/thimble-0.11.0-rc1.tar.gz",
+                            "/releases/download/v0.10.8/thimble-0.10.8.tar.gz",
+                            "/releases/download/v0.11.0-rc1/thimble-0.11.0-rc1.tar.gz"]
+
+
 def made_fix(w, monkeypatch, words: str) -> dict:
     """A fix made as thimble makes one, in the test's process with the person's environment: its copy cut from mine,
     the fixer's change written there, done with no tests, then on with a made-up key press."""

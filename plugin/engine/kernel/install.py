@@ -9,9 +9,10 @@ commands thimble and thimble-browser in ~/.local/bin.
     thimble install release --file FILE [--tag vX.Y.Z] [--ref REF]
                                          FILE, the release's file the script downloaded (the release --tag names), or
                                          GitHub's archive of the branch or tag --ref names, becomes live (ensure_live);
-                                         an install that is there stays, with its fixes, and says what it is and whether
-                                         a newer release is out; with --ref it first moves to that branch or tag, as
-                                         thimble update moves to a release. Exit 3: every part is in place.
+                                         a prerelease's file (--tag v0.11.0-rc1) is installed as a branch is. An install
+                                         that is there stays, with its fixes, and says what it is and whether a newer
+                                         release is out; with --ref it first moves to that branch or tag, as thimble
+                                         update moves to a release. Exit 3: every part is in place.
     thimble install release --from DIR   the same from DIR, a git clone of the release, as install scripts before
                                          release files give it
     thimble install name                 the release live is on, as the script's last lines name it
@@ -160,14 +161,17 @@ def release(a: Any, r: Run) -> int:
     install's fixes (scripts/install.sh --local) go aside first, and a release install that --local set aside comes
     back in place of the download, with its fixes (the script then says that it downloaded the release for its install
     steps). A branch is installed with the newest release then (based_on), which thimble update compares a release
-    with: it is read first, so that a network that fails installs nothing."""
+    with: it is read first, so that a network that fails installs nothing. So is a prerelease (v0.11.0-rc1), whose
+    version is no release's: from its file, by its name, as --ref moves an install that is there to it."""
     rel, live = FX.release(), FX.live_dir()
     if rel and (live / ".git").exists() and rel.get("kind") != "clone":
         return installed(a, r, rel)
     if not a.file and not a.from_:
         raise FX.FixError("thimble is not installed in this home, and no release was given to install (--file)")
-    to = target(a.ref) if a.ref else {}
-    tag = a.tag or to.get("tag", "")
+    # the branch or tag to record by its name: --ref, or a prerelease's tag that --tag names
+    ref = a.ref or (a.tag if a.tag and not FX.RELEASE_TAG.match(a.tag) else "")
+    to = target(ref) if ref else {}
+    tag = to["tag"] if ref else a.tag or ""
     if a.file and not tag and not to:
         raise FX.FixError("thimble install release --file needs the release the file is (--tag) or the branch (--ref)")
     src = Path(a.from_).resolve() if a.from_ and not a.file else None
@@ -175,7 +179,7 @@ def release(a: Any, r: Run) -> int:
         # git would walk up to a repository around the folder, and take that one for thimble's
         raise FX.FixError(f"--from takes a git clone of thimble, and {tilde(src)} is not one; give the release's "
                           "file with --file")
-    based_on = FX.latest_release(then="run the install again")["tag"] if a.ref and not tag else ""
+    based_on = FX.latest_release(then="run the install again")["tag"] if ref and not tag else ""
     if rel and (live / ".git").exists():
         clone = tilde(rel.get("repo") or "")
         to = aside("dev")
@@ -199,14 +203,14 @@ def release(a: Any, r: Run) -> int:
         if src is None:
             FX.ensure_live({"kind": "release", "file": str(Path(a.file).resolve()), "tag": tag,
                             "ref": "" if tag else to["name"], "based_on": based_on,
-                            "source": releases.file_url(tag) if a.tag else releases.archive_url(to["name"])})
+                            "source": releases.file_url(a.tag) if a.tag else releases.archive_url(to["name"])})
             return 0
         commit = FX.git("rev-parse", "HEAD", cwd=src)
         rel = FX.ensure_live({"kind": "github", "repo": str(src), "commit": commit, "url": FX.update_url(),
                               "entry": None})
         # live's origin is thimble's repository; the download it came from goes after the install
         rel["repo"] = str(live)
-        if a.ref and not rel.get("tag"):
+        if ref and not rel.get("tag"):
             rel.update(ref=to["name"], based_on=based_on)
         FX.write_json(FX.home() / "release.json", rel)
     return 0
