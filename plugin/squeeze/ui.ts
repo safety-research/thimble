@@ -749,7 +749,7 @@ export async function underRow($: Engine, els: Any, row: string, cols: number, c
     if (ui.error) out.push(els.Text({ key: `cu-note-${row}`, color: 'error', wrap: 'wrap', children: `× ${ui.error}` }))
   }
   const left = recs.flatMap(r => (cardNotes(r) as { left: string[] }).left)
-  if (left.length) out.push(els.Box({ key: `lo-${row}`, marginLeft: 2, marginTop: 1, children: [els.Text({ dimColor: true, wrap: 'truncate-end', children: `left out by rewrite: ${left.map(t => `"${t.length > 48 ? `${t.slice(0, 47)}…` : t}"`).join(', ')}` })] }))
+  if (left.length) out.push(els.Box({ key: `lo-${row}`, marginLeft: 2, marginTop: 1, children: [els.Text({ dimColor: true, wrap: 'truncate-end', children: `left out by thimble: ${left.map(t => `"${t.length > 48 ? `${t.slice(0, 47)}…` : t}"`).join(', ')}` })] }))
   for (const id of [row, ...(cu ? [cu.id] : [])]) {
     const chips = await chipsEl($, els, id, cols)
     if (chips) out.push(chips)
@@ -757,11 +757,11 @@ export async function underRow($: Engine, els: Any, row: string, cols: number, c
   return out
 }
 
-/** The line under a card a squeeze changed: `edited by rewrite` or `added by rewrite`. */
+/** The line under a card a squeeze changed: `edited by thimble` or `added by thimble`. */
 export async function underCardLine($: Engine, els: Any, id: string): Promise<Any[]> {
   if (!featureOn('squeezeAnswers')) return []
   const did = await cardDid($, id)
-  return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by rewrite` })] : []
+  return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by thimble` })] : []
 }
 
 /** Whether a card is left out of the version of its answer shown now. */
