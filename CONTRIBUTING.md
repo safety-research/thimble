@@ -91,7 +91,7 @@ The browser workbench, `browser/`:
 | the server's tests | `browser/backend/tests_public/` |
 | the launcher that `scripts/install.sh` puts on `PATH` | `browser/scripts/thimble-browser` |
 
-`scripts/` holds `install.sh`, `check.sh`, `scan.sh`, `thimble09.py` (which finds a thimble 0.9 install for `install.sh` and says how to remove it) and the git hooks.
+`scripts/` holds `install.sh`, `check.sh`, `scan.sh`, `release-file.sh` (which builds the file a release has attached: Releasing thimble, below), `thimble09.py` (which finds a thimble 0.9 install for `install.sh` and says how to remove it) and the git hooks.
 
 ## Changing what the model reads
 
@@ -182,3 +182,30 @@ an agent never uses it. CI runs the same scan with the generic patterns only.
 
 To scan by hand, `scripts/scan.sh origin/main..HEAD` scans a range of commits, `scripts/scan.sh --all` every commit of
 the remote branches and tags, and `scripts/scan.sh --tree HEAD` every file at a commit.
+
+## Releasing thimble
+
+Each release has one file attached, `thimble-X.Y.Z.tar.gz` (git archive of its tag), with `SHA256SUMS`. The install
+and `thimble update` find the newest release from GitHub's page of the latest release, which counts nothing, then
+download that file and check its sha256. GitHub counts each download of the file, which is how many people install
+each version. `scripts/release-file.sh` builds both files, and the Action `.github/workflows/release-file.yml` attaches
+them. A published release must never be without its file: the install and the update then stop and say that it is
+missing, and install nothing. So the file goes on while the release is still a draft:
+
+1. Merge the release's pull request into main.
+2. Tag main's commit and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
+3. Make the release as a draft: `gh release create vX.Y.Z --draft --verify-tag --title "thimble X.Y.Z" --notes-file
+   NOTES.md`.
+4. Attach its file: `gh workflow run release-file.yml --ref vX.Y.Z -f tag=vX.Y.Z`, then `gh run watch`.
+5. Check: `gh release view vX.Y.Z --json assets -q '.assets[].name'` lists `thimble-X.Y.Z.tar.gz` and `SHA256SUMS`.
+6. Publish: `gh release edit vX.Y.Z --draft=false`. The Action runs again, sees both files and stops.
+
+If a release is published without its file (step 4 skipped, or the Action failed), the Action attaches it within about
+a minute. To replace a broken file, `gh release delete-asset vX.Y.Z thimble-X.Y.Z.tar.gz --yes`, then step 4 again.
+
+The count per version:
+
+    gh api --paginate repos/safety-research/thimble/releases --jq '.[] | "\(.tag_name) \([.assets[] | select(.name | endswith(".tar.gz")) | .download_count] | add // 0)"'
+
+It counts fresh installs and the updates that a thimble with this file's code ran; an update by an older thimble
+downloads with git, and a dev install (`--local`) or `--ref` with a branch downloads no release file.
