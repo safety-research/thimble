@@ -23,6 +23,7 @@ import { restoreMarks } from '../marks/store'
 import { turnObserver } from '../observer/observer'
 import { turnSqueeze } from '../squeeze/seam'
 import { turnThreads } from '../threads/thread'
+import { turnTour } from '../tour/tour'
 import { turnTray } from '../tray/tray'
 import { conversationTurned } from './conversation'
 
@@ -57,6 +58,7 @@ async function turnOver($: Engine): Promise<void> {
   try { await turnClaims($) } catch { /* the claims */ }
   try { await turnThreads($) } catch { /* the side threads */ }
   try { await turnTray($) } catch { /* the tray */ }
+  try { await turnTour($) } catch { /* the tour */ }
   try { await promptTyped($) } catch { /* the failure line */ }
   try { await turnCounts($) } catch { /* the bar's counts */ }
 }

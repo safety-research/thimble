@@ -1,0 +1,37 @@
+order_id,date,customer,region,product,quantity,total_usd,carrier,arrived,refunded
+F-1001,2026-03-01,Ada Quill,West,Gift box,1,64,Swiftbox,on time,no
+F-1002,2026-03-01,Bo Marsh,East,Gift box,1,64,Swiftbox,on time,no
+F-1003,2026-03-02,Cleo Fenn,North,Sampler,3,87,Swiftbox,on time,no
+F-1004,2026-03-03,Dev Arlo,North,Loose-leaf tin,4,72,Parcelo,late,no
+F-1005,2026-03-04,Edda Voss,East,Loose-leaf tin,2,36,Parcelo,on time,no
+F-1006,2026-03-05,Finn Oakes,East,Loose-leaf tin,2,36,Swiftbox,on time,yes
+F-1007,2026-03-06,Gia Lune,North,Loose-leaf tin,4,72,Parcelo,on time,no
+F-1008,2026-03-06,Hal Brint,East,Loose-leaf tin,3,54,Parcelo,on time,no
+F-1009,2026-03-07,Iris Pell,South,Loose-leaf tin,2,36,Parcelo,on time,no
+F-1010,2026-03-08,Jun Tarro,North,Gift box,1,64,Parcelo,late,no
+F-1011,2026-03-09,Kit Mallow,East,Loose-leaf tin,3,54,Parcelo,on time,no
+F-1012,2026-03-10,Lio Strand,South,Loose-leaf tin,2,36,Swiftbox,on time,no
+F-1013,2026-03-11,Mira Holt,West,Loose-leaf tin,3,54,Parcelo,on time,no
+F-1014,2026-03-11,Nell Corra,South,Sampler,3,87,Parcelo,on time,no
+F-1015,2026-03-12,Oren Vale,North,Sampler,1,29,Parcelo,on time,no
+F-1016,2026-03-13,Pia Sorrel,South,Loose-leaf tin,2,36,Swiftbox,late,yes
+F-1017,2026-03-14,Quin Dace,West,Loose-leaf tin,4,72,Parcelo,on time,no
+F-1018,2026-03-15,Rhea Wick,North,Loose-leaf tin,4,72,Parcelo,on time,no
+F-1019,2026-03-16,Sol Bramm,South,Gift box,1,64,Parcelo,on time,no
+F-1020,2026-03-16,Tess Ivo,West,Loose-leaf tin,3,54,Swiftbox,on time,no
+F-1021,2026-03-17,Uma Prell,North,Gift box,1,64,Swiftbox,on time,no
+F-1022,2026-03-18,Vik Halden,North,Loose-leaf tin,3,54,Swiftbox,on time,no
+F-1023,2026-03-19,Wren Tolle,West,Loose-leaf tin,3,54,Parcelo,late,no
+F-1024,2026-03-20,Xan Merrow,North,Loose-leaf tin,4,72,Parcelo,on time,no
+F-1025,2026-03-21,Yara Bell,South,Gift box,1,64,Parcelo,on time,yes
+F-1026,2026-03-21,Zed Cotter,North,Sampler,2,58,Swiftbox,on time,no
+F-1027,2026-03-22,Ana Ruse,South,Loose-leaf tin,4,72,Swiftbox,on time,no
+F-1028,2026-03-23,Ben Taft,North,Loose-leaf tin,2,36,Parcelo,late,no
+F-1029,2026-03-24,Cora Lind,West,Gift box,1,64,Parcelo,on time,no
+F-1030,2026-03-25,Dax Pym,South,Loose-leaf tin,1,18,Parcelo,on time,no
+F-1031,2026-03-26,Elle Varga,East,Loose-leaf tin,1,18,Parcelo,on time,no
+F-1032,2026-03-26,Fox Hadley,North,Loose-leaf tin,2,36,Parcelo,on time,yes
+F-1033,2026-03-27,Gus Nolle,North,Loose-leaf tin,2,36,Swiftbox,on time,no
+F-1034,2026-03-28,Hana Reeve,East,Loose-leaf tin,1,18,Parcelo,late,no
+F-1035,2026-03-29,Ivo Stack,North,Sampler,1,29,Parcelo,on time,no
+F-1036,2026-03-30,Jae Corwin,South,Loose-leaf tin,2,36,Parcelo,on time,no

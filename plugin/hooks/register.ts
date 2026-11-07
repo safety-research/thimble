@@ -40,6 +40,7 @@
 //   bar         ../bar/register.ts      the line above the prompt: busy step, failure and fix lines, counts
 //   fix         ../fix/register.ts      /thimble-fix: the person's changes to their own thimble, made by the fixer in a
 //                                       scratch copy, applied with their key; the fixer's calls in the sandbox
+//   tour        ../tour/tour.ts         /thimble:tour: Claude's next step of the tour, when the person did the one before
 import type { Register } from 'claude-code'
 
 import { registerBar } from '../bar/register'
@@ -67,6 +68,7 @@ import { registerSettings } from '../settings/term'
 import { registerSqueeze } from '../squeeze/seam'
 import { registerTelemetry } from '../telemetry/telemetry'
 import { registerThreads } from '../threads/seam'
+import { registerTour } from '../tour/tour'
 import { registerTray } from '../tray/seam'
 import { registerHandoff } from './handoff'
 import { registerKeys } from './keys'
@@ -104,5 +106,6 @@ export const register: Register = (on, options) => {
   registerTray(on, options)
   registerBar(on, options)
   registerFix(on, options)
+  registerTour(on, options)
   registerTelemetry(on, 'last')
 }

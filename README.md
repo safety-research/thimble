@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
 - **Claims** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. thimble pulls the claims out of every reply in the background; set Claims to on demand to pull them out only when you ask (`f` in the pane).
-- **Rewrite** (`s`): the last answer, shorter or longer, for a novice or an expert, or as you describe it.
+- **Simplify** (`s`): a shorter, plainer version of the last answer, below it; press `s` again to make it longer, for a novice or an expert, or as you describe it.
 - **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 
 ## Installation
@@ -42,7 +42,7 @@ It installs thimble in `~/.thimble`. Adding `-s -- --no-browser` after `bash` in
 
 ### Terminal plugin
 
-Run `claude` in a folder with files you'd like to analyze. By default, thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off. Run `/plugin` to turn the thimble plugin off.
+Run `claude` in a folder with files you'd like to analyze. By default, thimble is on in every session. For a two-minute tour on made-up data, run `thimble tour` in a shell, or type `/thimble:tour` in Claude Code. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off. Run `/plugin` to turn the thimble plugin off.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 

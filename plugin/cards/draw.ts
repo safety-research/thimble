@@ -591,14 +591,16 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     // another row's line points to it
     if (meta.anchorRow && !here.includes(meta.anchorRow)) {
       const E = $.ui.resolve(e) as Any
-      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” is drawn under an earlier answer` })] })
+      // a simpler version of the answer the card is drawn under stands right below that card
+      const where = here.includes(`${meta.anchorRow}#s`) ? 'is drawn above' : 'is drawn under an earlier answer'
+      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }
     // a card stands in one place: the newest row that placed it (or a catch-up of the replies, `<row>#cu`, drawn below
-    // them); an earlier one shows a line that points there
+    // them, or a simpler version of an answer, `<row>#s`, drawn below it); an earlier one shows a line that points there
     if (!meta.anchorRow && meta.inRow && !here.includes(meta.inRow)) {
       const E = $.ui.resolve(e) as Any
-      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : 'is drawn further down'
+      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : meta.inRow.endsWith('#s') ? 'is in the simpler version below' : 'is drawn further down'
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }

@@ -247,6 +247,7 @@ def test_a_fresh_install_lays_the_release_out_in_thimbles_home_and_says_so(w):
         "thimble 0.10.8 is installed.",
         "",
         "Try it now: run claude in a folder of data files.",
+        "Take the two-minute tour: run thimble tour",
         "",
         "Note: ~/.local/bin is not on your PATH, so a new terminal does not find thimble. Add this line to ~/.zshrc: "
         'export PATH="$HOME/.local/bin:$PATH"',
@@ -286,12 +287,13 @@ def test_both_products_build_the_workbench_in_live_and_link_its_command(w):
     assert re.fullmatch(r"  Installing its packages and building its page \(a few minutes\)\.\.\. done, \d+ MB\.",
                         section[0]), section
     assert section[1:] == ["  Sign-in: not chosen yet. The workbench asks when it starts."], section
-    assert out.rstrip().splitlines()[-6:] == [
+    assert out.rstrip().splitlines()[-7:] == [
         "The commands thimble and thimble-browser are in ~/.local/bin.",
         "",
         "thimble 0.10.8 is installed.",
         "",
         "Try it now: run claude in a folder of data files.",
+        "Take the two-minute tour: run thimble tour",
         "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link "
         "it prints."], out
     live = w.th / "fixes" / "live"
@@ -401,12 +403,25 @@ def test_local_installs_from_the_clone_as_the_dev_install(w):
     p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh")
     assert p.returncode == 0, text_of(p)
     assert "  Added to Claude Code from ~/thimble." in p.stdout.splitlines()
-    assert before_notes(p.stdout)[-3:] == [
-        "thimble is installed from your clone ~/thimble.", "", "Try it now: run claude in a folder of data files."], \
-        p.stdout
+    assert before_notes(p.stdout)[-4:] == [
+        "thimble is installed from your clone ~/thimble.", "", "Try it now: run claude in a folder of data files.",
+        "Take the two-minute tour: run thimble tour"], p.stdout
     assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
     assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(clone / "plugin" / "bin" / "thimble")
     assert not (w.th / "fixes").exists()
+
+
+def test_an_install_inside_claude_code_names_reload_plugins_and_leaves_the_tour_to_claude(w):
+    """Run by Claude in a Claude Code session (CLAUDECODE set), the end says /reload-plugins and names no thimble tour,
+    which opens a session of its own: Claude offers the tour in the session (CLAUDE.md)."""
+    clone = w.home / "thimble"
+    sh("git", "clone", "-q", str(w.bare), str(clone))
+    p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1")
+    assert p.returncode == 0, text_of(p)
+    assert before_notes(p.stdout)[-3:] == [
+        "thimble is installed from your clone ~/thimble.", "",
+        "Try it now: type /reload-plugins in this Claude Code session."], p.stdout
+    assert "thimble tour" not in p.stdout
 
 
 # ------------------------------------------------------------------ the kernel's steps alone

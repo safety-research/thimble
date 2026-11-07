@@ -240,13 +240,17 @@ signin() {
 }
 
 # finish WHAT: the end: what is installed, how to try it (in the Claude Code session that runs the install, which sets
-# CLAUDECODE for its commands, or in a terminal), then what does not work yet
+# CLAUDECODE for its commands, or in a terminal), then what does not work yet. In a terminal it names the tour
+# (thimble tour, plugin/engine/kernel/tour.py); in Claude Code, Claude offers the tour itself (CLAUDE.md)
 finish() {
   say ""
   say "$1."
   say ""
   if [ -n "${CLAUDECODE:-}" ]; then say "Try it now: type /reload-plugins in this Claude Code session."
-  else say "Try it now: run claude in a folder of data files."; fi
+  else
+    say "Try it now: run claude in a folder of data files."
+    say "Take the two-minute tour: run thimble tour"
+  fi
   if [ "$built" = 1 ]; then
     say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
       "it prints."
