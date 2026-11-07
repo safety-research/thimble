@@ -301,14 +301,20 @@ export function LabelKindTag() {
   return <span className="bcell-kind-tag">Label</span>
 }
 
-/** What a label card's label row says after the label's name (details labelIdentity): how the label is defined, what it
- * ran on, and how many units its shares are of, in one quiet line; the hover names every file pattern whole. */
-export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'model'> }) {
-  const { ws } = useContext(CanvasContext)
+/** What a label card's label row says after the label's name (details labelIdentity): what kind of classifier gave its
+ * values, in plain words (a code or regex rule over the data, or a model's judgment), how many units it ran over, the
+ * label it ran within and where, in one quiet line; the hover gives the whole line, every file pattern whole. */
+export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'model' | 'within'> }) {
+  const { ws, concepts } = useContext(CanvasContext)
   const model = useLabelModel(ws, k.kind === 'prompt' && !k.model)
-  const id = labelIdentity(k, k.kind === 'prompt' && (k.model || model) ? modelLabel(k.model || model) : '')
-  const parts = [id.how && <span key="how">{id.how}</span>, <span key="where" title={id.full !== id.where ? id.full : undefined}>{id.where}</span>, id.units && <span key="units">{id.units}</span>].filter(Boolean)
-  return <span className="bcell-label-meta">{parts.flatMap((part, i) => (i ? [' · ', part] : [part]))}</span>
+  const id = labelIdentity(k, k.kind === 'prompt' && (k.model || model) ? modelLabel(k.model || model) : '', k.within ? (concepts.get(k.within.label)?.name ?? '') : '')
+  return (
+    <span className="bcell-label-meta" title={`${id.how} · ${id.full}`}>
+      <span>{id.how}</span>
+      {' · '}
+      <span>{id.where}</span>
+    </span>
+  )
 }
 
 /**
@@ -382,7 +388,7 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
               return (
                 <tr key={v}>
                   <td>
-                    {classes ? <span className={`bcell-value-square${cls?.highlight ? ' is-lit' : ''}`} style={{ '--c': colourVar(cls?.color) } as CSSProperties} title={cls?.highlight ? 'highlighted in Files' : undefined} /> : null}
+                    {classes ? <span className={`bcell-value-square${cls?.highlight ? ' is-lit' : ''}`} style={{ '--c': colourVar(cls?.color) } as CSSProperties} title={cls?.highlight ? 'painted in Files' : undefined} /> : null}
                     <button type="button" className={`bcell-value${on ? ' is-on' : ''}`} aria-pressed={on} disabled={!scope || pending != null} onClick={() => void toggle(v)} onMouseDown={(e) => e.stopPropagation()}>
                       {pending === v ? <Spinner size={10} label="setting the filter" /> : null}
                       {v}
