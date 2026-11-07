@@ -54,7 +54,10 @@
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
 // string holds no character that does not print (each shows as its escape, `\x00`, as core/text.js printable writes
 // it; a line break stays one, a tab is a space). A Button around lines (a Box, or several) becomes a column Box with
-// the Button's onPress number, and a click on its cells presses it.
+// the Button's onPress number, and a click on its cells presses it. And it is no larger than Claude Code draws, as the
+// Client draws it (drawn.js): a tree whose drawing is too large with the Buttons the Client puts around its runs of
+// words is marked `bare` on its top node, and the Client draws it without them; one too large even so is the view's
+// error, said to Claude with what to change.
 // A dense card gets blank rows between its parts (space.js), unless the view reads clicks by cell (surface.onPointer);
 // each version keeps the places its first drawing gave them, so a key never moves the card's rows.
 import fs from 'node:fs'
@@ -63,6 +66,7 @@ import { types } from 'node:util'
 import vm from 'node:vm'
 
 import { printable } from '../core/text.js'
+import { drawnSize } from './drawn.js'
 import { buttonText, layoutLines, pressAt, rowOf, textAt } from './layout.js'
 import { spaced } from './space.js'
 
@@ -70,8 +74,9 @@ const LOAD_MS = 5000
 // the terminal theme the cards draw for (surface.colors), as the newest request named it: 'dark' or 'light'
 let theme = 'dark'
 const EVENT_MS = 1000
-// Claude Code takes a Client's props, and the tree the Client draws, up to 100000 characters each; the Client's tree
-// spells each node out (type, props, children), so the cap is measured on that form (drawnSize)
+// Claude Code takes a Client's props (the plain tree), and the drawing the Client makes of them, up to 100000
+// characters each; the drawing is measured as Claude Code holds it (drawn.js), with room for what the measure cannot
+// know (the numbers Claude Code gives the drawing's Buttons as the card is drawn again and again)
 const MAX_TREE = 95000
 const MAX_VIEW = 60000
 
@@ -514,9 +519,13 @@ function inContext(card, op, args, ms) {
     drop(card)
     return { ok: false, phase: op, error: code && code.value === 'ERR_SCRIPT_EXECUTION_TIMEOUT' ? `the view ran past its ${ms / 1000} s limit` : 'the view stopped the card' }
   }
-  if (typeof out !== 'string' || out.length > 4 * MAX_TREE) {
+  if (typeof out !== 'string') {
     drop(card)
     return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
+  }
+  if (out.length > 4 * MAX_TREE) {
+    drop(card)
+    return { ok: false, phase: op, error: tooLarge(`more than ${(4 * MAX_TREE).toLocaleString('en-US')}`) }
   }
   const r = JSON.parse(out)
   // blank rows between the card's parts (space.js), in the places the version's first drawing at its width gave them, so
@@ -525,25 +534,33 @@ function inContext(card, op, args, ms) {
   // and its tree says so (`cells` on its top node), so the Client leaves its clicks to the view (client.tsx)
   else if (r.ok && r.tree && typeof r.tree === 'object') r.tree = { ...r.tree, p: { ...(r.tree.p || {}), cells: true } }
   delete r.cells
-  if (r.ok && drawnSize(r.tree) > MAX_TREE) {
-    drop(card)
-    return { ok: false, phase: op, error: `the drawing is more than ${MAX_TREE} characters as Claude Code holds it, which it does not draw; draw fewer elements: group the rows, or show a page of them` }
+  // the card as Claude Code holds its Client: the tree, and the Client's drawing of it, whose runs of words each ask
+  // about themselves in a Button (drawn.js). A drawing too large with those Buttons is drawn without them (`bare`); one
+  // too large even so is the view's error, which says what to change
+  if (r.ok && r.tree && typeof r.tree === 'object') {
+    const held = t => Math.max(JSON.stringify(t).length, drawnSize(t, r.width))
+    let size = held(r.tree)
+    if (size > MAX_TREE && !r.tree.p?.cells) {
+      const bare = { ...r.tree, p: { ...(r.tree.p || {}), bare: true } }
+      size = held(bare)
+      if (size <= MAX_TREE) r.tree = bare
+    }
+    if (size > MAX_TREE) {
+      drop(card)
+      return { ok: false, phase: op, error: tooLarge(size.toLocaleString('en-US')) }
+    }
   }
   return r
+}
+
+/** Why a drawing of `n` characters as Claude Code holds it does not draw, and what to change. */
+function tooLarge(n) {
+  return `the drawing is ${n} characters as Claude Code holds it, and a card draws at most ${MAX_TREE.toLocaleString('en-US')}; draw fewer elements: group the rows, or show a page of them`
 }
 
 /** The card out of the runner, when its context may hold what a failed event left. */
 function drop(card) {
   if (cards.get(card.id) === card) cards.delete(card.id)
-}
-
-/** The characters a plain tree takes as the Client draws it (client.tsx): each node as {type, props: {...p, key?,
- *  children}}, a Button with its key. */
-export function drawnSize(tree) {
-  const el = n => (typeof n === 'string' ? n : n && typeof n === 'object'
-    ? { type: n.t, props: { ...(n.p || {}), ...(n.t === 'Button' ? { key: `b${n.p?.onPress ?? ''}` } : {}), children: (n.c || []).map(el) } }
-    : null)
-  return JSON.stringify({ type: 'Box', props: { flexDirection: 'column', width: 0, children: [el(tree)] } }).length
 }
 
 // ------------------------------------------------------------------------------------------------- the cards

@@ -51,6 +51,7 @@ import { cardAsk, cardHidden, heldKeys, selectionAsks, textView, underCard } fro
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
+import { MAIN, tellFor } from '../core/tell'
 import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
@@ -107,6 +108,8 @@ const shown = new Map<string, boolean>()
 // from, and why. The frame says why in the card's place until the card has a newer tree or a new version, which is
 // drawn again.
 const faulted = new Map<string, { gen: number; seq: number; reason: string }>()
+// what the analyst reads after such a reason: who fixes the card, and when (clientFault)
+const FAULT_TOLD = 'Claude gets the error with your next message'
 // the width each frame of a card draws at now, by the drawing it stands in (the `requestId` of its row or pane, which
 // a Client's ui.message names too) and the card: what the answer to that Client's post is laid out at
 const siteWidth = new Map<string, number>()
@@ -451,7 +454,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: num
       onPress: () => { opened.add(openKey(meta)); $.ui.invalidate('ui.render') },
       children: [E.Text({ key: 'more-w', color: accent(), children: `+${rowsWord(more)}` })] }))
   }
-  if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
+  if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault} · ${FAULT_TOLD}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   // the frame in the 2 columns of its indent; `ask` at its title's right is how a side thread about it
   // starts, so no ? in the margin asks the same
@@ -506,16 +509,21 @@ function selectedLine(tree: Any, width: number): { row: number; text: string } |
 }
 
 /** The card's Client failed on screen (Claude Code's ui.fault): its frame draws the reason in its place until the card
- *  has a newer tree or a new version, and the failure line says it until then. */
+ *  has a newer tree or a new version, and the failure line says it until then. The one that drew the card (main, or the
+ *  side thread whose fork drew it) reads the reason and what to do with its next card call or as its next turn starts
+ *  (core/tell.ts tellFor), as it reads a card call that failed. */
 export async function clientFault($: Engine, key: string, reason: string): Promise<void> {
   const { id, gen } = cardOfKey(key)
   const meta = await metaOf($, id)
   const t = await treeOf($, id)
   // the Client of an earlier version, which a new version's took the place of
   if (!meta || !t || (gen !== null && gen !== meta.gen)) return
-  faulted.set(id, { gen: t.gen, seq: t.seq, reason: reason.slice(0, 200) })
+  const why = reason.slice(0, 200)
+  faulted.set(id, { gen: t.gen, seq: t.seq, reason: why })
   $.ui.invalidate('ui.render')
-  failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
+  failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)} · ${FAULT_TOLD}`, about(id))
+  const to = meta.anchorRow?.startsWith('thread:') ? meta.anchorRow : MAIN
+  await tellFor($, to, `card-fault:${id}`, `Claude Code could not draw version ${meta.version} of the card “${meta.title}” (id "${id}") on the analyst's screen: ${why}. The analyst sees this error in the card's place. Draw it again with id "${id}" in a form Claude Code draws, such as with fewer elements.`)
 }
 
 /** The width a text copy of a card is laid out at for a reader on `pane` (a side thread's, `thread:<key>`; none for
