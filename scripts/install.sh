@@ -175,9 +175,9 @@ needs() {
   # every system has curl, so it is named only when it is missing; the dev install downloads no release
   [ "$local" = 1 ] || command -v curl >/dev/null 2>&1 || missing+=("curl: $(fix curl)")
   v=$(claude --version 2>/dev/null | awk '{print $1}') || v=""
-  if [ -n "$v" ] && ver_ge "$v" 2.1.307; then have+=("Claude Code $v")
-  elif [ -n "$v" ]; then missing+=("Claude Code 2.1.307 or later (the one here is $v): $(claude_update)")
-  else missing+=("Claude Code 2.1.307 or later: curl -fsSL https://claude.ai/install.sh | bash"); fi
+  if [ -n "$v" ] && ver_ge "$v" 2.1.314; then have+=("Claude Code $v")
+  elif [ -n "$v" ]; then missing+=("Claude Code 2.1.314 or later (the one here is $v): $(claude_update)")
+  else missing+=("Claude Code 2.1.314 or later: curl -fsSL https://claude.ai/install.sh | bash"); fi
   if [ "$web" = 1 ]; then
     v=$(uv --version 2>/dev/null | awk '{print $2}') || v=""
     if [ -n "$v" ] && ver_ge "$v" 0.8; then have+=("uv $v")

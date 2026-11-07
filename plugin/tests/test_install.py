@@ -468,6 +468,21 @@ def test_what_is_missing_is_said_with_its_fix_and_nothing_is_installed(w):
     assert not w.th.exists() and not w.cc.exists()
 
 
+def test_a_claude_code_older_than_thimble_needs_is_said_with_the_command_that_updates_it(w):
+    """thimble needs Claude Code 2.1.314 or later, the first with $.ui.place, which the tour draws its rows with. An
+    older one is said with the command that updates it (claude update, for a claude no package manager installed), and
+    nothing is installed; 2.1.314 installs."""
+    p = w.install("--no-browser", FAKE_CLAUDE_VERSION="2.1.312")
+    assert p.returncode == 1, text_of(p)
+    lines = p.stdout.splitlines()
+    assert lines[lines.index("Checking what thimble needs...") + 1:] == [
+        "thimble needs these first:", "  - Claude Code 2.1.314 or later (the one here is 2.1.312): claude update",
+        "Run the install again after that. Nothing was installed."]
+    assert not w.th.exists() and not w.cc.exists()
+    p = w.install("--no-browser", FAKE_CLAUDE_VERSION="2.1.314")
+    assert p.returncode == 0 and "Claude Code 2.1.314: all here." in p.stdout, text_of(p)
+
+
 def wsl(w, kernel: str) -> None:
     """Windows' WSL, as its kernel names itself in uname -r: WSL 1's says Microsoft, WSL 2's microsoft."""
     stub(w.bin / "uname", f'if [ "$1" = -r ]; then echo "{kernel}"; else echo Linux; fi\n')
