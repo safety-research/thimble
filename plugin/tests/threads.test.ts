@@ -1,7 +1,6 @@
 // Side threads (threads/): a question typed in a pane's input bar asks the thread's fork once, even when ↵ comes twice
 // before the fork started; its answer is read from the fork's transcript at its end, and m sends it to main; while the
-// fork works, the thread shows its question and the steps the fork took. While the tour waits for its ask step, the
-// thread's answer about a card is that step done. All data is made up. `claude plugin test plugin`.
+// fork works, the thread shows its question and the steps the fork took. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'
@@ -13,9 +12,6 @@ import { threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
 import { treeRows } from '../core/trail.mjs'
-import { noteViewport } from '../cards/draw'
-import { setOptions } from '../settings/features.mjs'
-import { tourDid, tourNow, tourStart } from '../tour/tour'
 import { promptStub } from './stubs'
 import { test } from './kit'
 
@@ -185,43 +181,4 @@ test("a running thread under a tall heads-up shows its question and the steps it
   // each point wraps after its gutter, so the pane, which scrolls to the conversation's end, counts it at that width
   const part = nodes(tree).find(n => n.props?.key === 'subject-m0')
   expect(treeRows(part, 50)).toBe(treeRows(els.Text({ wrap: 'wrap', children: `· ${point}` }), 48))
-})
-
-test('the tour (tour/tour.ts): while its ask step waits, which holds main\'s answers, the thread\'s fork still answers, and its answer is that step done', async () => {
-  setOptions({})
-  noteViewport({ isFullscreen: true })
-  const s = setup()
-  const card = { about: 'the card "Orders by region"', card: 'card-made-up-1' }
-  await tourStart(s.$)
-  for (const step of ['answer', 'e', 'v'] as const) await tourDid(s.$, step)
-  expect((await tourNow(s.$))?.at).toBe('ask')
-  const asked = askHere(s.$, card, 'which region refunds most?')
-  await settle()
-  s.go()
-  await asked
-  // the question alone is not the step
-  expect((await tourNow(s.$))?.at).toBe('ask')
-  s.answer('agent-1', 'The North refunds most.')
-  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
-  expect(threadOf(threadKey(card))!.turns.at(-1)).toMatchObject({ role: 'claude', text: 'The North refunds most.' })
-  expect((await tourNow(s.$))?.done).toContain('ask')
-  expect((await tourNow(s.$))?.at).toBe('s')
-})
-
-test('the tour (tour/tour.ts): the answer of a side thread about a passage, not a card, leaves its ask step waiting', async () => {
-  setOptions({})
-  noteViewport({ isFullscreen: true })
-  const s = setup()
-  const passage = { about: 'the passage "refunds rose in May"', passage: { row: 'r-made-up-1', text: 'Refunds rose in May.' } }
-  await tourStart(s.$)
-  for (const step of ['answer', 'e', 'v'] as const) await tourDid(s.$, step)
-  const asked = askHere(s.$, passage, 'why in May?')
-  await settle()
-  s.go()
-  await asked
-  s.answer('agent-1', 'A sale ended in April.')
-  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
-  expect(threadOf(threadKey(passage))!.turns.at(-1)).toMatchObject({ role: 'claude', text: 'A sale ended in April.' })
-  expect((await tourNow(s.$))?.done).not.toContain('ask')
-  expect((await tourNow(s.$))?.at).toBe('ask')
 })

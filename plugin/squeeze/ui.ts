@@ -45,11 +45,12 @@ import { accent } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { mainRuns, mainTurn } from '../core/turn'
 import type { Take } from '../hooks/keys'
-import { marksIn } from '../marks/message.js'
+import { marksIn, withoutMarks } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
+import { tourHolds } from '../tour/tour'
 import { trayHeld } from '../tray/seam'
 import { cardDid, cardHidden } from './cards'
 import { CHOICES, atOf, cardNotes, catchUpStands, choiceAt, isSimplify, revealCut } from './chips.mjs'
@@ -401,10 +402,15 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   seeView(cols)
   const ui = await uiOf($, cu.id)
   const busy = !!ui.running || (await levelsNow($, cu)).pending
-  const text = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
+  const cut = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
+  // the simpler version of the tour's sample answer draws its citations as plain words until the tour's cite step
+  // starts, as the answer does (tour/tour.ts tourHolds)
+  let held = false
+  for (const r of cu.catchup?.rows ?? []) held = held || (await tourHolds($, r))
+  const text = held ? withoutMarks(cut) : cut
   const items: MarkItem[] = []
   const from: { row: string; n: number }[] = []
-  for (const r of cu.catchup?.rows ?? []) {
+  for (const r of held ? [] : cu.catchup?.rows ?? []) {
     for (const it of (await rowMarks($, r))?.items ?? []) {
       from.push({ row: it.row, n: it.n })
       items.push({ ...it, n: from.length })

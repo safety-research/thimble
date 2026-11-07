@@ -4,7 +4,7 @@
 // follows `$` only into functions a file declares or imports, so a list of handlers that take `$` cannot be called):
 //
 //   marks/register.ts  AssistantMessage   textView (the text a row shows), spansFor (explainers and heads-ups on its
-//                                         words, the tour's mark on the wrong number), markFocus (the
+//                                         words, the tour's shimmer on the words its step e names), markFocus (the
 //                                         citation the tray shows), underText (lines under the row's words),
 //                                         markPressed (a press on a citation), passagesFor (what the margin of
 //                                         each passage asks: a side thread about it)
@@ -39,7 +39,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, askBar, askKey, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { tourSpans, tourUnder } from '../tour/tour'
+import { tourKey, tourSpans, tourUnder } from '../tour/tour'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
@@ -110,7 +110,7 @@ export function checkSpans(given: unknown, text: string, marks: { start: number;
 }
 
 /** The features' spans on a row's words (the explainers and heads-ups, and first the words being explained on demand,
- *  which cover the marks they overlap; last the tour's mark on the number to click), checked (checkSpans). */
+ *  which cover the marks they overlap; last the tour's shimmer on the words its step e names), checked (checkSpans). */
 export async function spansFor($: Engine, row: string, text: string, marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
   const given = [...await safe(pendingSpans($, row, text), [] as Span[]), ...await safe(explainSpans($, row, text, marks), [] as Span[]), ...await safe(tourSpans($, row, text), [] as Span[])]
   const focus = await safe(trayFocus($, row), null)
@@ -252,13 +252,15 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray (while open its own keys, 0 closes it;
  *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, 0), { } over the answers, then the
- *  keys that act on the selected words, while they wait (else typed): e, c and a; then w (the claims), then t. */
+ *  keys that act on the selected words, while they wait (else typed): e, c and a, and c with none selected while the
+ *  tour's cite step waits for it (tour/tour.ts tourKey); then w (the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   return (await safe(trayKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(citeKey($, key, until), null))
+    ?? (await safe(tourKey($, key, until), null))
     ?? (await safe(askKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
