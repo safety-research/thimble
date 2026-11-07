@@ -32,7 +32,9 @@ The sandbox. Claude Code puts its sandbox's proxy sockets in TMPDIR (claude-http
 path holds at most 104 (macOS) or 108 (Linux) bytes, so with a long TMPDIR (the workspace's runtime/tmp/<conv>, 76
 characters and more) the sandbox did not start, and Claude Code then ran Bash outside it. So each turn's session gets a
 short TMPDIR (a 0700 folder under /tmp), and its sandbox is required (cc_settings.offline_sandbox's `required`): a
-sandbox that still cannot start refuses each Bash call, and the person gets a notice (SANDBOX_NOTICE). The sandbox gives
+sandbox that still cannot start refuses each Bash call, and the person gets a notice (SANDBOX_NOTICE). Where thimble's
+probe finds that the sandbox cannot run here (cc_settings.sandbox_ok), a session gets no Bash at all (options), and the
+person gets the same notice as the session starts (_no_box). The sandbox gives
 a command Claude Code's own temp folder as its TMPDIR, claude-<uid> in CLAUDE_CODE_TMPDIR, which the session gets as its
 TMPDIR too. Main's and its thread forks' sessions have the workspace's own short folder (workspace_tmp), kept from turn
 to turn, so their commands' TMPDIR (shell_tmp) is the same folder at each turn, which the card kernels share (notebook);
@@ -120,6 +122,8 @@ class Held:
     ended: Any = None  # what goes once it closes: its TMPDIR, and the sandbox's folder in the corpus (turn)
     # the hosts the analyst allowed once in it (options): it then never goes on into another turn (module note)
     once: list[str] = field(default_factory=list)
+    # it has Bash (options): only then did a Bash call's result run in the sandbox or meet its refusal (_session)
+    bash: bool = True
 
     async def close(self) -> None:
         try:
@@ -528,6 +532,7 @@ async def turn(conv: Any, text: str) -> Any:
     if held is not None and held.spec == spec and not held.once:
         return await _session(conv, spec, text, None)  # the session open since its last turn (module note)
     await close(conv)
+    await _no_box(conv, spec)
     pending: dict[str, list[str]] = {}
     once: list[str] = []
     kept = workspace_tmp(conv.c) if spec.temp is not None else None
@@ -578,6 +583,19 @@ def _tell_box(conv: Any, why: str) -> None:
                      text=SANDBOX_NOTICE.format(agent=name, why=why[:200]), action=notices.SETTINGS)
     except Exception:  # noqa: BLE001 — a notice not told is no reason to fail the turn
         log.exception("%s: the sandbox notice was not told", conv.c)
+
+
+async def _no_box(conv: Any, spec: Any) -> None:
+    """A session that would run Bash gets none where the sandbox cannot run (options), so the person is told so as it
+    starts, with what the sandbox lacks (cc_settings.sandbox_missing, which probes again, so what was installed since
+    counts at once), unless THIMBLE_SANDBOX=0 turned the sandbox off on purpose."""
+    from . import cc_settings  # noqa: PLC0415
+
+    if "Bash" not in spec.builtins or cc_settings.sandbox_ok() or os.environ.get("THIMBLE_SANDBOX", "").strip() == "0":
+        return
+    missing = await asyncio.to_thread(cc_settings.sandbox_missing)
+    if missing:
+        _tell_box(conv, "missing " + ", ".join(missing))
 
 
 async def _hand(conv: Any, client: Any, handed: dict[str, str], closing: asyncio.Event) -> None:
@@ -634,7 +652,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
     if held is None:
         stack = contextlib.AsyncExitStack()
         held = Held(spec, await stack.enter_async_context(ClaudeSDKClient(opts)), stack,
-                    once=[] if once is None else once)
+                    once=[] if once is None else once, bash="Bash" in (opts.tools or []))
     keep = False
     try:
         client = held.client
@@ -657,8 +675,9 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
                         if getattr(msg, "parent_tool_use_id", None):
                             continue
                         blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
-                        bash_ids.update(str(b["id"]) for b in blocks
-                                        if b.get("type") == "tool_use" and b.get("name") == "Bash")
+                        if held.bash:  # a session without Bash answers a call of it with an error that ran nothing
+                            bash_ids.update(str(b["id"]) for b in blocks
+                                            if b.get("type") == "tool_use" and b.get("name") == "Bash")
                         conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                         said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
