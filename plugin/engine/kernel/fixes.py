@@ -3034,11 +3034,12 @@ def browser_on_live() -> dict[str, Any]:
 
 def browser_packages(b: Path, part: str, env: dict[str, str]) -> None:
     """The workbench's packages of `part` in the browser folder `b`: the server's Python packages (uv sync, with the
-    test extras, so that thimble's dev agent can run the server's tests), or the page's and its sandbox runtime's (npm
-    ci)."""
+    test extras, so that thimble's dev agent can run the server's tests, and compiled to bytecode, which a kernel never
+    writes, so a kernel's start does not compile pandas and ipykernel again), or the page's and its sandbox runtime's
+    (npm ci)."""
     if part == "backend":
         run(["uv", "sync", "--project", str(b / part), "--frozen", "--no-dev", "--no-install-project",
-             "--extra", "dev"], env=env, timeout=1800)
+             "--extra", "dev", "--compile-bytecode"], env=env, timeout=1800)
     else:
         run(["npm", "--prefix", str(b / part), "ci", "--no-audit", "--no-fund"], env=env, timeout=1800)
 
