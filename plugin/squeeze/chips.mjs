@@ -21,7 +21,7 @@
 // A simpler version (s) is a catch-up of one message, the latest answer, with `catchup.kind` 'simplify': the request
 // names one message to make simpler (SIMPLIFY_HEAD), and it arrives at Length short and Background learning
 // (SIMPLIFY_AT). It stands below the answer as a catch-up does, and its chips change it. A message's own versions,
-// rewritten in place, are what s did before 0.10.12: a resumed session's records still hold and draw them.
+// rewritten in place, are what s did in 0.10.12 and earlier: a resumed session's records still hold and draw them.
 //
 // The chips belong to the whole answer: its text and the cards drawn in its turn. The request shows the original's
 // cards (cardsBlock: each card's title, columns, first rows, what it draws and its

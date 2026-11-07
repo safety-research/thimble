@@ -1,8 +1,11 @@
 // Simplify and catch-up in the terminal (squeeze/): s at an empty prompt writes a simpler version of the answer below
 // it in one press, at Length short and Background learning; s again opens the chips on it, ] asks one more call, Claude
 // hears the version with the next prompt, and 0 removes it; a letter right after s undoes it; with two replies since
-// the person's last prompt, b writes one catch-up of them below the newest, in place of a simpler version there; an
-// arrow or tab in the chips changes nothing. All data is made up. `claude plugin test plugin`.
+// the person's last prompt, b writes one catch-up of them below the newest, in place of a simpler version there, and
+// b undone puts that simpler version back; a catch-up read and removed still counts as read after s; s while main's
+// turn runs simplifies its answer when it ends; an answer rewritten in place in an earlier release shows its original
+// again when s simplifies it; an arrow or tab in the chips changes nothing. All data is made up.
+// `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { resetSqueeze } from '../squeeze/term'
@@ -34,13 +37,16 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: Any[] = []
-  on('session.id', () => ({ value: 's-squeeze' }))
+  // the conversation's id: a test that moves to another conversation (a /resume) sets it
+  const conversation = { id: 's-squeeze' }
+  on('session.id', () => ({ value: conversation.id }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
-  on('fs.write', (_$: unknown, e: { path: string; content: string }) => { files[e.path] = String(e.content); return { value: undefined } })
-  on('fs.list', () => ({ value: [] }))
+  on('fs.write', (_$: unknown, e: { path: string; text: string }) => { files[e.path] = String(e.text); return { value: undefined } })
+  // a folder's files, so a session started again reads back the turns its conversation kept (core/answers.ts)
+  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(files).filter(f => f.startsWith(`${e.path}/`) && !f.slice(e.path.length + 1).includes('/')).map(f => ({ name: f.slice(e.path.length + 1), kind: 'file' })) }))
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
@@ -59,7 +65,9 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  // the drawing beneath thimble's: the words it was handed to draw, kept for a test to read
+  const beneath: string[] = []
+  on('ui.render', (_$: unknown, e: Any) => { beneath.push(String(e?.props?.text ?? '')); return { type: 'Text', props: {}, children: ['the engine'] } as never })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const ask = (text: string, by = 'composer') => $.prompt.submit({ text, origin: { kind: by } } as never) as Promise<Any>
   const say = (uuid: string, text: string) => $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid } as never)
@@ -72,7 +80,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, turn, press, bar }
+  return { clock, asked, ask, turn, press, bar, files, conversation, beneath }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -105,7 +113,8 @@ test('s writes a simpler version below the answer in one press, at Length short 
   const { client, tree } = await chipsDrawn($, 'row-t1', LONG)
   expect(client?.props.module).toMatch(/chips\.tsx$/)
   expect(levelsOf(client?.props.props)).toEqual({ length: 0, familiarity: 1 })
-  for (const k of ['1 Length', '[ shorter', '] longer', '2 Background', '+ your own', '0 revert', 's close']) expect(textOf(tree)).toContain(k)
+  for (const k of ['1 Length', '[ shorter', '] longer', '2 Background', '+ your own', '0 remove', 's close']) expect(textOf(tree)).toContain(k)
+  expect(textOf(tree)).not.toContain('0 revert')
   expect(t.asked.length).toBe(1)
   // ] makes it longer: one more call, written below the answer, never in place of it
   await t.press(']')
@@ -187,6 +196,90 @@ test('with two replies since the last prompt, the bar names b apart from s; a si
   await t.press('s')
   expect(levelsOf((await clientUnder($, 'row-t3', 'The retry passed on all runs.'))?.props.props)).toEqual({ length: 0, familiarity: 2 })
   expect(t.asked.length).toBe(asked)
+})
+
+test('b undone by the letter after it puts back the simpler version it replaced', async ($, on) => {
+  const t = await setup($, on, ['Simpler.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('Simpler.')
+  // `by` typed at the empty prompt: b writes a catch-up, and y undoes it
+  expect(await $.prompt.edit(key('b'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('by')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  const host = textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))
+  expect(host).toContain('simpler version of the answer above')
+  expect(host).toContain('Simpler.')
+  expect(await t.bar()).toContain('b catch up on 2 replies')
+})
+
+test('a catch-up read and then removed still counts as read after s writes a simpler version on the same reply', async ($, on) => {
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.', 'Simpler.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('b')
+  await t.clock.advance(5000)
+  // s opens the chips on the catch-up, and 0 removes it
+  await t.press('s')
+  await t.press('0')
+  expect(await t.bar()).not.toContain('catch up')
+  // s now writes a simpler version of the newest reply; b is still not offered for the replies already read
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Write one simpler message of it')
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('simpler version of the answer above')
+  expect(await t.bar()).not.toContain('catch up')
+})
+
+test('s pressed while main\'s turn runs waits for its answer, then writes the simpler version of that answer', async ($, on) => {
+  const t = await setup($, on, ['Simpler second.'])
+  await t.turn('t1', 'First answer.')
+  await t.ask('and the second?')
+  await $.turn.start({ text: 'and the second?', turnId: 't2' } as never)
+  await t.press('s')
+  // s waits: it is lit on the bar, and nothing is asked yet
+  expect(await t.bar()).toContain('s simplify')
+  expect(t.asked.length).toBe(0)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Second answer.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t2' } as never)
+  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: 'Second answer.', durationMs: 10, isAborted: false } as never)
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).toContain('Second answer.')
+  expect(String(t.asked[0].prompt)).not.toContain('First answer.')
+  const host = textOf(await $.ui.render(answer('row-t2', 'Second answer.')))
+  expect(host).toContain('simpler version of the answer above')
+  expect(host).toContain('Simpler second.')
+})
+
+test('an answer s rewrote in place in an earlier release still draws its version; s shows its original again, with no call, and writes the simpler version below it', async ($, on) => {
+  const t = await setup($, on, [SHORT])
+  await t.turn('t1', LONG)
+  // a conversation of an earlier release kept the answer with a version that s wrote in place; the session moves to it
+  const kept = JSON.parse(t.files['/made-up/.thimble/conversations/s-squeeze/answers/t1.json']!)
+  for (const m of kept.msgs) if (m.row === 'row-t1') m.parts = { ...(m.parts ?? {}), squeeze: { own: { shown: 'Old version written in place.', squeeze: { at: { length: 0 }, scale: 5, versions: {} } } } }
+  t.files['/made-up/.thimble/conversations/s-old/answers/t1.json'] = JSON.stringify(kept)
+  t.conversation.id = 's-old'
+  await t.ask('the earlier conversation')
+  // the answer draws the old version in place of what Claude wrote
+  await $.ui.render(answer('row-t1', LONG))
+  expect(t.beneath.at(-1)).toBe('Old version written in place.')
+  // s: the answer shows as Claude wrote it again, with no call for that, and one call writes the simpler version below
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  t.beneath.length = 0
+  const host = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(t.beneath).not.toContain('Old version written in place.')
+  expect(host).not.toContain('Old version written in place.')
+  expect(host).toContain('simpler version of the answer above')
+  expect(host).toContain('the cache key changed.')
 })
 
 /** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */

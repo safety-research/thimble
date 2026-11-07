@@ -5,22 +5,24 @@
 // s (Simplify, the bar's `s simplify`) writes a simpler version of the newest answer (core/answers.ts latestAnswer) in
 // one press: one call, drawn below the answer as a catch-up is (term.ts simplify), at Length short and Background
 // learning, while the answer still shows as written. With a simpler version or a catch-up standing on the newest
-// answer, s opens the chips on it instead: they make it shorter or longer, more novice or more expert, and 0 removes it.
+// answer, s opens the chips on it instead: they make it longer, more novice or more expert, or follow the person's own
+// words, and 0 removes it.
 // s while main's turn runs waits for the answer it writes and then does the same (answerDone). With two or more replies
 // since the person's last prompt not yet caught up on, the bar also names `b catch up on N replies` (Catch-up): b writes
 // one catch-up of them, drawn below the newest of them as one more answer, while the replies still show as written
 // (term.ts catchUp), in place of a simpler version that stood there; the chips stay closed (s opens them on the
-// catch-up). A letter right after s or b undoes it (hooks/keys.ts word window). The chips that s opens take the keys: an
-// open tray, which holds them over the chips, gives way (tray/seam.ts trayGiveWay), and s with the tray open over open
-// chips gives the keys back to them. A message's own versions that s rewrote in place before 0.10.12 still draw in a
-// resumed session (viewOf), but s no longer opens the chips on a message itself.
+// catch-up). A letter right after s or b undoes it (hooks/keys.ts word window): b undone puts back the simpler version
+// or catch-up it replaced. The chips that s opens take the keys: an open tray, which holds them over the chips, gives
+// way (tray/seam.ts trayGiveWay), and s with the tray open over open chips gives the keys back to them. A message's own
+// versions that s rewrote in place in 0.10.12 and earlier still draw in a resumed session (viewOf); s on such an answer
+// shows its original again before it writes the simpler version, and s never opens the chips on a message itself.
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey). The chips name
 // each where it acts (chips.tsx), as the tray names its keys in its header, and the bar names none of them, so each key
 // shows once (heldKeys there):
 //   1–N pick a chip, each digit before its chip's name · [ and ] on the picked chip's ends move it a level (`[ shorter
 //   ○●○○ ] longer`; Length: short · as written · longer · much longer); < > , . the same, unnamed · + your own, a chip in
 //   the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed) · 0 revert, the
-//   original (on a simpler version or a catch-up: removes it) · s close
+//   original (on a simpler version or a catch-up: `0 remove`, which removes it) · s close
 // A press on a dot sets that level, and a press on an end moves the chip one level toward it, as [ and ] do. While a
 // rewrite is on its way the old text dims, and the bar's busy line says `simplifying` (term.ts); a version seen before
 // comes back at once. The bar says what the chips cannot show: a chip that goes no further, a rewrite that failed or
@@ -59,8 +61,8 @@ import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { trayGiveWay, trayHeld, trayHolds } from '../tray/seam'
 import { cardDid, cardHidden } from './cards'
-import { atOf, cardNotes, chipsOf, endsOf, isOriginal, isSimplify, levelWords, ownWords, revealCut, stepAt, withOwn } from './chips.mjs'
-import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, running, saveRec, seeView, setLevels, simplify, stopLevels, uiOf, wantLevels, type Rec } from './term'
+import { atOf, cardNotes, catchUpStands, chipsOf, endsOf, isOriginal, isSimplify, levelWords, ownWords, revealCut, stepAt, withOwn } from './chips.mjs'
+import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, running, saveRec, seeView, setLevels, simpleId, simplify, slotOf, standAgain, stopLevels, uiOf, wantLevels, type Rec } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -149,7 +151,7 @@ export async function answerDone($: Engine, turnId: string): Promise<void> {
 export async function targetNow($: Engine): Promise<string | null> {
   const row = await latestAnswer($)
   if (!row) return null
-  return (await catchUpOn($, row)) ? cuId(row) : row
+  return (await catchUpOn($, row))?.id ?? row
 }
 
 /** The chips open on a record, its first chip picked; scrolled into view. */
@@ -318,14 +320,18 @@ function simplifyTake($: Engine, row: string): Take {
   }
 }
 
+/** Whether a simpler version's first call failed: no version of it shows, none is on its way, and the call said why.
+ *  Then s writes it again (its error says so). */
+async function firstFailed($: Engine, rec: Rec): Promise<boolean> {
+  return isSimplify(rec) && typeof rec.shown !== 'string' && !running(rec.id) && !!(await uiOf($, rec.id)).error
+}
+
 /** What s does at rest on the answer `row`: with a simpler version or a catch-up standing on it, the chips open on
  *  that (`keys`: taking the keys from the tray; the wait took them already); else (or when a simpler version's first
  *  call failed) a simpler version is written. */
 async function restTake($: Engine, row: string, keys = true): Promise<Take> {
   const block = await catchUpOn($, row)
-  if (!block) return simplifyTake($, row)
-  const failed = isSimplify(block) && typeof block.shown !== 'string' && !running(block.id) && !!(await uiOf($, block.id)).error
-  if (failed) return simplifyTake($, row)
+  if (!block || (await firstFailed($, block))) return simplifyTake($, row)
   return keys ? openTake($, block.id) : { now: () => openChips($, block.id) }
 }
 
@@ -335,26 +341,47 @@ const blockOn = (rec: Rec) => featureOn(isSimplify(rec) ? 'squeezeAnswers' : 'ca
 // ------------------------------------------------------------------------------------------------ the catch-up
 
 /** b with replies piled up: one catch-up of every message since the person's last prompt, under the newest of them.
- *  An earlier catch-up of some of them goes, and so does a simpler version of one of them. Returns its id. */
-export async function catchUpNow($: Engine): Promise<string | null> {
+ *  An earlier catch-up of some of them goes, and so does a simpler version of one of them that stands. Returns its id,
+ *  and the records it replaced as they stood, which b undone puts back. */
+async function catchUpWith($: Engine): Promise<{ id: string; was: Rec[] } | null> {
   const pile = await pileUp($)
   if (!pile) return null
   const host = pile.replies[pile.replies.length - 1]!
-  for (const r of pile.replies) if ((await partNow($, r)).cu) await dismissCatchUp($, cuId(r), { quiet: true })
+  const was: Rec[] = []
+  for (const r of pile.replies) {
+    for (const id of [cuId(r), simpleId(r)]) {
+      const rec = await recOf($, id)
+      if (!rec || (slotOf(id) === 'simple' && !catchUpStands(rec))) continue
+      was.push(rec)
+      await dismissCatchUp($, id, { quiet: true })
+    }
+  }
   const id = await catchUp($, { host, rows: pile.rows, replies: pile.n, question: pile.prompt?.text ?? '', prompt: pile.prompt?.row ?? null })
   if (!id) return null
   await pickAnswer($, null)
   const cu = await recOf($, id)
   await $.ui.scroll({ to: { key: `ans-${cu ? drawnAt(cu) : host}` }, block: 'nearest' }).catch(() => undefined)
-  return id
+  return { id, was }
 }
 
-/** b: the catch-up written; undone (a letter right after it), it goes and the chips stand as they were. */
+/** b, or a press on `b catch up on N replies`: the catch-up written (catchUpWith). Returns its id. */
+export async function catchUpNow($: Engine): Promise<string | null> {
+  return (await catchUpWith($))?.id ?? null
+}
+
+/** b: the catch-up written; undone (a letter right after it), it goes, the simpler version or catch-up it replaced
+ *  stands again, and the chips stand as they were. */
 function catchUpTake($: Engine, open: Open | null): Take {
-  let made: string | null = null
+  let made: { id: string; was: Rec[] } | null = null
   return {
-    now: async () => { made = await catchUpNow($) },
-    undo: async () => { if (made) await dismissNow($, made, true); if (open) await writeOpen($, open); else await setOpen($, null) },
+    now: async () => { made = await catchUpWith($) },
+    undo: async () => {
+      if (made) {
+        await dismissNow($, made.id, true)
+        for (const rec of made.was) await standAgain($, rec)
+      }
+      if (open) await writeOpen($, open); else await setOpen($, null)
+    },
   }
 }
 
@@ -415,8 +442,9 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
   return restTake($, row)
 }
 
-/** A key the open chips take, at the prompt or in the chips (heldKey): [ ] (< > , .) a level, 1–N a chip, 0 revert, +
- *  your own (at the prompt: the prompt box takes the words), s close, b a catch-up while replies piled up. */
+/** A key the open chips take, at the prompt or in the chips (heldKey): [ ] (< > , .) a level, 1–N a chip, 0 revert
+ *  (on a block: remove), + your own (at the prompt: the prompt box takes the words), s close (on a simpler version
+ *  whose first call failed: write it again), b a catch-up while replies piled up. */
 async function chipsKeyTake($: Engine, open: Open, key: string): Promise<Take | null> {
   const rec = await recOf($, open.id)
   if (!rec) { await setOpen($, null); return null }
@@ -430,6 +458,11 @@ async function chipsKeyTake($: Engine, open: Open, key: string): Promise<Take | 
   if (key === '0') return { now: () => revert($, open) }
   if (key === '+') return { now: () => askOwn($) }
   if (key === 's') {
+    // a simpler version whose first call failed: s writes it again, as its error says, and the chips close
+    if (await firstFailed($, rec)) {
+      const again = simplifyTake($, rec.row)
+      return { now: async () => { await setOpen($, null); await again.now!() }, undo: again.undo }
+    }
     // the tray opened over the chips holds the keys: s gives them back to the chips, the tray giving way
     if (await trayHolds($).catch(() => false)) {
       let back: (() => Promise<void>) | null = null
@@ -563,7 +596,8 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
 
 /** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +;
  *  whether they name their keys (not while the tray holds the keys over them), whether a click gave them the keyboard,
- *  and whether 0 has a version to take back (a squeezed version shown or on its way; on a catch-up, the catch-up). */
+ *  whether 0 has a version to take back (a squeezed version shown or on its way; on a catch-up, the catch-up), and
+ *  whether 0 removes the record (a simpler version or a catch-up: `0 remove`). */
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
@@ -576,13 +610,13 @@ async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, level0: c.level0, ends: endsOf(c), word: levelWords(c), picked: c.id === focus && open.typing == null })),
     plus: open.typing, width, color: accent(),
-    keys: !trayHas, held: !!open.held, revert: !!rec.catchup || !orig || pending,
+    keys: !trayHas, held: !!open.held, revert: !!rec.catchup || !orig || pending, remove: !!rec.catchup,
   }
 }
 
 /** What the chips draw from their props, each a press (chips.tsx): each chip's digit and name, its ends (with their
  *  keys on the picked chip), its dots, the words of its level, its levels; s close; + your own, or what is typed after +
- *  and what ↵ and tab do then; 0 revert; esc back to the prompt; each with its key and without. */
+ *  and what ↵ and tab do then; 0 revert (or 0 remove); esc back to the prompt; each with its key and without. */
 function chipsWords(props: Any): string[] {
   const items: Any[] = Array.isArray(props?.items) ? props.items : []
   const typing = typeof props?.plus === 'string'
@@ -590,7 +624,7 @@ function chipsWords(props: Any): string[] {
   return [
     's close', 'close',
     ...(typing ? [`+ ${props.plus}▏`, '↵ adds it', 'adds it', 'tab lets it go', 'lets it go'] : ['+ your own', 'your own', '+']),
-    ...(props?.revert && !typing ? ['0 revert', 'revert'] : []),
+    ...(props?.revert && !typing ? (props?.remove ? ['0 remove', 'remove'] : ['0 revert', 'revert']) : []),
     ...(held ? ['esc back to the prompt', 'back to the prompt'] : []),
     ...items.flatMap(c => {
       const levels: unknown[] = Array.isArray(c.levels) ? c.levels : []

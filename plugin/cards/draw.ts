@@ -595,10 +595,10 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
       continue
     }
     // a card stands in one place: the newest row that placed it (or a catch-up of the replies, `<row>#cu`, drawn below
-    // them); an earlier one shows a line that points there
+    // them, or a simpler version of an answer, `<row>#s`, drawn below it); an earlier one shows a line that points there
     if (!meta.anchorRow && meta.inRow && !here.includes(meta.inRow)) {
       const E = $.ui.resolve(e) as Any
-      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : 'is drawn further down'
+      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : meta.inRow.endsWith('#s') ? 'is in the simpler version below' : 'is drawn further down'
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }

@@ -73,7 +73,7 @@ export type TurnPrompt = { text: string; by: string }
 /** One of Claude's messages a look reads: its row, its words, whether it ended its turn, its turn and that turn's
  *  prompt. `at`: when it was queued (session clock); `t`: the same in wall time. `only`: the lenses of a look on
  *  demand (the claims'), which reads it with those alone. */
-export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number; only?: string[]; catchUp?: string }
+export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number; only?: string[]; catchUp?: string; simpler?: boolean }
 /** What one look gave, as a feature's merge reads it: the messages it read (the newest last), the reply read
  *  leniently (reply.mjs parseAnswer), whether the person started another turn while it looked, and a log of the
  *  look's own (a feature may note what it placed). */
@@ -259,14 +259,15 @@ export async function findClaimsNow($: Engine): Promise<number> {
 
 /** A catch-up's version shown (squeeze/term.ts settled): the explain and heads lenses read it as they read an answer,
  *  with its words as what the analyst reads below `row`, the newest message it covers, where what they give is kept
- *  (explain/seam.ts explainMerge) and the catch-up's drawing finds it (explainSpansOf). */
-export async function lookAtCatchUp($: Engine, row: string, text: string): Promise<void> {
+ *  (explain/seam.ts explainMerge) and the catch-up's drawing finds it (explainSpansOf). `simpler`: a simpler version
+ *  of the answer `row`, which the look names as one (messages.mjs). */
+export async function lookAtCatchUp($: Engine, row: string, text: string, o: { simpler?: boolean } = {}): Promise<void> {
   // a lens on demand marks nothing by itself, a catch-up's words neither
   const only = (LENSES as Lens[]).filter(l => (l.name === 'explain' || l.name === 'heads') && lensesAfterReply(l.option)).map(l => l.name)
   if (!only.length || S.person !== 'now' || !text.trim()) return
   const t = await turnOfRow($, row)
   const m = t ? await msgOf($, t, row, 'answer') : null
-  if (m) await enqueue($, { ...m, only, catchUp: text })
+  if (m) await enqueue($, { ...m, only, catchUp: text, ...(o.simpler ? { simpler: true } : {}) })
 }
 
 // ------------------------------------------------------------------------------------------------ the look

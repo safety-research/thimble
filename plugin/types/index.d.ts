@@ -164,7 +164,7 @@ declare module 'claude-code' {
       fixerBox: Record<string, string[]>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
-      /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,
+      /** a record's state beside its text, by its id (a row, `<host row>#cu` for a catch-up, `<row>#s` for a simpler version): { running, want,
        *  asked, error, reveal } (squeeze/term.ts SqzUi) */
       squeezeUi: StateFamily<unknown>
       /** what Claude was told of each record's version, and the version waiting for the next prompt, by its id */

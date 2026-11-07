@@ -1,21 +1,22 @@
 // seam.ts: where Simplify and Catch-up (two settings; Simplify's key is squeezeAnswers) meet the rest of thimble
 // (core/answerview.ts calls each function by name, since Claude Code follows `$` only into functions a file declares or
 // imports). s writes a simpler version of the last answer below it in one press, as b writes a catch-up below the
-// replies that piled up; s again opens the chips on it, which make it shorter or longer, more novice or more expert, and
-// 0 removes it. The feature's own modules are beside this file: term.ts (the records, the call that writes a version,
-// the simpler version, the catch-up, what Claude hears), ui.ts (the keys, the chips, the bar, the drawing), cards.ts
-// (the cards a squeeze changes), chips.mjs (pure: the chips, the request, the reply, the checks), chips.tsx (the chips'
-// Client), prompts/squeeze.md.
+// replies that piled up; s again opens the chips on it, which make it longer, more novice or more expert, or follow the
+// person's own words, and 0 removes it. The feature's own modules are beside this file: term.ts (the records, the call
+// that writes a version, the simpler version, the catch-up, what Claude hears), ui.ts (the keys, the chips, the bar,
+// the drawing), cards.ts (the cards a squeeze changes), chips.mjs (pure: the chips, the request, the reply, the
+// checks), chips.tsx (the chips' Client), prompts/squeeze.md.
 //
 //   SQUEEZE_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   squeezeView($, row, text)          the text a row of Claude's shows now in place of what Claude wrote: a version
-//                                      s rewrote in place before 0.10.12 (a resumed session's), the part of it written
-//                                      in so far, `dim` while a rewrite runs; null: the row as Claude wrote it
+//                                      s rewrote in place in 0.10.12 and earlier (a resumed session's), the part of
+//                                      it written in so far, `dim` while a rewrite runs; null: the row as Claude
+//                                      wrote it
 //   squeezeUnder($, els, row, cols, cardsIn)  what stands under the row after its cards: its simpler version, or the
-//                                      catch-up of the replies it ends (the rule down its side, its head line, its words
-//                                      with their marks, the
-//                                      replies' explainers and the cards it places), why a catch-up failed, what a
-//                                      squeeze left out of its cards, the chips while they are open on it
+//                                      catch-up of the replies it ends (the rule down its side, its head line, its
+//                                      words with their marks, the replies' explainers and the cards it places),
+//                                      why a block's first version failed, what a squeeze left out of its cards,
+//                                      the chips while they are open on it
 //   squeezeUnderCard($, els, id, cols) what stands under one card: what a squeeze changed of it
 //   squeezeHidesCard($, id)            whether a card is left out of the version of its answer shown now
 //   squeezeHolds($)                    whether the chips are open: their keys come before the tray's and the ask's
@@ -37,7 +38,7 @@ import type { Take } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
-import { promptSent, recOf } from './term'
+import { promptSent, recOf, slotOf } from './term'
 import { addOwn, answerDone, barItems, type CardsIn, chipsHeld, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, simplifyNow, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
@@ -107,7 +108,7 @@ export const registerSqueeze: Register = on => {
   on('command.run', { command: 'rewrite' }, async ($, e) => {
     if (!featureOn('squeezeAnswers')) return { text: 'Simplify is off. Turn it on in /thimble-settings to use it.' }
     let id = (await openNow($))?.id ?? (await targetNow($))
-    if (id && !id.endsWith('#cu')) id = await simplifyNow($, id)
+    if (id && !slotOf(id)) id = await simplifyNow($, id)
     if (!id || !(await recOf($, id))) return { text: 'No answer to simplify yet: ask Claude something first.' }
     if (!ownWords(e.args)) { await openChips($, id); return {} }
     await addOwn($, id, e.args)
