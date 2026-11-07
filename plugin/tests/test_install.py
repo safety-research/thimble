@@ -609,6 +609,22 @@ def test_ref_to_a_prerelease_installs_its_file_by_its_name_beside_the_newest_rel
                             "/releases/download/v0.11.0-rc1/thimble-0.11.0-rc1.tar.gz"]
 
 
+def test_ref_over_a_dev_install_sets_its_fixes_aside_and_installs_the_branch(w, monkeypatch):
+    clone = w.home / "thimble"
+    sh("git", "clone", "-q", str(w.bare), str(clone))
+    assert w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh").returncode == 0
+    made_fix(w, monkeypatch, "say read, not coverage")
+    assert w.release()["kind"] == "clone"
+    tip = w.publish(branch="try-r110")
+    p = w.install("--no-browser", "--ref", "try-r110")
+    assert p.returncode == 0, text_of(p)
+    assert "The fixes of your dev install are set aside in ~/.thimble/fixes-dev-" in p.stdout, p.stdout
+    rel = w.release()
+    assert (rel["kind"], rel["ref"], rel["commit"], rel["based_on"]) == ("release", "try-r110", tip, "v0.10.8")
+    assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory",
+                                                                          "path": str(w.th / "fixes" / "live")}
+
+
 def made_fix(w, monkeypatch, words: str) -> dict:
     """A fix made as thimble makes one, in the test's process with the person's environment: its copy cut from mine,
     the fixer's change written there, done with no tests, then on with a made-up key press."""

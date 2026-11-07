@@ -182,10 +182,10 @@ def release(a: Any, r: Run) -> int:
     based_on = FX.latest_release(then="run the install again")["tag"] if ref and not tag else ""
     if rel and (live / ".git").exists():
         clone = tilde(rel.get("repo") or "")
-        to = aside("dev")
+        went = aside("dev")
         # the clone holds those fixes too (live is a worktree of it): it stays in use (unused)
         r.put(dev=rel.get("repo"))
-        say(f"The fixes of your dev install are set aside in {tilde(to)}. scripts/install.sh --local in {clone} "
+        say(f"The fixes of your dev install are set aside in {tilde(went)}. scripts/install.sh --local in {clone} "
             "brings them back.")
     back = newest("release")
     if back:
