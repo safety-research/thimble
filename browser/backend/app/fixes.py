@@ -602,8 +602,10 @@ def end_of(answer: str) -> dict[str, Any]:
     req = re.search(r"^\s*\**request\**\s*:\s*([\s\S]+)$", text, re.I | re.M)
     does = re.search(r"^\s*\**what it does\**\s*:\s*([\s\S]+)$", text, re.I | re.M)
     said = req or does
+    # the fence a fixer may close its end with, as the prompt shows the form in one, is no part of what it says
+    words = re.sub(r"\s*`{3,}\s*$", "", said.group(1).strip()) if said else ""
     return {"title": (title.group(1).replace("*", "").strip() if title else "")[:60],
-            "summary": re.sub(r"\s+", " ", said.group(1).strip() if said else "")[:1200],
+            "summary": re.sub(r"\s+", " ", words)[:1200],
             "request": req is not None and does is None}
 
 

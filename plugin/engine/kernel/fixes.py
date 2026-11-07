@@ -2508,17 +2508,25 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
         return {**out, "earlier": str(patch)} if wrote else out
 
 
-def undo(fid: int | str) -> dict[str, Any]:
-    """u: the fix's commit comes out of mine and stays under its ref, so it can go on again."""
+def undo(fid: int | str, back: bool = True) -> dict[str, Any]:
+    """u: the fix's commit comes out of mine and stays under its ref, so it can go on again. After a y on a fix changed
+    in place, u brings back its version before (`back`). thimble fix off and remove take the fix out (back False): its
+    version before does not come back, and the new version of a round that waits stays for the person's y."""
     rec = get(fid)
-    if rec.get("state") != "on":
+    if not _is_on(rec):
         raise FixError(f"fix {rec['id']} is not on")
-    if rec.get("prev"):
+    if back and rec.get("state") == "on" and rec.get("prev"):
         return _move(lambda: _back(rec["id"]))
 
     def change():
         r = get(rec["id"])
-        r.update(state="off", note="undone")
+        if r.get("state") == "on":
+            r.pop("prev", None)
+            run(["git", "update-ref", "-d", f"refs/thimble/prev/{rec['id']}"], cwd=live_dir(), check=False)
+            r.update(state="off", note="undone")
+        elif r.get("prev"):
+            # a round of the fix waits: the version the person has goes off, and the round goes on
+            r["prev"] = {**r["prev"], "state": "off"}
         put(r)
         out = _take_out(rec["id"], f"it did not fit once fix {rec['id']} was undone")
         return {"id": rec["id"], "title": rec["title"], **out}
@@ -2557,10 +2565,9 @@ def _back(fid: int) -> dict[str, Any]:
 def remove(fid: int | str) -> dict[str, Any]:
     """x: the fix leaves the list (its record stays in fixes.jsonl, as removed)."""
     rec = get(fid)
-    was_on = rec.get("state") == "on"
     out: dict[str, Any] = {"id": rec["id"], "title": rec["title"], "reload": False}
-    if was_on:
-        out = undo(rec["id"])
+    if _is_on(rec):
+        out = undo(rec["id"], back=False)
     # under the fixes' lock, which the runner of the fix's tests writes under too (tests_runner)
     with Lock():
         r = get(rec["id"])
@@ -2653,9 +2660,9 @@ def one_on(fid: int | str) -> dict[str, Any]:
 def one_off(fid: int | str) -> dict[str, Any]:
     """thimble fix off N: the fix comes out of mine and stays in the list, off, for thimble fix on N."""
     rec = get(fid)
-    if rec.get("state") != "on":
+    if not _is_on(rec):
         return {"said": f"Fix {rec['id']} is not on ({state_word(rec)}).", "reload": False}
-    out = undo(rec["id"])
+    out = undo(rec["id"], back=False)
     said = f"Fix {rec['id']} is off: {rec['title']}. thimble fix on {rec['id']} turns it back on."
     if out.get("redo"):
         said += f" It also took off {_and([str(i) for i in out['redo']])}, which did not fit without it."

@@ -1087,14 +1087,16 @@ def source_changed(state: dict[str, Any] | None = None) -> bool | None:
 
 
 def record_source_fingerprint(pid: int | None = None) -> bool:
-    """Called by the server at start-up: when server.json is about this process, refresh its fingerprint."""
+    """Called by the server at start-up: when server.json is about this process, refresh its fingerprint and the tree
+    it runs from (repo). A restart under the same pid may start it in another tree (a thimble fix that goes on starts
+    it from the checkout of the person's fixes, fixes.restart), and stop finds it there by that record."""
     st = read_state()
     if not st or st.get("pid") != (pid or os.getpid()):
         return False
-    fp = source_fingerprint()
-    if st.get("source_fingerprint") == fp:
+    fp, repo = source_fingerprint(), str(config.REPO_ROOT)
+    if st.get("source_fingerprint") == fp and st.get("repo") == repo:
         return False
-    st["source_fingerprint"] = fp
+    st.update(source_fingerprint=fp, repo=repo)
     write_state(st)
     return True
 
