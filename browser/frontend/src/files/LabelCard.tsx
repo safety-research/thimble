@@ -1,7 +1,7 @@
 // A label's edit card beside the Labels pane: what it labels (records of files, canvas cards or report sentences), for
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
 // body, and the classes with colour and highlight switch (headed "paint in Files": which values Files and the views
-// color, PAINT_TIP). Colours and highlights save as they change; the rest is a
+// color). Colours and highlights save as they change; the rest is a
 // draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
 // Escape drops the draft. The card stands at the Labels pane's edge, or in the popover a view or Files opens beside a
 // control (LabelEditor). A label that exists opens compact: its name in its color (a multi-class label's in the ink,
@@ -17,7 +17,7 @@ import { TextArea, TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Menu, Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
-import { TipButton, Tipped } from '../components/Tooltip'
+import { TipButton } from '../components/Tooltip'
 import { labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { loadSettings, modelChoices, modelLabel } from '../lib/models'
@@ -179,10 +179,6 @@ export function scopeLine(k: Concept, glob: string | null | undefined = k.glob):
   const count = st?.state === 'done' ? outcomeText({ ...st, failed: 0 }) : st?.state === 'running' ? progressText(st) : n != null ? `${n.toLocaleString()} ${unitWord(k.unit, n)}` : ''
   return [files, count].filter(Boolean).join(' · ')
 }
-
-/** What a class's switch does, on the hover of the switches' heading: it paints the class's records in Files and the
- * views, and changes nothing of the label. */
-export const PAINT_TIP = 'Which values are colored where the label is shown in Files and views. Switching one off or on does not change the label or its counts.'
 
 /** Whether More is open in a label's compact card, for the page's session: the next card opens as the last was left. */
 let moreShown = false
@@ -583,9 +579,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
             {grid}
             <div className="label-card-classes">
               <div className="label-card-classes-head">
-                <Tipped text={PAINT_TIP} className="label-card-key">
-                  Paint in Files
-                </Tipped>
+                <span className="label-card-key">Paint in Files</span>
               </div>
               {classes.map((c, i) => (
                 <div key={i} className="label-card-class">
@@ -614,9 +608,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
       <div className="label-card-classes">
         <div className="label-card-classes-head">
           <span className="label-card-key">Classes</span>
-          <Tipped text={PAINT_TIP} className="label-card-hl">
-            paint in Files
-          </Tipped>
+          <span className="label-card-hl">paint in Files</span>
         </div>
         {classes.map((c, i) => classRow(c, i, true))}
         {add}
