@@ -229,6 +229,80 @@ def test_off_and_on_and_off_sh(world):
     assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and not FX.is_on()
 
 
+def am_on_the_release(world, patch: Path) -> Path:
+    """A clean checkout of the release, with `patch` applied by git am, which fails on a patch that does not apply."""
+    clean = world["tmp"] / f"clean-{len(list(world['tmp'].glob('clean-*')))}"
+    sh("git", "clone", "-q", "--no-checkout", str(world["rel"]), str(clean))
+    sh("git", "checkout", "-q", "--detach", world["base"], cwd=clean)
+    sh("git", "am", "-q", str(patch), cwd=clean)
+    return clean
+
+
+def test_the_export_of_a_fix_carries_the_fixes_it_builds_on_so_that_git_am_applies_it_to_the_release(world):
+    """A fix made while another is on, which changes the line the other changed: its patch alone does not apply to the
+    release, so the export carries the other fix first and says so, as it does for a fix whose record says it refines
+    the other. A fix that stands alone exports as before."""
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "The bar's coverage item says read.")
+    FX.apply(a["id"], press(a["id"]))
+    b = FX.new("say read twice")
+    bar = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    bar.write_text(bar.read_text().replace("read", "read read"))
+    FX.done(b["id"], "Bar says read twice", "")
+    c = FX.new("a note for the people I work with")
+    (Path(c["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(c["id"], "A note", "")
+    out = world["tmp"] / "out"
+    assert FX.export(b["id"], str(out)) == [str(out / "thimble-fix-2.patch"), str(out / "thimble-fix-2.md"),
+                                            "Fix 2 builds on fix 1 (Bar says read), so the patch carries it first."]
+    clean = am_on_the_release(world, out / "thimble-fix-2.patch")
+    assert sh("git", "log", "--format=%s", cwd=clean).splitlines() == ["Bar says read twice", "Bar says read",
+                                                                     "thimble 0.10.2"]
+    assert (clean / "plugin" / "bar" / "bar.tsx").read_text() == "const words = `read read ${n}`\n"
+    # fix 3 sits on fix 1 too, and changes none of its lines: its own commit's patch, as before
+    assert FX.export(c["id"], str(out)) == [str(out / "thimble-fix-3.patch"), str(out / "thimble-fix-3.md")]
+    alone = FX.run(["git", "format-patch", "--stdout", "-1", FX.get(c["id"])["commit"]], cwd=FX.live_dir()).stdout
+    assert (out / "thimble-fix-3.patch").read_text() == alone
+    clean = am_on_the_release(world, out / "thimble-fix-3.patch")
+    assert sh("git", "log", "--format=%s", cwd=clean).splitlines() == ["A note", "thimble 0.10.2"]
+    # a follow-up made as a fix of its own (thimble 0.10.1 and before), whose record says it refines fix 1
+    FX.put({**FX.get(c["id"]), "refines": a["id"]})
+    assert FX.export(c["id"], str(out))[2:] == ["Fix 3 builds on fix 1 (Bar says read), so the patch carries it first."]
+    clean = am_on_the_release(world, out / "thimble-fix-3.patch")
+    assert sh("git", "log", "--format=%s", cwd=clean).splitlines() == ["A note", "Bar says read", "thimble 0.10.2"]
+
+
+def test_the_export_of_a_fix_that_is_on_follows_where_mine_holds_it(world):
+    """As found live: a fix made on the release goes on after another fix whose change is in the lines around its own.
+    As mine holds it, its patch touches the other fix's lines, so the export carries the other fix first. Once the other
+    fix is off, mine holds the fix on the release alone, and so does its export."""
+    items = "".join(f"const item{i} = {i}\n" for i in range(1, 9))
+    (world["rel"] / "plugin" / "bar" / "items.ts").write_text(items)
+    sh("git", "add", "plugin/bar/items.ts", cwd=world["rel"])
+    sh("git", "commit", "-q", "-m", "thimble 0.10.2 with the bar's items", cwd=world["rel"])
+    old, world["base"] = world["base"], sh("git", "rev-parse", "HEAD", cwd=world["rel"])
+    installed = world["cc"] / "plugins" / "installed_plugins.json"
+    installed.write_text(installed.read_text().replace(old, world["base"]))
+    ids = []
+    for words, was, now in (("item two is twenty", "item2 = 2\n", "item2 = 20\n"),
+                            ("item five is fifty", "item5 = 5\n", "item5 = 50\n")):
+        r = FX.new(words)
+        p = Path(r["work"]) / "plugin" / "bar" / "items.ts"
+        p.write_text(p.read_text().replace(was, now))
+        ids.append(FX.done(r["id"], words.capitalize(), "")["id"])
+    FX.apply(ids[1], press(ids[1]))
+    FX.apply(ids[0], press(ids[0]))
+    out = world["tmp"] / "out"
+    assert FX.export(ids[0], str(out))[2:] == ["Fix 1 builds on fix 2 (Item five is fifty), so the patch carries it first."]
+    clean = am_on_the_release(world, out / "thimble-fix-1.patch")
+    both = items.replace("item2 = 2\n", "item2 = 20\n").replace("item5 = 5\n", "item5 = 50\n")
+    assert (clean / "plugin" / "bar" / "items.ts").read_text() == both
+    FX.one_off(ids[1])
+    assert FX.export(ids[0], str(out))[2:] == []
+    clean = am_on_the_release(world, out / "thimble-fix-1.patch")
+    assert (clean / "plugin" / "bar" / "items.ts").read_text() == items.replace("item2 = 2\n", "item2 = 20\n")
+
+
 WAY_BACK = "no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through"
 
 

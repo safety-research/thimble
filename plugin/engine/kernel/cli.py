@@ -17,7 +17,8 @@ In a shell:
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
-    thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble fix export N [--to D]  save fix N as files: its patch (git am applies it), with the fixes it builds on
+                                   first, and its record
     thimble fix show|diff|apply|off|on|remove|export N...
                                    several fixes at once: thimble fix remove 3 4 5
     thimble doctor                 a checklist of what works, with the fix for each problem
@@ -578,7 +579,8 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix off | on             all your fixes off (the plain release), or on again
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
     thimble fix remove N             fix N leaves your list (off first, when it is on)
-    thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it) and its record
+    thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it), with the fixes it
+                                     builds on first, and its record
     thimble fix show|diff|apply|off|on|remove|export N...
                                      several fixes at once: thimble fix remove 3 4 5
 
