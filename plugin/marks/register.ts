@@ -15,7 +15,8 @@
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
-//                    Claude Code refused is noted as it ends (checker.ts readEnded)
+//                    Claude Code refused is noted as it ends (checker.ts readEnded), and so is its Python that don't
+//                    ask mode refused (checker.ts pythonEnded)
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
@@ -49,7 +50,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, pythonEnded, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -191,12 +192,15 @@ export const registerMarks: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // fails closed: a guard that throws before `next` refuses the checker's call in its place. A read Claude Code refused
-  // is noted as it ends: the file the check could not read
+  // is noted as it ends: the file the check could not read; so is its Python that don't ask mode refused
   on('tool.call', { agentId: /./ }, async ($, e, next) => {
     const no = denial(e)
     if (no) return { deny: no }
     const r = await next(e)
-    if (forkOf(e.agentId)?.kind === 'checker') await readEnded($, e as never, r).catch(() => undefined)
+    if (forkOf(e.agentId)?.kind === 'checker') {
+      try { pythonEnded(e as never, r) } catch { /* the check ends as its answer says */ }
+      await readEnded($, e as never, r).catch(() => undefined)
+    }
     return r
   }).catch(($, e, next) => {
     if (next.called) return next(e)

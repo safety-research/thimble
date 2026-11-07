@@ -2,13 +2,15 @@
 // its checks of citations (g, or x on a failed citation), thimble answers Claude Code's own ask on a checker's spawn of
 // its own with allow; a deny, an ask a rule, a hook, a setting or another plugin made, Claude's own call of a subagent,
 // another plugin's call and thimble's other forks stay as Claude Code decides. The OK also covers its checker forks'
-// Python, a Bash call that runs one script with python3 or python, never main's or another agent's. Where Claude Code
-// refused a check's read of a file asking nobody, x gives the person's OK for that file alone. Neither OK answers an
-// ask Claude Code puts to someone. All data is made up. `claude plugin test plugin`.
+// Python, a Bash call that runs one script with python3 or python, never main's or another agent's. Where don't ask mode
+// refuses that Python (it starts the fork), the citations the check could not judge wait, and the line offers g. Where
+// Claude Code refused a check's read of a file asking nobody, x gives the person's OK for that file alone. Neither OK
+// answers an ask Claude Code puts to someone. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
+import { failLineNow } from '../bar/notice'
 import { spawnFork } from '../core/forks'
-import { AGAIN_DESCRIPTION, autoRepair, endCheck, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, repairOk, startCheck } from '../marks/checker'
+import { AGAIN_DESCRIPTION, autoRepair, checkKey, endCheck, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, repairOk, startCheck } from '../marks/checker'
 import { registerMarks } from '../marks/register'
 import { newReply, rowMarks } from '../marks/store'
 import { setOptions } from '../settings/features.mjs'
@@ -248,4 +250,63 @@ test("x's OK covers its checker forks' Python too: thimble answers allow on Clau
   // a word typed after x takes the OK back
   await ok.undo()
   expect(await bash(SCRIPT)).toBe('ask')
+})
+
+/** Claude Code's refusal of a call in don't ask mode, as its tool.call answers it. There it starts the checker's fork
+ *  (its Agent tool asks for no permission outside auto mode) and refuses the fork's Python, which no rule allows. */
+const BASH_DONT_ASK = "Permission to use Bash has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal. "
+/** The line that says so, as the person reads it. */
+const DONT_ASK_LINE = "Claude Code's don't ask mode refused thimble's check of citations. Press g to allow thimble's checks this session."
+const settle = () => new Promise(r => setTimeout(r, 5))
+
+test("where don't ask mode refuses the check's Python and not its fork, the citations the check could not judge wait, not checked, and none is repaired by itself; one line says what refused it and offers g, which gives the OK and starts their check again, whose Python thimble then answers allow; a later reply's check runs with no line", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    // the validator: the check could not confirm marks 1 and 2, found 3 wrong, and verified 4 and 5
+    const { $, spawned } = engine(() => null, marks => marks.map(m => (m.n <= 2
+      ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: 'No output shows it.' }
+      : m.n === 3 ? { n: 3, status: 'failed', failedBy: 'check', shown: m.words, reason: 'The log names another check.' } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' })))
+    const call = hooksOn($)
+    /** A checker's Python as its call ends, as Claude Code answers it (`below`). */
+    const python = (agentId: string, below: Any) => call('tool.call', { tool: 'Bash', command: SCRIPT, agentId, tool_use_id: `toolu_${agentId}` }, below)
+    const statuses = async (row: string) => (await rowMarks($, row))!.items.map(m => m.status)
+    await noteRow($, 'row-1', REPLY)
+    await startCheck($, { turnId: 't-1', reason: 'answer' })
+    // both forks start (agent-1 for marks 1 to 3, agent-2 for 4 and 5); agent-1's Python is refused, asking nobody
+    expect(spawned.length).toBe(2)
+    await python('agent-1', refusedRead(BASH_DONT_ASK))
+    for (const agentId of ['agent-1', 'agent-2']) await endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })
+    expect(await statuses('row-1')).toEqual(['deferred', 'deferred', 'failed', 'verified', 'verified'])
+    // none is repaired by itself: the same refusal would stop the repair's Python
+    await autoRepair($, 'agent-1')
+    expect(spawned.length).toBe(2)
+    expect((await failLineNow($))?.text).toBe(DONT_ASK_LINE)
+    // g: the person's OK, and the check of the citations that wait starts again
+    const g = (await checkKey($, 'g', 0))!
+    await g.now()
+    await settle()
+    await g.later()
+    expect(spawned.length).toBe(3)
+    expect(spawned[2]).toMatchObject({ subagentType: 'fork', description: AGAIN_DESCRIPTION })
+    expect(spawned[2].prompt).toContain('1. [40]')
+    expect(spawned[2].prompt).toContain('2. [12 of 40]')
+    expect(spawned[2].prompt).not.toContain('3. [')
+    expect(await statuses('row-1')).toEqual(['checking', 'checking', 'failed', 'verified', 'verified'])
+    expect(await failLineNow($)).toBeNull()
+    // its Python, which Claude Code asks nobody about: thimble answers allow, under the OK
+    expect((await call('tool.check', { tool: 'Bash', input: { command: SCRIPT }, tool_use_id: 'toolu_b2', agentId: 'agent-3' }, ASK)).decision).toBe('allow')
+    // a later reply's check: its Python runs under the OK; a script that ran and failed is no refusal, whatever its
+    // output quotes; no line comes
+    await noteRow($, 'row-2', REPLY)
+    await startCheck($, { turnId: 't-2', reason: 'answer' })
+    expect(spawned.length).toBe(5)
+    expect((await call('tool.check', { tool: 'Bash', input: { command: SCRIPT }, tool_use_id: 'toolu_b3', agentId: 'agent-4' }, ASK)).decision).toBe('allow')
+    await python('agent-4', { result: '', isError: true, text: `Exit code 1\n${BASH_DONT_ASK}` })
+    await python('agent-5', { result: '12', text: '12' })
+    for (const agentId of ['agent-4', 'agent-5']) await endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })
+    expect(await statuses('row-2')).toEqual(['failed', 'failed', 'failed', 'verified', 'verified'])
+    expect(await failLineNow($)).toBeNull()
+  } finally {
+    setOptions({})
+  }
 })

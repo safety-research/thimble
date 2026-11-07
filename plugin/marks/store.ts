@@ -19,8 +19,9 @@ import { safeName } from '../core/layout.mjs'
 type Engine = EngineInterface
 
 /** `deferred`: a mark that waits to be checked until the person opens it (the setting Citations auto cite, words the
- *  person asked about with c, or a reply whose check could not start: checker.ts checkOpened); drawn as the reply's own
- *  cited words, with a dim ? after it. */
+ *  person asked about with c, a reply whose check could not start, or one its check could not judge because Claude Code
+ *  refused the check's Python: checker.ts checkOpened, pythonEnded); drawn as the reply's own cited words, with a dim ?
+ *  after it. */
 export type MarkStatus = 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed'
 /** A cited place of a file: its path from the folder the session started in, the cited line or range, and those lines
  *  with a line around them, the words found highlighted. */
