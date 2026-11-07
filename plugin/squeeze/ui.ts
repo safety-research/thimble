@@ -47,6 +47,7 @@ import { update, type EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { hintUsed } from '../bar/hints'
+import { failNotice, reasonOf } from '../bar/notice'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer, turnOf } from '../core/answers'
 import { openPane } from '../core/pane'
@@ -311,12 +312,16 @@ export async function simplifyNow($: Engine, row: string): Promise<string | null
   return id
 }
 
-/** s: the simpler version written; undone (a letter right after it), it goes. */
+/** s: the simpler version written; undone (a letter right after it), it goes. The key's hook does not wait for the
+ *  writes: Claude Code runs the next key's hook after this one returns, so a hook that waited would close the word
+ *  window before it reads a letter typed right after s. The undo waits for them. */
 function simplifyTake($: Engine, row: string): Take {
-  let made: string | null = null
+  let made: Promise<string | null> = Promise.resolve(null)
   return {
-    now: async () => { made = await simplifyNow($, row) },
-    undo: async () => { if (made) await dismissNow($, made, true) },
+    now: async () => {
+      made = simplifyNow($, row).catch(err => { failNotice($, `The s key did not run: ${reasonOf(err, 200)}`); return null })
+    },
+    undo: async () => { const id = await made; if (id) await dismissNow($, id, true) },
   }
 }
 
