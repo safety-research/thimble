@@ -106,9 +106,9 @@ export const TEXTS = {
     use: 'one fork of the conversation when the person asks what words of an answer mean (e on selected words, a press on cited words in a pane)',
   },
   squeeze: {
-    about: 'an answer rewritten at the levels the person picked on its chips, or a catch-up of the replies they missed',
+    about: 'a simpler version of an answer, rewritten at the levels the person picked under it, or a catch-up of the replies they missed',
     terminal: 'squeeze/term.ts',
-    use: 'one model call per change of the chips',
+    use: 'one model call per choice under the simpler version',
   },
   thread: {
     about: "a side thread's instructions",

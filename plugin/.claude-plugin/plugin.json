@@ -68,7 +68,7 @@
     "squeezeAnswers": {
       "type": "boolean",
       "title": "Simplify",
-      "description": "Press s for a shorter, plainer version of the last answer, below it. Press s again for its chips, which make it longer, more novice or more expert, or follow your own words. Press 0 to remove it. One call each time you ask.",
+      "description": "Press s for a shorter, plainer version of the last answer, below it. Under it, press 1 for shorter, 2 for longer, 3 to explain more, 4 to assume more, + for your own words, or 0 to remove it. One call each time you ask.",
       "default": true
     },
     "catchUp": {

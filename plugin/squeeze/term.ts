@@ -1,7 +1,7 @@
-// term.ts: Squeeze in the terminal: the records of the versions the chips wrote, the one call per change that writes
-// a version, the new text writing itself in from the top, the simpler version of an answer (s), the catch-up of
-// replies that piled up (b), and what Claude hears of the version the person settled on. The chips themselves, their
-// keys and their drawing, are ui.ts's; the seam (seam.ts) hands it to the hosts.
+// term.ts: Squeeze in the terminal: the records of the versions written at the chips' levels, the one call per change
+// that writes a version, the new text writing itself in from the top, the simpler version of an answer (s), the catch-up
+// of replies that piled up (b), and what Claude hears of the version the person settled on. The choices under a block,
+// their keys and their drawing, are ui.ts's; the seam (seam.ts) hands it to the hosts.
 //
 // A record is a message's own (its id is the row), a catch-up's (its id is `<host row>#cu`, kept on the newest of the
 // replies it covers), or a simpler version's (its id is `<row>#s`). A simpler version is a catch-up of one message,
@@ -10,7 +10,8 @@
 // still draws; s no longer writes one. All live in the message's part `squeeze` (core/answers.ts setPart), which a
 // resumed session reads back with its turn:
 //   {own: {shown, squeeze}, cu: {text, at, shown, squeeze, catchup}, simple: <as cu>, inCatchUp: <host row>}
-// chips.mjs says the fields. While a change is on its way, the module's state says where the chips go (want), and a
+// chips.mjs says the fields; a record kept at an earlier scale is read at this one (chips.mjs upgradeSqueeze). While a
+// change is on its way, the module's state says where the chips go (want) and what the choice does (doing), and a
 // failed call says why (error).
 //
 // A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
@@ -49,7 +50,7 @@ import { answerCards, applyCards, placeCatchUpCards, showCards, type Answer } fr
 import {
   ARRIVE, SCALE, SIMPLIFY_AT, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
   fromVersions, isOriginal, isSimplify, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
-  setWords, settledNote, shownKey, termsOf,
+  setWords, settledNote, shownKey, termsOf, upgradeSqueeze,
 } from './chips.mjs'
 
 type Engine = EngineInterface
@@ -68,7 +69,7 @@ type Block = { text: string; at: string; shown: string | null; squeeze: Any; cat
 export type SqPart = { own?: { shown: string | null; squeeze: Any }; cu?: Block; simple?: Block; inCatchUp?: string }
 /** A record's state beside its text: a call running, where the chips go while it runs, why the last call failed, and
  *  how much of a new text has written itself in. */
-export type SqzUi = { running: { since: number } | null; want?: At | null; asked?: number | null; error: string | null; reveal?: { n: number; total: number } | null }
+export type SqzUi = { running: { since: number } | null; want?: At | null; doing?: string | null; asked?: number | null; error: string | null; reveal?: { n: number; total: number } | null }
 
 const UI = { plugin: 'thimble', key: 'squeezeUi' } as const
 const TOLD = { plugin: 'thimble', key: 'squeezeTold' } as const
@@ -116,8 +117,8 @@ export async function recOf($: Engine, id: string): Promise<Rec | null> {
   if (!msg) return null
   const part = (msg.parts?.squeeze ?? {}) as SqPart
   const slot = slotOf(id)
-  if (slot) return part[slot] ? { id, row, ...part[slot]! } : null
-  return { id, row, text: msg.text, at: new Date(msg.at).toISOString(), shown: part.own?.shown ?? null, squeeze: part.own?.squeeze ?? {} }
+  if (slot) return part[slot] ? { id, row, ...part[slot]!, squeeze: upgradeSqueeze(part[slot]!.squeeze) } : null
+  return { id, row, text: msg.text, at: new Date(msg.at).toISOString(), shown: part.own?.shown ?? null, squeeze: upgradeSqueeze(part.own?.squeeze ?? {}) }
 }
 
 /** A record kept in its message's part. */
@@ -154,10 +155,11 @@ export function failedWords(why: string, key?: string | null, what = 'The rewrit
   return `${what} failed: ${why}. ${key ? `Press ${key} to try again` : 'Pick the level again to try again'}`
 }
 
-/** Where the chips of a record go, said at once (the chips read it), before the rewrite is asked: a key pressed right
- *  after reads the levels this one set. */
-export async function wantLevels($: Engine, id: string, at: At): Promise<void> {
-  await setUi($, id, { want: at, error: null })
+/** Where the chips of a record go, said at once (the block reads it), before the rewrite is asked: a key pressed right
+ *  after reads the levels this one set. `doing`: what the block says while that version is written (`making it
+ *  shorter`). */
+export async function wantLevels($: Engine, id: string, at: At, doing: string | null = null): Promise<void> {
+  await setUi($, id, { want: at, doing, error: null })
 }
 
 /** Set the chips of a record to `at` and show that version: from the record when it was written before, at once,
@@ -192,10 +194,9 @@ export async function setLevels($: Engine, id: string, at: At, key: string | nul
   }
 }
 
-/** The chips closed: a change on its way stops, its wait or its call, so the record keeps the version it shows and
- *  nothing is written after. Returns the levels that change was going to (null: none was on its way), which a close
- *  undone asks for again. A catch-up not written yet is written on, at its latest levels: there is no version of it to
- *  keep. */
+/** A change on its way stops, its wait or its call (0 removes the block it is for), so the record keeps the version
+ *  it shows and nothing is written after. Returns the levels that change was going to (null: none was on its way). A
+ *  catch-up not written yet is written on, at its latest levels: there is no version of it to keep. */
 export async function stopLevels($: Engine, id: string): Promise<At | null> {
   if (!latest.has(id)) return null
   const rec = await recOf($, id)
@@ -203,7 +204,7 @@ export async function stopLevels($: Engine, id: string): Promise<At | null> {
   const was = (await uiOf($, id)).want ?? null
   latest.delete(id)
   stopCall(id)
-  await setUi($, id, { running: null, want: null, asked: null, error: null })
+  await setUi($, id, { running: null, want: null, doing: null, asked: null, error: null })
   await noteSettled($, id)
   return was
 }
@@ -229,7 +230,7 @@ function stopped(signal: AbortSignal): Promise<Any> {
 async function done($: Engine, id: string, gen: number): Promise<void> {
   if (latest.get(id) !== gen) return
   latest.delete(id)
-  await setUi($, id, { running: null, want: null, asked: null })
+  await setUi($, id, { running: null, want: null, doing: null, asked: null })
   await noteSettled($, id)
 }
 
@@ -454,7 +455,7 @@ export async function pileUp($: Engine, on: (key: string) => boolean = featureOn
 }
 
 /** The block that stands on a reply (not dismissed): its catch-up, else its simpler version; or null. Only one stands
- *  at a time: b dismisses a simpler version, and s on a catch-up opens its chips. */
+ *  at a time: b dismisses a simpler version, and s on a block that stands only brings it into view. */
 export async function catchUpOn($: Engine, row: string): Promise<Rec | null> {
   for (const id of [cuId(row), simpleId(row)]) {
     const rec = await recOf($, id)
@@ -495,9 +496,9 @@ export async function catchUp($: Engine, o: { host: string; rows: string[]; repl
   if (!texts.length || !(await messageOf($, o.host))) return null
   const id = o.kind === 'simplify' ? simpleId(o.host) : cuId(o.host)
   const now = Number(await $.clock.now())
-  await saveRec($, { id, row: o.host, text: catchUpText(texts), at: new Date(now).toISOString(), shown: null, squeeze: { at: {} }, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt, ...(o.kind ? { kind: o.kind } : {}) } })
+  await saveRec($, { id, row: o.host, text: catchUpText(texts), at: new Date(now).toISOString(), shown: null, squeeze: { at: {}, scale: SCALE }, catchup: { host: o.host, rows: [...o.rows], replies: o.replies, question: o.question, prompt: o.prompt, ...(o.kind ? { kind: o.kind } : {}) } })
   for (const r of o.rows) if (r !== o.host) await setPart<SqPart>($, r, 'squeeze', cur => ({ ...(cur ?? {}), inCatchUp: o.host }))
-  await setUi($, id, { running: null, error: null, reveal: null, want: null, asked: null })
+  await setUi($, id, { running: null, error: null, reveal: null, want: null, doing: null, asked: null })
   // a simpler version that fails says s writes it again (ui.ts squeezeKeyTake)
   void (o.kind === 'simplify' ? setLevels($, id, { ...SIMPLIFY_AT }, 's') : setLevels($, id, { length: ARRIVE })).catch(() => undefined)
   return id

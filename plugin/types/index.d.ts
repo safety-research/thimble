@@ -167,16 +167,15 @@ declare module 'claude-code' {
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, `<host row>#cu` for a catch-up, `<row>#s` for a simpler version): { running, want,
-       *  asked, error, reveal } (squeeze/term.ts SqzUi) */
+       *  doing, asked, error, reveal } (squeeze/term.ts SqzUi) */
       squeezeUi: StateFamily<unknown>
       /** what Claude was told of each record's version, and the version waiting for the next prompt, by its id */
       squeezeTold: Record<string, { told: string; pending: string | null }>
-      /** the record the chips are open on, the picked chip, the chip at its edge, what is typed after +, whether a
-       *  click gave the chips the keyboard, whether the bar says how to type a chip of one's own (squeeze/ui.ts) */
-      squeezeOpen: { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean } | null
-      /** the chips the person typed this session, newest last */
+      /** + put /rewrite in the prompt box for the block `id`: the bar says `rewrite for…` (squeeze/ui.ts) */
+      squeezeHint: { id: string } | null
+      /** the words the person typed after /rewrite this session, newest last */
       squeezeOwn: string[]
-      /** s pressed while main's turn ran: the turn whose answer the chips open on once it ends (squeeze/ui.ts) */
+      /** s pressed while main's turn ran: the turn whose answer s acts on once it ends (squeeze/ui.ts) */
       squeezeWait: { turn: string } | null
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
        *  shown, what the version shown did to each (squeeze/cards.ts) */

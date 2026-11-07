@@ -426,8 +426,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: num
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
   // alone, each while its key reaches the card: what holds the keys before the card's header takes a while the tray is
   // open (a ask in its header) or stands on a card (a ask on the bar), and while words are selected (a ask on the bar,
-  // about them), and every key while a click gave the squeeze chips the keyboard, so each key shows once, where it
-  // acts. Every card's words are clicks
+  // about them), so each key shows once, where it acts. Every card's words are clicks
   const owner = (await headOwner($))?.id === meta.id
   const held = owner ? await heldKeys($, ['a', 'p']) : new Set<string>()
   if (owner && (await selectionAsks($))) held.add('a')
