@@ -1,14 +1,19 @@
 """thimble install: what scripts/install.sh does to thimble's home and to Claude Code, one verb per step, in the order
-the script runs them. The script checks what thimble needs, downloads the release with git and asks the person; these
-verbs do the rest with the code thimble update uses, so that an install leaves the layout an update leaves: the
-release in ~/.thimble/fixes/live (a git copy of it, where a fix is a commit), the plain release beside it in
+the script runs them. The script checks what thimble needs, downloads the release's file (or, for --ref, GitHub's
+archive of the branch or tag it names) and asks the person; these verbs do the rest with the code thimble update uses,
+so that an install leaves the layout an update leaves: the release in ~/.thimble/fixes/live (a git repository of its
+own, whose first commit is the release, and where a fix is a commit), the plain release beside it in
 ~/.thimble/fixes/release, Claude Code's marketplace thimble on live, the workbench built in live/browser, and the
 commands thimble and thimble-browser in ~/.local/bin.
 
-    thimble install release --from DIR   DIR, the release the script downloaded, becomes live (ensure_live, as a fix
-                                         makes it); an install that is there stays, with its fixes, and says what it is
-                                         and whether a newer release is out; with --ref it first moves to that branch or
-                                         tag, as thimble update moves to a release. Exit 3: every part is in place.
+    thimble install release --file FILE [--tag vX.Y.Z] [--ref REF]
+                                         FILE, the release's file the script downloaded (the release --tag names), or
+                                         GitHub's archive of the branch or tag --ref names, becomes live (ensure_live);
+                                         an install that is there stays, with its fixes, and says what it is and whether
+                                         a newer release is out; with --ref it first moves to that branch or tag, as
+                                         thimble update moves to a release. Exit 3: every part is in place.
+    thimble install release --from DIR   the same from DIR, a git clone of the release, as install scripts before
+                                         release files give it
     thimble install name                 the release live is on, as the script's last lines name it
     thimble install plugin               Claude Code loads the plugin from live, with its settings as they were
     thimble install sandbox              the sandbox that cards run in, which draws a test card (setup.mjs)
@@ -24,7 +29,7 @@ commands thimble and thimble-browser in ~/.local/bin.
 
 The dev install and the release install take turns in thimble's home: the one there goes aside, with its fixes, into a
 dated folder beside them (fixes-release-<date> or fixes-dev-<date>), and the newest one of the other kind that was set
-aside comes back (switch; release with --from).
+aside comes back (switch; release with --file or --from).
 
 Each verb prints its lines as the script lays them out, and adds what does not work yet to the file --notes names, one
 line each, which the script prints last. --state names a file where a verb leaves what a later one says: where Claude
@@ -37,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -46,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from . import fixes as FX
+from . import releases
 from .store import thimble_home
 
 # the line that marks a launcher the install wrote, which it may write again (an older install's has it too)
@@ -135,58 +142,30 @@ def defaults(manifest: dict[str, Any]) -> list[str]:
 
 
 def target(ref: str) -> dict[str, Any]:
-    """The branch or tag `ref` of thimble's repository, as fixes.update takes it (`to`): {tag, name, ref, commit, url,
-    version}, where tag is the release tag, or '' for a branch (or a tag that is no release, v0.11.0-rc1)."""
-    url, name = FX.update_url(), ref.removeprefix("refs/heads/").removeprefix("refs/tags/")
-    p = FX.remote_git("ls-remote", "--tags", "--heads", url, check=False, timeout=120)
-    if p.returncode != 0:
-        err = (p.stderr or p.stdout).strip().splitlines()
-        raise FX.FixError(f"thimble could not read {url} ({err[-1] if err else 'no message'}); check the network, then "
-                          "run the install again")
-    refs: dict[str, str] = {}
-    for line in p.stdout.splitlines():
-        sha, _, at = line.partition("\t")
-        if at.endswith("^{}"):
-            refs[at[:-3]] = sha  # an annotated tag's commit wins over the tag object
-        else:
-            refs.setdefault(at, sha)
-    for full in (f"refs/tags/{name}", f"refs/heads/{name}"):
-        if full in refs:
-            tag = name if full.startswith("refs/tags/") and FX.RELEASE_TAG.match(name) else ""
-            sha = refs[full]
-            return {"tag": tag, "name": name, "ref": full, "commit": sha, "url": url,
-                    "version": tag[1:] if tag else f"{name} at {sha[:7]}", "tags": {}}
-    raise FX.FixError(f"{url} has no branch or tag named {name}")
-
-
-def reach_release(full_ref: str) -> None:
-    """A branch's history in live back to the newest release, when the branch holds it, so that thimble update and a
-    session's check can tell whether a release is newer than the branch (fixes._is_newer reads the history), where a
-    copy one commit deep takes every release for newer. Done as well as the network lets it: nothing else changes."""
-    live, url = FX.live_dir(), FX.update_url()
-    try:
-        tag = FX.latest_release(then="run the install again")["tag"]
-    except FX.FixError:
-        return
-    FX.remote_git("fetch", "-q", "--depth", "1", "--no-tags", url, f"+refs/tags/{tag}:refs/tags/{tag}", cwd=live,
-                  check=False, timeout=300)
-    when = FX.git("log", "-1", "--format=%ct", f"refs/tags/{tag}", cwd=live, check=False)
-    if when.isdigit():
-        name = full_ref.removeprefix("refs/heads/").removeprefix("refs/tags/")
-        FX.remote_git("fetch", "-q", "--no-tags", f"--shallow-since={int(when) - 1}", url,
-                      f"+{full_ref}:refs/thimble/branches/{name}", cwd=live, check=False, timeout=600)
+    """The branch or tag `ref` of thimble's repository, as releases.fetch takes it: {tag, name, version}, where tag is
+    the release tag, or '' for a branch (or a tag that is no release, v0.11.0-rc1). Nothing is read: the download says
+    whether there is such a branch or tag."""
+    name = ref.removeprefix("refs/heads/").removeprefix("refs/tags/")
+    if not re.fullmatch(r"[A-Za-z0-9._+@][A-Za-z0-9._/+@-]*", name) or ".." in name:
+        raise FX.FixError(f"--ref takes the name of a branch or tag of thimble, such as main or v0.10.13, and {name} "
+                          "is not one")
+    tag = name if FX.RELEASE_TAG.match(name) else ""
+    return {"tag": tag, "name": name, "version": tag[1:] if tag else name}
 
 
 def release(a: Any, r: Run) -> int:
-    """The release the script downloaded (--from) becomes live, with the release checkout beside it, as thimble's first
-    fix makes them from Claude Code's copy (ensure_live). An install that is there stays (installed). A dev install's
-    fixes (scripts/install.sh --local) go aside first, and a release install that --local set aside comes back in place
-    of the download, with its fixes (the script then says that it downloaded the release for its install steps)."""
+    """The release the script downloaded becomes live, with the release checkout beside it (ensure_live): its file
+    (--file; the release --tag names, else the branch or tag --ref names, whose archive GitHub made), or, from an
+    install script before release files, its git clone (--from). An install that is there stays (installed). A dev
+    install's fixes (scripts/install.sh --local) go aside first, and a release install that --local set aside comes
+    back in place of the download, with its fixes (the script then says that it downloaded the release for its install
+    steps). A branch is installed with the newest release then (based_on), which thimble update compares a release
+    with: it is read first, so that a network that fails installs nothing."""
     rel, live = FX.release(), FX.live_dir()
     if rel and (live / ".git").exists() and rel.get("kind") != "clone":
         return installed(a, r, rel)
-    if not a.from_:
-        raise FX.FixError("thimble is not installed in this home, and no release was given to install (--from)")
+    if not a.file and not a.from_:
+        raise FX.FixError("thimble is not installed in this home, and no release was given to install (--file)")
     if rel and (live / ".git").exists():
         clone = tilde(rel.get("repo") or "")
         to = aside("dev")
@@ -201,47 +180,64 @@ def release(a: Any, r: Run) -> int:
         got = installed(a, r, FX.release())
         # the script goes on to the plugin's step, which points Claude Code at it again
         return 0 if got == IN_PLACE else got
-    src = Path(a.from_).resolve()
-    commit = FX.git("rev-parse", "HEAD", cwd=src)
+    to = target(a.ref) if a.ref else {}
+    tag = a.tag or to.get("tag", "")
+    if a.file and not tag and not to:
+        raise FX.FixError("thimble install release --file needs the release the file is (--tag) or the branch (--ref)")
+    based_on = FX.latest_release(then="run the install again")["tag"] if a.ref and not tag else ""
+    src = Path(a.from_).resolve() if a.from_ and not a.file else None
+    if src is not None and not FX._own_checkout(src):
+        # git would walk up to a repository around the folder, and take that one for thimble's
+        raise FX.FixError(f"--from takes a git clone of thimble, and {tilde(src)} is not one; give the release's "
+                          "file with --file")
     with FX.Lock():
         if os.path.lexists(live):
             # a live thimble cannot use (no release.json it can read beside it, or no git copy) may hold the person's
             # fixes as commits: it goes aside, never away
             why = "had no release.json beside it that thimble could read" if not rel else "was no git copy"
             r.note(f"{tilde(live)} {why}, so the install moved it to {tilde(FX.live_aside())}, with any fixes in it.")
+        if src is None:
+            FX.ensure_live({"kind": "release", "file": str(Path(a.file).resolve()), "tag": tag,
+                            "ref": "" if tag else to["name"], "based_on": based_on,
+                            "source": releases.file_url(tag) if a.tag else releases.archive_url(to["name"])})
+            return 0
+        commit = FX.git("rev-parse", "HEAD", cwd=src)
         rel = FX.ensure_live({"kind": "github", "repo": str(src), "commit": commit, "url": FX.update_url(),
                               "entry": None})
         # live's origin is thimble's repository; the download it came from goes after the install
         rel["repo"] = str(live)
-        branch = ""
         if a.ref and not rel.get("tag"):
-            branch = target(a.ref)["ref"]
-            rel["ref"] = branch.removeprefix("refs/heads/").removeprefix("refs/tags/")
+            rel.update(ref=to["name"], based_on=based_on)
         FX.write_json(FX.home() / "release.json", rel)
-    if branch:
-        reach_release(branch)
     return 0
 
 
 def installed(a: Any, r: Run, rel: dict[str, Any]) -> int:
     """An install in thimble's home: it stays, with its fixes. With --ref, it moves to that branch or tag first, as
-    thimble update moves to a release. Then the line that says what it is, with the parts in place when they all are
-    (exit IN_PLACE), and the newer release when one is out."""
+    thimble update moves to a release: the release that is installed already moves nothing and downloads nothing;
+    another is downloaded (its file, else GitHub's archive of it), and a commit that is the one installed moves
+    nothing either. Then the line that says what it is, with the parts in place when they all are (exit IN_PLACE), and
+    the newer release when one is out."""
     home = tilde(thimble_home())
     if a.ref:
         to = target(a.ref)
-        if to["commit"] != rel["base"]:
-            say(f"thimble {FX.release_name(rel)} is installed in {home}. It moves to {to['version']} now, and keeps "
-                "your fixes (a few minutes)...")
-            got = FX.update(to=to, say=FX._tell)
-            lines = list(got.get("lines") or [])
-            while lines and (not lines[-1].strip() or lines[-1].startswith("Then")):
-                lines.pop()
-            for line in lines:
-                say(line)
-            rel = FX.release()
-            if rel.get("ref"):
-                reach_release(to["ref"])
+        if not (to["tag"] and to["tag"] == rel.get("tag") and not rel.get("ref")):
+            then = "run the install again"
+            # a branch is as new as the newest release now: read first, so that nothing is downloaded when it fails
+            based_on = "" if to["tag"] else FX.latest_release(then=then)["tag"]
+            with FX.Lock():
+                got = releases.fetch(to, FX.live_dir(), then=then, archive=True)
+            got["based_on"] = based_on
+            had = rel.get("commit") or (rel["base"] if rel.get("kind") == "github" else "")
+            if not ((got["commit"] and got["commit"] == had) or got["base"] == rel["base"]):
+                say(f"thimble {FX.release_name(rel)} is installed in {home}. It moves to {got['version']} now, and "
+                    "keeps your fixes (a few minutes)...")
+                moved = FX.update(to=got, say=FX._tell)
+                lines = list(moved.get("lines") or [])
+                while lines and (not lines[-1].strip() or lines[-1].startswith("Then")):
+                    lines.pop()
+                for line in lines:
+                    say(line)
     whole = in_place(a.browser, bin_dir(a))
     parts = ("The plugin, the workbench and the commands are in place." if browser_ready() else
              "The plugin and the commands are in place.")

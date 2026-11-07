@@ -405,7 +405,101 @@ def test_thimble_update_moves_the_install_to_a_newer_release_in_place(w):
     assert w.calls()[-1] == "plugin update thimble@thimble"
 
 
-# ------------------------------------------------------------------ an earlier install moves into thimble's home
+def live_head(w) -> str:
+    return sh("git", "rev-parse", "mine", cwd=w.th / "fixes" / "live")
+
+
+def test_ref_moves_an_install_that_is_there_and_downloads_only_what_it_moves_to(w):
+    assert w.install("--no-browser").returncode == 0
+    v9 = w.publish("v0.10.9")
+    head, before = live_head(w), w.gh.files()
+    # the release that is installed: nothing is downloaded, and nothing moves
+    p = w.install("--no-browser", "--ref", "v0.10.8")
+    assert p.returncode == 0, text_of(p)
+    assert "It moves to" not in p.stdout and live_head(w) == head and w.gh.files() == before, text_of(p)
+    # another release: its file, once, and the install moves to it with its fixes
+    p = w.install("--no-browser", "--ref", "v0.10.9")
+    assert p.returncode == 0, text_of(p)
+    lines = p.stdout.splitlines()
+    assert ("thimble 0.10.8 is installed in ~/.thimble. It moves to 0.10.9 now, and keeps your fixes (a few "
+            "minutes)...") in lines, lines
+    assert "Updated thimble 0.10.8 → 0.10.9 (terminal plugin)" in lines
+    assert lines[-1] == "thimble 0.10.9 is installed in ~/.thimble. The plugin and the commands are in place."
+    made = sh("git", "rev-parse", "refs/thimble/releases/v0.10.9", cwd=w.th / "fixes" / "live")
+    assert live_head(w) == made and (w.release()["tag"], w.release()["commit"]) == ("v0.10.9", v9)
+    assert w.gh.files() == [*before, "/releases/download/v0.10.9/thimble-0.10.9.tar.gz"]
+    # a branch at the commit that is installed: GitHub's archive of it says so, and nothing moves
+    p = w.install("--no-browser", "--ref", "main")
+    assert p.returncode == 0, text_of(p)
+    assert "It moves to" not in p.stdout and live_head(w) == made and w.release()["tag"] == "v0.10.9", text_of(p)
+    assert w.gh.requests()[-2:] == ["GET /archive/main.tar.gz", "GET /releases/latest"]
+
+
+def made_fix(w, monkeypatch, words: str) -> dict:
+    """A fix made as thimble makes one, in the test's process with the person's environment: its copy cut from mine,
+    the fixer's change written there, done with no tests, then on with a made-up key press."""
+    from kernel import fixes as FX  # noqa: PLC0415
+
+    for k, v in w.env().items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    rec = FX.new(words)
+    (Path(rec["work"]) / "plugin" / f"made-up-{rec['id']}.txt").write_text(f"{words}\n")
+    rec = FX.done(rec["id"], words, "", tests=False)
+    assert rec["state"] == "ready", rec
+    secret = os.urandom(16).hex()
+    FX.write_json(FX.home() / "asks" / f"{rec['id']}.json", {"key": FX.key_hash(secret)})
+    FX.apply(rec["id"], secret)
+    return FX.get(rec["id"])
+
+
+def install_as_before_release_files(w) -> None:
+    """thimble 0.10.8 as an install script from before release files installed it: git cloned the release, and the
+    kernel's steps took that clone (--from), so live is a clone with GitHub's history."""
+    work = w.tmp / "tmp" / "thimble-install.older"
+    clone = work / "thimble"
+    sh("git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch", "v0.10.8", f"file://{w.bare}",
+       str(clone))
+    for step in (["release", "--from", str(clone)], ["plugin"], ["commands"]):
+        p = subprocess.run([sys.executable, "-B", str(clone / "plugin" / "engine" / "thimble.py"), "install", *step,
+                            "--bin-dir", str(w.home / ".local" / "bin"), "--notes", str(work / "notes"), "--state",
+                            str(work / "state.json")], env=w.env(), cwd=w.home, capture_output=True, text=True,
+                           timeout=300)
+        assert p.returncode == 0, text_of(p)
+    shutil.rmtree(work)
+
+
+def test_an_install_from_a_script_before_release_files_updates_to_a_release_file_with_its_fixes(w, monkeypatch):
+    install_as_before_release_files(w)
+    v8 = sh("git", "rev-parse", "v0.10.8", cwd=w.bare)
+    rel = w.release()
+    assert (rel["kind"], rel["base"], rel["commit"], rel["tag"]) == ("github", v8, v8, "v0.10.8")
+    rec = made_fix(w, monkeypatch, "say read, not coverage")
+    v9 = w.publish("v0.10.9")
+    from kernel import fixes as FX  # noqa: PLC0415
+
+    # the fix's checks run as in test_fixes.py: no sandbox runtime here
+    monkeypatch.setattr(FX, "sandbox_argv", lambda *a, **k: ["/bin/bash", "-c"])
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    out = FX.update()
+    assert (out["from"], out["to"], out["back"], out["aside"]) == ("0.10.8", "0.10.9", [rec["id"]], [])
+    live = FX.live_dir()
+    made = sh("git", "rev-parse", "refs/thimble/releases/v0.10.9", cwd=live)
+    assert sh("git", "rev-parse", "mine^", cwd=live) == made and FX.get(rec["id"])["state"] == "on"
+    assert (live / "plugin" / f"made-up-{rec['id']}.txt").is_file()
+    rel = w.release()
+    assert (rel["kind"], rel["tag"], rel["commit"], rel["base"]) == ("release", "v0.10.9", v9, made)
+    assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == made and made in (FX.home() / "off.sh").read_text()
+    assert w.gh.files() == ["/releases/download/v0.10.9/thimble-0.10.9.tar.gz"]
+    # the older script's way, given a folder that is no git clone, stops before anything
+    folder = w.tmp / "tmp" / "thimble-install.x" / "thimble-0.10.8"
+    folder.mkdir(parents=True)
+    p = subprocess.run([sys.executable, "-B", str(ROOT / "plugin" / "engine" / "thimble.py"), "install", "release",
+                        "--from", str(folder)], env={**w.env(), "THIMBLE_HOME": str(w.tmp / "other-home")},
+                       capture_output=True, text=True, timeout=60)
+    assert (p.returncode, p.stdout.strip()) == (1, f"--from takes a git clone of thimble, and {folder} is not one; "
+                                                   "give the release's file with --file."), text_of(p)
+    assert not (w.tmp / "other-home" / "fixes" / "live").exists()
 
 
 # ------------------------------------------------------------------ an earlier install moved by thimble update alone
