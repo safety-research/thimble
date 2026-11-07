@@ -28,6 +28,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
+import { hintUsed } from '../bar/hints'
 import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { anchoredAt, type CardMeta, inTemp, metaOf } from '../cards/store'
@@ -168,6 +169,8 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
     d.agentId = r.agentId
     d.status = 'running'
     await save($, d)
+    // the person drew a card: the first session's tour goes on (bar/intro.ts)
+    await hintUsed($, 'visualize').catch(() => undefined)
     await busyWhile($, 'drawing a card', () => designStep($, d))
   } catch (err) {
     await end($, d, 'failed', `× v could not start drawing a card: ${reason(err)}`)

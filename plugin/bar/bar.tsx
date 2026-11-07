@@ -13,8 +13,8 @@
 //                  right their items (barRight: `w 11 claims`, `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
-//                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
-//                  hint can point at it
+//                  (a step of the first session's tour: `Tour 1/4: …`) in place of the left's keys, after the busy
+//                  step, while it fits there whole; the right stays, so a hint can point at it
 //
 // A bar too narrow for its items gives way in this order: the busy step's other steps, then coverage's file counts,
 // then the words of an item that has shorter ones down to the longest of those (`] show explainer` to `] explainer`),
@@ -157,7 +157,7 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 
 /** The bar's rows: the failure line (or a hint the bar has no room for) when there is one, and the bar, `width` cells
  *  wide, on as many rows as its items need. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string; lead?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
@@ -180,10 +180,13 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a hint: in place of the left's keys, after the busy step, while it fits there whole beside what the bar keeps (the
   // busy step's glyph and seconds, the right's keys); an item it names (“a ask”) stays after it, on the right too.
   // Longer, it stands above the bar, and the bar keeps its keys
-  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
+  const notice = preview ? null : await hintNow($).catch(() => null)
+  const hint = preview ? null : (notice ?? o.intro ?? null)
+  // a hint's lead: `Hint:`, or the one the first session's line gives (`Tour 1/4:`, bar/intro.ts)
+  const lead = !notice && o.intro && o.lead ? o.lead : 'Hint:'
   const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
-  const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
+  const hinted: Item[] = hint ? [{ id: 'hint', glyph: lead, words: hint }, ...keys.filter(named)] : []
   const hintIn = !!hint && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
   const whole = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
   let left = whole
@@ -263,7 +266,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a hint the bar has no room for: above it, whole, where the failure line stands (a hint and a failure never show
   // together)
   const hintRow = Box({ key: 'hint-line', flexDirection: 'row', width, children: [Text({ key: 'hint-text', wrap: 'wrap', children: [
-    Text({ key: 'g', color: accent(), children: 'Hint: ' }), Text({ key: 'w', dimColor: true, children: hint }),
+    Text({ key: 'g', color: accent(), children: `${lead} ` }), Text({ key: 'w', dimColor: true, children: hint }),
   ] })] })
   const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf, held)
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's

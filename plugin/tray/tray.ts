@@ -64,6 +64,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { spinNow } from '../bar/busy'
+import { hintUsed } from '../bar/hints'
 import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
@@ -455,6 +456,8 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   // a citation that waits to be checked until it is opened (Citations auto cite, or words asked about with c) starts
   // its check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
+  // a citation's evidence opened: the first session's tour goes on (bar/intro.ts)
+  if (f.kind === 'citation') await hintUsed($, 'evidence').catch(() => undefined)
   await setTray($, open(f) as Tray)
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)

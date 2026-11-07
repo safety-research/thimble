@@ -240,13 +240,18 @@ signin() {
 }
 
 # finish WHAT: the end: what is installed, how to try it (in the Claude Code session that runs the install, which sets
-# CLAUDECODE for its commands, or in a terminal), then what does not work yet
+# CLAUDECODE for its commands, or in a terminal) with a short tour of thimble's keys, then what does not work yet
 finish() {
   say ""
   say "$1."
   say ""
   if [ -n "${CLAUDECODE:-}" ]; then say "Try it now: type /reload-plugins in this Claude Code session."
   else say "Try it now: run claude in a folder of data files."; fi
+  say "A quick tour, once Claude answers you:"
+  say "  v  draws a card of the answer"
+  say "  e  explains the words you select in an answer"
+  say "  c  checks the words you select against the data, and corrects them when they are wrong"
+  say "  s  writes a shorter, plainer version of a long answer below it"
   if [ "$built" = 1 ]; then
     say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
       "it prints."
