@@ -584,11 +584,16 @@ export function rowText(row) {
 
 // ------------------------------------------------------------------------------------------------ a change, applied
 
+/** The fields of a label that say which records it goes over: a change of one applies it over the records they name. */
+export const SCOPE = ['in', 'where', 'within', 'limit']
+
 /** The `thimble label` command that applies the label `l` (as `thimble label --json` gives it) again with `change`
  *  (its rule, plain sentence, records, values, where, within, model or limit; null clears where, within, model or
  *  limit): the command Claude runs, so the label's versions,
  *  checks and records stay right. A code label's code goes on stdin. Null when it cannot be applied again (no kind
- *  with a rule, or no records named). */
+ *  with a rule, or no records named). A trial whose records the ask picked (a sample, or what a cancel kept) has no
+ *  --limit that picks them again: a change that keeps its records (not `in`, `where`, `within` or `limit`) applies
+ *  over the same records (`--same-records`). */
 export function rerunArgs(l, change = {}) {
   const now = { rule: l?.rule, says: l?.says, in: l?.in, values: l?.values, where: l?.where, within: l?.within, model: l?.model, limit: l?.limit, ...change }
   const kind = l?.kind
@@ -604,6 +609,7 @@ export function rerunArgs(l, change = {}) {
   if (now.where) args.push('--where', String(now.where))
   if (now.within) args.push('--within', Array.isArray(now.within) ? now.within.join('=') : String(now.within))
   if (kind === 'prompt' && now.model) args.push('--model', String(now.model))
+  if (l?.trial && !(Number(now.limit) > 0) && !SCOPE.some(k => k in change)) args.push('--same-records')
   if (Number(now.limit) > 0) args.push('--limit', String(Math.floor(Number(now.limit))))
   if (Number(l?.seed) && Number(now.limit) > 0) args.push('--seed', String(l.seed))
   if (l?.reason) args.push('--reason')

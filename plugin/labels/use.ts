@@ -24,24 +24,28 @@
 // person with it. Their answer in that tool's result is the choice (use.mjs answerChoice): it runs as the person
 // (`thimble label NAME --answer all|sample|cancel --ask ID`, an id Claude never sees), the model's reads start beside
 // the session (labels.ts labelFromFeed), and Claude reads what was chosen after the tool's result. An answer in the
-// person's own words starts nothing; the same command again asks again.
+// person's own words starts nothing; the same command again asks again. An ask that a command of the person's own made
+// (a label applied again in the labels pane, edit.ts) has no command of Claude's after it: the person is asked at once
+// in the same dialog (askPerson), and Claude reads their choice with their next prompt.
 //
 //   labelsUnderAnswer($, els, row, cols)   the row under an answer
 //   labelsUnderCard($, els, id, cols)      the row under a card
 //   labelAskFromFeed($, ev)                a `label_ask` line of the kernel's change feed
 //   answerAsk($, choice, ask?)             the person's choice; what Claude reads of it
+//   askPerson($, name, ask)                the ask a command of the person's own made, asked of them at once
 //   registerLabelUse                       the reads of the labels (session.start, turn.complete, a `thimble label`
 //                                          command), the ask after that command, and the person's answer to it
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failNotice } from '../bar/notice'
+import { failNotice, noticeLine } from '../bar/notice'
 import { metaOf, treeOf } from '../cards/store'
 import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
 import { readFeed } from '../core/feed'
+import { tellAtNextPrompt } from '../core/tell'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
-import { answerChoice, answerNote, askContext, askOf, howMade, labelInTree, NO_VALUE, rowValues, tonesInTree, usedNames } from './use.mjs'
+import { answerChoice, answerNote, askChoices, askContext, askOf, askQuestion, howMade, labelInTree, NO_VALUE, rowValues, tonesInTree, usedNames } from './use.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,7 +56,7 @@ type Any = any
  *  of `values` when not given. `tones`, set only under a card: the colors the card gives its values. */
 export type UsedLabel = { name: string; values: string[]; shown?: { v: string; name: string }[]; kind?: string; records?: number; tones?: Record<string, string> }
 /** The ask that waits for the person's choice. */
-export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean; calls?: number }
+export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean; calls?: number; model?: string }
 type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
@@ -280,6 +284,35 @@ export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Pr
   needLabelList($)
   if (choice !== 'cancel') labelFromFeed($, { name: a.name, root: a.root, t: `${a.ask}-${choice}` })
   return answerNote(a, choice, got)
+}
+
+/** The ask `ask` that a command of the person's own made for the label `name` (the labels pane's edit, edit.ts),
+ *  asked of the person at once: no command of Claude's comes after it to ask. Claude Code's question dialog asks it, as Claude would,
+ *  each choice with what it costs; the ask is the person's from here, so Claude's next command and the question tool's
+ *  hook leave it alone. Their choice runs as theirs (answerAsk), and Claude reads it with their next prompt; no choice
+ *  (the dialog dismissed, or their own words) starts nothing, and a line says so. */
+export async function askPerson($: Engine, name: string, ask: string): Promise<void> {
+  const a = await labelAskNow($)
+  if (!a || a.name !== name || a.ask !== ask) return
+  fresh = fresh.filter(x => x.ask !== a.ask)
+  await setLabelAsk($, null)
+  const choices = askChoices(a) as { label: string; choice: Choice; cost: string }[]
+  const words = (c: { label: string; choice: Choice; cost: string }) => (c.choice !== 'cancel' && c.cost ? `${c.label} · ${c.cost}` : c.label)
+  let said = ''
+  try {
+    said = await $.ui.ask(askQuestion(a), { options: choices.map(words), header: 'Label run' })
+  } catch {
+    said = ''
+  }
+  const about = `label-ask:${a.root}|${a.name}`
+  const c = choices.find(x => words(x) === said)
+  if (!c) {
+    noticeLine($, `The label ${a.name} did not start: no choice was made. Ask Claude to run it again.`, about)
+    await tellAtNextPrompt($, about, `The label ${a.name} waits for the analyst's choice before the model reads its records, and they made none: nothing runs. The same \`thimble label\` command asks them again.`)
+    return
+  }
+  const note = await answerAsk($, c.choice, a)
+  if (note) await tellAtNextPrompt($, about, note)
 }
 
 /** A Bash command of Claude's that runs `thimble label` (labels/register.ts reads it alike). */
