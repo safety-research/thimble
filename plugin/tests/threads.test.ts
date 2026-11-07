@@ -1,7 +1,7 @@
 // Side threads (threads/): a question typed in a pane's input bar asks the thread's fork once, even when ↵ comes twice
 // before the fork started; its answer is read from the fork's transcript at its end, and m sends it to main; while the
 // fork works, the thread shows its question and the steps the fork took. While the tour waits for its ask step, the
-// thread's answer is that step done. All data is made up. `claude plugin test plugin`.
+// thread's answer about a card is that step done. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'
@@ -206,4 +206,22 @@ test('the tour (tour/tour.ts): while its ask step waits, which holds main\'s ans
   expect(threadOf(threadKey(card))!.turns.at(-1)).toMatchObject({ role: 'claude', text: 'The North refunds most.' })
   expect((await tourNow(s.$))?.done).toContain('ask')
   expect((await tourNow(s.$))?.at).toBe('s')
+})
+
+test('the tour (tour/tour.ts): the answer of a side thread about a passage, not a card, leaves its ask step waiting', async () => {
+  setOptions({})
+  noteViewport({ isFullscreen: true })
+  const s = setup()
+  const passage = { about: 'the passage "refunds rose in May"', passage: { row: 'r-made-up-1', text: 'Refunds rose in May.' } }
+  await tourStart(s.$)
+  for (const step of ['answer', 'e', 'v'] as const) await tourDid(s.$, step)
+  const asked = askHere(s.$, passage, 'why in May?')
+  await settle()
+  s.go()
+  await asked
+  s.answer('agent-1', 'A sale ended in April.')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  expect(threadOf(threadKey(passage))!.turns.at(-1)).toMatchObject({ role: 'claude', text: 'A sale ended in April.' })
+  expect((await tourNow(s.$))?.done).not.toContain('ask')
+  expect((await tourNow(s.$))?.at).toBe('ask')
 })

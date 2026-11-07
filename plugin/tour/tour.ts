@@ -20,8 +20,8 @@
 //             bold; the answer marks nothing for it
 //   v         the first card that v's designer draws is on the screen (designer/v.ts). A design that ends with no
 //             card counts too (tourMissed), so the tour goes on
-//   ask       the first answer of a side thread shows (threads/thread.ts). The step asks about the card v drew: a
-//             click on `ask` in the card's header, or ] to the card and a (cards/head.ts)
+//   ask       the first answer of a side thread about a card shows (threads/thread.ts). The step asks about the card v
+//             drew: a click on `ask` in the card's header, or ] to the card and a (cards/head.ts)
 //   s         the first text of the simpler version shows (squeeze/term.ts)
 //   cite      the marked citation, the wrong number, opens in the tray with its check (tray/tray.ts tourOpened). By
 //             then the checker has corrected it, so the tray shows the old value and the check. A click on it in the

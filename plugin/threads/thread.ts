@@ -23,7 +23,7 @@
 //   - Its answers cite as main's replies do, and are checked as they are (marks/checker.ts checkAnswer, at the fork's
 //     turn end): each answer is a reply of its own in the marks' store (threads.mjs answerRow), which the pane draws.
 //   - m sends the last answer to main as a prompt of its own (sendToMain): main answers it in the conversation.
-//   - A thread's answer is a step of the tour done (tour/tour.ts).
+//   - A thread's answer about a card is a step of the tour done (tour/tour.ts).
 //   - The bar counts the session's threads (`t 2 threads`); t or a click on the count lists them (pane `threads`), and
 //     opening one shows it again with its conversation.
 // Nothing here runs unless the person asked a question.
@@ -536,8 +536,8 @@ export const registerThreads: Register = on => {
       const now = t ? threads.get(t.key) : null
       const i = now ? now.turns.length - 1 : -1
       if (now && i >= 0 && now.turns[i]!.role === 'claude' && now.turns[i]!.text && !retired.has(now)) {
-        // a thread's answer shows: a step of the tour done (tour/tour.ts)
-        if (now.status === 'done') await tourDid($, 'ask').catch(() => undefined)
+        // a thread's answer about a card shows: a step of the tour done (tour/tour.ts)
+        if (now.status === 'done' && now.scope.card) await tourDid($, 'ask').catch(() => undefined)
         await checkAnswer($, { row: answerRow(now, i), text: now.turns[i]!.text, turnId: String((e as Any).turnId ?? ''), agentId: e.agentId, about: aboutOf(now.scope), reason: String((e as Any).reason ?? 'answer') })
       }
     } catch {
