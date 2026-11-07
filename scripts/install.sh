@@ -53,11 +53,16 @@ kernel() { "$py" -B "$code/plugin/engine/thimble.py" "$@" --notes "$notes" --sta
 # browser 1: the kernel's option for a step that has the workbench to install, or installed
 browser() { if [ "$1" = 1 ]; then echo --browser; fi; }
 # web ARGS...: curl as thimble reads its releases: no ~/.curlrc (-q), over HTTPS alone (plain http too while
-# THIMBLE_RELEASES_URL stands in for GitHub), its error line in $work/err
+# THIMBLE_RELEASES_URL stands in for GitHub), its error line in $work/err. When the environment names no proxy that curl
+# reads for that address, the proxy git's config names for it (http.proxy), through which git reached GitHub before
 web() {
-  local proto="=https"
+  local proto="=https" named proxy=""
   [ -z "${THIMBLE_RELEASES_URL:-}" ] || proto="=http,https"
-  curl -q --proto "$proto" --proto-redir "$proto" -sS --connect-timeout 20 --retry 2 "$@" 2>"$work/err"
+  case "$releases" in https:*) named="${https_proxy:-}${HTTPS_PROXY:-}" ;; *) named="${http_proxy:-}" ;; esac
+  [ -n "$named${all_proxy:-}${ALL_PROXY:-}" ] ||
+    proxy="$(cd / && git config --get-urlmatch http.proxy "$releases" 2>/dev/null)" || proxy=""
+  curl -q --proto "$proto" --proto-redir "$proto" -sS --connect-timeout 20 --retry 2 ${proxy:+--proxy "$proxy"} "$@" \
+    2>"$work/err"
 }
 # why_curl: what curl said in $work/err, in one line, without its `curl: (N) `
 why_curl() { local why; why="$(sed -n 's/^curl: ([0-9]*) //p' "$work/err" | tail -n 1)"; printf '%s' "${why%.}"; }

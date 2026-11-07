@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
@@ -24,7 +25,7 @@ sys.path.insert(0, str(ROOT / "plugin" / "engine"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from kernel import install as IN  # noqa: E402
-from releases_server import Releases  # noqa: E402
+from releases_server import Proxy, Releases  # noqa: E402
 
 GIT_ID = {"GIT_AUTHOR_NAME": "Release", "GIT_AUTHOR_EMAIL": "release@example.invalid",
           "GIT_COMMITTER_NAME": "Release", "GIT_COMMITTER_EMAIL": "release@example.invalid"}
@@ -488,6 +489,40 @@ def test_a_release_file_that_is_missing_broken_or_out_of_reach_says_what_to_do_a
         "curl" not in lines[-2] and lines[-3] == "", text_of(p)
     assert lines[-1] == "Check the network, then run the install again. Nothing was installed."
     nothing_installed(w)
+
+
+def closed_port() -> int:
+    """A port on 127.0.0.1 that nothing listens on."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_the_downloads_go_through_the_proxy_git_s_config_names_when_no_variable_names_one(w):
+    """A person whose network needs a proxy may have named it in git's config alone (http.proxy), which git used to
+    reach GitHub before release files. curl reads only the environment's variables, so the install and thimble update
+    give it git's proxy when no variable names one; a variable that names one wins, as it does for curl elsewhere."""
+    proxy = Proxy()
+    try:
+        cfg = w.tmp / "gitconfig"
+        cfg.write_text(f"[http]\n\tproxy = {proxy.url}\n")
+        p = w.install("--no-browser", GIT_CONFIG_GLOBAL=str(cfg))
+        assert p.returncode == 0, text_of(p)
+        assert [x for x in proxy.seen if "/releases/" in x] == [
+            f"GET {w.gh.url}/releases/latest", f"GET {w.gh.url}/releases/download/v0.10.8/SHA256SUMS",
+            f"GET {w.gh.url}/releases/download/v0.10.8/thimble-0.10.8.tar.gz"], proxy.seen
+        link = w.home / ".local" / "bin" / "thimble"
+        got = subprocess.run([str(link), "update", "--check"], capture_output=True, text=True,
+                             env=w.env(GIT_CONFIG_GLOBAL=str(cfg)))
+        assert got.returncode == 0 and proxy.seen[-1] == f"GET {w.gh.url}/releases/latest", text_of(got)
+        # git's proxy answers nothing now, and all_proxy names the one that works
+        cfg.write_text(f"[http]\n\tproxy = http://127.0.0.1:{closed_port()}\n")
+        seen = len(proxy.seen)
+        got = subprocess.run([str(link), "update", "--check"], capture_output=True, text=True,
+                             env=w.env(GIT_CONFIG_GLOBAL=str(cfg), all_proxy=proxy.url))
+        assert got.returncode == 0 and proxy.seen[seen:] == [f"GET {w.gh.url}/releases/latest"], text_of(got)
+    finally:
+        proxy.stop()
 
 
 def test_running_it_again_leaves_the_install_as_it_is_and_downloads_nothing(w):

@@ -153,8 +153,9 @@ The install:
   sandbox may fail inside Claude Code's sandbox for that reason alone. The check that counts is a card drawn in a new
   `claude` session: a card that cannot draw says why in the line above the prompt.
 - **The download failed.** The script says curl's line, or what is wrong with the release's file. A firewall must let
-  github.com and release-assets.githubusercontent.com through (codeload.github.com too for `--ref`). Check the
-  network, then run the script again: nothing was installed.
+  github.com and release-assets.githubusercontent.com through (codeload.github.com too for `--ref`). Behind a proxy,
+  the download goes through the one `https_proxy` names, else the one git's config names (`git config --global
+  http.proxy`). Check the network, then run the script again: nothing was installed.
 - **`~/.local/bin` is not on your `PATH`.** A note at the end of the install gives the line to add to your shell's
   startup file. Until then, start the commands by their full paths.
 

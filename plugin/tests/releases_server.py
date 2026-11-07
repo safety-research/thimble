@@ -15,10 +15,13 @@ makes it the newest; drop(tag) takes them away; spoil(tag) changes its file's by
 has the page of the latest release answer with that status (503, as when GitHub is down); stop() ends the server, so
 that a request finds nothing listening.
 
+Proxy is an HTTP proxy on 127.0.0.1 that passes each request on and logs it, as a person's network may need one.
+
 Run as a script, it does the same from a shell, for a test by hand (python3 releases_server.py --help)."""
 from __future__ import annotations
 
 import argparse
+import http.client
 import re
 import shutil
 import subprocess
@@ -26,6 +29,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_FILE = ROOT / "scripts" / "release-file.sh"
@@ -158,6 +162,52 @@ class Releases:
         SHA256SUMS."""
         return [r.split(" ", 1)[1] for r in self.requests()
                 if r.startswith("GET /releases/download/") and not r.endswith("/SHA256SUMS")]
+
+
+class ProxyHandler(BaseHTTPRequestHandler):
+    server: "Proxy"
+
+    def log_message(self, *a) -> None:
+        pass
+
+    def do_GET(self) -> None:
+        """A request in a proxy's form (GET http://host:port/path) is passed on as it is, with no redirect followed,
+        and its answer passed back."""
+        self.server.seen.append(f"{self.command} {self.path}")
+        u = urlsplit(self.path)
+        if u.scheme != "http" or not u.hostname:
+            self.send_response(400)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=60)
+        c.request("GET", u.path + (f"?{u.query}" if u.query else ""))
+        r = c.getresponse()
+        body = r.read()
+        self.send_response(r.status)
+        for k, v in r.getheaders():
+            if k.lower() in ("location", "content-type"):
+                self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class Proxy(ThreadingHTTPServer):
+    """An HTTP proxy on 127.0.0.1, on a free port, in a thread of the test's own process: `url` is what https_proxy or
+    git's http.proxy names, and `seen` each request it passed on."""
+
+    daemon_threads = True
+
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), ProxyHandler)
+        self.seen: list[str] = []
+        self.url = f"http://127.0.0.1:{self.server_address[1]}"
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    def stop(self) -> None:
+        self.shutdown()
+        self.server_close()
 
 
 def main() -> int:

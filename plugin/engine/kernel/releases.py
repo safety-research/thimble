@@ -15,8 +15,9 @@ downloads of that file, which is how many people install each version; thimble s
                  own time, so that a release is the same commit on every machine
     fetch()      both, into live: what thimble update and the install's --ref move live to
 
-curl runs with no ~/.curlrc (-q) and only over HTTPS. Python from python.org on macOS may have no certificates; curl
-uses the system's. thimble's repository on GitHub is https://github.com/safety-research/thimble (fixes.upstream());
+curl runs with no ~/.curlrc (-q) and only over HTTPS, through the proxy that the environment names, else the one
+git's config names (http.proxy), as git reached GitHub before. Python from python.org on macOS may have no
+certificates; curl uses the system's. thimble's repository on GitHub is https://github.com/safety-research/thimble (fixes.upstream());
 THIMBLE_RELEASES_URL stands in for it, for tests (a server on 127.0.0.1, over plain http). The dev install
 (scripts/install.sh --local) and a pull request's fetch of main (share.py) still use git."""
 from __future__ import annotations
@@ -80,13 +81,32 @@ def _why(p: subprocess.CompletedProcess) -> str:
     return re.sub(r"^curl: \(\d+\) ", "", said[-1]).rstrip(".")
 
 
+def _proxy() -> list[str]:
+    """curl's --proxy when the environment names no proxy that curl reads for thimble's address (https_proxy or
+    all_proxy; http_proxy for a test's plain http) and git's config names one for it (http.proxy): git reached GitHub
+    through it before release files, and a person may have set it alone. git's config is read from /, as git read it
+    then, so a repository around the folder the command runs in does not count."""
+    url = base()
+    names = (["https_proxy", "HTTPS_PROXY"] if url.startswith("https:") else ["http_proxy"]) + ["all_proxy", "ALL_PROXY"]
+    if any(os.environ.get(n) for n in names):
+        return []
+    try:
+        p = subprocess.run(["git", "config", "--get-urlmatch", "http.proxy", url], cwd="/", capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    proxy = p.stdout.strip() if p.returncode == 0 else ""
+    return ["--proxy", proxy] if proxy else []
+
+
 def _curl(args: list[str], then: str, seconds: int, name: str = "") -> str:
     """curl ARGS, with no ~/.curlrc and over HTTPS alone (plain http too while THIMBLE_RELEASES_URL stands in for
-    GitHub): what it wrote for -w. A failure of curl itself is the person's line with its fix, then `then`; a download
-    that could not be written (`name`) says to make room on the disk."""
+    GitHub), through the proxy git's config names when the environment names none (_proxy): what it wrote for -w. A
+    failure of curl itself is the person's line with its fix, then `then`; a download that could not be written
+    (`name`) says to make room on the disk."""
     proto = "=http,https" if os.environ.get("THIMBLE_RELEASES_URL") else "=https"
     cmd = ["curl", "-q", "--proto", proto, "--proto-redir", proto, "-sS", "--connect-timeout", "20", "--retry", "2",
-           "--max-time", str(seconds), *args]
+           "--max-time", str(seconds), *_proxy(), *args]
     limit = seconds * 3 + 60  # its tries, and the waits between them
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=limit,
