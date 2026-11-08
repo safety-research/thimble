@@ -140,6 +140,13 @@ const typing = (t: EventTarget | null): boolean => {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
 }
 
+/** Whether a key went to another part of the page than the board, such as a button in the chat: that part's key, which
+ * the board leaves to it (Space presses the button rather than pans, Enter opens no focus mode). */
+const elsewhere = (t: EventTarget | null): boolean => {
+  const panel = t instanceof Element ? t.closest('[data-panel]') : null
+  return !!panel && panel.getAttribute('data-panel') !== 'canvas'
+}
+
 const PART_WORD: Record<FilterPart, string> = { kinds: 'Kind', groups: 'Group', makers: 'Made by', checks: 'Check', starred: 'Starred', locked: 'Locked', text: 'Text' }
 
 /** What a part of the card filter keeps, as its chip in the band names it: `Kind · plot, table`, `Starred`, `Text · "merge"`. */
@@ -1094,11 +1101,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     return kidsOf(board, parent).filter((k) => k.t === 'c').map((k) => k.it.cell as Cell)
   }, [focus, board])
 
-  // the board's keys, while its pane has the focus
+  // the board's keys, while its pane has the focus and the key is not another part's
   useEffect(() => {
     if (!focused) return
     const onKey = (e: KeyboardEvent) => {
-      if (typing(e.target)) return
+      if (typing(e.target) || elsewhere(e.target)) return
       if (e.key === ' ' && !focus) {
         space.current = e.type === 'keydown'
         if (e.type === 'keydown') e.preventDefault()

@@ -85,3 +85,29 @@ def test_a_detached_browser_start_starts_the_server_once_and_stop_ends_it(home, 
         for q in _uvicorns_on(port):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(q, 9)
+
+
+def test_stop_ends_a_server_that_a_restart_started_in_another_tree(tmp_path, monkeypatch):
+    """A fix that goes on starts the server again from the checkout of the person's fixes, under the same pid
+    (fixes.restart, dev._do_restart). The server records the tree it runs from as it starts, so that the launcher's
+    stop (its Ctrl-C) ends it there, as it ends the server it started."""
+    from app import config  # noqa: PLC0415
+
+    clone, live = tmp_path / "clone" / "browser", tmp_path / "fixes" / "live" / "browser"
+    for d in (clone, live):
+        (d / "backend").mkdir(parents=True)
+    port = free_port()
+    # the server's command line, in live's backend folder
+    server = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "uvicorn", "app.main:app", "--port",
+                               str(port)], cwd=live / "backend", start_new_session=True)
+    try:
+        monkeypatch.setattr(config, "REPO_ROOT", clone)
+        cli.write_state({"port": port, "pid": server.pid, "repo": str(clone)})
+        monkeypatch.setattr(config, "REPO_ROOT", live)
+        cli.record_source_fingerprint(server.pid)
+        monkeypatch.setattr(config, "REPO_ROOT", clone)
+        assert f"server: pid {server.pid} stopped" in cli.stop(vite=False)
+        assert server.wait(timeout=10) is not None
+    finally:
+        if server.poll() is None:
+            server.kill()

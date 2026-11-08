@@ -44,8 +44,10 @@
 //
 // Its words may hold a check's comment on them (an explainer, a heads-up), tinted in main's chat (chat/markdown
 // MdMark): a click on the tinted words opens the comment first, as the terminal opens an explainer before the citation
-// it stands on, and the citation on the next click (CiteWords). Its other words open the citation.
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+// it stands on, and the citation on the next click (CiteWords). Its other words open the citation. A corrected mark's
+// text holds its corrected words already (marks.ts asChecked), so they are drawn as the text gives them, a tint on them
+// too; words the text could not take are drawn alone.
+import { createContext, isValidElement, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -183,6 +185,8 @@ export function Mark({ k, item: given, anchor, children }: { k: number; item?: M
   }
 
   const corrected = item?.status === 'corrected' && item.shown
+  // the corrected words the text holds (module note): drawn as the text gives them
+  const inText = corrected && wordsOf(children) === plain(item.shown!)
   // a narrowing cites only a part of the words: the rest stays, as Claude's own words, outside the citation
   const whole = item?.words != null ? plain(item.words) : ''
   const part = corrected && item.narrowed ? whole.indexOf(plain(item.shown!)) : -1
@@ -213,7 +217,7 @@ export function Mark({ k, item: given, anchor, children }: { k: number; item?: M
           }
         }}
       >
-        {corrected ? (
+        {corrected && !inText ? (
           plain(item.shown!)
         ) : (
           <CiteWordsContext.Provider value={cite}>{children}</CiteWordsContext.Provider>
@@ -246,6 +250,13 @@ const cardRef = (item: MarkItem | undefined): string | undefined => {
 
 /** A mark's words as written, without the markdown's formatting marks. */
 const plain = (s: string) => s.replace(/\*\*|__|`/g, '')
+
+/** The words drawn elements hold, as text. */
+function wordsOf(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(wordsOf).join('')
+  return isValidElement<{ children?: ReactNode }>(node) ? wordsOf(node.props.children) : ''
+}
 
 function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: MarkLook }) {
   if (!item || look === 'pending' || look === 'checking')

@@ -34,7 +34,8 @@
 //                                      fullscreen layout only), on the answer they lie in, else the newest answer
 //                                      that holds them, opened in the tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers the explainers it
-//                                      overlaps; a heads-up keeps its words
+//                                      overlaps; a heads-up keeps its words. The explainer shown is a step of the
+//                                      tour done (tour/tour.ts)
 //   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -58,6 +59,7 @@ import { sessionKey } from '../hooks/conversation'
 import type { Take } from '../hooks/keys'
 import { citeShown } from '../marks/cite'
 import { withoutMarks } from '../marks/message.js'
+import { tourDid } from '../tour/tour'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray, trayFocus, trayOffRow } from '../tray/seam'
@@ -349,6 +351,8 @@ function explainOpen($: Engine, row: string, words: string): void {
       await failCleared($, 'explain')
       await hintUsed($, 'explain')
       if (!pending || (await stillShown())) await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
+      // the explainer shows: a step of the tour done (tour/tour.ts)
+      await tourDid($, 'e').catch(() => undefined)
     }
   })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
 }
@@ -395,7 +399,12 @@ export async function explainSelection($: Engine): Promise<void> {
   const row = own ?? (await rowHolding($, words))
   if (!row) { await howTo($, 'explain', 'ask Claude something, then select a passage in its answer and press e to explain it.', 'explain'); return }
   const mark = await markOf($, row, words)
-  if (mark) { await hintUsed($, 'explain'); await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
+  if (mark) {
+    await hintUsed($, 'explain')
+    await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark)
+    await tourDid($, 'e').catch(() => undefined)
+    return
+  }
   // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
   // Only a cut selection says so, since the busy line names just the words it explains
   if (cut) hintLine($, `the passage is long: the explainer covers its first ${words.length} characters.`, 'explain')

@@ -89,7 +89,7 @@ import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
+import { squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
@@ -192,7 +192,7 @@ export async function closeOnRow($: Engine, row: string): Promise<void> {
   if (tray?.stack[0]?.row === row) await closeTray($)
 }
 
-/** The tray gives way to what takes the keys from it (the squeeze chips, s): it closes, and a card ] reached gives its
+/** The tray gives way to what takes the keys from it (v): it closes, and a card ] reached gives its
  *  keys back. Returns what puts it back as it stood (the key undone: a letter right after it). */
 export async function giveWay($: Engine): Promise<() => Promise<void>> {
   const was = await keptNow($)
@@ -570,19 +570,13 @@ async function repair($: Engine, f: Frame): Promise<boolean> {
 
 // ------------------------------------------------------------------------------------------------ the keys
 
-/** Whether the squeeze chips hold the keys now (their items show as the bar's focus): [ and ] are theirs then. */
-async function chipsOpen($: Engine): Promise<boolean> {
-  try { return await squeezeHolds($) } catch { return false }
-}
-
-/** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always (but while the squeeze chips
- *  are open at rest), its own while it is open, a's and 0 on a card ] reached. */
+/** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always, its own while it is open,
+ *  a's and 0 on a card ] reached. */
 export async function trayKey($: Engine, key: string, until = 0): Promise<Any | null> {
   const k = await keptNow($)
   const tray = k.tray
   const stand = tray ? null : k.stand
   if (key === ']' || key === '[') {
-    if (!tray && !stand && (await chipsOpen($))) return null
     // with nothing to step to, ] and [ are the prompt's
     if (!tray && !stand && !(await allStops($)).length) return null
     return { now: () => stepMark($, key === ']' ? 1 : -1) }
@@ -636,8 +630,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
- *  names only those; while a tray is open, ] and [ beside the bar's own keys (its other keys are in its header); at
- *  rest, ] (restItem). */
+ *  names only those, after v and s (bar/bar.tsx leftItems); while a tray is open, ] and [ beside the bar's own keys
+ *  (its other keys are in its header); at rest, ] (restItem). */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)

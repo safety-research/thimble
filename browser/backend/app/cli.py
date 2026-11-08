@@ -38,7 +38,6 @@ import argparse
 import errno
 import fcntl
 import hashlib
-import importlib.util
 import json
 import os
 import platform
@@ -58,7 +57,7 @@ import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, NamedTuple
+from typing import Any, Callable, Iterator, NamedTuple
 
 from . import config, headless, procs
 
@@ -1087,14 +1086,16 @@ def source_changed(state: dict[str, Any] | None = None) -> bool | None:
 
 
 def record_source_fingerprint(pid: int | None = None) -> bool:
-    """Called by the server at start-up: when server.json is about this process, refresh its fingerprint."""
+    """Called by the server at start-up: when server.json is about this process, refresh its fingerprint and the tree
+    it runs from (repo). A restart under the same pid may start it in another tree (a thimble fix that goes on starts
+    it from the checkout of the person's fixes, fixes.restart), and stop finds it there by that record."""
     st = read_state()
     if not st or st.get("pid") != (pid or os.getpid()):
         return False
-    fp = source_fingerprint()
-    if st.get("source_fingerprint") == fp:
+    fp, repo = source_fingerprint(), str(config.REPO_ROOT)
+    if st.get("source_fingerprint") == fp and st.get("repo") == repo:
         return False
-    st["source_fingerprint"] = fp
+    st.update(source_fingerprint=fp, repo=repo)
     write_state(st)
     return True
 
@@ -1524,55 +1525,20 @@ def source_changed_text(st: dict[str, Any], up: bool) -> str:
 BROWSER_DEPS = "sudo backend/.venv/bin/python -m playwright install-deps chromium-headless-shell"
 
 
-def browser_fix() -> str:
-    """The doctor's fix for a missing headless Chromium: the installer's answer that downloads it."""
-    return f": `bash {config.REPO_ROOT / 'scripts' / 'install.sh'} --browser bundled` downloads it, then `thimble restart`"
-
-
-def playwright_browsers_dir(environ: Mapping[str, str] | None = None, platform_: str | None = None) -> Path:
-    """The folder Playwright installs its browsers into, resolved as Playwright resolves it: PLAYWRIGHT_BROWSERS_PATH (or
-    npm's config spellings; "0" is inside the package), else ms-playwright in the platform's cache folder."""
-    env = os.environ if environ is None else environ
-    plat = platform_ or sys.platform
-    value = next((env[k] for k in ("PLAYWRIGHT_BROWSERS_PATH", "npm_config_playwright_browsers_path",
-                                   "npm_package_config_playwright_browsers_path") if k in env), None)
-    if value == "0":
-        spec = importlib.util.find_spec("playwright")
-        package = Path(spec.origin).parent if spec and spec.origin else Path.cwd()
-        return package / "driver" / "package" / ".local-browsers"
-    if value:
-        return Path(env.get("INIT_CWD") or Path.cwd()) / value
-    if plat == "darwin":
-        cache = Path.home() / "Library" / "Caches"
-    elif plat == "win32":
-        cache = Path(env.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    else:
-        cache = Path(env.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    return cache / "ms-playwright"
-
-
-def headless_fetched(browsers_json: Path) -> bool:
-    """Whether the headless Chromium the Playwright with this browsers.json launches is in Playwright's browsers folder;
-    with no readable browsers.json, whether any headless Chromium is."""
-    browsers = playwright_browsers_dir()
-    try:
-        data = json.loads(browsers_json.read_text("utf-8"))
-        rev = next(str(b["revision"]) for b in data["browsers"] if b.get("name") == "chromium-headless-shell")
-    except (OSError, ValueError, KeyError, TypeError, StopIteration):
-        return any(browsers.glob("chromium_headless_shell-*"))
-    return (browsers / f"chromium_headless_shell-{rev}").is_dir()
+def browser_fix(kind: str) -> str:
+    """The doctor's fix for `kind`'s missing headless Chromium: the command that fetches it (headless.fetch_command),
+    then a new start of the server."""
+    return f": `{headless.fetch_command(kind)}` fetches it; then {config.RESTART_HOW}"
 
 
 def harness_line(url: str, up: bool, commands: bool = True) -> str:
     """Whether the card harness draws cards (render.py's headless Chromium), and with `commands` the command that fixes
     it when it cannot: the running server's own answer, else whether the browser was fetched. Without it no card is
     checked, since the card check reads a card's picture."""
-    spec = importlib.util.find_spec("playwright")
-    fetched = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and spec.origin
-                               else Path("-"))
+    fetched = headless.fetched(headless.browsers_json(headless.HARNESS) or Path("-"))
     which, what = _browser_choice()
     fetched = fetched or which == "system"
-    fix = browser_fix() if commands and what != _browser_off() else ""
+    fix = browser_fix(headless.HARNESS) if commands and what != _browser_off() else ""
     if up:
         status, got = _request("GET", f"{url}/api/render/status")
         if status == 200 and isinstance(got, dict):
@@ -1588,7 +1554,7 @@ def harness_line(url: str, up: bool, commands: bool = True) -> str:
         return f"no browser ({what}), so cards are not checked{fix}"
     if fetched:
         return "headless Chromium fetched" + ("" if up else " (the server is down)")
-    return f"no headless Chromium in {playwright_browsers_dir()}, so cards are not checked{fix}"
+    return f"no headless Chromium in {headless.browsers_dir()}, so cards are not checked{fix}"
 
 
 def _browser_choice() -> tuple[str, str]:
@@ -1635,14 +1601,14 @@ def pages_line(commands: bool = True) -> str:
     if not browsers_json.is_file():
         return "n/a (the frontend's packages are not installed)"
     which, what = _browser_choice()
-    fix = browser_fix() if commands and what != _browser_off() else ""
+    fix = browser_fix(headless.PAGES) if commands and what != _browser_off() else ""
     if which == "system":
         return f"the system browser, {what}"
     if which == "off":
         return f"no browser ({what}), so {headless.SKIPPED[headless.PAGES]}{fix}"
-    if headless_fetched(browsers_json):
+    if headless.fetched(browsers_json):
         return "headless Chromium fetched"
-    return f"no headless Chromium in {playwright_browsers_dir()}, so {headless.SKIPPED[headless.PAGES]}{fix}"
+    return f"no headless Chromium in {headless.browsers_dir()}, so {headless.SKIPPED[headless.PAGES]}{fix}"
 
 
 def sandbox_lines(commands: bool = True) -> list[str]:
@@ -1686,7 +1652,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
 # disk, who holds the port, and whether the API host answers. Each reader returns a short phrase and never raises,
 # since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.307"  # INSTALL.md and CI (.github/workflows/ci.yml) name the same version
+TESTED_CLAUDE_CODE = "2.1.314"  # INSTALL.md and CI (.github/workflows/ci.yml) name the same version
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
 DISK_LOW_BYTES = 1_000_000_000  # under this much free space the doctor says the disk is low
 LOG_ROTATE_BYTES = 20_000_000  # a server.log past this size is moved to server.log.1 when a server starts
@@ -2189,14 +2155,9 @@ def _views_check() -> Check:
     which, _ = _browser_choice()
     if which == "off":
         return Check(True, "Views ready; screenshots off (no browser chosen)")
-    if which != "system":
-        spec = importlib.util.find_spec("playwright")
-        backend = headless_fetched(Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and
-                                   spec.origin else Path("-"))
-        front_json = FRONTEND_DIR / "node_modules" / "playwright-core" / "browsers.json"
-        front = not front_json.is_file() or headless_fetched(front_json)
-        if not (backend and front):
-            return Check(False, "No browser for screenshots", "In a shell: thimble update --browser bundled")
+    got = headless.check() if which != "system" else {"ok": True}
+    if not got["ok"]:
+        return Check(False, "No browser for screenshots", got["fix"])
     return Check(True, "Views and screenshots ready")
 
 

@@ -15,8 +15,9 @@ declare module 'claude-code' {
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
-       *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`) */
-      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }>
+       *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`); `asked`: a
+       *  check the person asked for (opening a citation, g, x); `note`: the words its prompt ends with */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number; asked?: boolean; note?: string }>
       /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
        *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
       checksRefused: string[]
@@ -122,6 +123,8 @@ declare module 'claude-code' {
       answerRowTurn: StateFamily<string>
       /** the answer the person picked for the keys with { and } or by opening one of its marks, or null: the newest */
       answerSel: string | null
+      /** main's turns answer nothing while this is true (the tour after its sample answer: core/answers.ts holdAnswers) */
+      answersHeld: boolean | null
 
       // ---- the tray (tray/tray.ts)
       /** the cite and explain tray while it is open: { stack: [MarkRef & { open?: 'code' | null }] }, its top shown */
@@ -164,17 +167,12 @@ declare module 'claude-code' {
       fixerBox: Record<string, string[]>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
-      /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,
-       *  asked, error, reveal } (squeeze/term.ts SqzUi) */
+      /** a record's state beside its text, by its id (a row, `<host row>#cu` for a catch-up, `<row>#s` for a simpler version): { running, want,
+       *  doing, asked, error, reveal } (squeeze/term.ts SqzUi) */
       squeezeUi: StateFamily<unknown>
       /** what Claude was told of each record's version, and the version waiting for the next prompt, by its id */
       squeezeTold: Record<string, { told: string; pending: string | null }>
-      /** the record the chips are open on, the picked chip, the chip at its edge, what is typed after +, whether a
-       *  click gave the chips the keyboard, whether the bar says how to type a chip of one's own (squeeze/ui.ts) */
-      squeezeOpen: { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean } | null
-      /** the chips the person typed this session, newest last */
-      squeezeOwn: string[]
-      /** s pressed while main's turn ran: the turn whose answer the chips open on once it ends (squeeze/ui.ts) */
+      /** s pressed while main's turn ran: the turn whose answer s acts on once it ends (squeeze/ui.ts) */
       squeezeWait: { turn: string } | null
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
        *  shown, what the version shown did to each (squeeze/cards.ts) */
@@ -184,6 +182,26 @@ declare module 'claude-code' {
       /** the messages queued for a look or being looked at, and the conversation's key: { session, msgs: [LookMsg] };
        *  a reload of the plugin queues them again */
       observerLooks: { session: string; msgs: unknown[] } | null
+
+      // ---- the tour (tour/tour.ts)
+      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `v`, `s`, `cite`, or `end`), the steps
+       *  done and those that did not work, when it started, the row of its sample answer, the ids of its placed rows
+       *  (the intro, the step row placed under a later reply) and how many were placed; the cite step's: whether the
+       *  prompt box took its question, the row of the answer it checks, and what that check did; null with no tour */
+      tour: {
+        at: 'answer' | 'e' | 'v' | 's' | 'cite' | 'end'; done: ('answer' | 'e' | 'v' | 's' | 'cite')[]
+        missed: ('answer' | 'e' | 'v' | 's' | 'cite')[]; startedAt: number; k: number
+        intro: string | null; sample: string | null; moved: string | null
+        asked?: boolean | null; cited?: string | null
+        checked?: { n: number; corrected: number; failed: number; fix?: { was: string; now: string } | null } | null
+        closed?: boolean
+      } | null
+      /** the tours started before the one that runs, as they were then: their rows still draw them */
+      tourPast: unknown[] | null
+      /** the row of the tour's sample answer, which the observer does not look at; kept after the tour ends */
+      tourSample: string | null
+      /** the frame of the shimmer on the words the tour's step e names, which moves while that step waits */
+      tourShimmer: number | null
 
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */

@@ -1,50 +1,48 @@
-// ui.ts: Squeeze on the screen: the chips under an answer, their keys at an empty prompt and in the chips, what the bar
-// says, the catch-up drawn below the newest message it covers, and the lines a squeeze puts under an answer and its cards. The
-// seam (seam.ts) hands each to its host (core/answerview.ts).
+// ui.ts: Squeeze on the screen: the simpler version that s writes, the row of choices under it, their keys at an empty
+// prompt, what the bar says, the catch-up drawn below the newest message it covers, and the lines a squeeze puts under
+// an answer and its cards. The seam (seam.ts) hands each to its host (core/answerview.ts).
 //
-// The chips open under the newest answer (core/answers.ts latestAnswer), after its cards: s opens them (Squeeze). With
-// two or more replies since the person's last prompt not yet caught up on, the bar also names `b catch up on N
-// replies` (Catch-up): b writes one catch-up of them, drawn below the newest of them as one more answer, while the
-// replies still show as written (term.ts catchUp); the chips stay closed (s opens them on the catch-up). A letter right
-// after s or b undoes it (hooks/keys.ts word window). The chips that s opens take the keys: an open tray, which holds
-// them over the chips, gives way (tray/seam.ts trayGiveWay), and s with the tray open over open chips gives the keys back
-// to them.
-// While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey). The chips name
-// each where it acts (chips.tsx), as the tray names its keys in its header, and the bar names none of them, so each key
-// shows once (heldKeys there):
-//   1–N pick a chip, each digit before its chip's name · [ and ] on the picked chip's ends move it a level (`[ shorter
-//   ○●○○ ] longer`; Length: short · as written · longer · much longer); < > , . the same, unnamed · + your own, a chip in
-//   the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed) · 0 revert, the
-//   original (on a catch-up: no catch-up) · s close
-// A press on a dot sets that level, and a press on an end moves the chip one level toward it, as [ and ] do. While a
-// rewrite is on its way the old text dims, and the bar's busy line says `rewriting` (term.ts); a version seen before
-// comes back at once. The bar says what the chips cannot show: a chip that goes no further, a rewrite that failed or
-// left something out, and what the prompt box asks for after + there (`rewrite for…`). While the tray holds the keys
-// over the chips, the chips name no key (s gives the keys back to them).
-// A click on the chips leaves the keys at the prompt (Claude Code 2.1.307 gives the chips no keyboard for a click), so
-// a press on + your own fills the prompt box with /rewrite, as + does there. A key that does reach the chips
-// (their Client, chips.tsx, while Claude Code gives them the keyboard) acts as at the prompt, each thimble's own, and +
-// there types the chip's words in the chips (`↵ adds it · tab lets it go`), until esc gives the keys back. No arrow and
-// no tab moves a chip or picks one: Claude Code takes those at the prompt (← there moves the conversation away). ↵ does
-// nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open. The chips' parts keep
-// their places while they are open, whatever the levels, the pick, the rewrite and the keys (chips.tsx), so a click
-// lands where it was aimed; a close, by s, a press or the person's prompt, keeps the version the answer shows and stops
-// a rewrite on its way.
+// s (Simplify, the bar's `s simplify`) writes a simpler version of the newest answer (core/answers.ts latestAnswer) in
+// one press: one call, drawn below the answer as a catch-up is (term.ts simplify), at Length short and Background
+// learning, while the answer still shows as written. Once it is written, its last row names the choices, each with its
+// key, as the bar draws a key:
+//   1 shorter · 2 longer · 3 explain more · 4 assume more · 0 hide
+// Each choice applies at once and rewrites the block in place (chips.mjs CHOICES: shorter and longer move Length one
+// level, explain more moves Background one level toward novice, assume more one level toward expert). Every choice
+// always shows, in the same place. A choice at its end draws dim, its key not in thimble's color, and its key or a
+// click on it does nothing: the key is taken, so it types nothing, and no call is made. While a new version is written,
+// the row stays: the choice being applied shows what it does in thimble's color (`3 explaining more…`), the other
+// choices stay as they are and still act, and the old text dims; a version seen before comes back at once. 0 hides
+// the block. The keys act while the block stands on the newest answer and main's turn does not run; in the fullscreen
+// layout a click on a choice does the same. A catch-up has the same row.
+// s on an answer that has a block already brings the block into view, with no call; the bar names s only while the
+// newest answer has none, or, lit, while the first version of the simpler version s started is on its way.
+// s while main's turn runs waits for the answer it writes and then does the same (answerDone). With two or more replies
+// since the person's last prompt not yet caught up on, the bar also names `b catch up on N replies` (Catch-up): b writes
+// one catch-up of them, drawn below the newest of them as one more answer, while the replies still show as written
+// (term.ts catchUp), in place of a simpler version that stood there. A letter right after s, b or a choice undoes it
+// (hooks/keys.ts word window): b undone puts back the simpler version or catch-up it replaced, a choice undone shows the
+// version before it again, 0 undone puts the block back; a choice at its end has nothing to undo, so the letter types
+// after its key. The hook of s or b returns before their writes end, since Claude Code runs the next key's hook only
+// after it returns; the undo runs after those writes (startedTake). A message's own versions that s rewrote in place in
+// 0.10.12 and earlier still draw in a resumed session (viewOf); s on such an answer shows its original again before it
+// writes the simpler version. A block kept by an earlier release may hold chips the person typed (chips.mjs `own`):
+// they still count in each rewrite of it.
 //
-//   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
-//   state squeezeWait: {turn} | null                                   s pressed while main's turn ran: its answer was
-//                                                                      still being written, so the chips open on it when
-//                                                                      the turn ends (answerDone), never on the one before
-//   state squeezeOwn: [words]                                          the chips the person typed this session
-import { update, type EngineInterface } from 'claude-code'
+//   state squeezeWait: {turn} | null    s pressed while main's turn ran: its answer was still being written, so s acts
+//                                       on it when the turn ends (answerDone), never on the one before
+import type { EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { hintUsed } from '../bar/hints'
+import { failNotice, reasonOf } from '../bar/notice'
+import { quiet } from '../core/askcell.js'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer, turnOf } from '../core/answers'
 import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
 import { accent } from '../core/theme'
+import { treeRows } from '../core/trail.mjs'
 import { mainRuns, mainTurn } from '../core/turn'
 import type { Take } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
@@ -52,10 +50,10 @@ import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { trayGiveWay, trayHeld, trayHolds } from '../tray/seam'
+import { trayHeld } from '../tray/seam'
 import { cardDid, cardHidden } from './cards'
-import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, stepAt, withOwn } from './chips.mjs'
-import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, saveRec, seeView, setLevels, stopLevels, uiOf, wantLevels, type Rec } from './term'
+import { CHOICES, atOf, cardNotes, catchUpStands, choiceAt, isSimplify, revealCut } from './chips.mjs'
+import { blockKey, catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, running, seeView, setLevels, simpleId, simplify, slotOf, standAgain, stopLevels, uiOf, wantLevels, type Rec } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,53 +62,27 @@ type Any = any
  *  home when the card's line stood in one of `rows`. */
 export type CardsIn = (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>
 type At = Record<string, number>
-type Open = { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean }
-/** s pressed while main's turn `turn` ran: the chips open on its answer when it ends. */
+type Choice = (typeof CHOICES)[number]
+/** s pressed while main's turn `turn` ran: s acts on its answer when it ends. */
 type Wait = { turn: string }
 
-const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
-const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 const WAIT = { plugin: 'thimble', key: 'squeezeWait' } as const
 const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.stringify(b || {})
+/** The key of the row under a block besides the choices' digits. */
+const REMOVE_KEY = '0'
+/** The keys the row under a block takes at an empty prompt. */
+export const ROW_KEYS = [...CHOICES.map(c => c.key), REMOVE_KEY]
 
-// ------------------------------------------------------------------------------------------------ the chips' state
+// ------------------------------------------------------------------------------------------------ the state
 
-/** A /clear or a /resume (seam.ts turnSqueeze): the chips close, and the chips the person typed in the earlier
- *  conversation are not offered. */
+/** A /clear or a /resume (seam.ts turnSqueeze): the wait goes. */
 export async function turnChips($: Engine): Promise<void> {
-  await shut($, await openNow($))
   await writeWait($, null)
-  await $.state.set(OWN, [])
 }
 
-export async function openNow($: Engine): Promise<Open | null> {
-  return ((await $.state.get(OPEN)).value ?? null) as Open | null
-}
-
-// The open chips, as this module last wrote or read them: it alone writes them, so the copy is the state's. A key at an
-// empty prompt reads the copy (chipsHold, squeezeKeyTake), since Claude Code gives a key's hook a few milliseconds of
-// its own time and each read of the state costs some of it under load. A drawing reads the state itself (openNow), so
-// a change draws again.
-let openKept: { open: Open | null } | null = null
-
-async function keptOpen($: Engine): Promise<Open | null> {
-  return (openKept ?? (openKept = { open: await openNow($) })).open
-}
-
-async function writeOpen($: Engine, open: Open | null): Promise<void> {
-  await $.state.set(OPEN, open)
-  openKept = { open }
-}
-
-async function setOpen($: Engine, change: Partial<Open> | null): Promise<void> {
-  if (change === null) { await writeOpen($, null); return }
-  let now: Open | null = null
-  await update($, OPEN, cur => (now = cur ? { ...cur, ...change } : null))
-  openKept = { open: now }
-}
-
-// The wait, as this module last wrote or read it: a key reads the copy, as it reads the open chips' (keptOpen); the bar
-// and the turn's end read the state.
+// The wait, as this module last wrote or read it: a key reads the copy, since Claude Code gives a key's hook a few
+// milliseconds of its own time and each read of the state costs some of it under load; the bar and the turn's end read
+// the state.
 let waitKept: { wait: Wait | null } | null = null
 
 async function waitNow($: Engine): Promise<Wait | null> {
@@ -128,73 +100,29 @@ async function writeWait($: Engine, wait: Wait | null): Promise<void> {
   waitKept = { wait }
 }
 
-/** Main's turn ended: the chips that s asked for while it ran open on its answer (none when it ended with none); the
- *  wait ends either way. (seam.ts, turn.complete) */
+/** Main's turn ended: s, pressed while it ran, acts on its answer (none when it ended with none): a block standing on
+ *  it comes into view, else a simpler version is written. The wait ends either way. (seam.ts, turn.complete) */
 export async function answerDone($: Engine, turnId: string): Promise<void> {
   if (!(await waitNow($))) return
   await writeWait($, null)
   const row = (await turnOf($, turnId))?.answer
   if (!row || !featureOn('squeezeAnswers')) return
-  await openChips($, (await catchUpOn($, row)) ? cuId(row) : row)
+  const t = await restTake($, row)
+  await t.now!()
 }
 
-/** The record the keys act on: the catch-up standing on the newest answer, else that answer. */
-export async function targetNow($: Engine): Promise<string | null> {
-  const row = await latestAnswer($)
-  if (!row) return null
-  return (await catchUpOn($, row)) ? cuId(row) : row
-}
-
-/** The chips open on a record, its first chip picked; scrolled into view. */
-export async function openChips($: Engine, id: string, focus = 'length'): Promise<void> {
-  await writeOpen($, { id, focus, edge: null, typing: null, held: false, hint: false })
-  await hintUsed($, 'rewrite')
-  await $.ui.scroll({ to: { key: `sq-${id}` }, block: 'nearest' }).catch(() => undefined)
-}
-
-export async function closeChips($: Engine): Promise<void> {
-  const open = await openNow($)
-  if (open) await shut($, open)
+/** The person's prompt went (seam.ts): the wait ends. */
+export async function promptWent($: Engine): Promise<void> {
   if (await waitNow($)) await writeWait($, null)
 }
 
-/** The chips close (s, a press on `s close`, the person's prompt): the answer keeps the version it shows, and a change
- *  on its way stops, its wait or its call, so nothing is written after (term.ts stopLevels). Returns what opens them
- *  again as they stood, the change asked for again (the close undone: a letter right after s). */
-async function shut($: Engine, open: Open | null): Promise<() => Promise<void>> {
-  await writeOpen($, null)
-  const was = open ? await stopLevels($, open.id).catch(() => null) : null
-  return async () => {
-    if (!open) return
-    await writeOpen($, open)
-    if (was) { await wantLevels($, open.id, was); void setLevels($, open.id, was).catch(() => undefined) }
-  }
-}
-
-/** The chips take the keys from the tray (an open tray, or a card ] reached), which holds them while it stands over
- *  the chips: it gives way (tray/seam.ts trayGiveWay). Returns what puts it back as it stood. */
-async function takeKeys($: Engine): Promise<() => Promise<void>> {
-  try { return await trayGiveWay($) } catch { return async () => undefined }
-}
-
-/** s, or a press on `s rewrite`: the chips open on `id` and take the keys, the tray giving way; undone (a letter right
- *  after s), they close and the tray stands as it was. */
-function openTake($: Engine, id: string): Take {
-  let back: (() => Promise<void>) | null = null
-  return {
-    now: async () => { back = await takeKeys($); await openChips($, id) },
-    undo: async () => { await setOpen($, null); await back?.() },
-  }
-}
-
-/** s, or a press on `s rewrite`, while main's turn runs: the chips wait for the answer it writes (`to`; null: s again,
- *  they no longer wait), the tray giving way as when they open; undone, the wait and the tray stand as they were. */
-function waitTake($: Engine, to: Wait | null, was: Wait | null): Take {
-  let back: (() => Promise<void>) | null = null
-  return {
-    now: async () => { if (to) back = await takeKeys($); await writeWait($, to) },
-    undo: async () => { await writeWait($, was); await back?.() },
-  }
+/** The block the row's keys act on now: the simpler version or catch-up standing on the newest answer, once a version
+ *  of it is written and while it shows; null while main's turn runs (its answer is the newest then). */
+async function rowBlock($: Engine): Promise<Rec | null> {
+  if (await mainTurn($)) return null
+  const row = await latestAnswer($)
+  const rec = row ? await catchUpOn($, row) : null
+  return rec && typeof rec.shown === 'string' && blockOn(rec) ? rec : null
 }
 
 /** Where the chips of a record stand now: where a change on its way goes, else the levels shown. */
@@ -204,163 +132,148 @@ async function levelsNow($: Engine, rec: Rec): Promise<{ at: At; pending: boolea
   return ui.want && !same(ui.want, shown) ? { at: ui.want, pending: true } : { at: shown, pending: false }
 }
 
-/** The chips in the order drawn: the fixed ones, then the person's own. */
-function rowOf(rec: Rec, at: At): Any[] {
-  const chips = chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })
-  return [...chips.filter((c: Any) => c.kind !== 'own'), ...chips.filter((c: Any) => c.kind === 'own')]
-}
+// ------------------------------------------------------------------------------------------------ the choices
 
-/** A level that would bring a catch-up to its original: it never stands there (0 shows the replies again). */
-const toOriginal = (rec: Rec, to: At) => !!rec.catchup && isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at: to } }))
-
-/** One chip moved a step, by a key or a press on one of its ends: the rewrite asked for, or the edge said when it goes
- *  no further. On a catch-up a step that would land on the original goes on past it. */
-async function step($: Engine, open: Open, cid: string, dir: number, key: string | null): Promise<void> {
-  const rec = await recOf($, open.id)
-  if (!rec) return
+/** A choice on the block `rec`: its version asked for at once (from the record when it was written before, else one
+ *  call after the short wait, term.ts setLevels); undone (a letter right after its key), the version before it shows
+ *  again. At the choice's end, a take that does nothing: the key is taken, so it types nothing, and nothing is asked. */
+async function chooseTake($: Engine, rec: Rec, c: Choice): Promise<Take> {
   const { at } = await levelsNow($, rec)
-  const probe = (a: At) => ({ ...rec, squeeze: { ...rec.squeeze, at: a } })
-  let to = stepAt(probe(at), cid, dir) as At | null
-  if (to && toOriginal(rec, to)) to = stepAt(probe(to), cid, dir) as At | null
-  if (!to) { await setOpen($, { focus: cid, edge: cid, typing: null }); return }
-  await setOpen($, { focus: cid, edge: null, typing: null })
-  await wantLevels($, open.id, to)
-  void setLevels($, open.id, to, key).catch(() => undefined)
+  const to = choiceAt(rec, at, c) as At | null
+  if (!to) return {}
+  return {
+    now: async () => { await wantLevels($, rec.id, to, c.doing); void setLevels($, rec.id, to, c.key).catch(() => undefined) },
+    undo: async () => { await wantLevels($, rec.id, at); void setLevels($, rec.id, at).catch(() => undefined) },
+  }
 }
 
-/** 0: the original again; on a catch-up, which has no original of its own, no catch-up. */
-async function revert($: Engine, open: Open): Promise<void> {
-  const rec = await recOf($, open.id)
-  if (!rec) return
-  if (rec.catchup) { await dismissNow($, open.id); return }
-  const { at, pending } = await levelsNow($, rec)
-  if (isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })) && typeof rec.shown !== 'string' && !pending) return
-  await setOpen($, { edge: null })
-  await wantLevels($, open.id, {})
-  void setLevels($, open.id, {}).catch(() => undefined)
+/** 0: the block goes, and a change on its way stops; undone, it stands again as it stood. */
+function removeTake($: Engine, rec: Rec): Take {
+  return {
+    now: async () => { await stopLevels($, rec.id).catch(() => null); await dismissNow($, rec.id) },
+    undo: async () => { await standAgain($, rec) },
+  }
 }
 
-/** A level of a chip set by a press on its dot. */
-async function setLevel($: Engine, open: Open, cid: string, lv: number): Promise<void> {
-  const rec = await recOf($, open.id)
-  if (!rec) return
-  const { at } = await levelsNow($, rec)
-  const c = rowOf(rec, at).find((x: Any) => x.id === cid)
-  await setOpen($, { focus: cid, edge: null, typing: null })
-  if (!c || lv === c.level || toOriginal(rec, { ...at, [cid]: lv })) return
-  const to = { ...at, [cid]: lv }
-  await wantLevels($, open.id, to)
-  void setLevels($, open.id, to).catch(() => undefined)
+// ------------------------------------------------------------------------------------------------ the simpler version
+
+/** s at rest: a simpler version of the answer `row`, drawn below it. Returns its id. */
+async function simplifyNow($: Engine, row: string): Promise<string | null> {
+  const id = await simplify($, row)
+  if (!id) return null
+  await hintUsed($, 'rewrite')
+  await $.ui.scroll({ to: { key: `ans-${row}` }, block: 'nearest' }).catch(() => undefined)
+  return id
 }
 
-/** A press on the picked chip steps it up, and from its last level back to its first; on another chip, picks it. */
-async function pressChip($: Engine, open: Open, cid: string): Promise<void> {
-  const rec = await recOf($, open.id)
-  if (!rec) return
-  if (cid !== open.focus) { await setOpen($, { focus: cid, edge: null, typing: null }); return }
-  const { at } = await levelsNow($, rec)
-  const to = (stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, cid, 1) as At | null) ?? { ...at, [cid]: 0 }
-  await setOpen($, { edge: null, typing: null })
-  if (toOriginal(rec, to)) return
-  await wantLevels($, open.id, to)
-  void setLevels($, open.id, to).catch(() => undefined)
+/**
+ * A key whose writes its hook starts but does not wait for (s, b), and their undo (a letter right after the key).
+ * Claude Code runs the next key's hook only after this one returns, so a hook that waited for the writes would close
+ * the word window before it reads a letter typed right after the key. The undo runs after the writes, in the same chain
+ * as they do: the letter's hook reads the state as it stood when that hook began, so an undo run in that hook would not
+ * find writes that ended after it began. A failure of the writes shows on the failure line, as a key's failure does.
+ */
+function startedTake<T>($: Engine, key: string, write: () => Promise<T | null>, undo: (made: T | null) => Promise<unknown>): Take {
+  let ask = () => {}
+  let undone: Promise<unknown> = Promise.resolve()
+  return {
+    now: async () => {
+      const asked = new Promise<void>(go => { ask = go })
+      const made = write().catch(err => { failNotice($, `The ${key} key did not run: ${reasonOf(err, 200)}`); return null })
+      undone = Promise.all([made, asked]).then(([m]) => undo(m))
+    },
+    undo: async () => { ask(); await undone },
+  }
 }
 
-/** A chip of the person's own on a record, from the words they typed after + (or `/rewrite <words>`): added at as
- *  written, picked, and kept for the session so + offers it again. */
-export async function addOwn($: Engine, id: string, typed: string): Promise<string | null> {
-  const rec = await recOf($, id)
-  const made = rec ? withOwn(rec, typed) : null
-  if (!rec || !made) return null
-  await saveRec($, { ...rec, squeeze: made.squeeze })
-  const words = ownWords(typed)
-  await update($, OWN, cur => [...((cur as string[] | undefined) ?? []).filter(d => d.toLowerCase() !== words.toLowerCase()), words].slice(-8))
-  if ((await openNow($))?.id === id) await setOpen($, { focus: made.id, typing: null, edge: null })
-  else await openChips($, id, made.id)
-  return made.id
+/** s: the simpler version written; undone, it goes. */
+function simplifyTake($: Engine, row: string): Take {
+  return startedTake($, 's', () => simplifyNow($, row), async id => { if (id) await dismissNow($, id, true) })
 }
 
-/** The chips the person typed earlier this session, newest last. */
-export async function ownEarlier($: Engine): Promise<string[]> {
-  return ((await $.state.get(OWN)).value ?? []) as string[]
+/** Whether a simpler version's first call failed: no version of it shows, none is on its way, and the call said why.
+ *  Then s writes it again (its error says so). */
+async function firstFailed($: Engine, rec: Rec): Promise<boolean> {
+  return isSimplify(rec) && typeof rec.shown !== 'string' && !running(rec.id) && !!(await uiOf($, rec.id)).error
 }
 
-/** + with the prompt holding the keys: the prompt takes the words, as `/rewrite <words>`, and the bar says so. */
-async function askOwn($: Engine): Promise<void> {
-  await $.prompt.fill({ text: '/rewrite ', mode: 'replace' }).catch(() => undefined)
-  await setOpen($, { hint: true })
+/** What s does at rest on the answer `row`: with a simpler version or a catch-up standing on it, the view goes to that
+ *  block, with no call; else (or when a simpler version's first call failed) a simpler version is written. */
+async function restTake($: Engine, row: string): Promise<Take> {
+  const block = await catchUpOn($, row)
+  if (!block || (await firstFailed($, block))) return simplifyTake($, row)
+  return { now: () => $.ui.scroll({ to: { key: blockKey(block) }, block: 'nearest' }).catch(() => undefined) }
 }
+
+/** s, or a press on `s simplify`, while main's turn runs: s waits for the answer it writes (`to`; null: s again, it no
+ *  longer waits); undone, the wait stands as it was. */
+function waitTake($: Engine, to: Wait | null, was: Wait | null): Take {
+  return {
+    now: () => writeWait($, to),
+    undo: () => writeWait($, was),
+  }
+}
+
+/** Whether a block drawn below an answer shows: a simpler version while Simplify is on, a catch-up while Catch-up is. */
+const blockOn = (rec: Rec) => featureOn(isSimplify(rec) ? 'squeezeAnswers' : 'catchUp')
 
 // ------------------------------------------------------------------------------------------------ the catch-up
 
 /** b with replies piled up: one catch-up of every message since the person's last prompt, under the newest of them.
- *  An earlier catch-up of some of them goes. Returns its id. */
-export async function catchUpNow($: Engine): Promise<string | null> {
+ *  An earlier catch-up of some of them goes, and so does a simpler version of one of them that stands. Returns its id,
+ *  and the records it replaced as they stood, which b undone puts back. */
+async function catchUpWith($: Engine): Promise<{ id: string; was: Rec[] } | null> {
   const pile = await pileUp($)
   if (!pile) return null
   const host = pile.replies[pile.replies.length - 1]!
-  for (const r of pile.replies) if ((await partNow($, r)).cu) await dismissCatchUp($, cuId(r), { quiet: true })
+  const was: Rec[] = []
+  for (const r of pile.replies) {
+    for (const id of [cuId(r), simpleId(r)]) {
+      const rec = await recOf($, id)
+      if (!rec || (slotOf(id) === 'simple' && !catchUpStands(rec))) continue
+      was.push(rec)
+      await dismissCatchUp($, id, { quiet: true })
+    }
+  }
   const id = await catchUp($, { host, rows: pile.rows, replies: pile.n, question: pile.prompt?.text ?? '', prompt: pile.prompt?.row ?? null })
   if (!id) return null
   await pickAnswer($, null)
   const cu = await recOf($, id)
   await $.ui.scroll({ to: { key: `ans-${cu ? drawnAt(cu) : host}` }, block: 'nearest' }).catch(() => undefined)
-  return id
+  return { id, was }
 }
 
-/** b: the catch-up written; undone (a letter right after it), it goes and the chips stand as they were. */
-function catchUpTake($: Engine, open: Open | null): Take {
-  let made: string | null = null
-  return {
-    now: async () => { made = await catchUpNow($) },
-    undo: async () => { if (made) await dismissNow($, made, true); if (open) await writeOpen($, open); else await setOpen($, null) },
-  }
+/** b, or a press on `b catch up on N replies`: the catch-up written (catchUpWith). Returns its id. */
+export async function catchUpNow($: Engine): Promise<string | null> {
+  return (await catchUpWith($))?.id ?? null
+}
+
+/** b: the catch-up written; undone, it goes, and the simpler version or catch-up it replaced stands again. */
+function catchUpTake($: Engine): Take {
+  return startedTake($, CATCH_UP_KEY, () => catchUpWith($), async cu => {
+    if (!cu) return
+    await dismissNow($, cu.id, true)
+    for (const rec of cu.was) await standAgain($, rec)
+  })
 }
 
 /** The key that writes a catch-up, named on the bar while replies piled up (squeeze/seam.ts SQUEEZE_KEYS). */
 export const CATCH_UP_KEY = 'b'
 
-/** A catch-up dismissed (its chips' 0, or undone): the chips close, and the keys go back to the newest reply. */
+/** A simpler version or catch-up dismissed (0, or undone): the row's words go with it. */
 export async function dismissNow($: Engine, id: string, undo = false): Promise<void> {
   await dismissCatchUp($, id, { undo })
-  if ((await openNow($))?.id === id) await setOpen($, null)
+  controlWords('squeeze', [])
 }
 
 // ------------------------------------------------------------------------------------------------ keys
 
-/** Whether the chips are open: their keys come before the tray's and the label ask's, as in 0.10. */
-export async function chipsHold($: Engine): Promise<boolean> {
-  return featureOn('squeezeAnswers') && !!(await keptOpen($))
-}
-
-/** The keys the open chips take now, which nothing else names (core/answerview.ts heldKeys): [ ] (and < > , .), 1–9,
- *  0, + and s; every key ('*') while a click gave them the keyboard. None while they are closed. A tray opened over
- *  them takes its keys first, ] and [ among them (the bar names those, tray/tray.ts trayBar): the chips hold the rest.
- *  Read from the state, so a drawing that asks draws again when they open or close. */
-export async function chipsHeld($: Engine): Promise<string[]> {
-  if (!featureOn('squeezeAnswers')) return []
-  const open = await openNow($)
-  if (!open || !(await recOf($, open.id))) return []
-  if (open.held || open.typing != null) return ['*']
-  const keys = ['[', ']', '<', '>', ',', '.', '0', '+', 's', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-  const tray = await trayHeld($, keys).catch(() => [] as string[])
-  if (!tray.length) return keys
-  const taken = new Set([']', '[', ...tray])
-  return keys.filter(k => !taken.has(k))
-}
-
-/** A key at an empty prompt: the chips' keys while they are open; s at rest opens them, and b writes a catch-up. */
+/** A key at an empty prompt: s at rest writes a simpler version of the newest answer, or brings the block standing on
+ *  it into view; b writes a catch-up; 1–4 and 0 act on the block standing on the newest answer (its row). */
 export async function squeezeKeyTake($: Engine, key: string): Promise<Take | null> {
-  const squeezing = featureOn('squeezeAnswers')
-  const open = squeezing ? await keptOpen($) : null
-  if (open) {
-    // a key at the prompt: a click no longer holds the keys in the chips (esc gave them back), so words begun after +
-    // there are let go
-    if (open.held || open.hint || open.typing != null) await setOpen($, { held: false, hint: false, typing: null })
-    return chipsKeyTake($, { ...open, held: false, hint: false, typing: null }, key)
-  }
-  if (key === CATCH_UP_KEY) return (await pileUp($)) ? catchUpTake($, null) : null
-  if (key !== 's' || !squeezing) return null
+  if (key === CATCH_UP_KEY) return (await pileUp($)) ? catchUpTake($) : null
+  if (ROW_KEYS.includes(key)) return rowKeyTake($, key)
+  if (key !== 's' || !featureOn('squeezeAnswers')) return null
   // main's turn runs: its answer is still being written, so s waits for it (answerDone), never the answer before it
   const turn = await mainTurn($)
   if (turn) {
@@ -369,209 +282,50 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
   }
   const row = await latestAnswer($)
   if (!row) return null
-  return openTake($, (await catchUpOn($, row)) ? cuId(row) : row)
+  return restTake($, row)
 }
 
-/** A key the open chips take, at the prompt or in the chips (heldKey): [ ] (< > , .) a level, 1–N a chip, 0 revert, +
- *  your own (at the prompt: the prompt box takes the words), s close, b a catch-up while replies piled up. */
-async function chipsKeyTake($: Engine, open: Open, key: string): Promise<Take | null> {
-  const rec = await recOf($, open.id)
-  if (!rec) { await setOpen($, null); return null }
-  const dir = '[<,'.includes(key) ? -1 : ']>.'.includes(key) ? 1 : 0
-  if (dir) return { now: () => step($, open, open.focus, dir, key === '[' || key === ']' ? key : null) }
-  if (/^[1-9]$/.test(key)) {
-    const row = rowOf(rec, (await levelsNow($, rec)).at)
-    const c = row[Number(key) - 1]
-    return c ? { now: () => setOpen($, { focus: c.id, edge: null }) } : null
-  }
-  if (key === '0') return { now: () => revert($, open) }
-  if (key === '+') return { now: () => askOwn($) }
-  if (key === 's') {
-    // the tray opened over the chips holds the keys: s gives them back to the chips, the tray giving way
-    if (await trayHolds($).catch(() => false)) {
-      let back: (() => Promise<void>) | null = null
-      return { now: async () => { back = await takeKeys($) }, undo: async () => { await back?.() } }
-    }
-    let back: (() => Promise<void>) | null = null
-    return { now: async () => { back = await shut($, open) }, undo: async () => { await back?.() } }
-  }
-  if (key === CATCH_UP_KEY && (await pileUp($))) return catchUpTake($, open)
-  return null
-}
-
-/** A change of the prompt box (a key typed there, esc esc clearing it): the keys are the prompt's again, so words
- *  begun after + in the chips are let go, and the bar's `rewrite for…` goes once the box no longer holds /rewrite.
- *  (Claude Code tells no hook of the esc that takes the keys back from the chips, so the words go at the next key.)
- *  Reads the module's copy of the open chips, so an edit costs no read of the state. */
-export async function promptHasKeys($: Engine, text?: string): Promise<void> {
-  const open = openKept?.open
-  if (!open) return
-  const hint = open.hint && typeof text === 'string' && !/^\/rewrite\b/.test(text)
-  if (open.typing != null || open.held || hint) await setOpen($, { typing: null, held: false, ...(hint ? { hint: false } : {}) })
-}
-
-/** What a key in the chips does, once a click gave them the keyboard: what it does at the prompt, a key of thimble's
- *  own ([ ] and 1–N move and pick the chips, s closes them), and nothing for any other (an arrow, tab, ↵: Claude Code's
- *  keys at the prompt); + types a chip's words, ↵ adds it, tab lets it go. */
-async function heldKey($: Engine, open: Open, key: string): Promise<void> {
-  const rec = await recOf($, open.id)
-  if (!rec) return
-  await setOpen($, { held: true, hint: false })
-  if (open.typing != null) {
-    const typing = open.typing
-    if (key === 'return' || key === 'enter') { await setOpen($, { typing: null }); if (ownWords(typing)) await addOwn($, open.id, typing); return }
-    if (key === 'tab') { await setOpen($, { typing: null }); return }
-    if (key === 'backspace' || key === 'delete') { await setOpen($, { typing: typing.slice(0, -1) }); return }
-    if (key === 'space') { await setOpen($, { typing: `${typing} ` }); return }
-    if ([...key].length === 1 && typing.length < 40) await setOpen($, { typing: typing + key })
-    return
-  }
-  if ([...key].length !== 1) return
-  if (key === '+') { await setOpen($, { typing: '', edge: null }); return }
-  const t = await chipsKeyTake($, { ...open, held: true, hint: false }, key)
-  if (t?.now) await t.now()
-}
-
-/** What the chips' Client posted: presses and keys, each handled once, in order. Answers the Client's next props. */
-const handled = new Map<string, number>()
-export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> {
-  if (!data || typeof data !== 'object' || !Array.isArray(data.events)) return {}
-  const client = String(data.client ?? '')
-  const from = `${id}:${client}`
-  let last = handled.get(from) ?? 0
-  for (const ev of data.events) {
-    const n = Number(ev?.n)
-    if (!Number.isInteger(n) || n <= last) continue
-    last = n
-    handled.set(from, n)
-    const open = await openNow($)
-    if (!open || open.id !== id) continue
-    if (typeof ev.key === 'string') { await heldKey($, open, ev.key); continue }
-    const r = String(ev.press ?? '')
-    // + your own does what + does at the prompt: the prompt box takes the words, as a click gives the chips no keyboard
-    if (r === 'add') { await askOwn($); continue }
-    if (r === 'close') { await shut($, open); continue }
-    // the presses that do what a key named in the chips does: ↵ and tab after the typed words, 0, esc
-    if (r === 'own-add' || r === 'own-drop') {
-      const typed = open.typing
-      await setOpen($, { typing: null })
-      if (r === 'own-add' && typed && ownWords(typed)) await addOwn($, open.id, typed)
-      continue
-    }
-    if (r === 'revert') { await revert($, open); continue }
-    if (r === 'esc') { await setOpen($, { held: false, typing: null }); continue }
-    const dot = /^lvl-(.+)-(\d+)$/.exec(r)
-    if (dot) { await setLevel($, open, dot[1]!, Number(dot[2])); continue }
-    const end = /^step-(.+)-(down|up)$/.exec(r)
-    if (end) { await step($, open, end[1]!, end[2] === 'up' ? 1 : -1, null); continue }
-    const cid = r.replace(/^(chip|word)-/, '')
-    if (cid !== r) await pressChip($, open, cid)
-  }
-  return { props: { ...(await chipsProps($, id, 0)), ack: { [client]: last } } }
+/** A key of the row under the block on the newest answer: a choice (one at its end does nothing), 0 hide. Null when
+ *  no block's row shows there: the key types as usual. */
+async function rowKeyTake($: Engine, key: string): Promise<Take | null> {
+  const rec = await rowBlock($)
+  if (!rec) return null
+  if (key === REMOVE_KEY) return removeTake($, rec)
+  const c = CHOICES.find(x => x.key === key)
+  return c ? chooseTake($, rec, c) : null
 }
 
 // ------------------------------------------------------------------------------------------------ the bar
 
-/** What the bar says while the chips are open, which the chips cannot show (their keys are in the chips): a chip that
- *  goes no further, a rewrite that failed or left something out, `rewrite for…` while the prompt box holds /rewrite; at
- *  rest, s: `s rewrite`, the same words whether the answer shows its original or a squeezed version (the chips name the
- *  levels), and `b catch up on N replies` while replies piled up since the person's last prompt. While main's turn
- *  runs, s waits for the answer it writes: while it waits, `s rewrite` is lit (its words in thimble's color), and a
- *  press ends the wait, as s again does. */
+/** What the bar says: `s simplify` while the newest answer has no block standing on it (the block's row names its own keys), and `b catch
+ *  up on N replies` while replies piled up since the person's last prompt. While main's turn runs, s waits for the
+ *  answer it writes: while it waits, `s simplify` is lit (its words in thimble's color), and a press ends the wait, as
+ *  s again does. While the first version of the simpler version s started is on its way, `s simplify` stays, lit, until
+ *  that version shows with its row: the press does not take s off the bar before anything shows for it. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
-  if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
-  const open = squeezing ? await openNow($) : null
-  const rec = open ? await recOf($, open.id) : null
-  if (open && rec) return openItems($, open, rec)
+  if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'simplify' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
   const row = await latestAnswer($)
   // while main's turn runs, s waits for the answer it writes, lit while it waits
   const turn = squeezing ? await mainTurn($) : ''
   if (!row && !turn) return []
-  const id = row && (await catchUpOn($, row)) ? cuId(row) : row
   const pile = row ? await pileUp($, on) : null
   const wait = turn ? await waitNow($) : null
-  const s: BarItem = !turn
-    ? { id: 'squeeze', key: 's', words: 'rewrite', press: () => openTake($, id!).now!() }
-    : { id: 'squeeze', key: 's', words: 'rewrite', ...(wait ? { color: accent() } : {}), press: () => waitTake($, wait ? null : { turn }, wait).now!() }
+  const block = !turn && row ? await catchUpOn($, row) : null
+  const failed = !!block && (await firstFailed($, block))
+  // a simpler version whose first text is still on its way: its row shows nothing yet, so s stays, lit
+  const writing = !!block && !failed && isSimplify(block) && typeof block.shown !== 'string'
+  const named = !block || !blockOn(block) || failed || writing
+  const s: BarItem | null = turn
+    ? { id: 'squeeze', key: 's', words: 'simplify', ...(wait ? { color: accent() } : {}), press: () => waitTake($, wait ? null : { turn }, wait).now!() }
+    : named ? { id: 'squeeze', key: 's', words: 'simplify', ...(writing ? { color: accent() } : {}), press: async () => (await restTake($, row!)).now!() } : null
   return [
-    ...(squeezing ? [s] : []),
+    ...(squeezing && s ? [s] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
   ]
 }
 
-async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
-  // the words being typed after + in the chips: the chips say what ↵ and tab do there
-  if (open.typing != null) return []
-  // + at the prompt: the box holds /rewrite and the person's words follow it, so the bar says only what it asks for
-  if (open.hint) {
-    const dims = await ownEarlier($)
-    return [{ id: 'sq-hint', words: `rewrite for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, focus: true, color: accent() }]
-  }
-  const ui = await uiOf($, open.id)
-  const row = rowOf(rec, (await levelsNow($, rec)).at)
-  const focus = row.find((c: Any) => c.id === open.focus) ?? row[0]
-  if (ui.error) return [{ id: 'sq-error', words: `× ${ui.error}`, color: 'error' }]
-  if (open.edge && focus) return [{ id: 'sq-edge', words: `${focus.name} goes no further than ${focus.levels[focus.level]}`, color: accent() }]
-  if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') return [{ id: 'sq-problem', words: `! ${rec.squeeze.problems[0]}`, color: accent() }]
-  return []
-}
-
 // ------------------------------------------------------------------------------------------------ the drawing
-
-/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +;
- *  whether they name their keys (not while the tray holds the keys over them), whether a click gave them the keyboard,
- *  and whether 0 has a version to take back (a squeezed version shown or on its way; on a catch-up, the catch-up). */
-async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
-  const open = await openNow($)
-  const rec = await recOf($, id)
-  if (!open || !rec) return { items: [], plus: null, width, color: accent() }
-  const { at, pending } = await levelsNow($, rec)
-  const row = rowOf(rec, at)
-  const focus = row.some((c: Any) => c.id === open.focus) ? open.focus : row[0].id
-  const orig = isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })) && typeof rec.shown !== 'string'
-  const trayHas = (await trayHeld($, []).catch(() => [] as string[])).length > 0
-  return {
-    items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, level0: c.level0, ends: endsOf(c), word: levelWords(c), picked: c.id === focus && open.typing == null })),
-    plus: open.typing, width, color: accent(),
-    keys: !trayHas, held: !!open.held, revert: !!rec.catchup || !orig || pending,
-  }
-}
-
-/** What the chips draw from their props, each a press (chips.tsx): each chip's digit and name, its ends (with their
- *  keys on the picked chip), its dots, the words of its level, its levels; s close; + your own, or what is typed after +
- *  and what ↵ and tab do then; 0 revert; esc back to the prompt; each with its key and without. */
-function chipsWords(props: Any): string[] {
-  const items: Any[] = Array.isArray(props?.items) ? props.items : []
-  const typing = typeof props?.plus === 'string'
-  const held = !!props?.held && !typing
-  return [
-    's close', 'close',
-    ...(typing ? [`+ ${props.plus}▏`, '↵ adds it', 'adds it', 'tab lets it go', 'lets it go'] : ['+ your own', 'your own', '+']),
-    ...(props?.revert && !typing ? ['0 revert', 'revert'] : []),
-    ...(held ? ['esc back to the prompt', 'back to the prompt'] : []),
-    ...items.flatMap(c => {
-      const levels: unknown[] = Array.isArray(c.levels) ? c.levels : []
-      const dots = levels.map((_, i) => (i === c.level ? '●' : '○')).join('')
-      const ends: string[] = (Array.isArray(c.ends) ? c.ends : []).filter((e: unknown) => typeof e === 'string')
-      return [`${c.n} ${c.name}`, c.name, ...ends, ...(ends[0] ? [`[ ${ends[0]}`] : []), ...(ends[1] ? [`] ${ends[1]}`] : []), dots, `· ${c.word}`, c.word, ...levels]
-    }),
-  ].filter((x: unknown): x is string => typeof x === 'string')
-}
-
-/** The chips under the record `id`, when they are open on it: their Client, keyed so a click keeps the keyboard in
- *  them while the answer above draws again. */
-async function chipsEl($: Engine, els: Any, id: string, cols: number): Promise<Any | null> {
-  const open = await openNow($)
-  // what the chips draw, which a click on it leaves selected: no answer's words while they are drawn
-  // (core/selection.ts)
-  if (!open) controlWords('chips', [])
-  if (!open || open.id !== id) return null
-  const w = Math.max(30, cols - 2)
-  const props = await chipsProps($, id, w)
-  controlWords('chips', chipsWords(props), { inRow: true })
-  return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props })] })
-}
 
 /** The text a row shows in place of what Claude wrote: its version (the part written in so far, dim while a rewrite
  *  runs). The replies a catch-up covers show as written, since the catch-up stands below them (underRow). */
@@ -588,9 +342,57 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
   return { text, dim: busy }
 }
 
-/** The catch-up drawn below the newest message it covers (term.ts drawnAt), after that message and its cards, once a
- *  version of it is written, and as it stands at every level of its chips: a rule down its left side beside its
- *  head line and its text (its first characters while a version writes itself in, dim while one is written). Its
+/** The lines at the end of the block on the newest answer: why its last rewrite failed or what it said that the
+ *  original does not, then its row of choices, each its key and words as the bar draws a key, and a click that does
+ *  what the key does; a key the open tray holds now shows no key (the tray takes it). Every choice always shows, in the
+ *  same place: one at its end draws dim, its key not in thimble's color, and a click on it does nothing. While a
+ *  version is on its way, the choice that asked for it says what it does (`3 explaining more…`) in thimble's color. */
+async function rowEl($: Engine, els: Any, rec: Rec, w: number): Promise<Any> {
+  const { Box, Text, Button } = els
+  const ui = await uiOf($, rec.id)
+  const { at, pending } = await levelsNow($, rec)
+  const busy = pending || !!ui.running
+  const lines: Any[] = []
+  if (ui.error) lines.push(Text({ key: 'err', color: 'error', wrap: 'wrap', children: `× ${ui.error}` }))
+  else if ((rec.squeeze?.problems ?? [])[0] && !busy) lines.push(Text({ key: 'problem', color: accent(), wrap: 'wrap', children: `! ${rec.squeeze.problems[0]}` }))
+  const words: string[] = []
+  const held = new Set(await trayHeld($, ROW_KEYS).catch(() => [] as string[]))
+  // `look`: 'doing' (its version is on its way, all in thimble's color), 'end' (dim, no press) or 'on'
+  const item = (id: string, k: string, said: string, look: 'on' | 'doing' | 'end', press: () => Promise<unknown>) => {
+    words.push(`${k} ${said}`, said)
+    const kids = [
+      ...(held.has(k) ? [] : [Text({ key: 'k', ...(look === 'end' ? { dimColor: true } : { color: accent(), bold: true }), children: `${k} ` })]),
+      Text({ key: 'w', ...(look === 'doing' ? { color: accent() } : { dimColor: true }), children: said }),
+    ]
+    if (look === 'end') return Box({ key: id, flexDirection: 'row', children: kids })
+    return Button({ key: id, plain: true, label: `${k} ${said}`, hover: quiet(`sq-${rec.id}-${id}`), onPress: () => { void press().catch(() => undefined) }, children: kids })
+  }
+  const parts: Any[] = []
+  for (const c of CHOICES) {
+    const press = async () => (await chooseTake($, rec, c)).now?.()
+    if (busy && ui.doing === c.doing) parts.push(item(`c${c.key}`, c.key, `${c.doing}…`, 'doing', press))
+    else parts.push(item(`c${c.key}`, c.key, c.words, choiceAt(rec, at, c) ? 'on' : 'end', press))
+  }
+  parts.push(item('remove', REMOVE_KEY, 'hide', 'on', () => removeTake($, rec).now!()))
+  lines.push(Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', children: parts.flatMap((p, i) => [
+    ...(i ? [Text({ key: `sep${i}`, dimColor: true, children: ' · ' })] : []),
+    p,
+  ]) }))
+  // the row's words are thimble's own controls: a click on them selects no answer's words (core/selection.ts)
+  controlWords('squeeze', words, { inRow: true })
+  // the rule runs down beside them, through the blank row above them, as beside the block's text
+  const body = Box({ flexDirection: 'column', flexShrink: 1, width: w, paddingTop: 1, children: lines })
+  const n = Math.max(2, treeRows(body, w))
+  return Box({ key: `sq-row-${rec.id}`, flexDirection: 'row', children: [
+    Box({ width: 4, flexShrink: 0, children: [Text({ color: accent(), children: Array.from({ length: n }, () => '▎').join('\n') })] }),
+    body,
+  ] })
+}
+
+/** The catch-up drawn below the newest message it covers (term.ts drawnAt), or the simpler version below its answer,
+ *  after that message and its cards, once a version of it is written: a rule down its left side beside its head line
+ *  (`catch-up of the N replies above`, `simpler version of the answer above`), its text (its first characters while a
+ *  version writes itself in, dim while one is written) and, on the newest answer, its row of choices (rowEl). Its
  *  citations look as the checked citations of the replies they stand for (marks/register.ts looksByWords: the same
  *  words, else the same claim in new words), and a press on one acts as a press on that citation in its reply. The
  *  replies' citations are numbered across the catch-up, since each reply numbers its own from 1: so citations of two
@@ -598,11 +400,11 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
  *  and heads-ups stand on its words where it says their terms (core/answerview.ts spansOver), and a card it places on
  *  a line of its own draws there, moved down from its reply (cards.ts placeCatchUpCards). */
 async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any | null> {
-  if (!featureOn('catchUp')) return null
   const cu = await catchUpAt($, row)
-  if (!cu || typeof cu.shown !== 'string') return null
+  if (!cu || typeof cu.shown !== 'string' || !blockOn(cu)) return null
   seeView(cols)
   const ui = await uiOf($, cu.id)
+  const busy = !!ui.running || (await levelsNow($, cu)).pending
   const text = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
   const items: MarkItem[] = []
   const from: { row: string; n: number }[] = []
@@ -621,7 +423,7 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   const cards = cardsIn ? await cardsIn(text, [cu.id], { indent: 2 }).catch(() => ({})) : {}
   const spans = await spansOver($, cu.catchup?.rows ?? [], text, marks)
   const body = messageEl(els, {
-    text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running, cards, spans, rule: accent(),
+    text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: busy, cards, spans, rule: accent(),
     onMark: async (k: number) => {
       const it = from[(looks[k]?.n ?? 0) - 1]
       if (!it) return
@@ -634,13 +436,16 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   // catch-up ends, whatever width it is drawn at
   const head = els.Box({ key: 'cu-head', flexDirection: 'row', children: [
     els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: accent(), children: '▎' })] }),
-    els.Text({ children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] }),
+    els.Text({ children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: isSimplify(cu) ? '  simpler version of the answer above' : `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] }),
   ] })
-  return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [head, body] })
+  // its row of choices, while it stands on the newest answer, where the keys act
+  const newest = (await rowBlock($))?.id === cu.id
+  const choices = newest ? await rowEl($, els, cu, w) : null
+  return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [head, body, ...(choices ? [choices] : [])] })
 }
 
-/** What stands under a row after its cards: the catch-up drawn below it, or why it failed, what a squeeze left out of
- *  its cards, and the chips while they are open on it or on the catch-up drawn at it (under the whole answer, last). */
+/** What stands under a row after its cards: the simpler version or catch-up drawn below it, or why its first version
+ *  failed, and what a squeeze left out of its cards. */
 export async function underRow($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any[]> {
   const squeezing = featureOn('squeezeAnswers')
   if (!squeezing && !featureOn('catchUp')) return []
@@ -650,26 +455,23 @@ export async function underRow($: Engine, els: Any, row: string, cols: number, c
   const part = await partNow($, row)
   const recs: Rec[] = []
   if (squeezing && part.own) { const r = await recOf($, row); if (r) recs.push(r) }
-  const cu = featureOn('catchUp') ? await catchUpAt($, row) : null
+  const drawnHere = await catchUpAt($, row)
+  const cu = drawnHere && blockOn(drawnHere) ? drawnHere : null
   if (cu) recs.push(cu)
   if (cu && typeof cu.shown !== 'string') {
     const ui = await uiOf($, cu.id)
     if (ui.error) out.push(els.Text({ key: `cu-note-${row}`, color: 'error', wrap: 'wrap', children: `× ${ui.error}` }))
   }
   const left = recs.flatMap(r => (cardNotes(r) as { left: string[] }).left)
-  if (left.length) out.push(els.Box({ key: `lo-${row}`, marginLeft: 2, marginTop: 1, children: [els.Text({ dimColor: true, wrap: 'truncate-end', children: `left out by rewrite: ${left.map(t => `"${t.length > 48 ? `${t.slice(0, 47)}…` : t}"`).join(', ')}` })] }))
-  for (const id of [row, ...(cu ? [cu.id] : [])]) {
-    const chips = await chipsEl($, els, id, cols)
-    if (chips) out.push(chips)
-  }
+  if (left.length) out.push(els.Box({ key: `lo-${row}`, marginLeft: 2, marginTop: 1, children: [els.Text({ dimColor: true, wrap: 'truncate-end', children: `left out by thimble: ${left.map(t => `"${t.length > 48 ? `${t.slice(0, 47)}…` : t}"`).join(', ')}` })] }))
   return out
 }
 
-/** The line under a card a squeeze changed: `edited by rewrite` or `added by rewrite`. */
+/** The line under a card a squeeze changed: `edited by thimble` or `added by thimble`. */
 export async function underCardLine($: Engine, els: Any, id: string): Promise<Any[]> {
   if (!featureOn('squeezeAnswers')) return []
   const did = await cardDid($, id)
-  return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by rewrite` })] : []
+  return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by thimble` })] : []
 }
 
 /** Whether a card is left out of the version of its answer shown now. */

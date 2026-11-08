@@ -38,6 +38,8 @@ export interface FixRow {
   title: string
   /** the kernel's state: working, ready, failed, on, off, redo, request, ... */
   state: string
+  /** in Your fixes, why a fix that is on is off: it is not in the code the server runs (backend fixes.not_here) */
+  why?: string | null
   /** what this server does with it now; null once it ended */
   phase: 'fixing' | 'testing' | 'applying' | 'restarting' | null
   /** how it ended, until dismissed: ready (it asks the person), fixed (on), failed, request, undone, problem */

@@ -5,14 +5,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, choiceOf, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
+import { SWITCHES, choiceOf, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, setOptions, switchesFrom } from '../features.mjs'
 
 test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
   {
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
-    // the fields Citations replaced stay last, so a value saved under them still reaches the plugin
-    assert.deepEqual(Object.keys(manifest.userConfig), [...SWITCHES.map(s => s.key), ...Object.keys(RETIRED), ...Object.keys(DEFAULTS_FIELD)])
+    assert.deepEqual(Object.keys(manifest.userConfig), SWITCHES.map(s => s.key))
     assert.deepEqual(SWITCHES.map(s => s.key), ['minimal', 'citations', 'checkerModel', 'checkerEffort', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
     for (const s of SWITCHES) {
       const kind = s.choices ? { type: 'string', options: s.choices } : { type: 'boolean' }
@@ -20,9 +19,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
       // a feature with modes says what each one gives
       if (s.choices) assert.deepEqual(Object.keys(s.says), s.choices)
     }
-    for (const [k, f] of Object.entries({ ...RETIRED, ...DEFAULTS_FIELD })) assert.deepEqual(manifest.userConfig[k], f)
-    // the person reads Squeeze as Rewrite, and Claims by its name; the keys stay, so a saved setting still applies
-    assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Rewrite')
+    // the person reads Squeeze as Simplify, and Claims by its name; the keys stay, so a saved setting still applies
+    assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Simplify')
     assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Claims')
     assert.deepEqual(SWITCHES.find(s => s.key === 'claimsMode').choices, ['auto', 'on demand', 'off'])
   }
@@ -95,26 +93,17 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('citations'), 'auto cite + verify')
     setOptions({})
   }
-  // a value saved under the retired fields stands while Citations holds its default; a Citations the person sets wins
+  // a value that settings.json still holds under a field of the manifest until 0.10.12 changes nothing
   {
-    assert.equal(citationsFrom({ marks: false, citationChecks: 'auto' }), 'off')
-    assert.equal(citationsFrom({ marks: true, citationChecks: 'auto' }), 'auto cite + verify')
-    assert.equal(citationsFrom({ marks: true, citationChecks: 'off' }), 'auto cite')
-    assert.equal(citationsFrom({ marks: true, citationChecks: 'on demand' }), null)
-    setOptions({ citations: 'auto cite', marks: false })
-    assert.equal(choiceOf('citations'), 'off')
-    setOptions({ citations: 'auto cite + verify', marks: false })
-    assert.equal(choiceOf('citations'), 'off')
-    setOptions({ citations: 'manual', marks: false })
-    assert.equal(choiceOf('citations'), 'manual')
-    setOptions({ marks: false })
-    noteChange('citations', 'auto cite')
-    assert.equal(choiceOf('citations'), 'auto cite')
+    setOptions({ marks: false, citationChecks: 'off', squeeze: false, counts: false, claims: false, defaultsAt: 'none' })
+    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(featureOn('squeezeAnswers'), true)
+    assert.equal(featureOn('labels'), true)
+    assert.equal(choiceOf('claims'), 'auto')
     setOptions({})
   }
   // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only when Claims
-  // is auto (auto by default, a value outside its modes too); Claims off is no claims, and the old Claims switch saved
-  // off stands for it
+  // is auto (auto by default, a value outside its modes too); Claims off is no claims
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
@@ -131,30 +120,12 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({ explain: false, details: false, claimsMode: 'off' })
     assert.equal(featureOn('observer'), false)
     assert.equal(featureOn('claims'), false)
-    setOptions({ explain: false, details: false, claims: false, claimsMode: 'on demand' })
-    assert.equal(choiceOf('claims'), 'off')
-    assert.equal(featureOn('claims'), false)
     setOptions({ claimsMode: true })
     assert.equal(choiceOf('claimsMode'), 'auto')
     setOptions({})
   }
-  // no default moves now: a value saved at an old default (auto cite, 0.10.3's) stays, before and after the first
-  // session notes the defaults; and a value at an old default still counts as unset for a retired field's move
-  {
-    assert.deepEqual(defaultsFrom({ citations: 'auto cite' }), {})
-    assert.deepEqual(defaultsFrom({ claimsMode: 'on demand' }), {})
-    setOptions({ citations: 'auto cite' })
-    noteDefaults()
-    assert.equal(choiceOf('citations'), 'auto cite')
-    setOptions({ claimsMode: 'on demand' })
-    noteDefaults()
-    assert.equal(choiceOf('claimsMode'), 'on demand')
-    setOptions({ claimsMode: 'on demand', claims: false })
-    assert.equal(choiceOf('claimsMode'), 'off')
-    setOptions({})
-  }
   // Minimal is a preset: its modes (PRESET) keep Claude citing, each citation verified when it is opened, and the
-  // explainers and heads-ups in the look after each reply; Cards on demand; Rewrite, Catch-up and the session-wide
+  // explainers and heads-ups in the look after each reply; Cards on demand; Simplify, Catch-up and the session-wide
   // panes (Claims, Labels, Coverage) off. Explainers and Heads-ups saved as the switches they were read as auto (on)
   // and off (off)
   {

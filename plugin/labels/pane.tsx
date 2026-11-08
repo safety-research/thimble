@@ -31,7 +31,6 @@ import type { EngineInterface } from 'claude-code'
 import { failNotice } from '../bar/notice'
 import { quiet } from '../core/askcell.js'
 import { rootHere, startDir } from '../core/env'
-import { busy } from '../bar/busy'
 import { openPane, paneBack } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
@@ -39,7 +38,7 @@ import { rowsUnder, type PaneEdit } from '../threads/seam'
 import { rerunLabel } from './edit'
 import { SETTINGS } from './labelreads.mjs'
 import { checkRecord, labelsData } from './labels'
-import { chosenOf, definition, examples, isNegative, ledgerTop, NONE, partOf, partsOf, ruleWord, valueOrder } from './ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, NONE, partOf, partsOf, ruleWord, SCOPE, valueOrder } from './ledger.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -285,9 +284,10 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
   const body = [...(top.rows as Row[]), ...section]
   const keyLook = { color: accent(), bold: true }
   const keysRow = a.edit && chosen
-    // editing: ↵ (the input's own) applies the change over the same records, esc (or a click here) cancels
+    // editing: ↵ (the input's own) applies the change, over the same records unless it changes which records the label
+    // goes over (ledger.mjs rerunArgs); esc (or a click here) cancels
     ? Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: [
-      Text({ key: 'k-enter', ...keyLook, children: '↵' }), Text({ key: 'w-enter', dimColor: true, children: ` rerun over the same ${Number(chosen.lab.records || 0).toLocaleString('en-US')} records` }),
+      Text({ key: 'k-enter', ...keyLook, children: '↵' }), Text({ key: 'w-enter', dimColor: true, children: SCOPE.includes(a.edit) ? ' rerun' : ` rerun over the same ${Number(chosen.lab.records || 0).toLocaleString('en-US')} records` }),
       Text({ key: 'sep', dimColor: true, children: ' · ' }),
       Button({ key: 'key-esc', plain: true, label: 'cancel the edit', hover: quiet('labels-key-esc'), onPress: () => paneBack($), children: [Text({ key: 'k', ...keyLook, children: 'esc' }), Text({ key: 'w', dimColor: true, children: ' cancel' })] }),
     ] })
@@ -334,7 +334,7 @@ export async function labelEdit($: Engine, args: unknown): Promise<PaneEdit | nu
       const v = String(text ?? '').trim()
       await paneBack($)
       if (v === now.trim() || (!v && (f === 'rule' || f === 'in'))) return
-      const bad = await busy($, `applying ${lab.name} again`, () => rerunLabel($, root, lab, { [f]: v || null }))
+      const bad = await rerunLabel($, root, lab, { [f]: v || null })
       if (bad) failNotice($, bad)
     },
   }

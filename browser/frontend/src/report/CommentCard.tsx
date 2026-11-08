@@ -55,6 +55,8 @@ export interface CommentCardProps {
   /** ✓ (Done) */
   onResolve: () => Promise<void>
   thread: CommentThread
+  /** a line under the statement on where the comment stands: a comment on Claude's answer whose words are gone */
+  note?: string
   cardRef?: (el: HTMLDivElement | null) => void
   /** the surface's own class, which places the card */
   className?: string
@@ -85,7 +87,7 @@ export function threadText(c: CommentView, name: string, thread: CommentThread):
   return `${thread.passage ? `${thread.passage}\n\n` : ''}${who}${where}: ${said}`
 }
 
-export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {
+export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, note, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const name = commentName(comment, look)
@@ -133,6 +135,7 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
         )}
       </div>
       <div className="wu-cm-text wu-cm-statement">{noteText(comment.text)}</div>
+      {note && <div className="wu-cm-text">{note}</div>}
       {open && more && (
         <div className="wu-cm-details">
           {comment.details.trim() && (

@@ -20,7 +20,7 @@ from . import fixes as FX
 from .store import thimble_home
 
 NODE_MIN = (22, 18)  # the terminal plugin's, as scripts/install.sh and sandbox/setup.mjs name it
-CLAUDE_CODE_MIN = (2, 1, 307)  # as scripts/install.sh, INSTALL.md and CI name it
+CLAUDE_CODE_MIN = (2, 1, 314)  # as scripts/install.sh, INSTALL.md and CI name it
 
 Row = tuple[bool | None, str, str]  # works (None: not installed, by choice), what, and the fix or the step that adds it
 
@@ -107,23 +107,38 @@ def sandbox(node_bin: str, plugin: Path) -> list[Row]:
              d.get("fix") or f"See its whole message: node {FX._tilde(str(setup))} --probe")]
 
 
-def browser() -> Row:
-    """The browser workbench's launcher: in live, where scripts/install.sh and thimble update build it (browser-ready),
-    in the clone an install with --local built it in, in this thimble's own checkout when its packages are installed,
-    or on PATH."""
+def workbench() -> Path | None:
+    """The browser workbench's folder: in live, where scripts/install.sh and thimble update build it (browser-ready), in
+    the clone an install with --local built it in, or in this thimble's own checkout when its packages are installed."""
     try:
         ready = Path((FX.home() / "browser-ready").read_text().strip())
     except OSError:
         ready = None
     for b in (ready, FX._browser_seed(), FX.PLUGIN.parent / "browser"):
         if b and (b / "scripts" / "thimble-browser").is_file() and (b / "backend" / ".venv").is_dir():
-            return True, f"the browser workbench: {FX._tilde(str(b / 'scripts' / 'thimble-browser'))}", ""
+            return b
+    return None
+
+
+def browser() -> Row:
+    """The browser workbench's launcher: in its folder (workbench), or on PATH."""
+    b = workbench()
+    if b:
+        return True, f"the browser workbench: {FX._tilde(str(b / 'scripts' / 'thimble-browser'))}", ""
     found = shutil.which("thimble-browser")
     if found:
         return True, f"the browser workbench: {FX._tilde(found)}", ""
     # a terminal-only install (scripts/install.sh --no-browser) is a choice, not a problem
     return (None, "the browser workbench is not installed",
             "To add it, run the install again without --no-browser (INSTALL.md)")
+
+
+def chromium() -> list[Row]:
+    """The browser the workbench draws cards and loads views in (fixes.browser_chromium): a row only when it lacks it,
+    with the command that fetches it."""
+    b = workbench()
+    wrong = FX.browser_chromium(b) if b else []
+    return [(False, f"the browser workbench {wrong[0]}", wrong[1])] if wrong else []
 
 
 def on_path() -> Row:
@@ -256,7 +271,7 @@ def checks(offline: bool = False) -> list[Row]:
                               f"{FX._tilde(str(plugin))}", "")]
     rows += claude_code()
     node_bin, row = node()
-    rows += [row, *sandbox(node_bin, plugin), browser(), on_path(), *your_fixes()]
+    rows += [row, *sandbox(node_bin, plugin), browser(), *chromium(), on_path(), *your_fixes()]
     if not offline:
         rows.append(newest())
     return rows

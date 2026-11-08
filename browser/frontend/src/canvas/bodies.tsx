@@ -32,6 +32,7 @@ import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
+import { ThimbleTag } from '../files/LabelsHelp'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -296,19 +297,26 @@ export const asksQuestion = (title: string | undefined, name: string): boolean =
   return !!t && t !== name.trim().toLowerCase()
 }
 
-/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels). */
+/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels): thimble's
+ * logo in grey, then Label, and on hover what a label is (files/LabelsHelp ThimbleTag). */
 export function LabelKindTag() {
-  return <span className="bcell-kind-tag">Label</span>
+  return <ThimbleTag>Label</ThimbleTag>
 }
 
-/** What a label card's label row says after the label's name (details labelIdentity): how the label is defined, what it
- * ran on, and how many units its shares are of, in one quiet line; the hover names every file pattern whole. */
-export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'model'> }) {
-  const { ws } = useContext(CanvasContext)
+/** What a label card's label row says after the label's name (details labelIdentity): what kind of classifier gave its
+ * values, in plain words (a code or regex rule over the data, or a model's prompt), how many units it ran over, the
+ * label it ran within and where, in one quiet line; the hover gives the whole line, every file pattern whole. */
+export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'model' | 'within'> }) {
+  const { ws, concepts } = useContext(CanvasContext)
   const model = useLabelModel(ws, k.kind === 'prompt' && !k.model)
-  const id = labelIdentity(k, k.kind === 'prompt' && (k.model || model) ? modelLabel(k.model || model) : '')
-  const parts = [id.how && <span key="how">{id.how}</span>, <span key="where" title={id.full !== id.where ? id.full : undefined}>{id.where}</span>, id.units && <span key="units">{id.units}</span>].filter(Boolean)
-  return <span className="bcell-label-meta">{parts.flatMap((part, i) => (i ? [' · ', part] : [part]))}</span>
+  const id = labelIdentity(k, k.kind === 'prompt' && (k.model || model) ? modelLabel(k.model || model) : '', k.within ? (concepts.get(k.within.label)?.name ?? '') : '')
+  return (
+    <span className="bcell-label-meta" title={`${id.how} · ${id.full}`}>
+      <span>{id.how}</span>
+      {' · '}
+      <span>{id.where}</span>
+    </span>
+  )
 }
 
 /**

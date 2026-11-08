@@ -2,12 +2,13 @@
 // the one Client with the runner's tree; a new version draws in the card's place, and a view that does not parse is
 // fixed with edits; a card's link alone on a line of a reply draws the card there; a key at an empty prompt reaches the
 // card on screen that takes it; a card taller than its frame waits for the card check. The person's permission rules, a
-// data file whose real path leaves the folder, and a sandbox that cannot start each keep the card from running. The
-// runner is answered here, at http.fetch (cards/test/runner.test.mjs tests the real one). All data is made up. `claude
-// plugin test plugin`.
+// data file whose real path leaves the folder, and a sandbox that cannot start each keep the card from running. A card
+// as large as the runner lets through draws, and one Claude Code cannot draw sends Claude why. The runner is answered
+// here, at http.fetch (cards/test/runner.test.mjs tests the real one). All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { drawnSize } from '../cards/drawn.js'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -23,6 +24,15 @@ const VIEW = 'const keys = "o"\nfunction onKey(k, s) { s.setState({ sorted: true
 // a card of 42 rows, one per run: taller than the 30 rows its frame shows (draw.ts CARD_ROWS)
 const TALL_LINES = Array.from({ length: 42 }, (_, i) => `run ${i + 1}  passed`)
 const TALL = { t: 'Box', p: { flexDirection: 'column' }, c: TALL_LINES.map(l => ({ t: 'Text', p: {}, c: [l] })) }
+// a card of `n` dots, a run each, 30 to a row: small as the runner's tree, large once the Client puts a Button around
+// each run; `bare` marks it as the runner marks a tree too large with those Buttons (cards/drawn.js)
+const DOTS = (n: number, bare = false) => ({
+  t: 'Box', p: { flexDirection: 'column', ...(bare ? { bare: true } : {}) },
+  c: Array.from({ length: Math.ceil(n / 30) }, (_, r) => ({ t: 'Box', p: { flexDirection: 'row' }, c: [
+    { t: 'Text', p: {}, c: [`run ${r * 30 + 1} `] },
+    ...Array.from({ length: Math.min(30, n - r * 30) }, (_, k) => ({ t: 'Text', p: { color: k % 3 ? '#67cda8' : '#f59183' }, c: ['●'] })),
+  ] })),
+})
 
 function elements(n: Any, out: Any[] = []): Any[] {
   if (n == null || typeof n !== 'object') return out
@@ -97,12 +107,14 @@ function world(on: Any, o: { sandbox?: Record<string, unknown> } = {}) {
     // a view that does not parse
     if (op === 'load' && String(body.view).includes('BROKEN')) return reply({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' })
     if ((op === 'load' || op === 'draw') && body.width) runnerWidth = body.width
-    // a view that says TALL draws taller than the frame
+    // a view that says TALL draws taller than the frame; one that says `// dots N` draws N dots (DOTS), `// dots N bare`
+    // the same, marked bare
     const tall = String(body.view ?? '').includes('TALL')
+    const dots = /\/\/ dots (\d+)( bare)?/.exec(String(body.view ?? ''))
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: {
-        ok: true, tree: tall ? TALL : TREE, width: runnerWidth, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: tall ? TALL_LINES : ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
+        ok: true, tree: dots ? DOTS(Number(dots[1]), !!dots[2]) : tall ? TALL : TREE, width: runnerWidth, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: tall ? TALL_LINES : ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
       },
       key: { ok: true, handled: body.key === 'o', tree: SORTED, width: runnerWidth, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, width: runnerWidth, state: 'null' },
@@ -274,6 +286,43 @@ test('a key at an empty prompt reaches the focused card in view when it lists th
   expect((await edit('o')).text).toBe('o')
 })
 
+test('a card on screen with keys of its own takes none of thimble\'s: the bar names its keys, then v visualize · s simplify, also while ] stands on the card and while the simpler version is on its way', { options: { cards: 'on demand', squeezeAnswers: true, citations: 'off', explain: 'off' } }, async ($, on) => {
+  const w = world(on)
+  on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text }))
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
+  const simplified: Any[] = []
+  let give: () => void = () => {}
+  on('model.complete', async (_$: unknown, e: Any) => {
+    simplified.push(e)
+    await new Promise<void>(r => { give = r })
+    return { value: { isAnswered: true, text: '<text>\nTwo runs failed.\n</text>', usage: {} } }
+  })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'which runs failed?', turnId: 't1' } as never)
+  // a card whose view asks for o and for s: s is thimble's, so the card keeps o alone
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW.replace('const keys = "o"', 'const keys = "os"') }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_61', ...input } as never)
+  await shown($, callRow('toolu_made_up_61', input))
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed, ada and bram.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed, ada and bram.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  expect(textOf(await $.ui.render(BAND))).toContain('o card keys · v visualize · s simplify')
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // ] stands on the card, which holds the keys: the bar names its keys after v and s, which still act at the prompt
+  expect(await edit(']')).toEqual({ text: '', cursor: 0 })
+  await w.clock.advance(1000)
+  expect(textOf(await $.ui.render(BAND))).toMatch(/v visualize · s simplify · a ask/)
+  // s at the empty prompt simplifies the answer, as the bar says; while its first version is on its way, s stays
+  expect(await edit('s')).toEqual({ text: '', cursor: 0 })
+  await w.clock.advance(1000)
+  expect(simplified.length).toBe(1)
+  expect(String(simplified[0].prompt)).toContain('Two runs failed, ada and bram.')
+  expect(textOf(await $.ui.render(BAND))).toContain('v visualize · s simplify')
+  give()
+  await w.clock.advance(5000)
+})
+
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {
   const w = world(on)
   w.files[`${DATA}/secret.json`] = '[]'
@@ -379,3 +428,42 @@ test('a card taller than its frame waits for the card check: its frame draws `dr
   expect(asked).toHaveLength(1)
 })
 
+
+test("a card as large as the runner lets through draws in Claude Code: with a Button around each run, or, past that, without them", async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // the most dots the runner lets through with their Buttons (its limit: 95,000 characters as Claude Code holds them,
+  // which refuses past 100,000), measured at the width the frame draws them at
+  const width = cardWidth(100)
+  let n = 30
+  while (drawnSize(DOTS(n + 30), width) <= 95000) n += 30
+  for (const [i, view, asks] of [[1, `${VIEW}\n// dots ${n}`, n + n / 30], [2, `${VIEW}\n// dots 1000 bare`, 0]] as const) {
+    const input = { title: 'Runs', data: 'runs.json', view }
+    await $.tool.call({ tool: TOOL, tool_use_id: `toolu_made_up_d${i}`, ...input } as never)
+    const row = callRow(`toolu_made_up_d${i}`, input)
+    const key = elements(await $.ui.render(row)).find(x => x.type === 'Client')?.props.key
+    // Claude Code draws it: a drawing it refuses fails the mount
+    const ui = (await $.ui.mount({ plugin: 'thimble', ...(row as Any) })) as Any
+    expect(JSON.stringify(await ui.drawn({ in: key })).match(/"key":"ask-\d+"/g)?.length ?? 0).toBe(asks)
+    await ui.unmount()
+  }
+})
+
+test('a card Claude Code cannot draw says why in its place and who fixes it, and Claude reads why with its next card call', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // a Button around each of 1000 dots: more than Claude Code draws (the runner draws such a tree bare)
+  const input = { title: 'Runs', data: 'runs.json', view: `${VIEW}\n// dots 1000` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_f1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const row = callRow('toolu_made_up_f1', input)
+  let refused = ''
+  try { await $.ui.mount({ plugin: 'thimble', ...(row as Any) }) } catch (e) { refused = String((e as Error).message) }
+  expect(refused).toContain('a tree serializing to more than 100000 characters')
+  // the card's place and the failure line say why, and that Claude fixes it
+  expect(textOf(await $.ui.render(row))).toContain('× Claude Code could not draw this card: a tree serializing to more than 100000 characters · Claude gets the error with your next message')
+  expect(textOf(await $.ui.render(BAND))).toContain('could not be drawn: a tree serializing to more than 100000 characters · Claude gets the error with your next message')
+  // Claude's next card call answers why, and what to do
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_f2', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(String(r2.result)).toContain(`Claude Code could not draw version 1 of the card “Runs” (id "${id}") on the analyst's screen: a tree serializing to more than 100000 characters. The analyst sees this error in the card's place. Draw it again with id "${id}" in a form Claude Code draws, such as with fewer elements.`)
+})

@@ -9,6 +9,7 @@ import { registerTurn } from '../core/turn'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
+import { readStore } from '../claims/store.js'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -268,4 +269,46 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   await closeOf(await draw({ claim: 'c1' })).onPress()
   expect(closed.length).toBe(2)
   expect(paneNow(s)).toBe(null)
+})
+
+/** A long claim, as the lens writes one: a full sentence with its numbers and qualifiers, past 200 characters. */
+const LONG = "Across the 1,204 interviews the survey team coded, respondents who named their job lab-tech work were twice as likely to report unpaid overtime as any other role, by the survey's definition, which counts every hour past the contract."
+const flat = (node: Any) => textOf(node).replace(/\s+/g, ' ')
+
+test('a long claim is kept whole: its cluster lists it whole when current, a preview cut after a word with … when not, and e opens it whole', async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([
+    { claim: LONG, quote: 'twice as likely to report unpaid overtime', cluster: 'overtime' },
+    { claim: 'Nurses reported the least unpaid overtime.', quote: 'Nurses reported the least unpaid overtime', cluster: 'overtime' },
+  ])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Who works unpaid overtime?', rows: [`Lab techs were twice as likely to report unpaid overtime. Nurses reported the least unpaid overtime.`] })
+  s.$.ui.panes = async () => []
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
+  // the current claim of its cluster: whole, wrapped, its own full stop, not cut at 200 characters (`… which cou.`)
+  const cluster = flat(await draw({ group: 'k1' }))
+  expect(cluster).toContain(LONG.split(' ').slice(-8).join(' '))
+  expect(cluster).not.toContain('which cou.')
+  // not current: one line, cut after a whole word, then …
+  const other = flat(await draw({ group: 'k1', cur: 1 }))
+  expect(other).toMatch(/ 1\. Across the 1,204 interviews[^…]* lab-tech …▸ 2\. Nurses/)
+  expect(other).not.toContain('past the contract.')
+  // e opens it: the claim picked shows it whole
+  expect(flat(await draw({ claim: 'c1' }))).toContain(LONG)
+})
+
+test('a store of v 2 kept a long claim cut at 200 characters, in a word: read, it ends after its last whole word, then …', () => {
+  const claim = (text: string) => ({ id: 'c1', text, by: 'claude', cluster: 'k1', turn: 1, said: [], sources: [] })
+  const cut = LONG.slice(0, 200)
+  expect(cut.endsWith('which cou')).toBe(true)
+  const old = (v: Any, text: string) => readStore(JSON.stringify({ v, claims: [claim(text)], clusters: [{ id: 'k1', name: 'overtime' }] })).claims[0].text
+  expect(old(2, cut)).toBe(`${LONG.slice(0, LONG.indexOf(' counts'))} …`)
+  expect(old(undefined, cut)).toMatch(/definition, which …$/)
+  // a whole sentence of 200 characters, a short claim, and any claim of a v 3 store stay as they are
+  const whole = `${'x'.repeat(198)}.`.padStart(200, 'y')
+  expect(old(2, whole)).toBe(whole)
+  expect(old(2, 'Run 4 failed')).toBe('Run 4 failed')
+  expect(old(3, cut)).toBe(cut)
+  expect(readStore('{}').v).toBe(3)
 })

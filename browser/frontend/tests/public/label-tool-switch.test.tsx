@@ -9,7 +9,7 @@ import { LABEL_TOOL, LabelsSidebar } from '../../src/shell/LabelsSidebar.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-const LABEL = { id: 'k1', name: 'stage', kind: 'regex', unit: 'line', shown: true, classes: [{ name: 'ingest', color: 1 }], counts: { ingest: 3 }, n_labeled: 3 }
+const LABEL = { id: 'k1', name: 'stage', kind: 'regex', unit: 'record', shown: true, classes: [{ name: 'ingest', color: 1 }], counts: { ingest: 3 }, n_labeled: 3 }
 
 let stored: { labels?: boolean }
 let puts: unknown[]
@@ -51,7 +51,7 @@ test("the labels' head holds the Label tool, on or off, beside the heading, and 
   expect(switchOf(el).getAttribute('aria-checked')).toBe('true')
   // the switch's words name it
   expect(tool(el)?.tagName).toBe('LABEL')
-  // each label keeps its own switch
+  // a label over files keeps its own switch
   expect(el.querySelector('[data-label="k1"] button[role="switch"]')).not.toBeNull()
 
   await act(async () => switchOf(el).click())

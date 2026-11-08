@@ -24,9 +24,14 @@ export function refFromUrl(): string | null {
   return v || null
 }
 
+/** The element carrying `data-anchor=ref` in `root`, or null when none is mounted. */
+export function anchorEl(ref: string, root: ParentNode = document): HTMLElement | null {
+  return ref ? root.querySelector<HTMLElement>(`[data-anchor="${cssEscape(ref)}"]`) : null
+}
+
 /** Scroll the element carrying `data-anchor=ref` into view and flash it; false when none is mounted. */
 export function revealAnchor(ref: string, root: ParentNode = document): boolean {
-  const el = root.querySelector<HTMLElement>(`[data-anchor="${cssEscape(ref)}"]`)
+  const el = anchorEl(ref, root)
   if (!el) return false
   el.scrollIntoView({ block: 'center' })
   el.classList.add('anchor-flash')

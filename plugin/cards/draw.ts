@@ -51,6 +51,7 @@ import { cardAsk, cardHidden, heldKeys, selectionAsks, textView, underCard } fro
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
+import { MAIN, tellFor } from '../core/tell'
 import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
@@ -107,6 +108,8 @@ const shown = new Map<string, boolean>()
 // from, and why. The frame says why in the card's place until the card has a newer tree or a new version, which is
 // drawn again.
 const faulted = new Map<string, { gen: number; seq: number; reason: string }>()
+// what the analyst reads after such a reason: who fixes the card, and when (clientFault)
+const FAULT_TOLD = 'Claude gets the error with your next message'
 // the width each frame of a card draws at now, by the drawing it stands in (the `requestId` of its row or pane, which
 // a Client's ui.message names too) and the card: what the answer to that Client's post is laid out at
 const siteWidth = new Map<string, number>()
@@ -426,8 +429,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: num
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
   // alone, each while its key reaches the card: what holds the keys before the card's header takes a while the tray is
   // open (a ask in its header) or stands on a card (a ask on the bar), and while words are selected (a ask on the bar,
-  // about them), and every key while a click gave the squeeze chips the keyboard, so each key shows once, where it
-  // acts. Every card's words are clicks
+  // about them), so each key shows once, where it acts. Every card's words are clicks
   const owner = (await headOwner($))?.id === meta.id
   const held = owner ? await heldKeys($, ['a', 'p']) : new Set<string>()
   if (owner && (await selectionAsks($))) held.add('a')
@@ -452,7 +454,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: num
       onPress: () => { opened.add(openKey(meta)); $.ui.invalidate('ui.render') },
       children: [E.Text({ key: 'more-w', color: accent(), children: `+${rowsWord(more)}` })] }))
   }
-  if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
+  if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault} · ${FAULT_TOLD}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   // the frame in the 2 columns of its indent; `ask` at its title's right is how a side thread about it
   // starts, so no ? in the margin asks the same
@@ -507,16 +509,21 @@ function selectedLine(tree: Any, width: number): { row: number; text: string } |
 }
 
 /** The card's Client failed on screen (Claude Code's ui.fault): its frame draws the reason in its place until the card
- *  has a newer tree or a new version, and the failure line says it until then. */
+ *  has a newer tree or a new version, and the failure line says it until then. The one that drew the card (main, or the
+ *  side thread whose fork drew it) reads the reason and what to do with its next card call or as its next turn starts
+ *  (core/tell.ts tellFor), as it reads a card call that failed. */
 export async function clientFault($: Engine, key: string, reason: string): Promise<void> {
   const { id, gen } = cardOfKey(key)
   const meta = await metaOf($, id)
   const t = await treeOf($, id)
   // the Client of an earlier version, which a new version's took the place of
   if (!meta || !t || (gen !== null && gen !== meta.gen)) return
-  faulted.set(id, { gen: t.gen, seq: t.seq, reason: reason.slice(0, 200) })
+  const why = reason.slice(0, 200)
+  faulted.set(id, { gen: t.gen, seq: t.seq, reason: why })
   $.ui.invalidate('ui.render')
-  failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
+  failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)} · ${FAULT_TOLD}`, about(id))
+  const to = meta.anchorRow?.startsWith('thread:') ? meta.anchorRow : MAIN
+  await tellFor($, to, `card-fault:${id}`, `Claude Code could not draw version ${meta.version} of the card “${meta.title}” (id "${id}") on the analyst's screen: ${why}. The analyst sees this error in the card's place. Draw it again with id "${id}" in a form Claude Code draws, such as with fewer elements.`)
 }
 
 /** The width a text copy of a card is laid out at for a reader on `pane` (a side thread's, `thread:<key>`; none for
@@ -591,14 +598,16 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     // another row's line points to it
     if (meta.anchorRow && !here.includes(meta.anchorRow)) {
       const E = $.ui.resolve(e) as Any
-      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” is drawn under an earlier answer` })] })
+      // a simpler version of the answer the card is drawn under stands right below that card
+      const where = here.includes(`${meta.anchorRow}#s`) ? 'is drawn above' : 'is drawn under an earlier answer'
+      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }
     // a card stands in one place: the newest row that placed it (or a catch-up of the replies, `<row>#cu`, drawn below
-    // them); an earlier one shows a line that points there
+    // them, or a simpler version of an answer, `<row>#s`, drawn below it); an earlier one shows a line that points there
     if (!meta.anchorRow && meta.inRow && !here.includes(meta.inRow)) {
       const E = $.ui.resolve(e) as Any
-      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : 'is drawn further down'
+      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : meta.inRow.endsWith('#s') ? 'is in the simpler version below' : 'is drawn further down'
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }

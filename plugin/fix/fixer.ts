@@ -299,7 +299,9 @@ export function endOf(answer: string): { title: string; summary: string; request
   const cannot = /^\s*\**cannot\**\s*:\s*(.+)$/im.exec(text)?.[1]?.replace(/\*+/g, '').trim() || null
   const req = /^\s*\**request\**\s*:\s*([\s\S]+)$/im.exec(text)?.[1]?.trim()
   const does = /^\s*\**what it does\**\s*:\s*([\s\S]+)$/im.exec(text)?.[1]?.trim()
-  return { title: cut(title, 60), summary: cut((req ?? does ?? '').replace(/\s+/g, ' '), 1200), request: req != null && does == null, cannot: cannot ? cut(cannot, 300) : null }
+  // the fence a fixer may close its end with, as the prompt shows the form in one, is no part of what it says
+  const said = (req ?? does ?? '').replace(/\s*`{3,}\s*$/, '')
+  return { title: cut(title, 60), summary: cut(said.replace(/\s+/g, ' '), 1200), request: req != null && does == null, cannot: cannot ? cut(cannot, 300) : null }
 }
 
 /** The fixer ended: thimble commits its change and tests it, then the line says what came of it. */

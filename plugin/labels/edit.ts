@@ -5,15 +5,18 @@
 //
 //   rerunLabel($, root, label, change)   applies `label` (as `thimble label --json` gives it) again with `change`;
 //                                        a line for the person when it could not, else null. A prompt label's records
-//                                        are read, or the person is asked first, as when Claude runs it (core/feed.ts
-//                                        withPersonFeed); Claude hears what changed with the person's next prompt
+//                                        are read (core/feed.ts withPersonFeed), or, when there are many, the person
+//                                        is asked first, at once (use.ts askPerson), as Claude asks after its own
+//                                        command; Claude hears what changed with the person's next prompt
 import type { EngineInterface } from 'claude-code'
 
+import { busy } from '../bar/busy'
 import { runThimble } from '../core/env'
 import { withPersonFeed } from '../core/feed'
 import { tellAtNextPrompt } from '../core/tell'
 import { labelsChanged } from './labels'
 import { rerunArgs } from './ledger.mjs'
+import { askPerson } from './use'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,7 +31,7 @@ export async function rerunLabel($: Engine, root: string, label: Any, change: Re
   if (!run) return `× The label ${name} cannot be applied again from here: it has no rule or no records named.`
   let r: Awaited<ReturnType<typeof runThimble>>
   try {
-    r = await withPersonFeed($, () => runThimble($, root, run.args, { ...(run.stdin != null ? { stdin: run.stdin } : {}), timeoutMs: 300000 }))
+    r = await busy($, `applying ${name} again`, () => withPersonFeed($, () => runThimble($, root, run.args, { ...(run.stdin != null ? { stdin: run.stdin } : {}), timeoutMs: 300000 })))
   } catch (err) {
     return `× The label ${name} was not applied again: ${String((err as Error)?.message || err).slice(0, 200)}`
   }
@@ -40,5 +43,7 @@ export async function rerunLabel($: Engine, root: string, label: Any, change: Re
   const counts = Object.entries((got.counts ?? {}) as Record<string, number>).map(([v, n]) => `${v} ${n}`).join(', ')
   await tellAtNextPrompt($, `label-edit:${root}|${name}`, `The analyst changed the ${what} of the label ${name} in the labels pane and applied it again: ${run.args.slice(1, -1).join(' ')}. ` +
     `It holds ${Number(got.records) || 0} records${counts ? ` (${counts})` : ''}${got.waiting ? `, ${got.waiting} of them waiting for the model` : ''}. \`thimble label ${name}\` prints its counts now.`)
+  // too many records to read without the person's choice: no command of Claude's follows this one to ask them
+  if (got.run?.state === 'ask') await askPerson($, name, String(got.run.ask?.id ?? ''))
   return null
 }

@@ -15,6 +15,7 @@ import { choiceName, valuesWord } from './ColorBy'
 import { choiceId, labelChips, NONE, type ColorChoice, type ColorValue } from './colorChoice'
 import { filterKeyValues } from './useFilterBy'
 import { openLabelEditor } from './LabelEditor'
+import { SourceHeading } from './LabelsHelp'
 
 interface Props {
   choice: ColorChoice
@@ -173,9 +174,7 @@ function FilterMenu({ choice, keys, labels, countsOf, onChoose }: { choice: Colo
     <div className="colorby-list">
       {item({ by: 'off' }, <span className="menu-item-label">None</span>)}
       {keys.length > 0 && (
-        <div className="menu-heading" role="presentation">
-          Fields
-        </div>
+        <SourceHeading of="fields" />
       )}
       {keys.map((k) =>
         item(
@@ -190,9 +189,7 @@ function FilterMenu({ choice, keys, labels, countsOf, onChoose }: { choice: Colo
         ),
       )}
       {labels.length > 0 && (
-        <div className="menu-heading" role="presentation">
-          Labels
-        </div>
+        <SourceHeading of="labels" />
       )}
       {labels.map((k) =>
         item(

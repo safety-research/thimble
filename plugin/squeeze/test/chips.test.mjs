@@ -1,10 +1,12 @@
-// A squeeze's rewrite (squeeze/chips.mjs): the rewrite is held to the original's citations and numbers. Made-up data
-// only.
+// A squeeze's rewrite (squeeze/chips.mjs): the rewrite is held to the original's citations and numbers; a simpler
+// version's request names one message to make simpler, at Length short and Background learning; the choices under it
+// stop at each end and never land on the original; a record kept before very short was added keeps its levels.
+// Made-up data only.
 // node --test plugin/squeeze/test/chips.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { checkRewrite, mapLinks } from '../chips.mjs'
+import { CATCHUP_HEAD, CHOICES, SCALE, SIMPLIFY_AT, SIMPLIFY_HEAD, checkRewrite, chipsOf, choiceAt, fromVersions, isSimplify, mapLinks, request, settledNote, upgradeSqueeze } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -24,4 +26,56 @@ test('a rewrite is held to the original: its citations stay as written, and a nu
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](#); now it [passed 200 times](#).').problems, [])
   // a link's words count, its target does not
   assert.equal(mapLinks('a [b (c)](#) d', (all, words) => words), 'a b (c) d')
+})
+
+test("a simpler version's request names one message to make simpler, at Length short and Background learning; Claude hears it stands below the message", () => {
+  const rec = { id: 'r1#cu', row: 'r1', text: TEXT, at: '2026-01-01T00:00:00Z', shown: null, squeeze: { at: { ...SIMPLIFY_AT } }, catchup: { host: 'r1', rows: ['r1'], replies: 1, question: 'why did it fail?', prompt: null, kind: 'simplify' } }
+  assert.deepEqual({ ...SIMPLIFY_AT }, { length: 1, familiarity: 1 })
+  assert.equal(isSimplify(rec), true)
+  assert.equal(isSimplify({ ...rec, catchup: { ...rec.catchup, kind: undefined } }), false)
+  const req = request(rec, { system: 'squeeze', question: 'why did it fail?' })
+  const head = req.prompt[0].text
+  assert.match(head, /Write one simpler message of it/)
+  assert.ok(head.includes(SIMPLIFY_HEAD))
+  assert.ok(!head.includes(CATCHUP_HEAD))
+  const tail = req.prompt[1].text
+  assert.match(tail, /- Length: short\./)
+  assert.match(tail, /- Background: learning\./)
+  // the levels' names, as the chips show them
+  assert.deepEqual(chipsOf(rec).map(c => c.levels[c.level]), ['short', 'learning'])
+  const note = settledNote({ ...rec, shown: 'The cart fixture was shared, so a coupon leaked.' })
+  assert.match(note, /^Below your message \("Fixed test_checkout_total\. It failed in about 1 run…"\), which still shows as you wrote it/)
+  assert.match(note, /Length: short, Background: learning/)
+  assert.match(settledNote({ ...rec, shown: 'x', catchup: { ...rec.catchup, dismissed: true } }, 'cu:x:1'), /closed the simpler version/)
+})
+
+const choice = words => CHOICES.find(c => c.words === words)
+
+test('the choices move one chip one level, stop at its end, and step past the original, which a simpler version never shows', () => {
+  const rec = { id: 'r1#s', row: 'r1', text: TEXT, shown: 'x', squeeze: { at: { ...SIMPLIFY_AT } }, catchup: { host: 'r1', rows: ['r1'], replies: 1, kind: 'simplify' } }
+  assert.deepEqual(CHOICES.map(c => `${c.key} ${c.words}`), ['1 shorter', '2 longer', '3 explain more', '4 assume more'])
+  assert.deepEqual(choiceAt(rec, { length: 1, familiarity: 1 }, choice('shorter')), { length: 0, familiarity: 1 })
+  assert.equal(choiceAt(rec, { length: 0, familiarity: 1 }, choice('shorter')), null)
+  assert.equal(choiceAt(rec, { length: 4, familiarity: 1 }, choice('longer')), null)
+  assert.equal(choiceAt(rec, { length: 1, familiarity: 0 }, choice('explain more')), null)
+  // as written at learning, then assume more: working would be the original, so it goes on to expert
+  assert.deepEqual(choiceAt(rec, { length: 2, familiarity: 1 }, choice('assume more')), { length: 2, familiarity: 3 })
+  assert.equal(choiceAt(rec, { length: 2, familiarity: 3 }, choice('assume more')), null)
+  // very short asks for one or two sentences
+  assert.match(request({ ...rec, squeeze: { at: { length: 0 } } }).prompt[1].text, /- Length: very short\. One or two sentences/)
+})
+
+test('a record kept at scale 5 reads with Length one level higher: its levels, its versions and its cards keep what they were written at', () => {
+  const old = { at: { length: 0, familiarity: 1 }, scale: 5, versions: { 'length=0&familiarity=1': 'short', 'familiarity=1': 'as written', 'length=2': 'longer' }, cards: { 'length=0&familiarity=1': { rows: {}, did: [] } }, made: [{ key: 'length=0&familiarity=1', ms: 1 }] }
+  const up = upgradeSqueeze(old)
+  assert.equal(up.scale, SCALE)
+  assert.deepEqual(up.at, { length: 1, familiarity: 1 })
+  assert.deepEqual(up.versions, { 'length=1&familiarity=1': 'short', 'familiarity=1': 'as written', 'length=3': 'longer' })
+  assert.deepEqual(Object.keys(up.cards), ['length=1&familiarity=1'])
+  assert.equal(up.made[0].key, 'length=1&familiarity=1')
+  // read again, it stays as it is
+  assert.deepEqual(upgradeSqueeze(up), up)
+  const rec = { text: TEXT, shown: 'short', squeeze: up }
+  assert.deepEqual(chipsOf(rec).map(c => c.levels[c.level]), ['short', 'learning'])
+  assert.equal(fromVersions(rec, { length: 3 }).shown, 'longer')
 })

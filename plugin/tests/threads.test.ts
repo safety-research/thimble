@@ -1,7 +1,6 @@
 // Side threads (threads/): a question typed in a pane's input bar asks the thread's fork once, even when ↵ comes twice
 // before the fork started; its answer is read from the fork's transcript at its end, and m sends it to main; while the
-// fork works, the thread shows its question and the steps the fork took. All data is made up. `claude plugin test
-// plugin`.
+// fork works, the thread shows its question and the steps the fork took. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'

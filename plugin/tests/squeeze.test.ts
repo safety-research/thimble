@@ -1,11 +1,19 @@
-// Squeeze and catch-up in the terminal (squeeze/): s at an empty prompt opens the chips under the answer, ] asks one
-// rewrite and the new text shows in place of Claude's words, Claude hears the version with the next prompt, 0 brings
-// the original back with no call; with two replies since the person's last prompt, b writes one catch-up of them below
-// the newest; an arrow or tab in the chips changes nothing. All data is made up. `claude plugin test plugin`.
+// Simplify and catch-up in the terminal (squeeze/): s at an empty prompt writes a simpler version of the answer below
+// it in one press, at Length short and Background learning, with a row of choices at its end; 2 asks one more call,
+// Claude hears the version with the next prompt, and 0 hides it; a letter right after s undoes it; with two replies
+// since the person's last prompt, b writes one catch-up of them below the newest, in place of a simpler version there,
+// and b undone puts that simpler version back; a key hook of s or b does not wait for their writes, so a slow write does
+// not close the word window; a catch-up read and removed still counts as read after s; s while main's turn runs
+// simplifies its answer when it ends; an answer rewritten in place in an earlier release shows its original again when
+// s simplifies it; the row stays whole while a version is written; a choice at its end stays in its place, dim, and its
+// key does nothing; a letter right after a choice undoes it, and a click on a choice does what its key does; there is
+// no + choice and no /rewrite; a simpler version kept before very short was added keeps its levels. All data is made
+// up.
+// `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { accent } from '../core/theme'
 import { resetSqueeze } from '../squeeze/term'
-import Chips from '../squeeze/chips.tsx'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -19,9 +27,6 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : '') + textOf(n.children)
 }
 
-/** Words as read, the spaces that keep the chips' columns as one. */
-const flat = (s: string) => s.replace(/\s+/g, ' ')
-
 const VIEW = { columns: 100, rows: 40, isFullscreen: true }
 const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: VIEW, props: { text, isFirstOfReply: true } }) as never
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: VIEW } as never
@@ -33,22 +38,36 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: Any[] = []
-  on('session.id', () => ({ value: 's-squeeze' }))
+  // the conversation's id: a test that moves to another conversation (a /resume) sets it
+  const conversation = { id: 's-squeeze' }
+  on('session.id', () => ({ value: conversation.id }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
-  on('fs.write', (_$: unknown, e: { path: string; content: string }) => { files[e.path] = String(e.content); return { value: undefined } })
-  on('fs.list', () => ({ value: [] }))
+  // a write that takes time on the clock, once, for a test that times the key hooks: in Claude Code, the next key's
+  // hook runs only after this key's hook returns
+  const slow = { writeMs: 0 }
+  on('fs.write', async (_$: unknown, e: { path: string; text: string }) => {
+    if (slow.writeMs) { const ms = slow.writeMs; slow.writeMs = 0; await clock.advance(ms) }
+    files[e.path] = String(e.text)
+    return { value: undefined }
+  })
+  // a folder's files, so a session started again reads back the turns its conversation kept (core/answers.ts)
+  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(files).filter(f => f.startsWith(`${e.path}/`) && !f.slice(e.path.length + 1).includes('/')).map(f => ({ name: f.slice(e.path.length + 1), kind: 'file' })) }))
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
   on('tool.register', () => ({ value: undefined }))
-  on('command.register', () => ({ value: { command: 'x' } }))
+  // the commands thimble registers, and what it fills into the prompt box, kept for a test to read
+  const commands: string[] = []
+  const fills: string[] = []
+  on('command.register', (_$: unknown, e: { name: string }) => { commands.push(e.name); return { value: { command: 'x' } } })
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', () => ({ value: undefined }))
-  on('prompt.fill', () => ({ isFilled: true }) as never)
-  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
+  on('prompt.fill', (_$: unknown, e: { text: string }) => { fills.push(e.text); return { isFilled: true } as never })
+  // a key no hook takes is typed into the box, as Claude Code types it
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text + (e.inputText ?? ''), cursor: e.cursor + (e.inputText ?? '').length }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   // the observer's look finds nothing to add
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
@@ -58,7 +77,9 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  // the drawing beneath thimble's: the words it was handed to draw, kept for a test to read
+  const beneath: string[] = []
+  on('ui.render', (_$: unknown, e: Any) => { beneath.push(String(e?.props?.text ?? '')); return { type: 'Text', props: {}, children: ['the engine'] } as never })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const ask = (text: string, by = 'composer') => $.prompt.submit({ text, origin: { kind: by } } as never) as Promise<Any>
   const say = (uuid: string, text: string) => $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid } as never)
@@ -71,74 +92,169 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, turn, press, bar }
+  return { clock, asked, ask, turn, press, bar, files, conversation, beneath, slow, commands, fills }
+}
+
+/** The look of the key of the row's item `id` (its first Text): its color, bold or dim. */
+function keyOf(n: Any, id: string): Any {
+  if (!n || typeof n !== 'object') return null
+  if (n.props?.key === id) return n.children?.[0]?.props ?? null
+  for (const c of [...(Array.isArray(n) ? n : []), ...[].concat(n.props?.children ?? []), ...[].concat(n.children ?? [])]) {
+    const f = keyOf(c, id)
+    if (f) return f
+  }
+  return null
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
 
-test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
-  const t = await setup($, on, ['The build failed on [3 of 12](#) runs: the cache key changed with the lockfile, and the mirror timed out on each fresh fetch.'])
+const SHORT = 'The build failed on [3 of 12](#) runs: the cache key changed.'
+const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · 0 hide'
+
+test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 hides it with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
+  const t = await setup($, on, [SHORT, 'The build failed on [3 of 12](#) runs, because the cache key changed when the lockfile moved, in more words.'])
   await t.turn('t1', LONG)
-  expect(await t.bar()).toContain('s rewrite')
+  expect(await t.bar()).toContain('s simplify')
+  expect(await t.bar()).not.toContain('rewrite')
   expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
-  // the chips name their keys, each where it acts, and the bar none of them: each key shows once
-  const chips = textOf((await chipsDrawn($, 'row-t1', LONG)).tree)
-  for (const k of ['1 Length', '[ shorter', '] longer', '2 Background', '+ your own', 's close']) expect(chips).toContain(k)
-  const open = await t.bar()
-  for (const k of ['s close', 'shorter', 'longer', 'chip', 'your own', 's done']) expect(open).not.toContain(k)
-  const under = textOf(await $.ui.render(answer('row-t1', LONG)))
-  expect(under).toContain(LONG.slice(0, 20))
-  await t.press(']')
   await t.clock.advance(5000)
+  // one call, which names one message to make simpler, at Length short and Background learning
   expect(t.asked.length).toBe(1)
-  expect(String(t.asked[0].prompt)).toContain('Length: longer')
-  const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
-  expect(shown).toContain('on each fresh fetch')
-  // the chips close with s; the bar says rewrite as before, not the levels set
-  await t.press('s')
-  expect(await t.bar()).toContain('s rewrite')
-  expect(await t.bar()).not.toContain('longer')
+  const asked = String(t.asked[0].prompt)
+  expect(asked).toContain('Write one simpler message of it')
+  expect(asked).toContain('Length: short.')
+  expect(asked).toContain('Background: learning.')
+  expect(asked).toContain('The analyst asked: question t1')
+  // the answer still shows as written, and the simpler version stands below it with its head line, its row last
+  const host = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(host.indexOf('the engine')).toBeLessThan(host.indexOf('simpler version of the answer above'))
+  expect(host).toContain('the cache key changed.')
+  expect(host).toContain(ROW)
+  expect(host.indexOf('the cache key changed.')).toBeLessThan(host.indexOf(ROW))
+  // the row names its keys, so the bar no longer names s
+  expect(await t.bar()).not.toContain('s simplify')
+  // 2 makes it longer at once: one more call, written below the answer, never in place of it; the row stays whole
+  // meanwhile, with 2 saying what it does
+  expect(await t.press('2')).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('1 shorter · 2 making it longer… · 3 explain more · 4 assume more · 0 hide')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: as written.')
+  const longer = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(longer).toContain('because the cache key changed')
+  expect(longer).toContain('simpler version of the answer above')
+  expect(longer).toContain(ROW)
+  // s with the block standing brings it into view, with no call and nothing typed
+  expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
   const next = await t.ask('and now?')
-  expect(String((next.context ?? []).join('\n'))).toContain('now reads, for the analyst, as:')
-  // 0 brings the original back, with no call
-  await t.press('s')
+  expect(String((next.context ?? []).join('\n'))).toContain('the analyst read a simpler version of it')
+  // after the prompt, the newest answer is still this one (no reply yet in this test): 0 hides it, with no call
   await t.press('0')
   await t.clock.advance(1000)
-  expect(t.asked.length).toBe(1)
+  expect(t.asked.length).toBe(2)
   const back = textOf(await $.ui.render(answer('row-t1', LONG)))
-  // (citations are checked when opened, by default, so its citation draws as written, with ? after it: not checked yet)
-  expect(back).toContain('The nightly build failed on 3 of 12 ? runs')
-  expect(back).not.toContain('fresh fetch')
+  expect(back).not.toContain('simpler version of the answer above')
+  expect(back).not.toContain('because the cache key changed')
+  expect(back).not.toContain(ROW)
+  // with no block, 1 asks nothing (it types as usual), and the bar names s again
+  await t.press('1')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(await t.bar()).toContain('s simplify')
+  // s once more writes a new one
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(3)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('simpler version of the answer above')
 })
 
-test('with two replies since the last prompt, the bar names b apart from s; b writes one catch-up below the newest, the replies still show, and the chips stay closed', async ($, on) => {
-  const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
+/** The bar's Text of the words of `s simplify` (its item `bar-squeeze`, after its key): their look says whether s is
+ *  lit. */
+function simplifyWords(n: Any): Any {
+  if (!n || typeof n !== 'object') return null
+  if (n.props?.key === 'bar-squeeze') return n.children?.[1] ?? null
+  for (const c of [...(Array.isArray(n) ? n : []), ...[].concat(n.props?.children ?? []), ...[].concat(n.children ?? [])]) {
+    const f = simplifyWords(c)
+    if (f) return f
+  }
+  return null
+}
+
+test('s simplify stands right after v visualize; pressed, it stays on the bar, lit, while the first version is on its way, and goes once that version shows with its row', { options: { citations: 'auto cite' } }, async ($, on) => {
+  let give: (text: string) => void = () => {}
+  const t = await setup($, on, [new Promise<string>(r => { give = r })])
+  await t.turn('t1', LONG)
+  // at rest, in every state: v, then s, then what the tray steps to
+  expect(await t.bar()).toContain('v visualize · s simplify · ] show citation')
+  expect(simplifyWords(await $.ui.render(above))?.props).toMatchObject({ dimColor: true })
+  // s: its first call runs, and nothing of the version shows yet; s stays, lit, and a press only brings the block into
+  // view
+  expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(1000)
+  expect(t.asked.length).toBe(1)
+  expect(await t.bar()).toContain('s simplify')
+  expect(simplifyWords(await $.ui.render(above))?.props?.color).toBe(accent())
+  await t.press('s')
+  expect(t.asked.length).toBe(1)
+  // the version shows, with its row of keys: the bar names s no more
+  give(SHORT)
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain(ROW)
+  expect(await t.bar()).not.toContain('s simplify')
+})
+
+test('a letter right after s undoes it: the word goes into the box whole, and no simpler version is written', async ($, on) => {
+  const t = await setup($, on, [SHORT])
+  await t.turn('t1', LONG)
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('o'))) as Any).text).toBe('so')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(0)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).not.toContain('simpler version')
+})
+
+test('a letter right after s undoes it while the writes of s still run: the key hook does not wait for them', async ($, on) => {
+  const t = await setup($, on, [SHORT])
+  await t.turn('t1', LONG)
+  // the first write of s takes 400 ms, longer than the word window
+  t.slow.writeMs = 400
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('h'))) as Any).text).toBe('sh')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(0)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).not.toContain('simpler version')
+})
+
+test('with two replies since the last prompt, the bar names b apart from s; a simpler version of the newest does not count as a catch-up, and b writes one catch-up below the newest in its place, the replies still showing', async ($, on) => {
+  const t = await setup($, on, ['The retry passed.', 'Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  expect(await t.bar()).toContain('s rewrite · b catch up on 2 replies')
-  // s opens the chips under the newest reply, with no call and no catch-up among them
+  expect(await t.bar()).toContain('s simplify · b catch up on 2 replies')
+  // s writes a simpler version of the newest reply, and b still offers the catch-up
   await t.press('s')
   await t.clock.advance(5000)
-  expect(t.asked.length).toBe(0)
-  const under = textOf((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree)
-  expect(under).toContain('2 Background')
-  expect(under).not.toContain('atch up')
-  expect(await t.bar()).not.toContain('chip')
-  await t.press('s')
-  // b writes the catch-up
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).toContain('Write one simpler message of it')
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('simpler version of the answer above')
+  expect(await t.bar()).toContain('b catch up on 2 replies')
+  // b writes the catch-up, in place of the simpler version
   await t.press('b')
   await t.clock.advance(5000)
-  expect(String(t.asked[0].prompt)).toContain("Claude's messages since the analyst's last prompt")
-  expect(String(t.asked[0].prompt)).toContain('The analyst asked: why did it fail?')
+  expect(String(t.asked[1].prompt)).toContain("Claude's messages since the analyst's last prompt")
+  expect(String(t.asked[1].prompt)).toContain('The analyst asked: why did it fail?')
   // the covered reply draws as written; the newest draws its own words, then the catch-up below with its head line
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
   const host = textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))
   expect(host.indexOf('the engine')).toBeLessThan(host.indexOf('catch-up of the 2 replies above'))
   expect(host).toContain('Both: the build failed, and the retry passed.')
-  // the squeeze chips stay closed under a catch-up, and nothing is hidden, so no key brings the replies back
-  expect(host).not.toContain('1–')
-  expect(await t.bar()).not.toContain('chip')
+  expect(host).not.toContain('simpler version')
+  // the catch-up has the same row of choices; nothing is hidden, so no key brings the replies back
+  expect(host).toContain(ROW)
   expect(await t.bar()).not.toContain('show the replies')
   expect(String((await t.ask('and?')).context ?? '')).toContain('Below those messages')
   // a catch-up the person read counts: the bar no longer offers one, and b does nothing
@@ -147,48 +263,166 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.press('b')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(asked)
+  // s on the catch-up brings it into view, with no call
+  expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(asked)
 })
 
-/** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */
-const ELS = Object.fromEntries(['Box', 'Text', 'Button'].map(k => [k, (props: Any) => ({ type: k, props })]))
-const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children), ...nodes(n.children)])
-async function chipsDrawn($: Any, row: string, text: string) {
-  const client = nodes(await $.ui.render(answer(row, text))).find(n => n.type === 'Client')
-  const surface = { elements: ELS, columns: 100, onKey: () => undefined, post: () => undefined }
-  return { client, tree: Chips(client?.props.props as never, surface as never) }
-}
+test('b undone by the letter after it, while the writes of b still run, puts back the simpler version it replaced', async ($, on) => {
+  const t = await setup($, on, ['Simpler.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('Simpler.')
+  // `by` typed at the empty prompt: b writes a catch-up, and y undoes it, though the first write of b takes 400 ms,
+  // longer than the word window
+  t.slow.writeMs = 400
+  expect(await $.prompt.edit(key('b'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('by')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  const host = textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))
+  expect(host).toContain('simpler version of the answer above')
+  expect(host).toContain('Simpler.')
+  expect(await t.bar()).toContain('b catch up on 2 replies')
+})
 
-test("a key in the chips that Claude Code also takes at the prompt, an arrow or tab, changes nothing, and nothing in the chips names one; thimble's own keys act there as at the prompt", async ($, on) => {
-  const t = await setup($, on, ['The nightly build failed on [3 of 12](#) runs, in more words.'])
+test('a catch-up read and then removed still counts as read after s writes a simpler version on the same reply', async ($, on) => {
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.', 'Simpler.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('b')
+  await t.clock.advance(5000)
+  // 0 hides the catch-up
+  await t.press('0')
+  expect(await t.bar()).not.toContain('catch up')
+  // s now writes a simpler version of the newest reply; b is still not offered for the replies already read
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Write one simpler message of it')
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('simpler version of the answer above')
+  expect(await t.bar()).not.toContain('catch up')
+})
+
+test('s pressed while main\'s turn runs waits for its answer, then writes the simpler version of that answer', async ($, on) => {
+  const t = await setup($, on, ['Simpler second.'])
+  await t.turn('t1', 'First answer.')
+  await t.ask('and the second?')
+  await $.turn.start({ text: 'and the second?', turnId: 't2' } as never)
+  await t.press('s')
+  // s waits: it is lit on the bar, and nothing is asked yet
+  expect(await t.bar()).toContain('s simplify')
+  expect(t.asked.length).toBe(0)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Second answer.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t2' } as never)
+  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: 'Second answer.', durationMs: 10, isAborted: false } as never)
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).toContain('Second answer.')
+  expect(String(t.asked[0].prompt)).not.toContain('First answer.')
+  const host = textOf(await $.ui.render(answer('row-t2', 'Second answer.')))
+  expect(host).toContain('simpler version of the answer above')
+  expect(host).toContain('Simpler second.')
+})
+
+test('an answer s rewrote in place in an earlier release still draws its version; s shows its original again, with no call, and writes the simpler version below it', async ($, on) => {
+  const t = await setup($, on, [SHORT])
+  await t.turn('t1', LONG)
+  // a conversation of an earlier release kept the answer with a version that s wrote in place; the session moves to it
+  const kept = JSON.parse(t.files['/made-up/.thimble/conversations/s-squeeze/answers/t1.json']!)
+  for (const m of kept.msgs) if (m.row === 'row-t1') m.parts = { ...(m.parts ?? {}), squeeze: { own: { shown: 'Old version written in place.', squeeze: { at: { length: 0 }, scale: 5, versions: {} } } } }
+  t.files['/made-up/.thimble/conversations/s-old/answers/t1.json'] = JSON.stringify(kept)
+  t.conversation.id = 's-old'
+  await t.ask('the earlier conversation')
+  // the answer draws the old version in place of what Claude wrote
+  await $.ui.render(answer('row-t1', LONG))
+  expect(t.beneath.at(-1)).toBe('Old version written in place.')
+  // s: the answer shows as Claude wrote it again, with no call for that, and one call writes the simpler version below
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  t.beneath.length = 0
+  const host = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(t.beneath).not.toContain('Old version written in place.')
+  expect(host).not.toContain('Old version written in place.')
+  expect(host).toContain('simpler version of the answer above')
+  expect(host).toContain('the cache key changed.')
+})
+
+test('a choice at its end stays in its place, dim, and its key does nothing: no call, and a letter right after it types both; a letter right after a choice undoes it; a click on a choice does what its key does; no + choice and no /rewrite', async ($, on) => {
+  const t = await setup($, on, [SHORT, 'Build failed: cache key.', 'The build failed because a key changed.'])
   await t.turn('t1', LONG)
   await t.press('s')
-  const props = async () => (await chipsDrawn($, 'row-t1', LONG)).client?.props.props
-  const levels = async () => Object.fromEntries((await props()).items.map((c: Any) => [c.id, c.level]))
-  const picked = async () => (await props()).items.find((c: Any) => c.picked)?.id
-  // a click on the dot where Length stands gives the chips the keyboard
+  await t.clock.advance(5000)
+  // 1 from short: very short, one or two sentences
+  await t.press('1')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: very short. One or two sentences')
+  const shortest = await $.ui.render(answer('row-t1', LONG))
+  expect(textOf(shortest)).toContain('Build failed: cache key.')
+  // Length goes no further: shorter stays in its place, its key and words dim, no longer in thimble's color
+  expect(textOf(shortest)).toContain(ROW)
+  expect(keyOf(shortest, 'c1')).toEqual({ dimColor: true })
+  expect(keyOf(shortest, 'c2')).toMatchObject({ bold: true })
+  // 1 is taken and asks nothing: `1x` typed at the empty prompt puts both into the box, since 1 has nothing to undo
+  expect(await $.prompt.edit(key('1'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('x'))) as Any).text).toBe('1x')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  // `2x` typed at the empty prompt: 2 asks for longer, and x right after undoes it; the very short version stays
+  expect(await $.prompt.edit(key('2'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(100)
+  expect(((await $.prompt.edit(key('x'))) as Any).text).toBe('2x')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('Build failed: cache key.')
+  // a click on 3 explain more does what 3 does
   const ui = await $.ui.mount(answer('row-t1', LONG))
-  await ui.press({ key: 'lvl-length-1' })
-  const was = await levels()
-  // each arrow and tab: no level moves, no chip is picked, nothing is asked
-  for (const k of [{ key: 'left' }, { key: 'right' }, { key: 'tab' }, { key: 'tab', shift: true }, { key: 'up' }, { key: 'down' }]) {
-    await ui.key(k as never)
-    await t.clock.advance(400)
-    expect([k, await levels(), await picked()]).toEqual([k, was, 'length'])
-  }
-  await t.clock.advance(3000)
-  expect(t.asked.length).toBe(0)
-  // nothing in the chips names an arrow or tab, held or not
-  const words = flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))
-  for (const k of ['←', '→', '↑', '↓', 'tab']) expect(words).not.toContain(k)
-  expect(words).toContain('1 Length [ shorter ○●○○ ] longer')
-  // thimble's own keys act in the chips as at the prompt: 2 picks Background, ] moves it a level, and the rewrite runs
-  await ui.key({ key: '2' })
-  await ui.key({ key: ']' })
+  await ui.press({ key: 'c3' })
   await ui.unmount()
-  expect(await picked()).toBe('familiarity')
-  expect((await levels()).familiarity).toBe(was.familiarity + 1)
-  await t.clock.advance(3000)
-  expect(t.asked.length).toBe(1)
-  // the chips still hold the keyboard after those keys: esc is still named
-  expect(flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))).toContain('esc back to the prompt')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(3)
+  expect(String(t.asked[2].prompt)).toContain('Background: novice.')
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('The build failed because a key changed.')
+  // there is no + choice: + is not taken and fills nothing into the box, and thimble registers no /rewrite
+  const host = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(host).not.toContain('+')
+  expect(host).not.toContain('your own')
+  expect(await t.press('+')).toEqual({ text: '+', cursor: 1 })
+  await t.clock.advance(5000)
+  expect(t.fills).toEqual([])
+  expect(t.asked.length).toBe(3)
+  expect(t.commands).toContain('thimble-settings')
+  expect(t.commands).not.toContain('rewrite')
+})
+
+test('a simpler version kept before very short was added keeps its levels: its version at short comes back at short, with no call', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  // a conversation of an earlier release kept a simpler version at short (Length 0 then) and one at as written (1)
+  const kept = JSON.parse(t.files['/made-up/.thimble/conversations/s-squeeze/answers/t1.json']!)
+  const simple = { text: LONG, at: '2026-01-01T00:00:00.000Z', shown: 'Old short.', squeeze: { at: { length: 0, familiarity: 1 }, scale: 5, versions: { 'length=0&familiarity=1': 'Old short.', 'familiarity=1': 'Old as written.' } }, catchup: { host: 'row-t1', rows: ['row-t1'], replies: 1, question: 'question t1', prompt: null, kind: 'simplify' } }
+  for (const m of kept.msgs) if (m.row === 'row-t1') m.parts = { ...(m.parts ?? {}), squeeze: { simple } }
+  t.files['/made-up/.thimble/conversations/s-old/answers/t1.json'] = JSON.stringify(kept)
+  t.conversation.id = 's-old'
+  await t.ask('the earlier conversation')
+  // it shows at short: shorter (now very short) is offered
+  const host = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(host).toContain('Old short.')
+  expect(host).toContain(ROW)
+  // 2 longer: the version kept at as written, with no call; 1 shorter: the one kept at short, with no call
+  await t.press('2')
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('Old as written.')
+  await t.press('1')
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('Old short.')
+  expect(t.asked.length).toBe(0)
 })

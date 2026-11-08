@@ -3,15 +3,20 @@
 // with the `card` tool and fixes it from the card's text copy. Its cards draw under the answer v was pressed on; the
 // busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
 // main, but main reads the cards it drew
-// with the person's next prompt.
+// with the person's next prompt. Its first card on the screen is a step of the tour done (tour/tour.ts), and a design
+// that ends with no card lets the tour go on. When Claude wrote messages after the answer (a reply during the tour,
+// say), the prompt quotes the answer, so the fork draws that one and not the newest message.
+//
+// v closes an open tray (tray/seam.ts trayGiveWay), so that the tray's rows do not hide the card.
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
-// "very"). The fork is spawned inside the keys' prompt.edit hook, so Claude Code skips only that hook for the fork and
-// this plugin's other hooks serve it (its card calls, its end). This module's agent.spawn hook holds the spawn until the
-// word window closes, and refuses it when a letter came: so a word typed after v starts nothing at all.
+// "very"), and that letter puts the tray back as it stood. The fork is spawned inside the keys' prompt.edit hook, so
+// Claude Code skips only that hook for the fork and this plugin's other hooks serve it (its card calls, its end). This
+// module's agent.spawn hook holds the spawn until the word window closes, and refuses it when a letter came: so a word
+// typed after v starts nothing at all.
 //
-// v starts a design only when there is an answer to draw (main's last text row, as session.append stored it), main is
-// not working, Cards is on, and no other design runs. Otherwise v types as any letter. A design whose fork Claude Code
+// v starts a design only when there is an answer to draw (main's last text row, as session.append stored it, in a turn
+// that answers something: core/answers.ts answersNothing), main is not working, Cards is on, and no other design runs. Otherwise v types as any letter. A design whose fork Claude Code
 // no longer runs (its end was missed, say in a reload of the plugin) ends as failed: at session start, with a notice,
 // and when v is pressed again.
 //
@@ -30,18 +35,21 @@ import type { EngineInterface, Register } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText } from '../cards/draw'
-import { anchoredAt, type CardMeta, inTemp, metaOf } from '../cards/store'
+import { anchoredAt, callOf, type CardMeta, inTemp, metaOf } from '../cards/store'
+import { answersNothing, messageOf, textRows } from '../core/answers'
 import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut, cutWords, fenced } from '../core/text.js'
-import { mainRuns } from '../core/turn'
+import { mainRuns, mainTurn } from '../core/turn'
 import { plainSentence } from '../marks/message.js'
 import { replyOf } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
+import { tourDid, tourMissed } from '../tour/tour'
+import { trayGiveWay } from '../tray/seam'
 
 type Engine = EngineInterface
 
@@ -62,12 +70,16 @@ export type Design = {
 
 /** The words the fork shows as in /tasks, and how this module's agent.spawn hook knows the spawn as v's. */
 const DESCRIPTION = 'card of the last answer (v)'
+/** The most of an older answer the fork's prompt quotes (olderAnswer). */
+const ANSWER_CHARS = 4000
 /** The most of a card's text copy main reads. */
 const TELL_CHARS = 3000
 /** The most of the fork's last words a failure line quotes, in cells: their first paragraph, cut at a word. */
 const SAID_CELLS = 400
+/** The card tool, as the fork calls it. */
+const CARD_TOOL = 'mcp__thimble__card'
 /** The tools the fork may call; Write only into the temp folder. */
-const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', 'mcp__thimble__card'])
+const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', CARD_TOOL])
 
 const DESIGNS = { plugin: 'thimble', key: 'designs' } as const
 const NOW = { plugin: 'thimble', key: 'designNow' } as const
@@ -139,6 +151,17 @@ async function checkedSince($: Engine, row: string): Promise<string> {
   return `\n\nSince that answer, thimble checked its citations against the data. The check found (its words quote the records):\n${fenced(lines.join('\n'))}\nThe card shows the corrected values, computed from the records.`
 }
 
+/** The answer v was pressed under, quoted, when Claude wrote other messages after it: the prompt says "your last
+ *  answer", and the fork, a copy of the whole conversation, would draw the newest message. The replies to the person's
+ *  own prompts during the tour are such messages (core/answers.ts holdAnswers). */
+async function olderAnswer($: Engine, row: string): Promise<string> {
+  const rows = await textRows($)
+  if (!rows.includes(row) || rows.at(-1) === row) return ''
+  const text = (await messageOf($, row))?.text ?? ''
+  if (!text.trim()) return ''
+  return `\n\nThe answer v was pressed under is not your last message: you wrote other messages after it. Draw this answer, and none of the messages after it. It reads:\n${fenced(cut(text, ANSWER_CHARS))}`
+}
+
 /** The card an earlier v drew under this answer, for the fork to draw a new version of: v again on the same answer
  *  changes that card rather than adding a second one. */
 async function earlierCard($: Engine, row: string): Promise<string> {
@@ -164,14 +187,29 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
   try {
     const r = await spawnFork($, { kind: 'designer', prompt, description: DESCRIPTION })
     if (d.status === 'cancelled') return
-    if (!r.agentId) return await end($, d, 'failed', `× v could not start drawing a card: ${cut(r.deny || 'Claude Code started no agent', 200)}`)
+    if (!r.agentId) { await end($, d, 'failed', `× v could not start drawing a card: ${cut(r.deny || 'Claude Code started no agent', 200)}`); return missed($) }
     d.agentId = r.agentId
     d.status = 'running'
     await save($, d)
     await busyWhile($, 'drawing a card', () => designStep($, d))
   } catch (err) {
     await end($, d, 'failed', `× v could not start drawing a card: ${reason(err)}`)
+    missed($)
   }
+}
+
+/** A design the person started ended with no card: the tour, when it waits for v, goes on (tour/tour.ts). */
+function missed($: Engine): void {
+  void tourMissed($, 'v').catch(() => undefined)
+}
+
+/** Whether the card call stored a version that is on the screen now: a call that did not draw answers with words
+ *  only (cards/tool.ts failed), and its card keeps the call with its error. */
+async function drewCard($: Engine, toolUseId: string): Promise<boolean> {
+  const id = toolUseId ? await callOf($, toolUseId) : null
+  const meta = id ? await metaOf($, id) : null
+  const call = meta?.calls?.[toolUseId]
+  return !!meta && meta.version > 0 && !!call && !call.error && call.version > 0
 }
 
 /** The fork ended: main reads the cards it drew, or the person reads why it drew none. */
@@ -208,18 +246,22 @@ export async function vKey($: Engine, key: string, until: number): Promise<{ now
     if (await forkAlive($, current)) return null
     await end($, current, 'failed')
   }
-  const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: await tempDir($) })}${await checkedSince($, row)}${await earlierCard($, row)}`
+  const prompt = `${fill(await promptText($, 'designer'), { TMPDIR: await tempDir($) })}${await olderAnswer($, row)}${await checkedSince($, row)}${await earlierCard($, row)}`
   const at = Number(await $.clock.now())
   const d: Design = { key: `d${at.toString(36)}`, anchorRow: row, agentId: null, status: 'held', at, until, cards: [] }
+  let back: (() => Promise<void>) | null = null
   return {
     now: async () => {
       current = d
       await save($, d)
       await $.state.set(NOW, d.key)
+      // the tray closes, as for s, so that its rows do not hide the card that draws under the answer
+      back = await trayGiveWay($).catch(() => null)
       void start($, d, prompt)
     },
     undo: async () => {
       if (d.status === 'held') await end($, d, 'cancelled')
+      await back?.()
     },
   }
 }
@@ -283,6 +325,9 @@ export const registerDesigner: Register = on => {
     const r = await next(e)
     const synthetic = e.origin.kind === 'model' && e.origin.model === '<synthetic>'
     if (e.agentId === undefined && !synthetic && r.uuid && e.message.content.some(b => b.type === 'text' && String(b.text || '').trim())) {
+      // a row of a turn that answers nothing (a reply during the tour) is not the answer v draws under
+      const turnId = await mainTurn($).catch(() => '')
+      if (turnId && (await answersNothing($, turnId).catch(() => false))) return r
       void $.state.set(ANSWER, r.uuid).catch(() => undefined)
       void writeKept($, ANSWER_FILE, { row: r.uuid }).catch(() => undefined)
     }
@@ -298,15 +343,23 @@ export const registerDesigner: Register = on => {
       } catch (err) {
         await end($, d, 'failed', `× v could not finish the card: ${reason(err)}`)
       }
+      if (d.status === 'failed') missed($)
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder
+  // the fork's calls: it reads, runs code, draws cards, and writes only in the temp folder. A card call that drew a
+  // version on the screen is a step of the tour done (tour/tour.ts); one that did not draw is not
   on('tool.call', { agentId: /\S/ }, async ($, e, next) => {
     if (forkOf(e.agentId)?.kind !== 'designer') return next(e)
     const no = await denial($, e as never)
-    return no ? { deny: no } : next(e)
+    if (no) return { deny: no }
+    const r = await next(e)
+    if (String(e.tool) === CARD_TOOL && !('deny' in r && r.deny !== undefined) && !r.isError) {
+      const toolUseId = String((e as { tool_use_id?: unknown }).tool_use_id ?? '')
+      void drewCard($, toolUseId).then(ok => (ok ? tourDid($, 'v') : undefined)).catch(() => undefined)
+    }
+    return r
   }).catch(($, e, next) => (next.called ? next(e) : forkOf(e.agentId)?.kind === 'designer' ? { deny: "thimble could not check this call of the card's copy" } : next(e)))
 
   // v's spawn waits out the word window, and is refused when a letter came in it

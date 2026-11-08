@@ -29,7 +29,9 @@ checkout of that commit which no fix changes. A fix may change any text file but
 of the sandbox, the hooks file and the command hooks, the launcher, thimble's scripts and the lock files (NOTICE_KINDS).
 
 The browser workbench runs from the checkout too: `thimble-browser FOLDER` builds the page again when its sources
-changed, so an edit to the page shows when you start it again.
+changed, so an edit to the page shows when you start it again. Use it now on a fix starts it from
+`~/.thimble/fixes/live` until the next `thimble-browser`, which starts the checkout again: Your fixes then lists that
+fix as off, and its Use it starts the workbench from your fixes again.
 
 ## Run the tests
 
@@ -57,8 +59,8 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 
 | What | Where |
 |---|---|
-| the manifest: name, the switches (Minimal, Citations (its modes), Checker and Effort (the citation checker's model and effort), Cards (its modes), Rewrite, Catch-up, Comments (Explainers, Heads-ups, with their modes), Claims (its modes), Labels, Coverage; the old fields they replaced, and defaultsAt, stay, hidden); no version, since a release names its version by its tag: Claude Code names the copy it installs by its commit, and `thimble --version` names the release from `~/.thimble/fixes/release.json` | `plugin/.claude-plugin/plugin.json` |
-| the `thimble` command (`label`, `coverage`, `fix` and `fixes`, `file`, `update`, `reapply`, `doctor`, `install`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
+| the manifest: name, the switches (Minimal, Citations (its modes), Checker and Effort (the citation checker's model and effort), Cards (its modes), Simplify, Catch-up, Comments (Explainers, Heads-ups, with their modes), Claims (its modes), Labels, Coverage); no version, since a release names its version by its tag: Claude Code names the copy it installs by its commit, and `thimble --version` names the release from `~/.thimble/fixes/release.json` | `plugin/.claude-plugin/plugin.json` |
+| the `thimble` command (`label`, `coverage`, `fix` and `fixes`, `file`, `update`, `reapply`, `doctor`, `tour`, `install`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), a `thimble` command in Claude Code's Bash sandbox run outside it (`handoff.ts`, with `engine/kernel/handoff.py`; a label's code such a command gives runs in thimble's sandbox, `engine/kernel/codebox.py`), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
 | shared parts: where thimble keeps its records (`layout.mjs`, the same names as `engine/kernel/store.py`), a text's width, whether main's turn runs, the forks (checker, designer, side thread), what thimble tells Claude with the next prompt, or sooner of a card Claude drew (`tell.ts`, the one way a report reaches Claude; `engaged.ts`, what the person opened and asked), the change feed, the one side pane, the record of main's turns and answers (`answers.ts`), and where the features that act on answers draw and take keys (`answerview.ts`) | `plugin/core/` |
@@ -74,7 +76,8 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | the settings and coverage panes | `plugin/panes/` |
 | the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
 | `/thimble-fix`: the person's changes to their own thimble, made by the fixer in a scratch copy and applied with their key | `plugin/fix/` |
-| the skills Claude calls: `fix-thimble`, which starts the fix the person asks for | `plugin/skills/` |
+| the skills Claude calls: `fix-thimble`, which starts the fix the person asks for; `tour`, the sample answer that starts the tour (`/thimble:tour`) | `plugin/skills/` |
+| the tour: the made-up sample data it works on, and the rows thimble draws for its steps (`tour.ts`) | `plugin/tour/` |
 | a `--prompt` label's model reads, and the labels pane; the labels an answer or a card used, and the ask before a large label run (`use.ts`) | `plugin/labels/` |
 | each model call and turn in the session's events, per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | every `$.state` key, one block per module | `plugin/types/index.d.ts` |
@@ -91,7 +94,7 @@ The browser workbench, `browser/`:
 | the server's tests | `browser/backend/tests_public/` |
 | the launcher that `scripts/install.sh` puts on `PATH` | `browser/scripts/thimble-browser` |
 
-`scripts/` holds `install.sh`, `check.sh`, `scan.sh`, `thimble09.py` (which finds a thimble 0.9 install for `install.sh` and says how to remove it) and the git hooks.
+`scripts/` holds `install.sh`, `check.sh`, `scan.sh`, `release-file.sh` (which builds the file a release has attached: Releasing thimble, below), `thimble09.py` (which finds a thimble 0.9 install for `install.sh` and says how to remove it) and the git hooks.
 
 ## Changing what the model reads
 
@@ -182,3 +185,30 @@ an agent never uses it. CI runs the same scan with the generic patterns only.
 
 To scan by hand, `scripts/scan.sh origin/main..HEAD` scans a range of commits, `scripts/scan.sh --all` every commit of
 the remote branches and tags, and `scripts/scan.sh --tree HEAD` every file at a commit.
+
+## Releasing thimble
+
+Each release has one file attached, `thimble-X.Y.Z.tar.gz` (git archive of its tag), with `SHA256SUMS`. The install
+and `thimble update` find the newest release from GitHub's page of the latest release, which counts nothing, then
+download that file and check its sha256. GitHub counts each download of the file, which is how many people install
+each version. `scripts/release-file.sh` builds both files, and the Action `.github/workflows/release-file.yml` attaches
+them. A published release must never be without its file: the install and the update then stop and say that it is
+missing, and install nothing. So the file goes on while the release is still a draft:
+
+1. Merge the release's pull request into main.
+2. Tag main's commit and push the tag: `git tag vX.Y.Z <commit> && git push origin vX.Y.Z`.
+3. Make the release as a draft: `gh release create vX.Y.Z --draft --verify-tag --title "thimble X.Y.Z" --notes-file
+   NOTES.md`.
+4. Attach its file: `gh workflow run release-file.yml --ref vX.Y.Z -f tag=vX.Y.Z`, then `gh run watch`.
+5. Check: `gh release view vX.Y.Z --json assets -q '.assets[].name'` lists `thimble-X.Y.Z.tar.gz` and `SHA256SUMS`.
+6. Publish: `gh release edit vX.Y.Z --draft=false`. The Action runs again, sees both files and stops.
+
+If a release is published without its file (step 4 skipped, or the Action failed), the Action attaches it within about
+a minute. To replace a broken file, `gh release delete-asset vX.Y.Z thimble-X.Y.Z.tar.gz --yes`, then step 4 again.
+
+The count per version:
+
+    gh api --paginate repos/safety-research/thimble/releases --jq '.[] | "\(.tag_name) \([.assets[] | select(.name | endswith(".tar.gz")) | .download_count] | add // 0)"'
+
+It counts fresh installs and the updates that a thimble with this file's code ran; an update by an older thimble
+downloads with git, and a dev install (`--local`) or `--ref` with a branch downloads no release file.

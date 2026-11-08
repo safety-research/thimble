@@ -41,3 +41,16 @@ def test_reads_in_the_temp_folder_only(tmp_path):
     # a folder other users can open is not thimble's temp folder
     temp.chmod(0o755)
     assert T.verdict(ev("Read", file_path=f"{temp}/rows.json"), env) is None
+
+
+def test_reads_of_the_tour_sample(tmp_path):
+    """The tour's checker reads the sample data from the plugin's folder: Read and Grep there need no dialog, with
+    Cards off too; a Write there, a path beside it and a link out of the folder get no answer."""
+    _, env = setup(tmp_path)
+    env["CLAUDE_PLUGIN_OPTION_CARDS"] = "off"
+    sample = Path(T.sample_folder())
+    assert T.verdict(ev("Read", file_path=str(sample / "orders.csv")), env) == "allow"
+    assert T.verdict(ev("Grep", path=str(sample), pattern="yes"), env) == "allow"
+    assert T.verdict(ev("Write", file_path=str(sample / "orders.csv"), content=""), {**env, "agent_id": "a"}) is None
+    assert T.verdict(ev("Read", file_path=str(sample.parent / "tour.ts")), env) is None
+    assert T.verdict(ev("Read", file_path=str(sample / ".." / ".." / "hooks" / "hooks.json")), env) is None

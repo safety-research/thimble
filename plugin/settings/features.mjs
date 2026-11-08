@@ -15,7 +15,7 @@
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
+const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Simplify, Catch-up, Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -78,9 +78,9 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
-    does: 'Press s to rewrite an answer shorter or longer, more novice or more expert, or in your own words. Press 0 for the original. One call each time you ask.',
-    says: { on: 'Press s to rewrite an answer shorter or longer, more novice or more expert. Press 0 for the original.', off: 'No rewrites.' },
+    key: 'squeezeAnswers', title: 'Simplify', group: 'Answers', default: true,
+    does: 'Press s for a shorter, plainer version of the last answer, below it. Under it, press 1 for shorter, 2 for longer, 3 to explain more, 4 to assume more, or 0 to hide it. One call each time you ask.',
+    says: { on: 'Press s for a shorter, plainer version of the last answer, below it. Under it, 1–4 make it shorter, longer, plainer or more expert; 0 hides it.', off: 'No simpler versions.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
@@ -127,22 +127,6 @@ export const SWITCHES = [
 
 const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
 
-/** The manifest's fields that newer settings replaced, kept so a value saved under them still reaches the plugin:
- *  Citations (`marks`, on or off) and Citation checks (`citationChecks`), now Citations' modes; Squeeze and catch-up
- *  (`squeeze`), now Squeeze and Catch-up; Labels and coverage on the bar (`counts`), now Labels and Coverage; and
- *  Squeeze changes cards (`squeezeCards`), gone: a squeeze always may move or leave out a card; and Claims (`claims`, on
- *  or off), now Claims' `off` mode beside its `auto` and `on demand` (`claimsMode`, once Extract claims). Settings hides them
- *  (term.ts), and the first session moves a saved one to the settings that replaced it (movedFrom), then sets it back
- *  to its default. */
-export const RETIRED = {
-  marks: { type: 'boolean', title: 'Citations (old setting)', description: 'Replaced by Citations, which has its modes.', default: true },
-  citationChecks: { type: 'string', title: 'Citation checks (old setting)', description: 'Replaced by Citations, which has its modes.', options: ['auto', 'on demand', 'off'], default: 'on demand' },
-  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Rewrite and Catch-up.', default: true },
-  counts: { type: 'boolean', title: 'Labels and coverage on the bar (old setting)', description: 'Replaced by Labels and Coverage.', default: true },
-  squeezeCards: { type: 'boolean', title: 'Squeeze changes cards (old setting)', description: 'Removed: a squeeze may move or leave out a card.', default: true },
-  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Claims, which has its modes.', default: true },
-}
-
 /** Modes renamed since a value was saved under their old name, by feature: the old name stands for the new one, and
  *  the first session saves the new one (term.ts). */
 export const RENAMED = {
@@ -159,62 +143,8 @@ export const RENAMED = {
 /** A mode saved under its old name (or as the switch it was), by its new name; undefined when it has none. */
 export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof saved === 'boolean' ? RENAMED[key]?.[String(saved)] : undefined)
 
-/** Defaults that moved, and the hidden field that says a person's settings have had them: the installer saves every
- *  field's default, so a value at an old default cannot tell whether the person chose it. While `defaultsAt` is not
- *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
- *  (term.ts); a value the person sets afterwards stays. None moves now: a value saved at an old default stays, so
- *  no one's settings change under them. `formerly`: the defaults a release had before (0.10.3: Citations auto cite,
- *  Claims on demand), which the installer may have saved, so a value at one still counts as unset (atDefault).
- *  `defaultsAt` starts at `none`, no version, and not empty: the installer gives each field its default, Claude Code
- *  takes no empty value, and it says a field with no value is not set. */
-export const DEFAULTS = { at: '0.10.4', moved: {}, formerly: { citations: ['auto cite'], claimsMode: ['on demand'] } }
-export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: 'none' } }
-
-/** The values the moved defaults change in `values`, by feature: {} once `defaultsAt` says they were applied. */
-export function defaultsFrom(values) {
-  if (!values || typeof values !== 'object' || values.defaultsAt === DEFAULTS.at) return {}
-  return Object.fromEntries(Object.entries(DEFAULTS.moved).filter(([k, m]) => values[k] === m.from).map(([k, m]) => [k, m.to]))
-}
-
-/** Whether a setting's value is its default: today's, or one it had before (DEFAULTS), which the installer may have
- *  saved. */
-export const atDefault = (key, v) => v === undefined || v === BY_KEY.get(key)?.default || v === DEFAULTS.moved[key]?.from || (DEFAULTS.formerly[key] ?? []).includes(v)
-
 /** Names modules ask featureOn by, for a feature kept under another key: Claims (`claims`) is the field `claimsMode`. */
 const ALIAS = { claims: 'claimsMode' }
-
-/** The Citations mode that the retired fields saved in `values` stand for, or null when they hold their defaults:
- *  citations off is `off`; checks after each reply are `auto cite + verify`; checks off is `auto cite`, since every mode
- *  that cites checks a citation once it is opened. */
-export function citationsFrom(values) {
-  if (!values || typeof values !== 'object') return null
-  if (values.marks === false) return 'off'
-  if (values.citationChecks === 'auto') return 'auto cite + verify'
-  if (values.citationChecks === 'off') return 'auto cite'
-  return null
-}
-
-/** The values the retired fields saved in `values` stand for, by the setting that replaced them: {} when they hold
- *  their defaults. */
-export function movedFrom(values) {
-  if (!values || typeof values !== 'object') return {}
-  const out = {}
-  const cites = citationsFrom(values)
-  if (cites) out.citations = cites
-  if (values.squeeze === false) Object.assign(out, { squeezeAnswers: false, catchUp: false })
-  if (values.counts === false) Object.assign(out, { labels: false, coverage: false })
-  if (values.claims === false) out.claimsMode = 'off'
-  return out
-}
-
-/** `values` with what the retired fields saved moved to the settings that replaced them (where those hold their
- *  defaults), and the retired fields at their defaults. */
-export function settled(values) {
-  const base = values && typeof values === 'object' ? values : {}
-  const moved = Object.fromEntries(Object.keys(movedFrom(base)).map(k => [k, valueIn(base, k)]))
-  const renamed = Object.fromEntries(Object.keys(RENAMED).filter(k => renamedTo(k, base[k])).map(k => [k, renamedTo(k, base[k])]))
-  return { ...base, ...renamed, ...moved, ...Object.fromEntries(Object.entries(RETIRED).map(([k, f]) => [k, f.default])) }
-}
 
 let current = {}
 
@@ -237,9 +167,6 @@ export function valueIn(values, key) {
   const s = BY_KEY.get(key)
   const saved = values ? values[key] : undefined
   const v = renamedTo(key, saved) ?? saved
-  // a setting at its default, while a retired field still holds a value saved before it, stands for that value
-  const moved = movedFrom(values)
-  if (s && key in moved && atDefault(key, v)) return moved[key]
   if (s?.choices) return s.choices.includes(v) ? v : s.default
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
@@ -247,7 +174,7 @@ export function valueIn(values, key) {
 /** Minimal: the modes it sets. Claude still cites, each citation verified when it is opened (auto cite), and the look
  *  after each answer still writes explainers and heads-ups; where Claude Code reports the pointer (its fullscreen
  *  layout, with its mouse reports on) its answers are plain, these showing only for the paragraph under the pointer
- *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Rewrite,
+ *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Simplify,
  *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off, and with Labels off Claude makes no labels:
  *  the guidance leaves out its Labels section (guidance/guidance.ts), and `thimble label` refuses Claude's commands
  *  (hooks/path.ts). Turning it on saves them (settings/term.ts), and the rows show them; a row changed away from them
@@ -295,19 +222,7 @@ export function choiceOf(key) {
 export function noteChange(key, value) {
   const s = BY_KEY.get(key)
   if (!s || !(s.choices ? s.choices.includes(value) : typeof value === 'boolean')) return
-  // a value the retired fields saved moves first, so the setting the person changes stands over it (term.ts moves
-  // them too)
-  current = { ...settled(current), defaultsAt: DEFAULTS.at, [key]: value }
-}
-
-/** The moved defaults saved in this load's copy, after term.ts saved them in Claude Code's. */
-export function noteDefaults() {
-  current = { ...current, ...defaultsFrom(current), defaultsAt: DEFAULTS.at }
-}
-
-/** The retired fields' values moved in this load's copy, after term.ts moved them in Claude Code's. */
-export function noteSettled() {
-  current = settled(current)
+  current = { ...current, [key]: value }
 }
 
 /** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
@@ -327,7 +242,7 @@ export function lensesAfterReply(key) {
 /** Whether Minimal is on: the modes it set (PRESET) stand. */
 export const minimalOn = () => valueIn(acting(), 'minimal') === true
 
-/** The values the person set, as this load runs with them, the retired fields' included: never UNDRAWN's modes. */
+/** The values the person set, as this load runs with them: never UNDRAWN's modes. */
 export const currentValues = () => ({ ...current })
 
 /** Whether Claude cites its claims (Citations auto cite + verify, or auto cite): main reads the citing guidance, and

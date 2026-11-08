@@ -27,7 +27,8 @@ import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
 import { AnswerCommentPop } from './AnswerComment'
-import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
+import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
+import { asChecked } from '../marks/marks'
 import { MarksFooter } from '../marks/MarksFooter'
 import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, REWIND_CHIP, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
@@ -182,17 +183,23 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   const answers = useAnswerComments(ws, chat === 'main' && !nested)
   const [opened, setOpened] = useState<string | null>(null)
   const [asked, setAsked] = useState<AnswerAsk | null>(() => (chat === 'main' && !nested ? askedAnswer() : null))
-  // each text row's comments and marks, again when the comments or the open one change
+  // each text row's comments, each where the row's words are drawn (placedOn), and the marks of those that have words
+  // there, again when the comments, the row's checks or the open one change
   const rowMarks = useMemo(() => {
     const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[] }>()
     if (!answers.comments.length) return out
     for (const r of shown) {
       if (r.kind !== 'text') continue
       const mine = commentsOfRow(r, answers.comments)
-      if (mine.length) out.set(r.index, { comments: mine, marks: marksOf(mine, opened) })
+      if (!mine.length) continue
+      // the words as ChatMarkdown draws them: as the check of the citations left them, once the row no longer streams
+      const drawn = r.checks && r !== lastText ? asChecked(r.text, r.checks).text : r.text
+      const placed = mine.map((c) => placedOn(c, r.text, drawn))
+      out.set(r.index, { comments: placed, marks: marksOf(placed.filter((c) => !c.gone), opened) })
     }
     return out
-  }, [shown, answers.comments, opened])
+  }, [shown, answers.comments, opened, lastText])
+  useEffect(() => noteDrawn([...rowMarks.values()].flatMap((m) => m.comments)), [rowMarks])
   const marksCtx = useMemo(() => ({ opened, show: setOpened }), [opened])
   // Go to it on `answer:<turn>#s<n>`: the comment it names opens once it is read, and its passage comes into view
   useEffect(() => {
@@ -208,8 +215,10 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
     setOpened(hit.id)
     setAsked(null)
     answeredAsk(asked)
-    window.setTimeout(() => revealAnchor(asked.ref), 0)
-  }, [asked, answers.comments])
+    // its words, else the answer they stood in, when the check of the citations took them away
+    const row = [...rowMarks].find(([, m]) => m.comments.some((c) => c.id === hit.id))?.[0]
+    window.setTimeout(() => revealAnchor(asked.ref) || (row != null && revealAnchor(anchorOf(row) ?? '')), 0)
+  }, [asked, answers.comments, rowMarks])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
       <AnswerMarksContext.Provider value={marksCtx}>

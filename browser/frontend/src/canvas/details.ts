@@ -313,17 +313,27 @@ export function shortGlob(glob: string | null | undefined): { short: string; ful
   return { short: short.join(', '), full: patterns.join(', ') }
 }
 
-/** What a label card says of its label after its name: how the label is defined (`code`, `regex`, or `prompt` with the
- * model it judges with, `model` as the card names it), what it ran on (its files as shortGlob writes them, else the
- * canvas or the report; `full`, every pattern whole, for the hover) and how many units its shares are of (a trial's
- * as `a sample of`; '' before any is labeled). Pure. */
-export function labelIdentity(k: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial'>, model = ''): { how: string; where: string; full: string; units: string } {
-  const how = [k.kind, k.kind === 'prompt' && model ? model : ''].filter(Boolean).join(' · ')
+/** How a label card names a label's classifier, in plain words, so a rule over the data reads apart from a model's
+ * prompt: `Code rule`, `Regex rule`, or `<model> prompt` (`model` as the card names it, else `Prompt`). */
+export const classifierWords = (kind: string, model = ''): string =>
+  kind === 'code' ? 'Code rule' : kind === 'regex' ? 'Regex rule' : model ? `${model} prompt` : 'Prompt'
+
+/** What a label card says of its label after its name: how the label is defined (classifierWords) and what it ran
+ * over, `over 12,480 records in <files>` (a trial's `over a sample of`; its files as shortGlob writes them, else the
+ * canvas or the report; `full`, every pattern whole, for the hover). A label that ran only over the records another label
+ * gave one value says which before its files, `where ‘<that label>’ is ‘<value>’`, `withinName` that label's name, so
+ * the line's cut falls on the files. Pure. */
+export function labelIdentity(k: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'within'>, model = '', withinName = ''): { how: string; where: string; full: string } {
+  const how = classifierWords(k.kind, k.kind === 'prompt' ? model : '')
   const glob = isFilesLabel(k) ? shortGlob(k.glob) : null
-  const where = glob?.short || scopeWord(k.unit)
+  const at = (place: string) => (glob ? `in ${place}` : place === 'canvas' ? 'on the canvas' : `in the ${place}`)
   const n = labeledTotal(k)
-  const units = n > 0 ? `${k.trial ? 'a sample of ' : ''}${unitTotal(n, k.unit)}` : ''
-  return { how, where, full: glob?.full || where, units }
+  const over = n > 0 ? `over ${k.trial ? 'a sample of ' : ''}${unitTotal(n, k.unit)}` : ''
+  const narrow = k.within ? `where ‘${withinName || 'another label'}’ is ‘${k.within.value}’` : ''
+  const head = [over, narrow].filter(Boolean).join(' ')
+  const line = (place: string) => (head ? `${head}${narrow ? ',' : ''} ${at(place)}` : at(place))
+  const scope = glob?.short || scopeWord(k.unit)
+  return { how, where: line(scope), full: line(glob?.full || scope) }
 }
 
 // ---- the card's history (backend notebook.stamp_edit) ----

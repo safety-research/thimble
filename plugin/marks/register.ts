@@ -8,14 +8,19 @@
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
-//                    reload of the plugin left running (checker.ts resumeChecks)
+//                    reload of the plugin left running (checker.ts resumeChecks), and the tour hears those that gave up
+//                    (tour/tour.ts tourChecked)
 //   session.append   main's text rows, as they are stored
-//   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others)
+//   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others); the
+//                    answer of the tour's cite step is checked now in every mode that cites, and the tour hears that
+//                    the turn ended (tour/tour.ts tourCites, tourChecked)
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
-//                    autoRepair), as x does
+//                    autoRepair), as x does. After each, the tour hears that a check ended (tour/tour.ts
+//                    tourChecked): its cite step is done once each citation of that step's answer has its result
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
-//                    Claude Code refused is noted as it ends (checker.ts readEnded)
+//                    Claude Code refused is noted as it ends (checker.ts readEnded), and so is its Python that don't
+//                    ask mode refused (checker.ts pythonEnded)
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
@@ -49,10 +54,12 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, pythonEnded, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
+// the tour's cite step (tour/tour.ts)
+import { tourChecked, tourCites } from '../tour/tour'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -146,6 +153,8 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     try { await restoreMarks($) } catch { /* the marks of earlier replies draw failed: their check did not run */ }
     try { await resumeChecks($) } catch { /* the checks that run end as they would */ }
+    // a check that gave up as the plugin loaded can be the last result the tour's cite step waits for
+    await tourChecked($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 
@@ -166,7 +175,10 @@ export const registerMarks: Register = on => {
   on('turn.complete', { reason: /^(answer|aborted|refusal|error)$/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) {
-      try { await startCheck($, e) } catch { /* the reply stands; its marks stay drawn as written */ }
+      // the answer of the tour's cite step is checked now, whatever the mode (tour/tour.ts tourCites)
+      try { await startCheck($, e, row => tourCites($, row)) } catch { /* the reply stands; its marks stay drawn as written */ }
+      // that answer cited nothing, or its check started: the tour hears the turn ended
+      await tourChecked($, true).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -178,6 +190,7 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     if (forkOf(e.agentId)?.kind === 'checker') {
       try { await autoRepair($, e.agentId!) } catch { /* the citations stay failed, and x repairs them */ }
+      await tourChecked($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -186,17 +199,22 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     if (forkOf(e.agentId)?.kind === 'checker') {
       try { await endCheck($, { agentId: e.agentId!, reason: e.reason, answer: e.answer, usage: e.usage }) } catch { /* endCheck says its own failures */ }
+      // a repair's fork skips the hook around this one, which it was spawned in: its end reaches the tour here
+      await tourChecked($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
 
   // fails closed: a guard that throws before `next` refuses the checker's call in its place. A read Claude Code refused
-  // is noted as it ends: the file the check could not read
+  // is noted as it ends: the file the check could not read; so is its Python that don't ask mode refused
   on('tool.call', { agentId: /./ }, async ($, e, next) => {
     const no = denial(e)
     if (no) return { deny: no }
     const r = await next(e)
-    if (forkOf(e.agentId)?.kind === 'checker') await readEnded($, e as never, r).catch(() => undefined)
+    if (forkOf(e.agentId)?.kind === 'checker') {
+      try { pythonEnded(e as never, r) } catch { /* the check ends as its answer says */ }
+      await readEnded($, e as never, r).catch(() => undefined)
+    }
     return r
   }).catch(($, e, next) => {
     if (next.called) return next(e)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -15,19 +16,20 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import agents, dev, fixes
+from app import agents, config, dev, fixes
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
 
 class Kernel:
     """`thimble fix VERB` in memory: new makes the copy's folder, done answers ready, apply takes the click's secret and
-    puts the fix on, undo takes it off."""
+    puts a ready or off fix on (and refuses any other, as the kernel does), undo takes it off."""
 
     def __init__(self, home: Path) -> None:
         self.home = home
         self.recs: dict[int, dict[str, Any]] = {}
         self.calls: list[tuple[str, ...]] = []
+        self.kind = "release"  # the install's kind, as the list says it: clone for a dev install
 
     def __call__(self, args: list[str], *, stdin: str | None = None, timeout: float = 0, env: dict | None = None):
         self.calls.append(tuple(args))
@@ -41,7 +43,7 @@ class Kernel:
                               "base": "HEAD", "made_in": args[args.index("--made-in") + 1], "updated": 1.0}
             return fixes.Ran(True, json.dumps(self.recs[fid]), "")
         if verb == "list":
-            return fixes.Ran(True, json.dumps({"fixes": list(self.recs.values())}), "")
+            return fixes.Ran(True, json.dumps({"fixes": list(self.recs.values()), "kind": self.kind}), "")
         rec = self.recs[int(args[1])]
         if verb == "done":
             if "--title" in args:
@@ -49,6 +51,8 @@ class Kernel:
             rec.update(state="ready", tests="passed", error=None,
                        summary="The card's title now ends with its row count.", files=[{"path": "a"}, {"path": "b"}])
         elif verb == "apply":
+            if rec["state"] not in ("ready", "off"):
+                return fixes.Ran(False, "", f"fix {rec['id']} is {rec['state']}, so there is nothing to apply")
             assert stdin and len(stdin) == 64  # the secret of the click, on stdin
             ask = self.home / "fixes" / "asks" / f"{rec['id']}.json"
             assert json.loads(ask.read_text())["key"] == fixes.hashlib.sha256(stdin.encode()).hexdigest()
@@ -194,3 +198,36 @@ async def test_only_the_analyst_s_click_puts_a_fix_on_and_undo_takes_it_off(fixi
     assert fixes.status()["fixes"][0]["said"] == "thimble fix undone: Card counts rows"
     await fixes.dismiss_route(1, analyst)
     assert fixes.status()["fixes"] == []
+
+
+async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_and_use_it_starts_it_from_live(
+        fixing, analyst):
+    # a dev install (scripts/install.sh --local), whose launcher started this server from the clone (this checkout)
+    # after Use it now had started it from live, where fix 1 is on
+    fixing.kind = "clone"
+    app = fixes.live_root() / "backend" / "app"
+    app.mkdir(parents=True)
+    (app / "main.py").write_text("")
+    fixing.recs[1] = {"id": 1, "title": "Bigger minimap button", "words": ["make the minimap button bigger"],
+                      "state": "on", "commit": "f" * 40, "updated": 1.0}
+    [row] = fixes.status(every=True)["fixes"]
+    assert (row["state"], row["why"]) == ("off", fixes.NOT_HERE)
+    # Use it leaves the fix as it is, which the kernel would not apply again, and starts the server from live
+    await fixes.apply_route(1, analyst)
+    await _went_on()
+    await _restarted(fixing, "Use it")
+    assert "apply" not in [c[0] for c in fixing.calls] and fixing.recs[1]["state"] == "on"
+    assert fixing.restarts == [("fix 1: Bigger minimap button", fixes.live_root() / "backend")]
+    fixes._phase.clear()
+    # on, as before: when the clone holds the fix's commit (the person merged it there), and in a release install
+    fixing.recs[1]["commit"] = subprocess.run(["git", "-C", str(config.REPO_ROOT), "rev-parse", "HEAD"],
+                                              capture_output=True, text=True, check=True).stdout.strip()
+    assert fixes.status(every=True)["fixes"][0]["state"] == "on"
+    fixing.recs[1]["commit"] = "f" * 40
+    fixing.kind = "release"
+    assert fixes.status(every=True)["fixes"][0]["state"] == "on"
+
+
+def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():
+    end = fixes.end_of("It already is.\n\n```\nTitle: Bar word is bold\nRequest: The bar's word is bold already.\n```")
+    assert end == {"title": "Bar word is bold", "summary": "The bar's word is bold already.", "request": True}

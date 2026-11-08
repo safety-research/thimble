@@ -94,6 +94,9 @@ EVIDENCE = PLUGIN / "engine" / "kernel" / "evidence.py"
 PER_FORK = 4
 MAX_FORKS = 8
 FORK_TIMEOUT_S = 900
+# a failed fork's error: its stderr's last lines (stderr_error), and at most this many characters of its own words
+STDERR_LINES = 3
+ERROR_CHARS = 2000
 CHECKER_TOOLS = ("Read", "Grep", "Glob", "Bash")
 ALLOWED = ("Read", "Grep", "Glob", "Bash(python3:*)", "Bash(python:*)")
 TELL_KIND = "citations"
@@ -410,11 +413,13 @@ def tell_text(items: list[dict[str, Any]]) -> str:
     return "\n".join(parts)
 
 
-def _notice(c: str, text: str) -> None:
+def _notice(c: str, text: str, details: str | None = None) -> None:
+    """The check's notice; `details`: its whole text when `text` holds an error's words shortened (_stopped)."""
     from . import notices  # noqa: PLC0415
 
     try:
-        notices.post(c, kind="agent", text=text, agent="Citation check", chat=agents.MAIN_ID, key="citations")
+        notices.post(c, kind="agent", text=text, agent="Citation check", chat=agents.MAIN_ID, key="citations",
+                     details=details)
     except Exception:  # noqa: BLE001 — a notice not posted is no reason to fail the check
         log.exception("%s: the citation check's notice was not posted", c)
 
@@ -718,8 +723,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         if got.get("error"):
             error = _error_words(got["error"], folders)
             await give_up(f"the check ended: {error}")
-            _notice(c, f"The check of the citations stopped ({error[:100]}), so some are not checked. The next reply is "
-                       "checked again.")
+            _stopped(c, error)
             return
         answer = str(got.get("answer") or "")
         ev = evidence()
@@ -778,6 +782,19 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
         if why and why != NOT_FAILED:
             _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
+
+
+STOPPED_TEXT = "The check of the citations stopped ({why}), so some are not checked. The next reply is checked again."
+
+
+def _stopped(c: str, error: str) -> None:
+    """The notice of a check whose fork stopped with `error`: its words in short, at a sentence's end (notices.gist),
+    and whole in the notice's details, which Show more opens."""
+    from . import notices  # noqa: PLC0415
+
+    why = error.strip().rstrip(".") or "no reason was given"
+    short = notices.gist(why, notices.REASON_CHARS).rstrip(".")
+    _notice(c, STOPPED_TEXT.format(why=short), STOPPED_TEXT.format(why=why) if short != why else None)
 
 
 def _error_words(error: Any, folders: tuple[str, str]) -> str:
@@ -1111,7 +1128,7 @@ def parse_stream(stdout: str) -> dict[str, Any]:
                     if isinstance(b, dict) and b.get("type") == "text":
                         texts.append(str(b.get("text") or ""))
         elif rec.get("type") == "result" and (rec.get("is_error") or rec.get("subtype") not in (None, "success")):
-            error = str(rec.get("result") or rec.get("subtype") or "error")[:200]
+            error = _clip(str(rec.get("result") or rec.get("subtype") or "error"))
     return {"answer": "\n".join(texts), "calls": bash_calls(messages, "checker"), "error": error}
 
 
@@ -1166,29 +1183,55 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
 
 
 async def _claude_fork(argv: list[str], cwd: Path, env: dict[str, str], prompt: str) -> dict[str, Any]:
-    """Run the fork `argv` in `cwd` with the prompt on stdin: {answer, calls, error}."""
+    """Run the fork `argv` in `cwd` with the prompt on stdin: {answer, calls, error}. A fork that started without the
+    prompt (sdk.stdin_missed) runs again, at most sdk.STDIN_TRIES times in all."""
+    for attempt in range(1, sdk.STDIN_TRIES + 1):
+        got, code, stderr = await _claude_fork_once(argv, cwd, env, prompt)
+        if got["answer"] or not sdk.stdin_missed(code, stderr) or attempt == sdk.STDIN_TRIES:
+            break
+        log.info("the check's fork started without its prompt (try %d of %d): it runs again", attempt, sdk.STDIN_TRIES)
+        await asyncio.sleep(sdk.STDIN_RETRY_WAIT_S)
+    if code not in (0, None) and not got["answer"] and (not got["error"] or sdk.stdin_missed(code, stderr)):
+        got["error"] = stderr_error(code, stderr)
+    return got
+
+
+def stderr_error(code: Any, stderr: str) -> str:
+    """A failed fork's error from what it wrote to stderr: its last STDERR_LINES lines but the stdin warning, after
+    sdk.STDIN_MISSED_TEXT when it started without its prompt, else its exit code."""
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip() and "no stdin data received" not in ln]
+    said = _clip(" ".join(lines[-STDERR_LINES:]))
+    if sdk.stdin_missed(code, stderr):
+        return f"{sdk.STDIN_MISSED_TEXT}. Claude Code said: {said}" if said else sdk.STDIN_MISSED_TEXT
+    return said or f"Claude Code exited with code {code}"
+
+
+def _clip(text: str) -> str:
+    """`text` at most ERROR_CHARS long, marked with an ellipsis where it was cut."""
+    return text if len(text) <= ERROR_CHARS else text[:ERROR_CHARS - 1].rstrip() + "…"
+
+
+async def _claude_fork_once(argv: list[str], cwd: Path, env: dict[str, str],
+                            prompt: str) -> tuple[dict[str, Any], int | None, str]:
+    """One run of the fork: ({answer, calls, error}, its exit code, its stderr)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv, cwd=str(cwd), env=env, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
     except OSError as e:
-        return {"error": f"Claude Code could not start: {e}"}
+        return {"answer": "", "error": f"Claude Code could not start: {e}"}, None, ""
     _procs.add(proc)
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), FORK_TIMEOUT_S)
     except asyncio.TimeoutError:
         _kill(proc)
-        return {"error": "it took too long"}
+        return {"answer": "", "error": "it took too long"}, None, ""
     except asyncio.CancelledError:
         _kill(proc)
         raise
     finally:
         _procs.discard(proc)
-    got = parse_stream(stdout.decode("utf-8", "replace"))
-    if proc.returncode not in (0, None) and not got["answer"]:
-        tail = stderr.decode("utf-8", "replace").strip().splitlines()
-        got["error"] = got["error"] or (tail[-1][:200] if tail else f"Claude Code exited with code {proc.returncode}")
-    return got
+    return parse_stream(stdout.decode("utf-8", "replace")), proc.returncode, stderr.decode("utf-8", "replace")
 
 
 def _kill(proc: asyncio.subprocess.Process) -> None:

@@ -217,6 +217,42 @@ async def test_claude_code_sign_in_runs_a_headless_session_with_the_same_records
     assert shape(main_records()) == cc
 
 
+async def test_a_session_whose_sandbox_cannot_run_has_no_bash_and_the_analyst_is_told_what_it_lacks(on, monkeypatch):
+    """Where thimble's probe finds that Claude Code's Bash sandbox cannot run, main's session goes without Bash, and the
+    analyst gets the sandbox notice with what the sandbox lacks, as the session starts, which the error Claude Code
+    answers a call of the missing Bash with does not take away; THIMBLE_SANDBOX=0, which turns the sandbox off on purpose
+    (the fixture's), tells nothing."""
+    from claude_agent_sdk import (AssistantMessage, ResultMessage, SystemMessage, TextBlock, ToolResultBlock,
+                                  ToolUseBlock, UserMessage)
+
+    from app import cc_settings, notices
+
+    seen: dict[str, Any] = {}
+    fake_sdk(monkeypatch, [
+        SystemMessage(subtype="init", data={"session_id": "sess-box"}),
+        AssistantMessage(content=[ToolUseBlock(id="toolu_box", name="Bash", input={"command": "ls runs | wc -l"})],
+                         model="claude-opus-5-5"),
+        UserMessage(content=[ToolResultBlock(tool_use_id="toolu_box", is_error=True,
+                                             content="<tool_use_error>Error: No such tool available: Bash</tool_use_error>")]),
+        AssistantMessage(content=[TextBlock(text="I could not run the shell.")], model="claude-opus-5-5"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                      session_id="sess-box"),
+    ], seen)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+
+    def told() -> list[str]:
+        return [n["text"] for n in notices.open_notices(CORPUS) if n.get("key") == runtime_cc.SANDBOX_KEY]
+
+    await main_turn("How many runs are there?")
+    assert "Bash" not in seen["options"].tools and told() == []
+    monkeypatch.delenv("THIMBLE_SANDBOX")
+    monkeypatch.setattr(cc_settings, "sandbox_ok", lambda refresh=False: False)
+    monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bwrap", "socat"])
+    await main_turn("How many runs are there?")
+    assert "Bash" not in seen["options"].tools
+    assert told() == [runtime_cc.SANDBOX_NOTICE.format(agent="Main", why="missing bwrap, socat")]
+
+
 class BackgroundCLI:
     """A headless `claude` whose first turn runs a Bash command in the background: a real process, which lives until the
     session closes, as Claude Code kills its background commands as it exits. `ends` makes the command end between the

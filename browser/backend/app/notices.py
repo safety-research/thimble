@@ -37,9 +37,9 @@ chat alone, since it tells of that chat's own replies), `thread:<chat>` and
 Kinds that tell of the setup rather than a failure:
 
   sandbox      key `cc-sandbox`: Claude Code's Bash sandbox could not start in a session of the Claude Code sign-in, so
-               its Bash calls were refused (runtime_cc.py), cleared by a later Bash call that ran; key `view-sandbox`:
-               the sandbox of a view build's commands can't start on this machine (dev._box_notice), cleared by a
-               later build's start where it starts
+               its Bash calls were refused, or it had no Bash (runtime_cc.py), cleared by a later Bash call that ran;
+               key `view-sandbox`: the sandbox of a view build's commands can't start on this machine
+               (dev._box_notice), cleared by a later build's start where it starts
   sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out
 
 A failure of Anthropic's API is told in plain words with its fix, and each fix says where it runs (reason, API_WORDS):

@@ -235,8 +235,6 @@ async def tool_stop_check(ctx: Any, args: dict[str, Any]) -> Any:
     docs = sorted(doc for (c, cid, doc) in list(checks._active) if c == ctx.c and cid == check["id"])
     checks.edit(ctx.c, check["id"], shown=False)
     await checks.stop_check(ctx.c, check["id"])
-    for key in [k for k in checks._dirty if k[0] == ctx.c and k[1] == check["id"]]:
-        checks._dirty.discard(key)  # a run stopped here is not followed by the rerun a save during it asked for
     checks._stream(ctx.c, check["id"], "", OFF, "", "")  # no document: the open tabs read the checks again
     if not docs:
         return tools.ok(tools.hint("stop_check-off", check=check["name"]))

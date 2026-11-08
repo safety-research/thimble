@@ -2,11 +2,11 @@
 // thimble fix in the page (src/chat/fix.ts, src/chat/FixStrip.tsx, backend fixes.py): how a fix ended is a row of the
 // chat. The newest row of a fix that passed its checks asks, and Use it now (the person's click) puts it on: the row
 // says "Reloading thimble…", then, with the server back, what it said, with nothing left to ask. A fix that is on
-// offers Undo.
+// offers Undo. Your fixes says why a fix is off when the server says.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { FixRow } from '../../src/chat/fix.ts'
-import { FixResult } from '../../src/chat/FixStrip.tsx'
+import { FixPage, FixResult } from '../../src/chat/FixStrip.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -24,7 +24,7 @@ beforeEach(() => {
     const method = init.method ?? 'GET'
     const u = String(url)
     if (method !== 'GET') sent.push(`${method} ${u.replace(/^.*\/api/, '')}`)
-    const body = u.endsWith('/fixes') && method === 'GET' ? { problem: '', fixes } : { ok: true, restart: true }
+    const body = /\/fixes(\?every=true)?$/.test(u) && method === 'GET' ? { problem: '', fixes } : { ok: true, restart: true }
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   })
 })
@@ -59,4 +59,17 @@ test('a fix that passed asks, and Use it now puts it on; a fix that is on offers
   await settle()
   await click(button(on, 'Undo'))
   expect(sent).toEqual(['POST /fixes/3/apply', 'POST /fixes/3/undo'])
+})
+
+test('Your fixes says why a fix that is on is off where the server runs, and Use it puts it on', async () => {
+  const why = 'the workbench runs from your clone, which does not have it'
+  fixes = [row({ state: 'off', why, kind: null, said: null })]
+  const el = await mount(<FixPage />)
+  await act(async () => bus.emit('fixList', { open: true }))
+  await settle()
+  const item = el.querySelector('.chat-fixes-list li')!
+  expect(item.querySelector('.chat-fixes-state')?.textContent).toBe('off')
+  expect(item.querySelector('.chat-fixes-why')?.textContent).toBe(why)
+  await click(button(item, 'Use it'))
+  expect(sent).toEqual(['POST /fixes/3/apply'])
 })

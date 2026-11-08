@@ -289,6 +289,12 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(await fixKey(s.$, 'u')).toBe(null)
 })
 
+test("a fixer that closes its end in a code fence: the fence is no part of what the fix does", async () => {
+  const s = setup()
+  await requested(s, 'Done.\n\n```\nTitle: Bar says read for coverage\nWhat it does: The bar says r read 14%.\n```')
+  expect(s.ran.find(x => x.argv.includes('done'))?.stdin).toBe('The bar says r read 14%.')
+})
+
 /** What Claude is told of fix 1 at the person's next prompt, or ''. */
 async function toldOf(s: ReturnType<typeof setup>): Promise<string> {
   return ((((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)['fix-1']) ?? ''

@@ -30,8 +30,11 @@ When someone asks you to install thimble, ask what they want, run the install sc
    minutes. When it stops because something is missing, it says what and the command that fixes it: tell them, run
    that command only on their yes, then run the script again.
 
-3. When it is done, reply with the script's last lines, word for word, with each command in backticks. Add only what
-   does not work yet, if anything.
+3. When it is done, reply briefly: one sentence on what is installed, then the workbench's line if the script printed
+   one, then what does not work yet, if anything. End with the script's last line, word for word, on a line of its
+   own, in bold, with the command in backticks, such as **Type `/reload-plugins` to enable thimble and start the
+   tour.** Write nothing after it: it is the one thing the person must do, and you cannot run it. Do not start
+   the tour yourself.
 
 To work on thimble's own code, clone this repository and run `scripts/install.sh --local` in the clone. Only do this
 when they ask for it.

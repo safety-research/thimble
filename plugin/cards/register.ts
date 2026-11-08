@@ -11,6 +11,7 @@
 //                ../sandbox/setup.mjs installs at the first session start
 //   layout.js    a tree laid out on a grid of cells: the text copy
 //   client.tsx   the one Client module that draws a card's tree in the terminal
+//   drawn.js     what the Client draws of a tree, and its size as Claude Code holds it, which the runner measures
 //   draw.ts      the frame, the drawing at the screen's width, the person's keys and clicks
 //   store.ts     each card in $.state and on disk, for a resumed session
 //   copy.ts      the cards an answer places, as text in what /copy and /export write
@@ -150,7 +151,8 @@ export const registerCards: Register = (on, options) => {
   on('ui.message', { element: /^card-c[0-9a-f]+(-\d+)?$/ }, async ($, e) => cardPost($, cardOfKey(String(e.element)).id, e.data, String(e.requestId ?? '')))
     .catch(() => ({}))
 
-  // a card's Client failed on screen: the card says why where it stood
+  // a card's Client failed on screen: the card says why where it stood, and the one that drew it gets why (draw.ts
+  // clientFault)
   on('ui.fault', { element: /^card-c[0-9a-f]+(-\d+)?$/ }, async ($, e, next) => {
     await clientFault($, String(e.element), String(e.reason ?? ''))
     return next(e)

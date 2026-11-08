@@ -4,6 +4,7 @@ fake that logs its arguments, and the remotes are local bare repositories: nothi
 test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -143,3 +144,37 @@ def test_a_detail_of_the_persons_in_the_code_refuses_and_names_each_one(world, g
                         "or ask /thimble-fix to change it: /thimble-fix 1 take my details out of the code"]
     assert asked == [] and not any(x.startswith(("repo", "pr")) for x in calls(gh))
     assert branches(gh, "made-up") == [] and "pr" not in FX.get(rec["id"])
+
+
+def test_a_pr_from_an_install_made_from_a_release_file_goes_onto_main_and_names_the_release(world, gh, monkeypatch,
+                                                                                              tmp_path):
+    """An install from a release's file has a live with none of GitHub's history: its release commit has no parent,
+    and its id is the person's own. A pull request fetches main into live, goes onto main's tip, and its text names
+    the release by its tag, as GitHub knows it."""
+    remote = gh["remotes"] / "safety-research.git"
+    work = tmp_path / "release-work"
+    sh("git", "clone", "-q", "-b", "main", str(remote), str(work))
+    # a release's manifest names no version: the release is its tag
+    (work / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble"}, indent=2) + "\n")
+    sh("git", "commit", "-q", "-am", "thimble 0.10.2", cwd=work)
+    sh("git", "tag", "v0.10.2", cwd=work)
+    sh("git", "push", "-q", "origin", "HEAD:refs/heads/main", "v0.10.2", cwd=work)
+    tip = sh("git", "rev-parse", "HEAD", cwd=work)
+    dist = tmp_path / "dist"
+    sh("bash", str(Path(__file__).resolve().parents[2] / "scripts" / "release-file.sh"), "v0.10.2", str(dist), cwd=remote)
+    rel = FX.ensure_live({"kind": "release", "file": str(dist / "thimble-0.10.2.tar.gz"), "tag": "v0.10.2", "ref": "",
+                          "source": "https://github.com/safety-research/thimble/releases/download/v0.10.2/"
+                                    "thimble-0.10.2.tar.gz"})
+    made = rel["base"]
+    assert sh("git", "rev-list", "--count", "--all", cwd=FX.live_dir()) == "1" and rel["commit"] == tip
+    rec = fix_on(world)
+    assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 0
+    (ref,) = branches(gh, "made-up")
+    fork = gh["remotes"] / "made-up.git"
+    assert sh("git", "rev-parse", f"{ref}^", cwd=fork) == tip
+    assert "+const words = `read ${n}`" in sh("git", "show", ref, cwd=fork)
+    body = FX.read_json(SH.share_dir(rec["id"]) / "pr.json")["body"]
+    assert "thimble 0.10.2 · terminal · fixed by `thimble fix`" in body, body
+    assert f"on thimble 0.10.2 (`{tip[:7]}`)" in body and made[:7] not in body
+    issue = SH.share(rec["id"])["body"]
+    assert issue.rstrip().endswith("thimble 0.10.2 · terminal · fixed by `thimble fix`") and made[:7] not in issue

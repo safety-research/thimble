@@ -3,6 +3,7 @@ a Claude Code session, Claude runs it to label records and to see what it read.
 
 In a shell:
 
+    thimble tour                   a two-minute tour of thimble: Claude Code opens on made-up sample data
     thimble update                 the newest thimble, for the terminal plugin and the browser workbench. Your fixes
                                    that still fit it stay on; thimble reapply brings back one that does not
     thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that did not fit
@@ -16,7 +17,8 @@ In a shell:
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
-    thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble fix export N [--to D]  save fix N as files: its patch (git am applies it), with the fixes it builds on
+                                   first, and its record
     thimble fix show|diff|apply|off|on|remove|export N...
                                    several fixes at once: thimble fix remove 3 4 5
     thimble doctor                 a checklist of what works, with the fix for each problem
@@ -473,21 +475,25 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 print("no code: pass a file with --code FILE, or the code on stdin, defining label(unit)")
                 return 2
         r = LB.define(st, name, kind, rule, a.glob, a.values.split(",") if a.values else None, a.where,
-                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says, a.model)
+                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says, a.model, a.same_records)
         lab = _load(st, name)
         s = LB.status(lab)
-        # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
-        # label and scope; the person's key answers with --answer, as the person (labels/use.ts)
+        # a big prompt label asks the person first (estimate.py), unless it is a trial (--limit, or a trial applied again
+        # over its same records) or they said yes to this exact label and scope; the person's key answers with --answer,
+        # as the person (labels/use.ts)
         ask = None
-        if kind == "prompt" and not a.limit and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
+        if kind == "prompt" and not lab.get("trial") and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
             units = LB.waiting(st, name)["units"]
             calls = len(LB.batches(units))
             ask = LB.hold_for_ask(st, name, calls)
             lab = _load(st, name)
+            # --json says the run waits for the ask, with its id (labels/edit.ts asks the person who ran it)
+            s = LB.status(lab)
             # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample. `chars`: the
-            # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs)
+            # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs),
+            # on the label's own model when it names one
             st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
-                     "chars": sum(len(u["text"]) + 40 for u in units),
+                     "chars": sum(len(u["text"]) + 40 for u in units), "model": lab.get("model"),
                      "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
                      "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(st, lab)} with Claude",
                      "meta": EST.calls_line(ask["calls"])})
@@ -573,7 +579,8 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix off | on             all your fixes off (the plain release), or on again
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
     thimble fix remove N             fix N leaves your list (off first, when it is on)
-    thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it) and its record
+    thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it), with the fixes it
+                                     builds on first, and its record
     thimble fix show|diff|apply|off|on|remove|export N...
                                      several fixes at once: thimble fix remove 3 4 5
 
@@ -593,8 +600,9 @@ FILE_HELP = """Send one of your fixes to thimble's public repository on GitHub, 
 Both take your names, paths and the names of your data out of the text first. Run them in your own terminal."""
 
 
-UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
-browser workbench in one go. Run it in a shell, not inside Claude Code.
+UPDATE_HELP = """thimble update: the newest thimble release (its newest release on GitHub), for the terminal plugin and the
+browser workbench in one go. It downloads that release's file from GitHub, which counts the download. Run it in a
+shell, not inside Claude Code.
 
 When you have fixes, it puts each one that still fits back on the release, as it was (fixes you turned off stay off):
 its change applies, and the release passes the checks a new fix passes with it. One the release already has leaves
@@ -645,6 +653,12 @@ def cmd_reapply(a: argparse.Namespace) -> int:
     return FX.cmd_reapply(a)
 
 
+def cmd_tour(a: argparse.Namespace) -> int:
+    from . import tour as TR  # noqa: PLC0415
+
+    return TR.cmd(a)
+
+
 def cmd_doctor(a: argparse.Namespace) -> int:
     from . import doctor as DR  # noqa: PLC0415
 
@@ -686,7 +700,7 @@ def _help() -> str:
 def _parser() -> tuple[argparse.ArgumentParser, Any]:
     """The command's parser, and its commands'."""
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    named = "update,reapply,fixes,fix,file,doctor," + ("" if labels_off() else "label,") + "coverage"
+    named = "tour,update,reapply,fixes,fix,file,doctor," + ("" if labels_off() else "label,") + "coverage"
     sub = ap.add_subparsers(dest="cmd", metavar="{" + named + "}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -703,6 +717,8 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--reason", action="store_true")
     p.add_argument("--model", help=argparse.SUPPRESS)  # a prompt label's model: the labels pane's edit of it
+    # the labels pane's edit of a trial the ask picked: over the records the label holds now, not its whole scope
+    p.add_argument("--same-records", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--set", dest="set_values", nargs="*", metavar="REF=VALUE")
     p.add_argument("--wait", nargs="?", type=float, const=600.0, metavar="SECONDS")
     p.add_argument("--again", action="store_true")
@@ -774,6 +790,11 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
                        "back what is still needed, and runs thimble update --continue. Run it in a shell.")
     p.add_argument("--print", action="store_true", help="print Claude's first message, and open nothing")
     p.set_defaults(fn=cmd_reapply)
+    p = sub.add_parser("tour", help="a two-minute tour of thimble, on made-up sample data",
+                       description="thimble tour: copies made-up sample data into ~/.thimble/tour and opens Claude Code "
+                       "there in its fullscreen layout, with /thimble:tour as the first prompt. Claude walks you through "
+                       "thimble one step at a time. Run it in a shell.")
+    p.set_defaults(fn=cmd_tour)
     p = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem",
                        description="thimble doctor: a checklist of what thimble needs, one line each: ✓ when it works, "
                        "× when it does not, with the step that fixes it on the line below. Run it in a shell.")
@@ -783,7 +804,11 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
     p = sub.add_parser("install", description="thimble install VERB: a step of scripts/install.sh, which runs them in "
                        "order (engine/kernel/install.py says what each does). Run the script, not this.")
     p.add_argument("verb", choices=INSTALL_VERBS, metavar="VERB")
-    p.add_argument("--from", dest="from_", metavar="DIR", help="release: the release the script downloaded")
+    p.add_argument("--file", metavar="FILE", help="release: the release's file the script downloaded, or GitHub's "
+                   "archive of the branch or tag --ref names")
+    p.add_argument("--tag", help="release: the release that file is (vX.Y.Z)")
+    p.add_argument("--from", dest="from_", metavar="DIR", help="release: a git clone of the release, as install "
+                   "scripts before release files give it")
     p.add_argument("--ref", help="release: the branch or tag the script was asked for")
     p.add_argument("--folder", metavar="DIR", help="the clone of a dev install (scripts/install.sh --local)")
     p.add_argument("--bin-dir", dest="bin_dir", metavar="DIR", help="where the commands are (~/.local/bin)")

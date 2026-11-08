@@ -55,6 +55,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
 
 What the last row of each fix says lives in the browser's home (fixes.json, by fix id), so it is still there after the
 restart; the newest row of a fix shows its state now, with the clicks it takes.
+A dev install's launcher (scripts/install.sh --local) starts the server from the clone, while Use it now starts it from
+live, where the fixes are: on a server that runs from the clone, Your fixes shows a fix that is on as off, and says why,
+and its Use it starts the server from live again (not_here).
 THIMBLE_FIXES=off turns fixes off on this server (the code tickets then take their entry points again).
 """
 from __future__ import annotations
@@ -270,11 +273,17 @@ def record(fid: int) -> dict[str, Any]:
     return _json(kernel(["show", str(fid), "--json"], timeout=30), "show")
 
 
-def records() -> list[dict[str, Any]]:
+def listing() -> dict[str, Any]:
+    """`thimble fix list --json`: the fixes, and the install's kind (`clone` for a dev install); {} when it fails."""
     r = kernel(["list", "--json"], timeout=30)
     with contextlib.suppress(ValueError):
-        return list((json.loads(r.out) if r.ok else {}).get("fixes") or [])
-    return []
+        got = json.loads(r.out) if r.ok else {}
+        return got if isinstance(got, dict) else {}
+    return {}
+
+
+def records() -> list[dict[str, Any]]:
+    return list(listing().get("fixes") or [])
 
 
 def press(fid: int) -> str:
@@ -368,12 +377,15 @@ def _phase_set(fid: int, phase: str | None) -> None:
 def status(every: bool = False) -> dict[str, Any]:
     """Each fix the page can show: the ones this server works on (their phase), and the ones whose end is not
     dismissed yet. A ready notice shows only while the fix is still ready (the terminal can apply it too). `every`:
-    every fix but the removed ones, for Your fixes. Newest first."""
+    every fix but the removed ones, for Your fixes, where a fix that is on but not in the code this server runs is off,
+    with why (not_here). Newest first."""
     _recover_soon()
     why = problem()
     notes = _notes()
     rows = []
-    for r in ([] if why else records()):
+    got = {} if why else listing()
+    kind = str(got.get("kind") or "")
+    for r in got.get("fixes") or []:
         fid = int(r["id"])
         n = notes.get(str(fid)) or {}
         if n.get("kind") == "ready" and r.get("state") != "ready":
@@ -384,7 +396,9 @@ def status(every: bool = False) -> dict[str, Any]:
         shown = bool(n) and not n.get("dismissed") and not phase
         conv = _fixers.get(fid)
         files = r.get("files") or []
-        rows.append({"id": fid, "title": r.get("title") or "", "state": r.get("state"), "phase": phase,
+        away = every and not_here(r, kind)
+        rows.append({"id": fid, "title": r.get("title") or "", "state": "off" if away else r.get("state"),
+                     "why": NOT_HERE if away else None, "phase": phase,
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
@@ -602,8 +616,10 @@ def end_of(answer: str) -> dict[str, Any]:
     req = re.search(r"^\s*\**request\**\s*:\s*([\s\S]+)$", text, re.I | re.M)
     does = re.search(r"^\s*\**what it does\**\s*:\s*([\s\S]+)$", text, re.I | re.M)
     said = req or does
+    # the fence a fixer may close its end with, as the prompt shows the form in one, is no part of what it says
+    words = re.sub(r"\s*`{3,}\s*$", "", said.group(1).strip()) if said else ""
     return {"title": (title.group(1).replace("*", "").strip() if title else "")[:60],
-            "summary": re.sub(r"\s+", " ", said.group(1).strip() if said else "")[:1200],
+            "summary": re.sub(r"\s+", " ", words)[:1200],
             "request": req is not None and does is None}
 
 
@@ -690,9 +706,14 @@ async def settle(fid: int, answer: str) -> None:
 async def apply(fid: int) -> None:
     """The person's click on a ready fix (Use it now, or Use it in Your fixes): the secret of this click to
     `fix apply`, then live's page is made ready, from the page the fix's checks built when live has the sources they
-    built it from (prepare), and the server starts again from live. Raises when the kernel refuses."""
+    built it from (prepare), and the server starts again from live. A fix that is on but not in the clone this server
+    runs from (on_elsewhere) stays as it is: only the server starts again from live. Raises when the kernel refuses."""
     _phase_set(fid, "applying")
     try:
+        rec = await asyncio.to_thread(on_elsewhere, fid)
+        if rec is not None:
+            runtime_task(_go_on(fid, fix_name(rec), undo=False), f"fix-apply:{fid}")
+            return
         secret = await asyncio.to_thread(press, fid)
         r = await asyncio.to_thread(kernel, ["apply", str(fid), "--ask", "-"], stdin=secret, timeout=300)
     except Exception:
@@ -705,12 +726,15 @@ async def apply(fid: int) -> None:
     runtime_task(_go_on(fid, title), f"fix-apply:{fid}")
 
 
-async def _go_on(fid: int, title: str) -> None:
+async def _go_on(fid: int, title: str, undo: bool = True) -> None:
+    """Live's page made ready, then the server starts again from live. A page that does not build takes the fix off
+    again (`undo`), unless it was on before the click (on_elsewhere), as the terminal has it."""
     why = await asyncio.to_thread(prepare, target_root(), checks_build(fid))
     if why:
-        await asyncio.to_thread(kernel, ["undo", str(fid)], timeout=300)
+        if undo:
+            await asyncio.to_thread(kernel, ["undo", str(fid)], timeout=300)
         _phase_set(fid, None)
-        note(fid, "failed", f"“{title}” did not go on: {why}; it is off again")
+        note(fid, "failed", f"“{title}” did not go on: {why}" + ("; it is off again" if undo else ""))
         return
     await restart(fid, f"“{title}” is on", "fixed", f"fix {fid}: {title}")
 
@@ -762,6 +786,39 @@ def target_root() -> Path:
     off), else this one."""
     live = live_root()
     return live if (live / "backend" / "app" / "main.py").is_file() else config.REPO_ROOT
+
+
+# why Your fixes shows a fix that is on as off (not_here)
+NOT_HERE = "the workbench runs from your clone, which does not have it"
+
+
+def not_here(rec: dict[str, Any], kind: str) -> bool:
+    """Whether fix `rec` is on but not in the code this server runs. In a dev install (the kernel's list says kind
+    `clone`), Use it now starts the server from live, where the fixes are, and the launcher starts it from the clone
+    (scripts/install.sh --local): the fix is a commit of live's branch mine, which the clone's checkout does not hold
+    unless the person merged it there."""
+    if rec.get("state") != "on" or kind != "clone" or target_root().resolve() == config.REPO_ROOT.resolve():
+        return False
+    commit = str(rec.get("commit") or "")
+    if not re.fullmatch(r"[0-9a-f]{7,64}", commit):
+        return True
+    try:
+        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(config.REPO_ROOT),
+                            "merge-base", "--is-ancestor", commit, "HEAD"], capture_output=True, timeout=30,
+                           check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    return p.returncode != 0
+
+
+def on_elsewhere(fid: int) -> dict[str, Any] | None:
+    """Fix `fid`'s record when it is on but not in the code this server runs (not_here), else None; no kernel call while
+    the server runs from live's browser/, or live has none."""
+    if target_root().resolve() == config.REPO_ROOT.resolve():
+        return None
+    got = listing()
+    rec = next((r for r in got.get("fixes") or [] if int(r.get("id") or 0) == int(fid)), None)
+    return rec if rec is not None and not_here(rec, str(got.get("kind") or "")) else None
 
 
 def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:

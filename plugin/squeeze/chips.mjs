@@ -1,23 +1,30 @@
-// chips.mjs: Squeeze as chips under a message. No `$`, no Node, no DOM: the hooks modules (term.ts, cards.ts, draw.ts),
-// the chips' Client (chips.tsx draws what draw.ts hands it) and the tests import it.
+// chips.mjs: Squeeze's levels (its chips) and the choices that move them. No `$`, no Node, no DOM: the hooks modules
+// (term.ts, cards.ts, ui.ts) and the tests import it.
 //
 // The chips are the same for every message; only where the original stands on each differs:
-//   Length              short · as written · longer · much longer. The original is always "as written": a shorter
-//                       version leaves parts out, a longer one explains more and adds detail.
+//   Length              very short · short · as written · longer · much longer. The original is always "as written":
+//                       a shorter version leaves parts out, a longer one explains more and adds detail.
 //   Background          new · learning · working · expert: the reader's background, how much of the field the text
 //                       explains and how much it takes as known. The original stands at working, and reads "as written".
-//   a chip the person typed, after +: their own words ("for my manager", "more skeptical", "as a timeline",
-//                       "engineer → manager"), as written · a little · more · fully. The original stands at as written.
+//   a chip the person typed in an earlier release: their own words ("for my manager", "more skeptical"), as written ·
+//                       a little · more · fully. The original stands at as written. A record kept then may still
+//                       hold one: it draws and counts in each rewrite, but no new one is made.
 // Each level is defined once, here (MEANS), and the request carries only the definition of the level picked (pickLine).
-// A message arrives as Claude wrote it; the chips rewrite it on demand. Every chip counts in every rewrite: one
-// $.model.complete call writes the message at all the chips' levels at once, and each version written is kept, so a
-// state seen before comes back with no call.
+// The person moves them with the choices under a simpler version or a catch-up (CHOICES): shorter and longer move
+// Length one level, explain more moves Background one level toward novice, assume more one level toward expert.
+// A message arrives as Claude wrote it. Every chip counts in every rewrite: one $.model.complete call writes the
+// message at all the chips' levels at once, and each version written is kept, so a state seen before comes back with
+// no call.
 //
 // A catch-up is a message of its own that the chips write of several of Claude's messages: all of them since the
 // person's last prompt, when replies piled up (term.ts). Its record is a message's record with `catchup` set; its text
 // (the original) is the messages as written, one after another (catchUpText); the request names them as several
 // messages to catch the person up on (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
 // which still show above it, so it never shows its original: 0 dismisses it.
+// A simpler version (s) is a catch-up of one message, the latest answer, with `catchup.kind` 'simplify': the request
+// names one message to make simpler (SIMPLIFY_HEAD), and it arrives at Length short and Background learning
+// (SIMPLIFY_AT). It stands below the answer as a catch-up does, and its choices change it. A message's own versions,
+// rewritten in place, are what s did in 0.10.12 and earlier: a resumed session's records still hold and draw them.
 //
 // The chips belong to the whole answer: its text and the cards drawn in its turn. The request shows the original's
 // cards (cardsBlock: each card's title, columns, first rows, what it draws and its
@@ -31,9 +38,10 @@
 //   {row, text, at, shown, squeeze, catchup?}
 //   squeeze: {
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
-//     own:      [{id, words}]         the chips the person typed for this message (at most three)
-//     scale:    5                     the chips' scales now: Length short · as written · longer · much longer, and
-//                                     the Background chip
+//     own:      [{id, words}]         the chips the person typed for this message in an earlier release
+//     scale:    6                     the chips' scales now: Length very short · short · as written · longer · much
+//                                     longer, and the Background chip. A record kept at scale 5 (no very short) is
+//                                     read with its Length levels one higher (upgradeSqueeze)
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     cards:    {key: {rows, did}}    the cards of each version that changed one: rows {row: [{id, copy}]} as drawn
 //                                     (`copy`: the copy of the card that version shows, cards.ts), did [{id, did:
@@ -91,21 +99,40 @@ export function mapLinks(text, fn) {
 
 /** The chips every message has, in the order drawn. `level0` is where the original stands: "as written". */
 export const CHIPS = Object.freeze([
-  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed', ends: Object.freeze(['shorter', 'longer']) }),
+  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['very short', 'short', 'as written', 'longer', 'much longer']), level0: 2, kind: 'fixed', ends: Object.freeze(['shorter', 'longer']) }),
   // (the id is the records' since before the chip was renamed)
   Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['novice', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed', ends: Object.freeze(['novice', 'expert']) }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at: short. */
-export const ARRIVE = 0
-/** The chips' scales now (the record's `scale`): Length without one line, and the Background chip's four levels. */
-export const SCALE = 5
+export const ARRIVE = 1
+/** The chips' scales now (the record's `scale`): Length with very short, and the Background chip's four levels. */
+export const SCALE = 6
+
+/** A Length level kept in a version's key (`length=0&familiarity=1`), one higher. */
+const shiftKey = k => String(k).replace(/(^|&)length=(\d+)/, (all, lead, n) => `${lead}length=${Number(n) + 1}`)
+const shiftKeys = o => (o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).map(([k, v]) => [shiftKey(k), v])) : o)
+
+/**
+ * A record's squeeze as this scale reads it. Records kept before very short was added (scale 5, or none) store Length
+ * one lower: short was 0. Their levels, their versions' keys, their cards' keys and their calls' keys move up one, so
+ * each version keeps the level it was written at. A squeeze at this scale comes back as it is.
+ */
+export function upgradeSqueeze(s) {
+  if (!s || typeof s !== 'object' || Number(s.scale) >= SCALE) return s
+  const at = s.at && typeof s.at === 'object' ? { ...s.at } : {}
+  if (Number.isInteger(at.length)) at.length += 1
+  return {
+    ...s, at, scale: SCALE,
+    ...(s.versions ? { versions: shiftKeys(s.versions) } : {}),
+    ...(s.cards ? { cards: shiftKeys(s.cards) } : {}),
+    ...(Array.isArray(s.made) ? { made: s.made.map(m => (m && typeof m.key === 'string' ? { ...m, key: shiftKey(m.key) } : m)) } : {}),
+  }
+}
 
 /** The levels of a chip the person typed: from the original (0) to all the way their words ask. */
 export const OWN_LEVELS = Object.freeze(['as written', 'a little', 'more', 'fully'])
-const MAX_OWN = 3
 
-const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 const sq = rec => (rec && rec.squeeze && typeof rec.squeeze === 'object' ? rec.squeeze : {})
 
 /** The dots of a chip at level v: one ● at its place among ○, as `○●○○○` for Length short. */
@@ -140,31 +167,6 @@ export const atOf = rec => levelsAt(sq(rec))
 /** A chip the person typed, as a chip: its words are its name, and its levels run from the original to fully. */
 function ownChip(c) {
   return { id: c.id, kind: 'own', name: c.words, words: c.words, levels: [...OWN_LEVELS], level0: 0 }
-}
-
-/** What the person typed after +, as a chip's words: one line, at most 40 characters, the + dropped. '' for none. */
-export function ownWords(typed) {
-  return str(String(typed || '').replace(/^\s*\+\s*/, ''), 40).replace(/[.,;:]+$/, '')
-}
-
-/** The record's squeeze with a chip the person typed added (or kept, when those words have one), its id, and the
- *  oldest of more than MAX_OWN gone. Null for empty words. */
-export function withOwn(rec, typed) {
-  const words = ownWords(typed)
-  if (!words) return null
-  const s = sq(rec)
-  const own = (Array.isArray(s.own) ? s.own : []).filter(c => c && c.id)
-  const have = own.find(c => c.words.toLowerCase() === words.toLowerCase())
-  if (have) return { squeeze: s, id: have.id }
-  const base = `x-${String(words).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'own'}`
-  const used = new Set([...CHIPS.map(c => c.id), ...own.map(c => c.id)])
-  let id = base
-  for (let i = 2; used.has(id); i++) id = `${base.slice(0, 18)}-${i}`
-  const next = [...own, { id, words }]
-  const gone = next.length > MAX_OWN ? next.shift() : null
-  const at = { ...(s.at || {}) }
-  if (gone) delete at[gone.id]
-  return { squeeze: { ...s, own: next, at }, id }
 }
 
 /** Every chip of the message, in the order drawn: the fixed ones, then the ones the person typed. Each with `level0`,
@@ -237,6 +239,7 @@ const round = n => (n >= 40 ? Math.round(n / 5) * 5 : Math.max(1, Math.round(n))
  */
 export const MEANS = Object.freeze({
   length: Object.freeze([
+    m => `One or two sentences, at most about ${Math.min(40, round(m.words / 8))} words${m.keep ? ', not counting the corrections listed above' : ''}. Give the main point, and leave out the rest.`,
     m => `About a quarter of the original, about ${round(m.words / 4)} words${m.keep ? ', not counting the corrections listed above' : ''}. Keep the main point and the facts it rests on, and leave out the rest.`,
     m => `About as long as the original, about ${m.words} words.`,
     m => `About one and a half times the original, about ${round(m.words * 1.5)} words. Explain what the original says more fully, such as what a term means or how one step led to the next.${m.data ? ' Add detail from the cards and their rows where it helps, each new number cited.' : ''}`,
@@ -271,12 +274,40 @@ export function pickLine(c, m = {}) {
 /** The line that heads the original in a catch-up's request: several messages, written as one. */
 export const CATCHUP_HEAD = "The original answer: Claude's messages since the analyst's last prompt, in the order it wrote them. The analyst knows the conversation as it was before them. Write one message that catches them up."
 
+/** The line that heads the original in a simpler version's request: one message, made simpler. */
+export const SIMPLIFY_HEAD = 'The original answer, as Claude wrote it. Write one simpler message of it, for an analyst who found it long or hard to follow. It stands below the original, which stays on the screen.'
+
+/** The levels a simpler version arrives at: Length short, Background learning. */
+export const SIMPLIFY_AT = Object.freeze({ length: 1, familiarity: 1 })
+
+/** The choices under a simpler version or a catch-up, in the order drawn, each with its key, its words, what the
+ *  block says while it is being written, and the chip it moves one level (`dir` -1 toward the chip's first level). */
+export const CHOICES = Object.freeze([
+  Object.freeze({ key: '1', words: 'shorter', doing: 'making it shorter', chip: 'length', dir: -1 }),
+  Object.freeze({ key: '2', words: 'longer', doing: 'making it longer', chip: 'length', dir: 1 }),
+  Object.freeze({ key: '3', words: 'explain more', doing: 'explaining more', chip: 'familiarity', dir: -1 }),
+  Object.freeze({ key: '4', words: 'assume more', doing: 'assuming more', chip: 'familiarity', dir: 1 }),
+])
+
+/**
+ * The levels a choice moves a block to from `at`, or null at that chip's end. A simpler version or a catch-up never
+ * stands at the original (the original shows above it), so a step that would land there goes one level further.
+ */
+export function choiceAt(rec, at, choice) {
+  const probe = a => ({ ...rec, squeeze: { ...sq(rec), at: a } })
+  let to = stepAt(probe(at), choice.chip, choice.dir)
+  if (to && isCatchUp(rec) && isOriginal(chipsOf(probe(to)))) to = stepAt(probe(to), choice.chip, choice.dir)
+  return to
+}
+
 /** A catch-up's original: Claude's messages, in order, one after another. */
 export const catchUpText = texts => (texts || []).map(t => String(t || '').trim()).filter(Boolean).join('\n\n---\n\n')
 
 /** Whether a record is a catch-up, and one that still stands (not dismissed). */
 export const isCatchUp = rec => !!(rec && rec.catchup && typeof rec.catchup === 'object')
 export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
+/** Whether a record is a simpler version of one answer (s): a catch-up of that one message. */
+export const isSimplify = rec => isCatchUp(rec) && rec.catchup.kind === 'simplify'
 
 /**
  * The $.model.complete request that writes the message at its chips' levels: the input (the question, the original,
@@ -295,7 +326,7 @@ export function request(rec, { system, toolkit = '', question = '', chips = chip
   const head = [
     question ? `The analyst asked: ${question.trim().slice(0, 2000)}` : 'The analyst\'s question is not known.',
     '',
-    isCatchUp(rec) ? CATCHUP_HEAD : 'The original answer, as Claude wrote it:',
+    isSimplify(rec) ? SIMPLIFY_HEAD : isCatchUp(rec) ? CATCHUP_HEAD : 'The original answer, as Claude wrote it:',
     '<original>',
     String(rec?.text ?? ''),
     '</original>',
@@ -797,7 +828,7 @@ export function shownKey(rec) {
 /**
  * What Claude reads beside the person's next prompt (core/tell.ts), once the person settled on a version of its
  * message: the version they read, whole, so a later turn knows what
- * they saw. A catch-up names the replies it stands in for. `told` says the version Claude was told of before: going
+ * they saw. A catch-up names the replies it stands in for, and a simpler version the message it stands below. `told` says the version Claude was told of before: going
  * back to the original is said only after a version was told. Empty when there is nothing new to say.
  */
 export function settledNote(rec, told = 'orig') {
@@ -807,6 +838,11 @@ export function settledNote(rec, told = 'orig') {
   const did = cardsDid(rec)
   const cards = did.length ? `\n\nIts cards changed with it: ${did.map(d => `"${d.title}" (${d.id}) ${d.did}${d.did === 'edited' ? `, now version ${d.v}` : ''}`).join('; ')}.` : ''
   const asWere = sq(rec).cards ? ', with its cards as they were' : ''
+  if (isSimplify(rec)) {
+    const which = `your message ("${firstWordsOf(rec.text)}")`
+    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst closed the simpler version of ${which}; it shows as you wrote it${asWere}.`
+    return `Below ${which}, which still shows as you wrote it, the analyst read a simpler version of it that the squeeze chips wrote${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}`
+  }
   if (isCatchUp(rec)) {
     const n = Number(rec.catchup.replies) || 0
     const of = n === 1 ? 'reply' : `${n} replies`
