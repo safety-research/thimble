@@ -270,6 +270,14 @@ export async function tourRuns($: Engine): Promise<boolean> {
   return !!(await tourNow($))
 }
 
+/** The tour's sample data in this plugin (tour/sample) when a tour ran in this session, else null. The tour runs in the
+ *  person's own folder, where its orders.csv is not, so a link of its answers to that file reads it here
+ *  (explain/expand.ts placeLines). */
+export async function tourData($: Engine): Promise<string | null> {
+  if (!(await stateNow($)) && !(await pastNow($)).length) return null
+  return `${$.plugin.root.replace(/\/+$/, '')}/tour/sample`
+}
+
 /** Whether `row` is the tour's sample answer: the row kept when step 0 was done, or, while step 0 waits, the answer of
  *  the turn that ends now. */
 export async function tourSample($: Engine, row: string | null | undefined): Promise<boolean> {

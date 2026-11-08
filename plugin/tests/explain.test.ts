@@ -1,6 +1,7 @@
 // The explainers and heads-ups (explain/): after the observer's look, each stands on its words in the answer as a
 // press, in the theme's teal and orange; e explains the words selected in an answer, and with Citations manual, c makes
-// them a citation. While the tour waits for its selection step, the explainer shown is that step done.
+// them a citation. While the tour waits for its selection step, the explainer shown is that step done. After a tour, a
+// link to its orders.csv opens the plugin's copy of the file.
 // All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
@@ -12,6 +13,7 @@ import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, resetExplain, type ExplainPart } from '../explain/seam'
+import { placeLines } from '../explain/expand'
 import { trayNow } from '../tray/tray'
 import { readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
@@ -179,6 +181,21 @@ test('the tour (tour/tour.ts): while its selection step waits, the explainer of 
   await settle()
   expect((await tourNow(s.$))?.done).toEqual(['answer', 'e'])
   expect((await tourNow(s.$))?.at).toBe('v')
+})
+
+test("after a tour, a link to the tour's orders.csv opens its lines from the plugin's tour/sample; the person's own file comes first", async () => {
+  setOptions({})
+  const s = setup([LOOK])
+  s.$.ui.place = async () => ({ isPlaced: true, requestId: 'r-made-up' })
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[]) => (argv[0] === 'sed' ? { exitCode: 2, stdout: '', stderr: 'No such file' } : run(argv))
+  s.files.set('/made-up/plugin/tour/sample/orders.csv', 'order,day,item,refunded\n1,2026-03-02,loose-leaf tins,no\n2,2026-03-03,teapot,yes\n')
+  // no tour in this session: orders.csv is not in the person's folder
+  expect(await placeLines(s.$, 'orders.csv', 2, 2)).toBe('orders.csv could not be read here.')
+  await tourStart(s.$)
+  expect(await placeLines(s.$, 'orders.csv', 2, 3)).toEqual([{ n: 2, text: '1,2026-03-02,loose-leaf tins,no' }, { n: 3, text: '2,2026-03-03,teapot,yes' }])
+  s.files.set('/made-up/data/orders.csv', 'id\nmine\n')
+  expect(await placeLines(s.$, 'orders.csv', 2, 2)).toEqual([{ n: 2, text: 'mine' }])
 })
 
 test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {

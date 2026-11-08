@@ -6,7 +6,9 @@
 // message's part `explain` keeps it as it keeps the look's explainers.
 //
 // The files: the places the checker's evidence found for the answer's citations (marks/store.ts MarkItem.evidence),
-// then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray.
+// then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray. A relative
+// path is read in the folder the session started in, then the folder holding the labels, then, after a tour, the
+// tour's sample data (readRoots).
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf, questionOf, setPart } from '../core/answers'
@@ -17,6 +19,7 @@ import { rowMarks } from '../marks/store'
 import { jsonIn } from '../observer/reply.mjs'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
+import { tourData } from '../tour/tour'
 import type { ExplainPart } from './seam'
 import { filePlaces } from './place.mjs'
 
@@ -59,10 +62,16 @@ async function citedFiles($: Engine, places: Place[], roots: string[]): Promise<
 
 const PLACE_LINES = 12 // lines the tray shows of a place an explainer cites
 
+/** The folders a relative path is read in, in turn: the folder the session started in, the folder holding the labels,
+ *  and, when a tour ran in this session, the tour's sample data, whose orders.csv its answers name. */
+async function readRoots($: Engine): Promise<string[]> {
+  return [...new Set([await startDir($), (await rootHere($)) || '', (await tourData($).catch(() => null)) || ''].filter(Boolean))]
+}
+
 /** The lines of a file an explainer or a heads-up cites (the tray shows them when its link is pressed): from `from` to
  *  `to` (the file's first lines when no line is named), at most PLACE_LINES; else a sentence that says why not. */
 export async function placeLines($: Engine, path: string, from: number | null, to: number | null): Promise<{ n: number; text: string }[] | string> {
-  const roots = [...new Set([await startDir($), (await rootHere($)) || ''].filter(Boolean))]
+  const roots = await readRoots($)
   const a = Math.max(1, from ?? 1)
   const b = Math.min(Math.max(a, to ?? a + PLACE_LINES - 1), a + PLACE_LINES - 1)
   for (const root of path.startsWith('/') ? [''] : roots) {
@@ -101,7 +110,7 @@ async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
 async function writeAbout($: Engine, row: string, term: string): Promise<Any> {
   const msg = await messageOf($, row)
   if (!msg) return 'That answer is not in this session any more.'
-  const roots = [...new Set([await startDir($), (await rootHere($)) || ''].filter(Boolean))]
+  const roots = await readRoots($)
   const answer = (await textView($, row, msg.text)).text
   const places = [...(await evidencePlaces($, row)), ...filePlaces(answer)]
   const question = await questionOf($, row).catch(() => '')
