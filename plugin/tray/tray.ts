@@ -84,13 +84,14 @@ import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, errorWordsOf, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
-import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
+import { marksIn, plainSentence, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
+import { tourHoldsCites } from '../tour/tour'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
@@ -425,6 +426,8 @@ function citesPlace(ev: Any, p: { path: string; from: number | null; to: number 
  *  looksByWords) or of the same lines, else, for a link to a file's lines, those lines (`opens`: the frame each opens,
  *  by their order in the words; null: none). */
 async function linksOf($: Engine, f: Frame, raw: string): Promise<{ text: string; marks: { start: number; end: number; words: string }[]; looks: Any[]; opens: (Frame | null)[] }> {
+  // while the tour holds citations back (tour/tour.ts tourHoldsCites), the links are their words alone
+  if (await tourHoldsCites($).catch(() => false)) return { text: withoutLinks(withoutMarks(raw)), marks: [], looks: [], opens: [] }
   const { text, places } = citeLinks(raw) as { text: string; places: ({ path: string; from: number | null; to: number | null } | null)[] }
   const marks = marksIn(text)
   const items = (await rowMarks($, f.row))?.items ?? []

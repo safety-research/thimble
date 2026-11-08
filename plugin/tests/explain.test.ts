@@ -1,7 +1,8 @@
 // The explainers and heads-ups (explain/): after the observer's look, each stands on its words in the answer as a
 // press, in the theme's teal and orange; e explains the words selected in an answer, and with Citations manual, c makes
-// them a citation. While the tour waits for its selection step, the explainer shown is that step done. After a tour, a
-// link to its orders.csv opens the plugin's copy of the file.
+// them a citation. While the tour waits for its selection step, the explainer shown is that step done. Until the tour's
+// cite step, an explainer's links are words and c cites nothing. After a tour, a link to its orders.csv opens the
+// plugin's copy of the file.
 // All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
@@ -14,14 +15,14 @@ import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, resetExplain, type ExplainPart } from '../explain/seam'
 import { placeLines } from '../explain/expand'
-import { trayNow } from '../tray/tray'
+import { trayKey, trayNow } from '../tray/tray'
 import { readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeBar, citeKey, citeWords } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { noteViewport } from '../cards/draw'
-import { tourDid, tourNow, tourStart } from '../tour/tour'
+import { tourDid, tourHoldsCites, tourNow, tourStart } from '../tour/tour'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -181,6 +182,34 @@ test('the tour (tour/tour.ts): while its selection step waits, the explainer of 
   await settle()
   expect((await tourNow(s.$))?.done).toEqual(['answer', 'e'])
   expect((await tourNow(s.$))?.at).toBe('v')
+})
+
+test("the tour holds citations back until its cite step: an explainer's link opens nothing and c cites nothing, then both act", async () => {
+  // the default Citations: with manual, the tour leaves out its cite step
+  setOptions({})
+  try {
+    noteViewport({ isFullscreen: true })
+    const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '[upload.py allows five tries](client/upload.py#L3-4).' }) })
+    s.$.ui.place = async () => ({ isPlaced: true, requestId: 'r-made-up' })
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
+    await tourStart(s.$)
+    await tourDid(s.$, 'answer')
+    expect(await tourHoldsCites(s.$)).toBe(true)
+    await pressE(s, { text: 'the client', requestId: 't1-row' })
+    expect((await tourNow(s.$))?.at).toBe('v')
+    expect(await trayKey(s.$, '2', 0)).toBe(null)
+    s.$.ui.selection = async () => ({ text: '41 of the 44', requestId: 't1-row' })
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+    expect(await citeKey(s.$, 'c', 0)).toBe(null)
+    await tourDid(s.$, 'v')
+    await tourDid(s.$, 's')
+    expect((await tourNow(s.$))?.at).toBe('cite')
+    expect(await tourHoldsCites(s.$)).toBe(false)
+    expect(await trayKey(s.$, '2', 0)).not.toBe(null)
+    expect((await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)).toEqual(['c'])
+  } finally {
+    setOptions({})
+  }
 })
 
 test("after a tour, a link to the tour's orders.csv opens its lines from the plugin's tour/sample; the person's own file comes first", async () => {

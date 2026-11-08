@@ -270,6 +270,14 @@ export async function tourRuns($: Engine): Promise<boolean> {
   return !!(await tourNow($))
 }
 
+/** Whether the tour holds citations back: it runs, and its cite step has not come. Until then its explainers' links
+ *  draw as their words (tray/tray.ts linksOf) and c cites nothing (marks/cite.ts), so the first citations the person
+ *  sees are the cite step's. */
+export async function tourHoldsCites($: Engine): Promise<boolean> {
+  const t = await tourNow($)
+  return !!t && t.at !== 'cite'
+}
+
 /** The tour's sample data in this plugin (tour/sample) when a tour ran in this session, else null. The tour runs in the
  *  person's own folder, where its orders.csv is not, so a link of its answers to that file reads it here
  *  (explain/expand.ts placeLines). */
