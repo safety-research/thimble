@@ -4293,23 +4293,77 @@ def diff_of(rec: dict[str, Any]) -> str:
     return ""
 
 
+def _mail(commit: str) -> str:
+    """A commit of live as git am takes it: the patch git format-patch writes, with the commit's title and words."""
+    return run(["git", "format-patch", "--stdout", "-1", commit], cwd=live_dir()).stdout
+
+
+def _applies(commit: str, patch: str) -> bool:
+    """Whether git apply, as git am runs it, applies `patch` (one commit's, or several in a row) to the tree of `commit`,
+    checked in an index of its own, so that live does not change."""
+    with tempfile.TemporaryDirectory(prefix="export-", dir=home()) as d:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(d) / "index")}
+        git("read-tree", commit, cwd=live_dir(), env=env)
+        return run(["git", "apply", "--cached", "--check"], cwd=live_dir(), env=env, check=False,
+                   stdin=patch).returncode == 0
+
+
+def _fix_of(commit: str, recs: dict[int, dict[str, Any]]) -> dict[str, Any]:
+    """The record of the fix whose change a commit of live holds, else {}: thimble ends each fix's commit with
+    `thimble fix <id>`, and Claude's commit for a fix at thimble reapply has the fix's title."""
+    words = git("log", "-1", "--format=%B", commit, cwd=live_dir()).splitlines() or [""]
+    m = re.fullmatch(r"thimble fix (\d+)", words[-1].strip())
+    if m:
+        return recs.get(int(m[1])) or {}
+    return next((r for r in recs.values() if r.get("title") and r["title"] == words[0].strip()), {})
+
+
+def _patch(rec: dict[str, Any], commit: str) -> tuple[str, list[dict[str, Any]]]:
+    """The patch of fix `rec`'s commit that git am applies to the release, and the fixes it carries before its own
+    change, oldest first: those under the commit that it builds on. From the commit just under it down to the release
+    commit, a fix is carried when the patches above it do not apply without it (its changes are in the lines they
+    touch), or when a fix above it refines it (a record's `refines`). A fix that stands alone, or one made on another
+    release (an update set it aside), is its own commit's patch alone."""
+    live, base = live_dir(), str(release().get("base") or "")
+    patch = _mail(commit)
+    if not base or run(["git", "merge-base", "--is-ancestor", base, commit], cwd=live, check=False).returncode:
+        return patch, []
+    recs, carried = records(), []
+    refined = {rec.get("refines")} - {None}
+    for c in git("rev-list", "--first-parent", f"{base}..{commit}^", cwd=live).split():
+        fix = _fix_of(c, recs)
+        if fix.get("id") in refined or not _applies(f"{c}^", patch):
+            patch = _mail(c) + patch
+            carried.insert(0, fix or {"title": git("log", "-1", "--format=%s", c, cwd=live)})
+            refined |= {fix.get("refines")} - {None}
+    return patch, carried
+
+
 def export(fid: int | str, to: str | None = None) -> list[str]:
-    """Save a fix as files, with nothing sent: the patch (git am applies it) and its record. Not scanned: these are the
-    person's own files on their own machine; submitting scans."""
+    """Save a fix as files, with nothing sent: the patch (git am applies it to the release) and its record. A fix that
+    builds on other fixes carries them in its patch, before its own change (_patch), and the last line names them. The
+    lines to print. Not scanned: these are the person's own files on their own machine; submitting scans."""
     r = get(fid)
     d = Path(to or os.getcwd())
     d.mkdir(parents=True, exist_ok=True)
-    out = []
+    out: list[str] = []
+    carried: list[dict[str, Any]] = []
     diff = diff_of(r)
     if diff.strip():
-        repo = live_dir()
-        patch = run(["git", "format-patch", "--stdout", "-1", r["commit"]], cwd=repo).stdout if r.get("commit") else diff
+        patch = diff
+        if r.get("commit"):
+            # a fix that is on: its commit as mine holds it now, which a rebuild of mine moves without its record
+            patch, carried = _patch(r, _fix_ref(r) if r.get("state") == "on" else r["commit"])
         p = d / f"thimble-fix-{r['id']}.patch"
         p.write_text(patch)
         out.append(str(p))
     m = d / f"thimble-fix-{r['id']}.md"
     m.write_text("\n".join(show_lines(r["id"])) + "\n")
     out.append(str(m))
+    if carried:
+        names = _and([f"fix {f['id']} ({f['title']})" if f.get("id") else f"“{f['title']}”" for f in carried])
+        out.append(f"Fix {r['id']} builds on {names}, so the patch carries {'it' if len(carried) == 1 else 'them'} "
+                   f"first{'' if len(carried) == 1 else ', in order'}.")
     return out
 
 
