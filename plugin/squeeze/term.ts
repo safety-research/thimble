@@ -194,7 +194,7 @@ export async function setLevels($: Engine, id: string, at: At, key: string | nul
   }
 }
 
-/** A change on its way stops, its wait or its call (0 removes the block it is for), so the record keeps the version
+/** A change on its way stops, its wait or its call (0 hides the block it is for), so the record keeps the version
  *  it shows and nothing is written after. Returns the levels that change was going to (null: none was on its way). A
  *  catch-up not written yet is written on, at its latest levels: there is no version of it to keep. */
 export async function stopLevels($: Engine, id: string): Promise<At | null> {
