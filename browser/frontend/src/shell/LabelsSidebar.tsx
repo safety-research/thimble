@@ -47,6 +47,7 @@ import { NewCheckCard, RunLine, RunMark, RunNotes, runCheck, useChecks, type Che
 import { checkColour, coversOf, docRuns, freeColour, nameTaken, NOTE_COLOR, runLine } from '../report/checkComments'
 import { useDocTypes, writtenDocs } from '../report/docTypes'
 import { docLabel } from '../report/model'
+import { HelpButton } from '../files/LabelsHelp'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 /** the found items a detail lists before "N more" */
@@ -160,6 +161,7 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
         ) : (
           <h2 className="lside-heading">
             {section === 'labels' ? 'Labels' : 'Comments'} <span className="lside-n">{section === 'labels' ? labels.length : comments.items.length}</span>
+            {section === 'labels' && <HelpButton of="labels" />}
           </h2>
         )}
         {section === 'labels' && !open && <LabelTool ws={ws} />}

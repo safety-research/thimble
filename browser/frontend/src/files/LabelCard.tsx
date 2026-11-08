@@ -1,7 +1,7 @@
 // A label's edit card beside the Labels pane: what it labels (records of files, canvas cards or report sentences), for
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
-// body, and the classes with colour and highlight switch (headed "paint in Files": which values Files and the views
-// color). Colours and highlights save as they change; the rest is a
+// body, and the classes with colour and highlight switch (headed "Highlight in Files": which values Files colors,
+// PAINT_TIP). Colours and highlights save as they change; the rest is a
 // draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
 // Escape drops the draft. The card stands at the Labels pane's edge, or in the popover a view or Files opens beside a
 // control (LabelEditor). A label that exists opens compact: its name in its color (a multi-class label's in the ink,
@@ -17,8 +17,9 @@ import { TextArea, TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Menu, Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, Tipped } from '../components/Tooltip'
 import { labelApi } from '../lib/api'
+import { ThimbleTag } from './LabelsHelp'
 import { bus } from '../lib/bus'
 import { loadSettings, modelChoices, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
@@ -179,6 +180,10 @@ export function scopeLine(k: Concept, glob: string | null | undefined = k.glob):
   const count = st?.state === 'done' ? outcomeText({ ...st, failed: 0 }) : st?.state === 'running' ? progressText(st) : n != null ? `${n.toLocaleString()} ${unitWord(k.unit, n)}` : ''
   return [files, count].filter(Boolean).join(' · ')
 }
+
+/** What a class's switch does, on the hover of the switches' heading: it colors the class's records in Files and the
+ * views, and changes nothing of the label. */
+export const PAINT_TIP = "Turn a value on to color its records in Files. This doesn't change the label or its counts."
 
 /** Whether More is open in a label's compact card, for the page's session: the next card opens as the last was left. */
 let moreShown = false
@@ -521,7 +526,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
       <TextInput bare mono value={c.name} onChange={(v) => setClass(i, { name: v })} aria-label="Class name" className="label-card-classname" autoFocus={!c.name && i >= 2} />
       {classes.length > 2 && <Button variant="icon" size="sm" icon="x" title="Remove" aria-label={`Remove ${c.name || 'the class'}`} className="label-card-drop" onClick={() => dropClass(i)} />}
       {counts?.[c.name] != null && saved.has(c.name) && <span className="label-sheet-count">{counts[c.name].toLocaleString()}</span>}
-      {full && <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Paint ${c.name} in Files`} />}
+      {full && <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Highlight ${c.name} in Files`} />}
     </div>
   )
   const add = (
@@ -579,12 +584,14 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
             {grid}
             <div className="label-card-classes">
               <div className="label-card-classes-head">
-                <span className="label-card-key">Paint in Files</span>
+                <Tipped text={PAINT_TIP} className="label-card-key">
+                  Highlight in Files
+                </Tipped>
               </div>
               {classes.map((c, i) => (
                 <div key={i} className="label-card-class">
                   <span className="label-card-hlname">{c.name}</span>
-                  <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Paint ${c.name} in Files`} />
+                  <Switch checked={c.highlight} onChange={(v) => setClass(i, { highlight: v })} label={`Highlight ${c.name} in Files`} />
                 </div>
               ))}
               {add}
@@ -608,7 +615,9 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
       <div className="label-card-classes">
         <div className="label-card-classes-head">
           <span className="label-card-key">Classes</span>
-          <span className="label-card-hl">paint in Files</span>
+          <Tipped text={PAINT_TIP} className="label-card-hl">
+            Highlight in Files
+          </Tipped>
         </div>
         {classes.map((c, i) => classRow(c, i, true))}
         {add}
@@ -673,6 +682,9 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
           </span>
         )}
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
+      </div>
+      <div className="label-sheet-made-row">
+        <ThimbleTag className="label-sheet-made">Created by thimble</ThimbleTag>
       </div>
       <LabelFields ws={ws} label={k} labels={labels} draft={shown} classes={classes} set={set} counts={k.counts} />
       <div className="label-card-foot">

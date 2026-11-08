@@ -35,6 +35,7 @@ export type IconName =
   | 'report'
   | 'writeup'
   | 'question'
+  | 'circle-help'
   | 'warning'
   | 'globe'
   | 'plus'
@@ -144,6 +145,8 @@ const PATHS: Record<IconName, string> = {
   report: 'M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z' + 'M8.5 7.5h4M8.5 12h7M8.5 16.5h7',
   writeup: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4.5' + 'M14 3v5h5M19 8v2.5' + 'M9 12h5M9 16h3' + 'M21.1 13.4a1.6 1.6 0 0 1 0 2.3L15.4 21.4l-3.1.7.7-3.1 5.7-5.7a1.6 1.6 0 0 1 2.3 0z',
   question: 'M8.6 8.6a3.4 3.4 0 1 1 4.9 3.05c-1 .55-1.5 1.3-1.5 2.35v.8M12 19h.01',
+  // the question mark in a ring: what a thing is, on hover (files/LabelsHelp HelpButton)
+  'circle-help': 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM9.5 9.4a2.5 2.5 0 1 1 3.6 2.25c-.75.4-1.1.95-1.1 1.7v.35M12 16.9h.01',
   warning: 'M10.7 4.6a1.5 1.5 0 0 1 2.6 0l8.2 14.2a1.5 1.5 0 0 1-1.3 2.2H4.8a1.5 1.5 0 0 1-1.3-2.2zM12 9.5v4.5M12 17.2h.01',
   globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM3 12h18M12 3c-2.5 2.6-3.75 5.6-3.75 9s1.25 6.4 3.75 9c2.5-2.6 3.75-5.6 3.75-9S14.5 5.6 12 3z',
   plus: 'M12 5v14M5 12h14',

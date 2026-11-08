@@ -3577,3 +3577,38 @@
     background-image: linear-gradient(color-mix(in oklab, var(--accent) 8%, transparent), color-mix(in oklab, var(--accent) 8%, transparent));
   }
 }
+
+/* the ? that says what labels or fields are (files/LabelsHelp HelpButton): a borderless icon button the size of its
+   heading's text, centered on its line in a menu and in the Labels sidebar's name, in the quiet ink until hovered or
+   focused; and the grey thimble tag of a label card and a label's edit card (ThimbleTag) */
+.labels-help-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lside-heading:has(.labels-help) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.labels-help.btn {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+}
+.labels-help.btn .btn-ico {
+  width: 14px;
+  height: 14px;
+}
+.labels-help.btn:hover,
+.labels-help.btn:focus-visible {
+  color: var(--text-primary);
+}
+.bcell-kind-tag .bcell-kind-logo {
+  margin-right: 4px;
+  color: var(--text-tertiary);
+}
+.label-sheet-made-row {
+  display: flex;
+  padding: 10px 12px 0;
+}

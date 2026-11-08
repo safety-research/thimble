@@ -20,6 +20,7 @@ import type { Concept, ConceptRun } from '../lib/types'
 import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
+import { HelpButton } from './LabelsHelp'
 import { LabelPalette } from './LabelPalette'
 import { ReadCutLine } from './ReadCutLine'
 import type { FilesLabels } from './useLabels'
@@ -63,6 +64,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
           <Icon name="chevron-right" size={14} className="files-caret" />
           Labels
         </button>
+        <HelpButton of="labels" />
         <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
         {onHide && <Button variant="icon" size="sm" icon="sidebar" title="Hide labels" aria-label="Hide labels" onClick={onHide} />}
       </div>
