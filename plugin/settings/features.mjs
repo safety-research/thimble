@@ -79,8 +79,8 @@ export const SWITCHES = [
   },
   {
     key: 'squeezeAnswers', title: 'Simplify', group: 'Answers', default: true,
-    does: 'Press s for a shorter, plainer version of the last answer, below it. Under it, press 1 for shorter, 2 for longer, 3 to explain more, 4 to assume more, or 0 to remove it. One call each time you ask.',
-    says: { on: 'Press s for a shorter, plainer version of the last answer, below it. Under it, 1–4 make it shorter, longer, plainer or more expert; 0 removes it.', off: 'No simpler versions.' },
+    does: 'Press s for a shorter, plainer version of the last answer, below it. Under it, press 1 for shorter, 2 for longer, 3 to explain more, 4 to assume more, or 0 to hide it. One call each time you ask.',
+    says: { on: 'Press s for a shorter, plainer version of the last answer, below it. Under it, 1–4 make it shorter, longer, plainer or more expert; 0 hides it.', off: 'No simpler versions.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,

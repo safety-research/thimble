@@ -1,6 +1,6 @@
 // Simplify and catch-up in the terminal (squeeze/): s at an empty prompt writes a simpler version of the answer below
 // it in one press, at Length short and Background learning, with a row of choices at its end; 2 asks one more call,
-// Claude hears the version with the next prompt, and 0 removes it; a letter right after s undoes it; with two replies
+// Claude hears the version with the next prompt, and 0 hides it; a letter right after s undoes it; with two replies
 // since the person's last prompt, b writes one catch-up of them below the newest, in place of a simpler version there,
 // and b undone puts that simpler version back; a key hook of s or b does not wait for their writes, so a slow write does
 // not close the word window; a catch-up read and removed still counts as read after s; s while main's turn runs
@@ -109,9 +109,9 @@ function keyOf(n: Any, id: string): Any {
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
 
 const SHORT = 'The build failed on [3 of 12](#) runs: the cache key changed.'
-const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · 0 remove'
+const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · 0 hide'
 
-test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 removes it with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 hides it with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, [SHORT, 'The build failed on [3 of 12](#) runs, because the cache key changed when the lockfile moved, in more words.'])
   await t.turn('t1', LONG)
   expect(await t.bar()).toContain('s simplify')
@@ -136,7 +136,7 @@ test('s writes a simpler version below the answer in one press, at Length short 
   // 2 makes it longer at once: one more call, written below the answer, never in place of it; the row stays whole
   // meanwhile, with 2 saying what it does
   expect(await t.press('2')).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('1 shorter · 2 making it longer… · 3 explain more · 4 assume more · 0 remove')
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('1 shorter · 2 making it longer… · 3 explain more · 4 assume more · 0 hide')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(2)
   expect(String(t.asked[1].prompt)).toContain('Length: as written.')
@@ -150,7 +150,7 @@ test('s writes a simpler version below the answer in one press, at Length short 
   expect(t.asked.length).toBe(2)
   const next = await t.ask('and now?')
   expect(String((next.context ?? []).join('\n'))).toContain('the analyst read a simpler version of it')
-  // after the prompt, the newest answer is still this one (no reply yet in this test): 0 removes it, with no call
+  // after the prompt, the newest answer is still this one (no reply yet in this test): 0 hides it, with no call
   await t.press('0')
   await t.clock.advance(1000)
   expect(t.asked.length).toBe(2)
@@ -298,7 +298,7 @@ test('a catch-up read and then removed still counts as read after s writes a sim
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
   await t.press('b')
   await t.clock.advance(5000)
-  // 0 removes the catch-up
+  // 0 hides the catch-up
   await t.press('0')
   expect(await t.bar()).not.toContain('catch up')
   // s now writes a simpler version of the newest reply; b is still not offered for the replies already read

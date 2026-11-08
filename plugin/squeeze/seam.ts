@@ -2,7 +2,7 @@
 // (core/answerview.ts calls each function by name, since Claude Code follows `$` only into functions a file declares or
 // imports). s writes a simpler version of the last answer below it in one press, as b writes a catch-up below the
 // replies that piled up. The block's last row names the choices, each acting at once: 1 shorter, 2 longer, 3 explain
-// more, 4 assume more, 0 remove. The feature's own modules are
+// more, 4 assume more, 0 hide. The feature's own modules are
 // beside this file: term.ts (the records, the call that writes a version, the simpler version, the catch-up, what
 // Claude hears), ui.ts (the keys, the row of choices, the bar, the drawing), cards.ts (the cards a squeeze changes),
 // chips.mjs (pure: the levels, the choices, the request, the reply, the checks), prompts/squeeze.md.

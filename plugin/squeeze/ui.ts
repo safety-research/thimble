@@ -6,13 +6,13 @@
 // one press: one call, drawn below the answer as a catch-up is (term.ts simplify), at Length short and Background
 // learning, while the answer still shows as written. Once it is written, its last row names the choices, each with its
 // key, as the bar draws a key:
-//   1 shorter · 2 longer · 3 explain more · 4 assume more · 0 remove
+//   1 shorter · 2 longer · 3 explain more · 4 assume more · 0 hide
 // Each choice applies at once and rewrites the block in place (chips.mjs CHOICES: shorter and longer move Length one
 // level, explain more moves Background one level toward novice, assume more one level toward expert). Every choice
 // always shows, in the same place. A choice at its end draws dim, its key not in thimble's color, and its key or a
 // click on it does nothing: the key is taken, so it types nothing, and no call is made. While a new version is written,
 // the row stays: the choice being applied shows what it does in thimble's color (`3 explaining more…`), the other
-// choices stay as they are and still act, and the old text dims; a version seen before comes back at once. 0 removes
+// choices stay as they are and still act, and the old text dims; a version seen before comes back at once. 0 hides
 // the block. The keys act while the block stands on the newest answer and main's turn does not run; in the fullscreen
 // layout a click on a choice does the same. A catch-up has the same row.
 // s on an answer that has a block already brings the block into view, with no call; the bar names s only while the
@@ -285,7 +285,7 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
   return restTake($, row)
 }
 
-/** A key of the row under the block on the newest answer: a choice (one at its end does nothing), 0 remove. Null when
+/** A key of the row under the block on the newest answer: a choice (one at its end does nothing), 0 hide. Null when
  *  no block's row shows there: the key types as usual. */
 async function rowKeyTake($: Engine, key: string): Promise<Take | null> {
   const rec = await rowBlock($)
@@ -373,7 +373,7 @@ async function rowEl($: Engine, els: Any, rec: Rec, w: number): Promise<Any> {
     if (busy && ui.doing === c.doing) parts.push(item(`c${c.key}`, c.key, `${c.doing}…`, 'doing', press))
     else parts.push(item(`c${c.key}`, c.key, c.words, choiceAt(rec, at, c) ? 'on' : 'end', press))
   }
-  parts.push(item('remove', REMOVE_KEY, 'remove', 'on', () => removeTake($, rec).now!()))
+  parts.push(item('remove', REMOVE_KEY, 'hide', 'on', () => removeTake($, rec).now!()))
   lines.push(Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', children: parts.flatMap((p, i) => [
     ...(i ? [Text({ key: `sep${i}`, dimColor: true, children: ' · ' })] : []),
     p,
