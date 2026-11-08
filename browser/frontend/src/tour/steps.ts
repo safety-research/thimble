@@ -1,7 +1,8 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own
-// (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
-// analyst to act acts only on that example, so nothing reaches the server.
+// (examples.json, captured from real thimble markup, its marks, comments and Labels sidebar drawn by
+// tests/public/tour-examples.test.tsx; all but the views step's are marked Example); a step that asks the analyst to act
+// acts only on that example, so nothing reaches the server.
 import { TIP_DELAY_MS } from '../components/Tooltip'
 import { fitChips } from '../files/ColorBy'
 import { shownIn } from '../files/Reader'
@@ -15,16 +16,55 @@ const filesPanel = '[data-panel="files"].shell-panel'
 const reportPanel = '[data-panel="report"].shell-panel'
 const chatSel = '.chat[data-panel="chat"]'
 
-// ---------- the chat: an example exchange in main's chat
-const cite = (v: string) => `<span class="refchip refchip-value refchip-citation">${v}</span>`
+// ---------- the chat: an example exchange in main's chat. The answer's three times are citations, drawn as
+// marks/Mark.tsx draws them (examples.json, drawn by tests/public/tour-examples.test.tsx): first checking, then
+// checked, the last one failed with its ×, and the line under the answer that counts it. On the next step Explainers'
+// comment tints "UK time" (chatExplained), and its comment card opens beside the chat (chatComment).
 const QUESTION = 'When did payments 4.12.0 go out, and was it still live when INC-312 opened?'
-const ANSWER = (c: (v: string) => string) =>
-  `It went out at ${c('02:06')} UTC (deploys.csv writes UK time, so 03:06 there) and was still live when INC-312 opened at ${c('08:02')}. The rollback to 4.11.3 began at ${c('08:28')}.`
 const chatHtml = `<div class="chat-flow" style="min-height:0">
   <div class="chat-msg chat-user"><p class="msg-user chat-message">${QUESTION}</p></div>
   <div class="chat-msg chat-calls"><div class="chat-callrun" data-calls="2" data-state="done"><span class="chat-callrun-head"><button type="button" class="chat-callchip chat-callrun-chip" aria-expanded="false"><span class="chat-callrun-tools"><span class="chat-callrun-tool"><span class="chat-callrun-name">Bash</span><span class="chat-callrun-n">2</span></span></span><svg class="icon icon-chevron-right chat-callchip-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button></span></div></div>
-  <div class="chat-msg chat-assistant"><div class="chat-text"><p>${ANSWER(cite)}</p></div></div>
+  <div class="chat-msg chat-assistant"><div class="chat-text"></div></div>
 </div>`
+/** The answer's states: its citations being checked, checked, and checked with Explainers' tint. */
+type AnswerState = 'chatChecking' | 'chatChecked' | 'chatExplained'
+/** The example answer (in `flow`, the example's chat list) drawn in `state`; each citation names its label in `pops`
+ * (`chat:<k>`). */
+const showAnswer = (api: Api, state: AnswerState, flow = api.els.flow as HTMLElement | undefined) => {
+  const reply = flow?.querySelector<HTMLElement>('.chat-assistant')
+  if (!reply || reply.dataset.state === state) return
+  reply.dataset.state = state
+  const text = reply.querySelector<HTMLElement>('.chat-text')!
+  text.replaceChildren(...api.snap(state).childNodes)
+  text.querySelectorAll('.mark').forEach((m, k) => m.setAttribute('data-tour-ref', `chat:${k}`))
+  reply.querySelector('.marks-foot')?.remove()
+  // the line under the answer once its check settled: how many citations it could not confirm
+  if (state !== 'chatChecking') reply.append(...api.snap('chatFoot').childNodes)
+}
+/** The answer's citations, in order. */
+const answerMarks = (api: Api) => [...((api.els.flow as HTMLElement | undefined)?.querySelectorAll<HTMLElement>('.chat-assistant .mark') ?? [])]
+/** Explainers' tint on the answer. */
+const answerTint = (api: Api) => (api.els.flow as HTMLElement | undefined)?.querySelector<HTMLElement>('.chat-assistant mark.answer-tint') ?? null
+/** A citation or tint the analyst rests on: the demo stops and the answer stands checked, then its label or comment
+ * opens. */
+const onAnswerChip = (state: AnswerState) => (api: Api, chip: Element) => {
+  api.stopDemo()
+  const ref = chip.getAttribute('data-tour-ref')
+  const before = (api.els.flow as HTMLElement | undefined)?.querySelector('.chat-assistant')?.getAttribute('data-state')
+  if (before === 'chatChecking') showAnswer(api, state)
+  const now = (chip.isConnected ? chip : ref && answerMarks(api).find((m) => m.dataset.tourRef === ref)) || null
+  if (!now) return
+  if (now.matches('mark.answer-tint')) showComment(api, now)
+  else api.showSource(now)
+}
+/** Explainers' comment card on `tint`, as the chat opens it (chat/AnswerComment.tsx): right of the chat's column, its
+ * top on the passage's line. */
+const showComment = (api: Api, tint: Element, demo = false) => {
+  const card = api.snap('chatComment').firstElementChild as HTMLElement
+  const C = api.rectOf(api.q(chatSel)),
+    T = api.rectOf(tint)
+  return api.showBeside(tint, card, { x: (C ? C.x + C.width : 0) + 16, y: (T ? T.y : 0) - 2 }, { demo })
+}
 const sessionExample = (api: Api): Example => {
   const list = api.q(`${chatSel} .chat-list`) || api.q(chatSel)
   // the example is the real chat's markup in a column of the chat panel's own width (real chat-list, chat-flow and
@@ -49,7 +89,8 @@ const sessionExample = (api: Api): Example => {
     if (!C || !L) return
     Object.assign(ex.style, { left: `${C.x}px`, top: `${L.y}px`, width: `${C.width}px`, height: `${(F ? F.y : C.y + C.height) - L.y}px` })
   }
-  return { els: { chat: ex, flow: inner }, layout }
+  showAnswer(api, 'chatChecking', inner)
+  return { els: { chat: ex, flow: inner, chipsIn: inner }, layout }
 }
 // the chat as the step shows it: the chat panel's own width, from its head to 14px past the end of the example exchange
 const chatContent = (api: Api) => {
@@ -207,7 +248,7 @@ const cardExample = (api: Api): Example => {
     key = size
     Object.assign(w.style, { left: `${f.x}px`, top: `${f.y}px`, height: `${h0}px`, transform: `scale(${f.w / 720})` })
   }
-  return { els: { card: art, wrap: w, real: false }, layout }
+  return { els: { card: art, wrap: w }, layout }
 }
 
 // ---------- the right sidebar (shell/LabelsSidebar.tsx), which the top bar's Labels and Comments buttons open, each on
@@ -243,7 +284,8 @@ const sideExample = (api: Api, section: SideSection) => {
     aside.querySelector('.lside-section')?.append(add)
   }
   Object.assign(aside.style, { width: '100%', maxWidth: 'none', height: '100%', margin: '0' })
-  Object.assign(api.tag(wrap).style, { top: '14px', right: '44px' })
+  // the badge in the head's empty middle, clear of the heading and of the Label tool switch
+  Object.assign(api.tag(wrap).style, { top: '14px', left: '50%', right: 'auto', transform: 'translateX(-50%)' })
   const layout = () => {
     const S = api.rectOf(realSide())
     wrap.style.display = S ? '' : 'none'
@@ -477,7 +519,6 @@ const reportExample = (api: Api): Example => {
   const els = {
     root: w,
     page: w.querySelector<HTMLElement>('.wu-page'),
-    real: false,
     k: 1,
     sideRow,
     checksShown: false,
@@ -604,7 +645,10 @@ const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undef
 /** What the steps about the chat and the ⌘-click box say. True however the workbench reaches Claude: an API key,
  * Workload Identity Federation or the Claude Code sign-in. */
 const SAID = {
-  chat: ['Your chat with Claude', 'Ask Claude anything about the files here.'],
+  chat: [
+    'Your chat with Claude',
+    'Ask Claude anything about the files here. Claude cites the numbers it states, and a second Claude checks each one against your files. A red × marks one it could not confirm.',
+  ],
   ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
 }
 
@@ -622,6 +666,66 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
       title: SAID.chat[0],
       body: SAID.chat[1],
+      after: 'Hover over a time to see its source.',
+      chips: onAnswerChip('chatChecked'),
+      // the citations are checked, the last one fails, and the pointer rests on it: its label says why
+      demo: async (api) => {
+        api.closeSource()
+        showAnswer(api, 'chatChecking')
+        await api.sleep(1800)
+        showAnswer(api, 'chatChecked')
+        await api.sleep(900)
+        const mark = answerMarks(api)[2]
+        const m = mark && api.rectOf(mark)
+        if (!mark || !m) return
+        api.cursor.show(m.x + m.width / 2 + 160, m.y - 70)
+        await api.sleep(400)
+        await api.cursor.move(() => {
+          const r = api.rectOf(mark)
+          return r && { x: r.x + r.width / 3, y: r.y + r.height * 0.6 }
+        }, undefined, 900)
+        await api.sleep(300)
+        const src = api.showSource(mark, { demo: true })
+        await api.sleep(3600)
+        await api.cursor.move(m.x + m.width / 2 + 200, m.y - 90, 600)
+        src?.remove()
+        api.closeSource()
+        api.cursor.hide()
+      },
+    },
+    {
+      tab: 'files', needsChat: true, example: sessionExample, pad: 0, radius: 12, place: ['bottom', 'right'], align: 'start',
+      // the chat, and the comment card beside it once open
+      anchor: (api) => {
+        const card = api.fx.querySelector('.answer-cm-pop')
+        return [chatContent(api), ...(card ? [card] : [])]
+      },
+      title: 'Explainers',
+      body: 'Checks also read Claude’s answers. Explainers tints words you may need explained. Click a tint to read its comment.',
+      chips: onAnswerChip('chatExplained'),
+      // the explainer's tint comes on the answer, and a click on it opens its comment, which stays open
+      demo: async (api) => {
+        api.closeSource()
+        showAnswer(api, 'chatExplained')
+        await api.sleep(900)
+        const tint = answerTint(api)
+        const t = tint && api.rectOf(tint)
+        if (!tint || !t) return
+        api.cursor.show(t.x + t.width / 2 + 150, t.y - 80)
+        await api.sleep(400)
+        await api.cursor.move(() => {
+          const r = api.rectOf(tint)
+          return r && { x: r.x + r.width / 2, y: r.y + r.height * 0.6 }
+        }, undefined, 900)
+        await api.sleep(250)
+        await api.cursor.click()
+        showComment(api, tint)
+        await api.sleep(700)
+        const c = api.cursor.pos
+        await api.cursor.move(c.x + 120, c.y + 90, 600)
+        api.cursor.hide()
+      },
+      leave: (api) => api.closeSource(),
     },
     {
       tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
@@ -690,7 +794,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,
       anchor: (api) => api.els.card,
       title: 'Cards on the Canvas',
-      body: 'Cards help make agents’ work visible. Hover over an underlined value to see its source.',
+      body: 'Cards help make agents’ work visible, and thimble checks each one. Hover over an underlined value to see its source.',
       // the analyst's own hover on a value shows its source, as the demo does
       chips: (api, chip) => {
         api.stopDemo()
@@ -700,7 +804,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       demo: async (api) => {
         for (let k = 0; k < 2; k++) {
           const card = api.els.card as HTMLElement
-          const chip = [...card.querySelectorAll('.refchip-value')].find((c) => c.textContent?.trim() === '08:04') || card.querySelector('.refchip-value')
+          const chip = [...card.querySelectorAll('.mark')].find((c) => c.textContent?.trim() === '08:04') || card.querySelector('.mark')
           const c = chip && api.rectOf(chip)
           if (!chip || !c) return
           api.cursor.show(c.x + c.width / 2 + 170, c.y - 90)
@@ -840,7 +944,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'report', example: reportExample, place: 'left', align: 'start', pad: 0, radius: 12,
       anchor: (api) => [reportPanel, ...(api.els.side ? [api.els.side, sideButton('comments')] : [])],
       title: 'Checks',
-      body: 'Checks read the report and the cards, and comment on what they find. Comments, at the top, lists the checks and their comments. Press + New check there to add one: say what to look for, in a line.',
+      body: 'Checks read Claude’s answers, the cards and the report, and comment on what they find. Comments, at the top, lists the checks and their comments. Press + New check there to add one: say what to look for, in a line.',
       note: 'Reopen this tour with /tour in the chat.',
       scroll: (api) => api.els.page ?? null,
       leave: (api) => api.els.hideSide?.(),
