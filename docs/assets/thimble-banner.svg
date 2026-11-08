@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="thimble">
-  <!-- The thimble logo (docs/assets/thimble-logo.svg) in white on thimble's accent, iris #5135ff, centred. The
+  <!-- The thimble logo in white on thimble's accent, iris #5135ff, centered. The
        wordmark is paths (Hanken Grotesk Bold at the logo's size and spacing), so the banner needs no font. -->
   <rect width="1280" height="320" rx="24" fill="#5135ff"/>
   <g transform="translate(301.64 63.75) scale(1.75)">
