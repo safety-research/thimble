@@ -241,19 +241,20 @@ signin() {
 
 # finish WHAT: the end: what is installed, how to try it, then what does not work yet. In the Claude Code session that
 # runs the install (it sets CLAUDECODE for its commands), the file tour-next in thimble's home names that session and
-# the time, and thimble starts its tour there at the person's /reload-plugins (plugin/tour/tour.ts). In a terminal,
-# it asks last whether to take the tour now, and runs thimble tour on yes (plugin/engine/kernel/tour.py)
+# the time, and thimble starts its tour there at the person's /reload-plugins (plugin/tour/tour.ts); the line that says
+# so comes last, on its own, since it is the one thing the person must do. In a terminal, it asks last whether to take
+# the tour now, and runs thimble tour on yes (plugin/engine/kernel/tour.py)
 finish() {
-  local tour=0 answer
+  local tour=0 answer reload=""
   say ""
   say "$1."
   say ""
   if [ -n "${CLAUDECODE:-}" ]; then
     if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] &&
       printf '%s %s\n' "$CLAUDE_CODE_SESSION_ID" "$(date +%s)" >"$home/tour-next" 2>/dev/null; then
-      say "Try it now: type /reload-plugins in this Claude Code session. A two-minute tour of thimble starts then."
+      reload="Type /reload-plugins now. thimble's two-minute tour starts right after."
     else
-      say "Try it now: type /reload-plugins in this Claude Code session, then /thimble:tour for a two-minute tour."
+      reload="Type /reload-plugins now, then /thimble:tour for thimble's two-minute tour."
     fi
   else
     # in a terminal, the notes come first, so the question to take the tour stands right under how to try thimble
@@ -269,6 +270,7 @@ finish() {
       "it prints."
   fi
   if [ "$tour" = 0 ] && [ -s "$notes" ]; then say ""; cat "$notes"; fi
+  if [ -n "$reload" ]; then say ""; say "$reload"; fi
   [ "$tour" = 1 ] || return 0
   printf 'Take the two-minute tour now? [Y/n]: '
   read -r answer </dev/tty || answer=n
