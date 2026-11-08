@@ -1652,7 +1652,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
 # disk, who holds the port, and whether the API host answers. Each reader returns a short phrase and never raises,
 # since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.307"  # INSTALL.md and CI (.github/workflows/ci.yml) name the same version
+TESTED_CLAUDE_CODE = "2.1.314"  # INSTALL.md and CI (.github/workflows/ci.yml) name the same version
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
 DISK_LOW_BYTES = 1_000_000_000  # under this much free space the doctor says the disk is low
 LOG_ROTATE_BYTES = 20_000_000  # a server.log past this size is moved to server.log.1 when a server starts
