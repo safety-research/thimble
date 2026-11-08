@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 // Signing in (src/shell/SignIn.tsx, src/lib/api.ts, src/lib/browserKey.ts): every read of the server's data needs a
 // signed-in browser (backend hook_auth: 401 {detail, signin: true} without one). The page shows the app only to a
-// browser that is signed in (GET /ui/paired, after the claim of the link's code); any other sees one line that sends
-// it to the new link in the terminal where thimble-browser runs, and the app never mounts, so nothing reads. A link's
-// code is posted with its workspace and leaves the address; the key the server gives for it is the path every request
+// browser that is signed in (GET /ui/paired, after the claim of the link's key); any other sees one line that sends
+// it to the link thimble-browser prints, and the app never mounts, so nothing reads. A link's
+// key is posted with its workspace and leaves the address; the key the server gives for it is the path every request
 // of this browser goes under (/b/<key>/api, which its cookie is scoped to). A read refused for want of sign-in brings
 // the line back.
 import { act, createElement } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const LINE = "This browser isn't signed in. Open the new link in the terminal where thimble-browser runs."
+const LINE = "This browser isn't signed in. Open the link in the terminal where thimble-browser runs."
 const KEY = 'Ab3_-'.repeat(6)
 
 let paired = false

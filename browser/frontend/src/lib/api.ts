@@ -74,14 +74,14 @@ export function describeDetail(d: unknown): string {
 
 let keyReady: Promise<void> | null = null
 const CLAIM_WAITS_MS = [0, 500, 2000] // before each try of the claim while the server does not answer
-// whether the server refused the last code this page posted with 410: used, replaced by a newer one, or expired
+// whether the server refused the last key this page posted with 410: `thimble-browser --unpair` changed it
 let codeGone = false
 
-/** Whether the server refused the link's sign-in code with 410 at the last claim (used, replaced by a newer one, or
- * expired); shell/SignIn starts its line with it. */
+/** Whether the server refused the link's sign-in key with 410 at the last claim (`thimble-browser --unpair` changed it);
+ * shell/SignIn starts its line with it. */
 export const claimRefused = (): boolean => codeGone
 
-/** The address's hash as parameters: `p` is a link's sign-in code. */
+/** The address's hash as parameters: `p` is the link's sign-in key. */
 const hashParams = (): URLSearchParams => new URLSearchParams(window.location.hash.slice(1))
 
 /** The address with `params` as its hash (none when empty), in place: no reload, no history entry. */
@@ -90,12 +90,12 @@ function setHash(params: URLSearchParams): void {
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + (rest ? `#${rest}` : ''))
 }
 
-/** Sign this browser in with the one-time code in the link thimble showed (`#p=`, made as the link is shown: backend
- * hook_auth.mint), which the server trades for the cookie that every read of the server's data and every analyst
- * action needs (backend hook_auth), and take the code out of the address once the server has answered. 200 {key}:
- * signed in, with the key of the path the cookie is scoped to, which the page keeps (lib/browserKey) and sends every
- * later request under. 204: signed in already (the claim went under this browser's path with its cookie), so the key
- * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
+/** Sign this browser in with the key in the link thimble showed (`#p=`, the same every time until `thimble-browser --unpair`:
+ * backend hook_auth.link_key), which the server trades for the cookie that every read of the server's data and every
+ * analyst action needs (backend hook_auth), and take the key out of the address once the server has answered.
+ * 200 {key}: signed in, with the key of the path the cookie is scoped to, which the page keeps (lib/browserKey) and
+ * sends every later request under. 204: signed in already (the claim went under this browser's path with its cookie),
+ * so the key it holds stands. 410 (or any other refusal): the link's key isn't the install's anymore, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). After the claim the page asks which browser it is and when it signed in (GET /ui/paired), so it
  * leaves out the notices of its own sign-in and of those before it (lib/notices setBrowserId).
