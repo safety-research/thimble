@@ -50,7 +50,7 @@ When thimble does something wrong or you'd like a new feature, `/thimble-fix <wh
 
 ### Browser workbench
 
-Run `thimble-browser` in a folder of files to open the browser workbench.
+Run `thimble-browser` in a folder of files to open the browser workbench. The first time it opens, it offers a short tour on example data; type `/tour` in its chat to take it again.
 
 ![the browser workbench answering whether agents reviewed before approving: a chat answer with citations, an agent transcript colored by an activity label, a timeline of every agent's labeled work and approvals, and a table of what each approver ran](docs/assets/thimble-browser.png)
 
