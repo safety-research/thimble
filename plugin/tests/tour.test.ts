@@ -20,7 +20,7 @@ import { setOptions } from '../settings/features.mjs'
 import { accent } from '../core/theme'
 import { endCheck, noteRow, resumeChecks, startCheck } from '../marks/checker'
 import { rowMarks } from '../marks/store'
-import { checkedWords, DONE_MS, E_WORDS, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourChecked, tourDid, tourHolds, tourKey, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
+import { checkedWords, CLOSE_MS, CLOSED, DONE_MS, E_WORDS, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourChecked, tourDid, tourHolds, tourKey, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -255,9 +255,12 @@ test('the cite step is done once each citation of the sample answer has its resu
   expect(t.done).toContain('cite')
   expect(t.checked).toEqual({ n: 4, corrected: 1, failed: 1 })
   expect(scrolls).toEqual([])
-  expect(timers.map(x => x.ms)).toEqual([DONE_MS])
+  expect(timers.map(x => x.ms).sort((a, b) => a - b)).toEqual([DONE_MS, CLOSE_MS])
   await tick()
   expect(scrolls).toEqual([{ to: { key: `tour-row-${t.startedAt}-under` }, block: 'nearest' }])
+  // CLOSE_MS after the end, the step row closes to one line
+  await tick()
+  expect(parsed(await $.state.get({ plugin: 'thimble', key: 'tour' })).closed).toBe(true)
 })
 
 /** A made-up engine for a check's run: versioned state, the checker's text, forks that start, and a validator that
@@ -562,7 +565,7 @@ test("in a session: thimble draws the intro and the step row under the sample an
   await tour()
   expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2', 'tour-intro-3'])
   expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
-  expect(await t.row('tour-step-2')).toContain('thimble tour · done')
+  expect(await t.row('tour-step-2')).toBe(CLOSED)
 })
 
 test("in a session: Claude's Skill call starts the tour, and the turn that called it holds the sample answer", { options: { cards: 'off', explain: 'off', citations: 'off', squeezeAnswers: false } }, async ($, on) => {

@@ -104,6 +104,8 @@ export type TourState = {
   at: Step | 'end'; done: Step[]; missed: Step[]; startedAt: number; k: number
   intro: string | null; sample: string | null; moved: string | null
   checkAt?: number | null; checked?: Checked | null
+  /** CLOSE_MS after the tour ends, its step row closes to one line */
+  closed?: boolean
 }
 export type Tour = TourState & { at: Step }
 
@@ -135,6 +137,9 @@ const CHECK_ELEMENT = 'tour-check'
  *  first. */
 export const DONE_MS = 2000
 
+/** How long the step row shows the whole tour once it ends, before it closes to one line. */
+export const CLOSE_MS = 8000
+
 /** The shimmer on step e's words: a frame each SHIMMER_MS (about 9 a second), a band of BAND characters, and PAUSE
  *  frames between one sweep and the next. */
 export const SHIMMER_MS = 110
@@ -156,6 +161,9 @@ export const END = (clicks: boolean): string[] => [
 
 /** The words of the sample answer that step e names. */
 export const E_WORDS = 'loose-leaf tins'
+
+/** The step row once the tour closed. */
+export const CLOSED = '✓ thimble tour done · type /thimble:tour to take it again'
 
 /** One step's action while it waits: its words, with each key as `{k}` and words drawn bold as `**words**`. v, s and
  *  cite name the answer they act on, since the row can stand under a reply to the person's own prompt. `checking`: the
@@ -222,7 +230,7 @@ function parse(x: unknown): TourState | null {
   return {
     at: t.at, done: steps(t.done), missed: steps(t.missed),
     startedAt: Number(t.startedAt) || 0, k: Number(t.k) || 0, intro: id(t.intro), sample: id(t.sample), moved: id(t.moved),
-    checkAt: Number(t.checkAt) || null,
+    checkAt: Number(t.checkAt) || null, closed: !!t.closed,
     checked: c && typeof c === 'object' ? { n: Number(c.n) || 0, corrected: Number(c.corrected) || 0, failed: Number(c.failed) || 0, ...(c.fix && typeof c.fix.was === 'string' && typeof c.fix.now === 'string' ? { fix: { was: c.fix.was, now: c.fix.now } } : {}) } : null,
   }
 }
@@ -323,6 +331,16 @@ export function placeIntro($: Engine): Promise<void> {
 async function goOn($: Engine, t: Tour, done: Step[], missed: Step[]): Promise<void> {
   const next = nextStep(t.at, done, await clicksNow($))
   await save($, { ...t, at: next ?? 'end', done, missed })
+  if (!next) { const startedAt = t.startedAt; $.clock.after(CLOSE_MS, () => { void closeRow($, startedAt).catch(() => undefined) }) }
+}
+
+/** The step row of the tour that started at `startedAt`, once it ended: closed to one line. */
+function closeRow($: Engine, startedAt: number): Promise<void> {
+  return inTurn(async () => {
+    const t = await stateNow($)
+    if (!t || t.startedAt !== startedAt || t.at !== 'end' || t.closed) return
+    await $.state.set(TOUR, { ...t, closed: true } as never)
+  })
 }
 
 /** A step done: the step that waits goes on to the next one. A later step done early counts when its turn comes. A
@@ -535,6 +553,8 @@ const rowKey = (t: TourState): string => `tour-row-${t.startedAt}-${t.moved ?? '
 
 /** The step row of a tour. `past`: a tour that a later one replaced, drawn as it was, with no action. */
 export function stepRowEl(els: Any, t: TourState, clicks: boolean, cols: number, past = false, look: Any = {}): Any {
+  // a tour that ended a while ago: one line, so the row no longer stands in the way
+  if (t.at === 'end' && t.closed) return els.Box({ key: rowKey(t), marginLeft: 2, ...look, children: [els.Text({ dimColor: true, children: CLOSED }) ] })
   const steps = shownSteps(t, clicks)
   const title = t.at === 'end' ? 'thimble tour · done'
     : past ? 'thimble tour · started again below'
