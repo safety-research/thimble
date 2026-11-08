@@ -228,7 +228,10 @@ def _secret(name: str, create: bool) -> bytes:
                 os.link(tmp, path)
             except FileExistsError:
                 if not _read_secret(path):  # an empty or unreadable file in its place
-                    os.replace(tmp, path)
+                    try:
+                        _write_in_place(path, secrets.token_hex(32))
+                    except OSError:
+                        os.replace(tmp, path)
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
@@ -253,9 +256,22 @@ def rotate_link_key() -> None:
     the file in place, not put in its place, so a sandbox that hides the file from a session keeps hiding it. No file:
     nothing to change, and the next link_key makes one."""
     with _secret_lock, contextlib.suppress(FileNotFoundError):
-        fd = os.open(home() / LINK_KEY, os.O_WRONLY | os.O_TRUNC)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(secrets.token_hex(32))
+        _write_in_place(home() / LINK_KEY, secrets.token_hex(32))
+
+
+def _write_in_place(path: Path, value: str) -> None:
+    """`value` written over the file at `path` (same inode), readable by its owner alone. The new bytes go over the old
+    ones before the file is cut to their length, so the file is never empty: an empty key file has _secret put a new
+    file in its place, and a new inode is no longer under the mount a sandbox hides the file with."""
+    data = value.encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        os.fchmod(fd, 0o600)
+        if os.pwrite(fd, data, 0) != len(data):
+            raise OSError(f"short write to {path}")
+        os.ftruncate(fd, len(data))
+    finally:
+        os.close(fd)
 
 
 def _same(a: str, b: str) -> bool:

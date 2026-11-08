@@ -77,6 +77,8 @@ def test_the_link_s_key_is_kept_for_its_owner_alone_and_changed_in_place():
     hook_auth.unpair()
     assert hook_auth.link_key() != key and path.stat().st_ino == inode
     assert (path.stat().st_mode & 0o777) == 0o600
+    path.write_text("")  # a write cut short: the key is made again in the same file, never in a new one
+    assert hook_auth.link_key() and path.stat().st_ino == inode
 
 
 @pytest.mark.real_read_guard
