@@ -31,6 +31,7 @@ import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
+import { tourHoldsCites } from '../tour/tour'
 import { openTray, trayFocus } from '../tray/seam'
 import { awaitsCheck } from './checker'
 import { askedWords, carrier, codeRanges, linksIn, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections, withoutLinks } from './message.js'
@@ -222,7 +223,7 @@ export async function citeSelection($: Engine): Promise<void> {
 /** Whether c cites now: Citations is on, an answer exists, and words are selected that c has not cited yet (Claude
  *  Code answers the last selection until the person selects again, so once c has cited it, c is typed again). */
 export async function citeShown($: Engine): Promise<boolean> {
-  if (!featureOn('cite')) return false
+  if (!featureOn('cite') || (await tourHoldsCites($).catch(() => false))) return false
   return shownFor($, await selectionNow($))
 }
 
@@ -247,7 +248,7 @@ async function answered($: Engine): Promise<boolean> {
  *  them, Claude Code types the key): one read of the selection, and none of the state while it is the selection the bar
  *  last drew with (waitKept); a selection made since is checked in full. */
 export async function citeKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (key !== 'c' || !featureOn('cite')) return null
+  if (key !== 'c' || !featureOn('cite') || (await tourHoldsCites($).catch(() => false))) return null
   const raw = await selectionNow($)
   const kept = waitKept
   const shown = kept && kept.sel === selectionKey(raw) ? kept.shown : await shownFor($, raw)
