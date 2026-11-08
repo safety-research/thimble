@@ -4,12 +4,16 @@
 // A claim is one statement the transcript makes, of one kind. One JSON file per conversation, claims.json in its kept
 // folder (core/env.ts keptDir):
 //
-//   {v: 2, session, updated,
+//   {v: 3, session, updated,
 //    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?, because?,
 //              links?: [{to, how: supports | contradicts | same topic}]}],
 //    clusters: [{id, name, turn, named, about?}],
 //    gaps: [{turn, why}],
 //    read?: [row]}
+//
+//   a text   a claim's words are kept whole (up to MAX_TEXT characters, past that cut after a word, then …); its because
+//            and why and a cluster's about likewise, each up to its own MAX_. A store of v 2 or before kept a claim's words cut at 200 characters,
+//            often in a word and with nothing to say so: read, such a claim ends after its last whole word, then ….
 //
 //   a name   a cluster's name is kept whole (up to MAX_NAME characters, past that cut after a word); the pane cuts it
 //            only to draw it. A store of v 1 kept names cut at 60 characters, often in a word: read, such a name ends
@@ -44,7 +48,11 @@ import { blocks, marksIn } from '../marks/message.js'
 export function linkSpans(text) {
   return [...String(text || '').matchAll(/\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(([^()\s]*)\)/g)]
 }
-const MAX_TEXT = 200
+/** A claim's words are kept up to this many characters (past that, cut after a word): a full sentence with its numbers
+ *  and qualifiers, as the lens writes it. */
+const MAX_TEXT = 500
+/** What a store of v 2 or before cut a claim's words at. */
+const OLD_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
 const MAX_WHY = 240
@@ -56,6 +64,8 @@ const MAX_NAME = 160
 export const GROWN = { least: 6, factor: 2 }
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
+/** Words as kept: whole up to n characters, past that cut after a word, then … (cutWords), never in a word. */
+const words = (v, n) => (typeof v === 'string' ? cutWords(v, n) : '')
 const cutTo = (s, n) => (s.length <= n ? s : s.slice(0, n - 1).trimEnd() + '…')
 
 /** Words cut to at most n characters after a whole word, ` …` where they were cut; a first word longer than n is cut
@@ -71,11 +81,19 @@ export function cutWords(text, n) {
 }
 
 /** A cluster's name as kept: whole, up to MAX_NAME characters. */
-const nameOf = v => cutWords(typeof v === 'string' ? v : '', MAX_NAME)
+const nameOf = v => words(v, MAX_NAME)
 
 /** A new, empty store for a session. */
 export function emptyStore(session = '') {
-  return { v: 2, session: String(session || ''), updated: null, claims: [], clusters: [], gaps: [] }
+  return { v: 3, session: String(session || ''), updated: null, claims: [], clusters: [], gaps: [] }
+}
+
+/** A claim's words as a store of v 2 or before kept them: at OLD_TEXT characters and not at a sentence's end, they were
+ *  cut there, so they end after their last whole word, then …. */
+const uncut = t => {
+  if (t.length !== OLD_TEXT || /[.!?…:;]["'”’)\]]*\s*$/u.test(t)) return t
+  const at = t.lastIndexOf(' ')
+  return at > 0 ? `${t.slice(0, at).trimEnd()} …` : `${t}…`
 }
 
 /** A store read from its file's text (or parsed JSON): whatever holds is kept, the rest starts empty. */
@@ -87,8 +105,9 @@ export function readStore(text, session = '') {
   const s = emptyStore(session || d?.session)
   if (!d || typeof d !== 'object') return s
   s.updated = d.updated || null
+  const old = !(Number(d.v) >= 3)
   s.claims = (Array.isArray(d.claims) ? d.claims : []).filter(c => c && c.id && c.text)
-    .map(c => ({ ...c, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
+    .map(c => ({ ...c, text: old && typeof c.text === 'string' ? uncut(c.text) : c.text, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
   s.clusters = (Array.isArray(d.clusters) ? d.clusters : []).filter(c => c && c.id)
   s.gaps = Array.isArray(d.gaps) ? d.gaps : []
   for (const [k, v] of Object.entries(d)) if (!(k in s)) s[k] = v
@@ -400,7 +419,7 @@ export function grownClusters(store) {
 function applyClusters(store, list, grown, turn) {
   const done = []
   const aboutOf = (c, x) => {
-    const about = str(x.about, MAX_ABOUT)
+    const about = words(x.about, MAX_ABOUT)
     if (c && about && about !== c.about) { c.about = about; done.push({ about: c.id }) }
   }
   for (const x of Array.isArray(list) ? list : []) {
@@ -460,13 +479,13 @@ export function parseClaims(list) {
     const by = String(x.by || '').toLowerCase().startsWith('person') || /^(you|analyst|the analyst)$/.test(String(x.by || '').toLowerCase()) ? 'person' : 'claude'
     const same = str(String(x.same ?? ''), 20)
     // a new claim with no "claim" of its own is named by the words that said it
-    const own = str(x.claim ?? x.text, MAX_TEXT)
-    const text = own || (same ? '' : capital(plainOf(quote).plain.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)))
+    const own = words(x.claim ?? x.text, MAX_TEXT)
+    const text = own || (same ? '' : capital(cutWords(plainOf(quote).plain, MAX_TEXT)))
     if (!quote || (!same && !text)) continue
     // `at`: its place in the lens's list (1 for the first), which a later claim of the same turn revises as "#1"
     const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
     const revises = str(String(x.revises ?? ''), 20) || null
-    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && str(x.why, MAX_WHY)) || null, because: str(x.because, MAX_BECAUSE) || null, links })
+    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && words(x.why, MAX_WHY)) || null, because: words(x.because, MAX_BECAUSE) || null, links })
   }
   // every claim the turn gave: a long answer can state many
   return out
