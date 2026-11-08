@@ -10,7 +10,7 @@ import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
 import { spawnFork } from '../core/forks'
-import { AGAIN_DESCRIPTION, autoRepair, checkKey, endCheck, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, repairOk, startCheck } from '../marks/checker'
+import { AGAIN_DESCRIPTION, autoRepair, checkKey, endCheck, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, repairOk, startCheck, TOUR_DESCRIPTION, waitingCheck } from '../marks/checker'
 import { registerMarks } from '../marks/register'
 import { newReply, rowMarks } from '../marks/store'
 import { setOptions } from '../settings/features.mjs'
@@ -306,6 +306,36 @@ test("where don't ask mode refuses the check's Python and not its fork, the cita
     for (const agentId of ['agent-4', 'agent-5']) await endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })
     expect(await statuses('row-2')).toEqual(['failed', 'failed', 'failed', 'verified', 'verified'])
     expect(await failLineNow($)).toBeNull()
+  } finally {
+    setOptions({})
+  }
+})
+
+test("the tour's check that c started, whose Python don't ask mode refused: its citations wait, and g checks them again with the words the tour's prompt ended with, since they may stand in an earlier reply than the last", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    // the validator: the check could confirm none of the marks
+    const { $, spawned } = engine(() => null, marks => marks.map(m => ({ n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: 'No output shows it.' })))
+    const call = hooksOn($)
+    // the tour holds its sample answer's check (tour/tour.ts tourHolds), and c starts it (waitingCheck)
+    await noteRow($, 'row-1', 'Customers placed [36 orders](#) in March 2026. Most were loose-leaf tins, worth [$52](#). The shop refunded [7 orders](#).')
+    await startCheck($, { turnId: 't-1', reason: 'answer' }, async () => true)
+    expect(spawned.length).toBe(0)
+    await (await waitingCheck($, 'row-1'))!({ until: 0, cancelled: false })
+    expect(spawned.map(a => a.description)).toEqual([TOUR_DESCRIPTION])
+    const note = String(spawned[0].prompt).split('\n\n').pop()!
+    expect(note).toContain('earlier reply')
+    // don't ask mode refuses its fork's Python, asking nobody
+    await call('tool.call', { tool: 'Bash', command: SCRIPT, agentId: 'agent-1', tool_use_id: 'toolu_agent-1' }, refusedRead(BASH_DONT_ASK))
+    await endCheck($, { agentId: 'agent-1', reason: 'answer', answer: '```json\n[]\n```' })
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'deferred', 'deferred'])
+    expect((await failLineNow($))?.text).toBe(DONT_ASK_LINE)
+    // g: the check of the citations that wait starts again, its prompt ending with the tour's words
+    const g = (await checkKey($, 'g', 0))!
+    await g.now()
+    await settle()
+    expect(spawned.slice(1).map(a => a.description)).toEqual([AGAIN_DESCRIPTION])
+    expect(String(spawned[1].prompt).endsWith(`\n\n${note}`)).toBe(true)
   } finally {
     setOptions({})
   }

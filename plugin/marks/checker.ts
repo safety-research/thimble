@@ -882,7 +882,8 @@ async function startAgain($: Engine, a: Again, hold: RepairHold): Promise<void> 
     const agentId = fork.agentId
     if (!agentId) continue
     await editReply($, a.whole.key, rep => ({ ...rep, settledAt: null, items: rep.items.map(m => (marks.includes(m.n) && m.status === 'deferred' ? { ...m, status: 'checking' as MarkStatus } : m)) }))
-    await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...a.whole, marks, agentId, spawnedAt: now, asked: true } }))
+    // the words its prompts end with stay with the check, so g's check of it again ends with them (sayPythonRefused)
+    await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...a.whole, marks, agentId, spawnedAt: now, asked: true, ...(a.note ? { note: a.note } : {}) } }))
     started.push(agentId)
   }
   if (started.length) await checkStarted($)
