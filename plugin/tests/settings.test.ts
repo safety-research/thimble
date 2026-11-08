@@ -9,6 +9,13 @@ import { test } from './kit'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
+function textOf(n: Any): string {
+  if (n == null || n === false) return ''
+  if (typeof n === 'string' || typeof n === 'number') return String(n)
+  if (Array.isArray(n)) return n.map(textOf).join('')
+  return textOf(n.props?.children) + textOf(n.children)
+}
+
 const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'thimble settings', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never
 
 test('/thimble-settings opens the settings under their headings; a press on a choice sets it through Claude Code, and its items leave the preview', async ($, on) => {
@@ -35,6 +42,8 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   expect((await pane.find({ key: 'sw-coverage' }))?.text).toMatch(/Coverage\s+on · off/)
   expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('which files Claude has read')
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
+  // the preview's keys: s simplify right after v visualize, as on the bar
+  expect(textOf(await $.ui.render(PANE))).toContain('v visualize · s simplify')
 
   await pane.press({ key: 'mode-coverage-off' })
   // the change alone: no default moved, so nothing else is saved (each save loads the plugin again)

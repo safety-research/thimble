@@ -12,6 +12,7 @@
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { accent } from '../core/theme'
 import { resetSqueeze } from '../squeeze/term'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
@@ -167,6 +168,41 @@ test('s writes a simpler version below the answer in one press, at Length short 
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(3)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('simpler version of the answer above')
+})
+
+/** The bar's Text of the words of `s simplify` (its item `bar-squeeze`, after its key): their look says whether s is
+ *  lit. */
+function simplifyWords(n: Any): Any {
+  if (!n || typeof n !== 'object') return null
+  if (n.props?.key === 'bar-squeeze') return n.children?.[1] ?? null
+  for (const c of [...(Array.isArray(n) ? n : []), ...[].concat(n.props?.children ?? []), ...[].concat(n.children ?? [])]) {
+    const f = simplifyWords(c)
+    if (f) return f
+  }
+  return null
+}
+
+test('s simplify stands right after v visualize; pressed, it stays on the bar, lit, while the first version is on its way, and goes once that version shows with its row', { options: { citations: 'auto cite' } }, async ($, on) => {
+  let give: (text: string) => void = () => {}
+  const t = await setup($, on, [new Promise<string>(r => { give = r })])
+  await t.turn('t1', LONG)
+  // at rest, in every state: v, then s, then what the tray steps to
+  expect(await t.bar()).toContain('v visualize · s simplify · ] show citation')
+  expect(simplifyWords(await $.ui.render(above))?.props).toMatchObject({ dimColor: true })
+  // s: its first call runs, and nothing of the version shows yet; s stays, lit, and a press only brings the block into
+  // view
+  expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(1000)
+  expect(t.asked.length).toBe(1)
+  expect(await t.bar()).toContain('s simplify')
+  expect(simplifyWords(await $.ui.render(above))?.props?.color).toBe(accent())
+  await t.press('s')
+  expect(t.asked.length).toBe(1)
+  // the version shows, with its row of keys: the bar names s no more
+  give(SHORT)
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain(ROW)
+  expect(await t.bar()).not.toContain('s simplify')
 })
 
 test('a letter right after s undoes it: the word goes into the box whole, and no simpler version is written', async ($, on) => {

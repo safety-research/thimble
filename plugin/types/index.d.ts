@@ -185,13 +185,15 @@ declare module 'claude-code' {
       // ---- the tour (tour/tour.ts)
       /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `v`, `s`, `cite`, or `end`), the steps
        *  done and those that did not work, when it started, the row of its sample answer, the ids of its placed rows
-       *  (the intro, the step row placed under a later reply) and how many were placed, when c started the cite step's
-       *  check and what that check did; null with no tour */
+       *  (the intro, the step row placed under a later reply) and how many were placed; the cite step's: whether the
+       *  prompt box took its question, the row of the answer it checks, and what that check did; null with no tour */
       tour: {
         at: 'answer' | 'e' | 'v' | 's' | 'cite' | 'end'; done: ('answer' | 'e' | 'v' | 's' | 'cite')[]
         missed: ('answer' | 'e' | 'v' | 's' | 'cite')[]; startedAt: number; k: number
         intro: string | null; sample: string | null; moved: string | null
-        checkAt?: number | null; checked?: { n: number; corrected: number; failed: number } | null
+        asked?: boolean | null; cited?: string | null
+        checked?: { n: number; corrected: number; failed: number; fix?: { was: string; now: string } | null } | null
+        closed?: boolean
       } | null
       /** the tours started before the one that runs, as they were then: their rows still draw them */
       tourPast: unknown[] | null

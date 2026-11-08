@@ -7,9 +7,9 @@
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
 //                  card that takes them now (cards/draw.ts cardKeyWords: `j down · k up`), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
-//                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, or at rest `] show explainer` while
-//                  the answer shows marks, the mark's name in its own look, `s squeeze`, and while words are selected
-//                  the keys that act on them, each in its color: `c cite · e explain · a ask`); at its
+//                  (core/answerview.ts barLeft: `s simplify` right after v, a label run's ask, the tray's steps, or at
+//                  rest `] show explainer` while the answer shows marks, the mark's name in its own look, and while
+//                  words are selected the keys that act on them, each in its color: `c cite · e explain · a ask`); at its
 //                  right their items (barRight: `w 11 claims`, `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands

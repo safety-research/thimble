@@ -3,12 +3,13 @@
 // prompt. The steps: e, v, s, then cite. Each step done redraws the row in place. A tour started again keeps the
 // earlier tour's rows. A step done early, a step whose feature is off and the selection step where no click reaches
 // thimble are left out; v that drew no card lets the tour go on. Step e names its words in bold, and while it waits
-// they shimmer in the sample answer, a band that moves at each tick of its own and stops with the step. Until the cite
-// step's key, the sample answer draws its cited words as plain words and its check is held; c starts the check, and
-// once every citation has its result the step is done, with what the check did, and the view goes to the step row. A
-// tour that ends first leaves its sample answer's citations to be checked when opened. After the sample answer, the
-// replies to the person's own prompts answer nothing, so s acts on the sample answer, and the step row is placed under
-// the reply; a fork's end moves nothing. After an install inside Claude Code, the person's /reload-plugins runs
+// they shimmer in the sample answer, a band that moves at each tick of its own and stops with the step. The sample
+// answer has no citations. As the cite step starts, thimble puts its question in an empty prompt box (else the step
+// names it); the person sends it, Claude's answer cites its numbers, the checker checks them as the turn ends (in
+// auto cite too), and once every citation has its result the step is done, with what the check did, and the view goes
+// to the step row; an answer that cites nothing ends the step too. After the sample answer and before the cite step,
+// the replies to the person's own prompts answer nothing, so s acts on the sample answer, and the step row is placed
+// under the reply; a fork's end moves nothing. After an install inside Claude Code, the person's /reload-plugins runs
 // /thimble:tour once in that session, soon after the install only. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
@@ -20,17 +21,20 @@ import { setOptions } from '../settings/features.mjs'
 import { accent } from '../core/theme'
 import { endCheck, noteRow, resumeChecks, startCheck } from '../marks/checker'
 import { rowMarks } from '../marks/store'
-import { checkedWords, CLOSE_MS, CLOSED, DONE_MS, E_WORDS, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourChecked, tourDid, tourHolds, tourKey, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
+import { checkedWords, CITE_QUESTION, CLOSE_MS, CLOSED, DONE_MS, E_WORDS, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourChecked, tourCites, tourDid, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** A made-up engine with what the tour reads: the session's state, the environment, the clock, and the rows it places. */
+/** A made-up engine with what the tour reads: the session's state, the environment, the clock, the rows it places, and
+ *  the prompt box (`box`: what it holds; `fills`: what thimble put in it; `takes`: whether it takes a fill). */
 function fake() {
   const state = new Map<string, unknown>()
   const placed: string[] = []
+  const box = { text: '', takes: true }
+  const fills: Any[] = []
   // the waits asked for, which the test runs itself
   const timers: { ms: number; fn: () => void }[] = []
   const $: Any = {
@@ -42,13 +46,22 @@ function fake() {
     clock: { now: async () => 0, after: (ms: number, fn: () => void) => { timers.push({ ms, fn }); return { cancel() {} } } },
     config: { list: async () => [] },
     ui: { invalidate: () => undefined, place: async (a: Any) => { placed.push(a.id); return { isPlaced: true, requestId: a.id } } },
+    prompt: {
+      read: async () => ({ text: box.text, cursor: box.text.length }),
+      fill: async (a: Any) => {
+        if (!box.takes) return { isFilled: false, refusal: 'dialog', text: box.text, cursor: 0 }
+        fills.push(a)
+        box.text = a.mode === 'append' ? box.text + a.text : a.text
+        return { isFilled: true, text: box.text, cursor: box.text.length }
+      },
+    },
   }
   /** The waits asked for so far run, each once; the waits they ask for wait. */
   const tick = async () => {
     for (const t of timers.splice(0)) t.fn()
     await new Promise(r => setTimeout(r, 5))
   }
-  return { $, placed, timers, tick }
+  return { $, placed, timers, tick, box, fills }
 }
 
 /** The steps the tour waited for, in order, as each step is done. */
@@ -181,70 +194,72 @@ test('the shimmer is the words in thimble\'s color with a brighter band that ent
   for (let f = 0; f < 31; f++) expect(at(f).map(r => (r[1] as number) - (r[0] as number)).reduce((a, b) => a + b, 0)).toBe(19)
 })
 
-test('until the cite step starts, the sample answer holds its citations: while it is written, then by its row; the hold ends with the step or the tour', async () => {
+test('as the cite step starts, thimble puts its question in an empty prompt box, and the step says to press Enter; a box with words in it, or one that takes nothing, keeps them, and the step names the question to type', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
-  const { $ } = fake()
-  const turn = (id: string, startedAt: number, endedAt: number | null, rows: string[]) => Promise.all([
-    $.state.set({ plugin: 'thimble', key: 'answerTurn', id }, { turnId: id, n: 1, prompt: { text: '', by: 'composer', row: null }, rows, answer: null, reason: null, startedAt, endedAt, labels: [], cards: [], seq: 0 }),
-    ...rows.map(r => $.state.set({ plugin: 'thimble', key: 'answerRowTurn', id: r }, id)),
-  ])
-  expect(await tourHolds($, 'row-sample')).toBe(false)
-  // an earlier answer, whose turn ended before the tour started, is not held
-  await turn('t0', -10, -5, ['row-before'])
-  await tourStart($)
-  await turn('t1', 0, null, ['row-sample'])
-  expect(await tourHolds($, 'row-before')).toBe(false)
-  // the turn that writes the sample answer, and a row not kept yet
-  expect(await tourHolds($, 'row-sample')).toBe(true)
-  expect(await tourHolds($, 'row-streaming')).toBe(true)
-  // once written, the sample answer alone
-  await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), at: 'e', done: ['answer'], sample: 'row-sample' })
-  expect(await tourHolds($, 'row-sample')).toBe(true)
-  expect(await tourHolds($, 'row-streaming')).toBe(false)
-  await walk($, ['e', 'v', 's'])
-  expect((await tourNow($))?.at).toBe('cite')
-  expect(await tourHolds($, 'row-sample')).toBe(true)
-  // c started the check: held no more
-  await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), checkAt: 5 })
-  expect(await tourHolds($, 'row-sample')).toBe(false)
-  // a tour that ends first holds nothing: its citations draw, and wait to be opened
-  await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), checkAt: null })
-  expect(await tourHolds($, 'row-sample')).toBe(true)
-  await turnTour($)
-  expect(await tourHolds($, 'row-sample')).toBe(false)
-  // with Citations manual the tour has no cite step, and holds nothing
+  const cite = (t: Any) => textOf(stepRowEl(els, t, true, 100))
+  const a = fake()
+  await tourStart(a.$)
+  await walk(a.$, ['answer', 'e', 'v'])
+  expect(a.fills).toEqual([])
+  await walk(a.$, ['s'])
+  expect((await tourNow(a.$))?.at).toBe('cite')
+  expect(a.fills).toEqual([{ text: CITE_QUESTION, mode: 'append' }])
+  expect(a.box.text).toBe(CITE_QUESTION)
+  expect(cite(await tourNow(a.$))).toContain('› Last, citations: press Enter to send the question in the prompt box. Claude cites each number in its answer, and thimble checks it against the data.')
+  // the person typed something: it stays, and the step names the question, in bold
+  const b = fake()
+  b.box.text = 'my own words'
+  await tourStart(b.$)
+  await walk(b.$, ['answer', 'e', 'v', 's'])
+  expect(b.fills).toEqual([])
+  expect(b.box.text).toBe('my own words')
+  const typed = stepRowEl(els, (await tourNow(b.$))!, true, 100)
+  expect(textOf(typed)).toContain(`› Last, citations: type ${CITE_QUESTION} and press Enter. Claude cites each number in its answer, and thimble checks it against the data.`)
+  expect(nodes(typed).find(n => n.type === 'Text' && n.props?.children === CITE_QUESTION)?.props).toMatchObject({ bold: true })
+  // a box that takes nothing (a dialog holds the keys): the same
+  const c = fake()
+  c.box.takes = false
+  await tourStart(c.$)
+  await walk(c.$, ['answer', 'e', 'v', 's'])
+  expect(cite(await tourNow(c.$))).toContain(`type ${CITE_QUESTION} and press Enter.`)
+  // with Citations manual there is no cite step, and the box stays empty
   setOptions({ citations: 'manual' })
-  await tourStart($)
-  expect(await tourHolds($, 'row-streaming')).toBe(false)
+  const d = fake()
+  await tourStart(d.$)
+  await walk(d.$, ['answer', 'e', 'v', 's'])
+  expect(d.fills).toEqual([])
   setOptions({})
 })
 
-test('the cite step is done once each citation of the sample answer has its result, none waiting or checked; DONE_MS later the view goes to the step row', async () => {
+test('the cite step is done once each citation of its answer has its result, none waiting or checked, or once that answer\'s turn ended with none; DONE_MS later the view goes to the step row', async () => {
   setOptions({})
   noteViewport({ isFullscreen: true })
   const { $, timers, tick } = fake()
   const scrolls: Any[] = []
   $.ui.scroll = async (a: Any) => { scrolls.push(a); return {} }
-  const item = (n: number, status: string) => ({ n, row: 'row-sample', words: `${n}`, start: 0, end: 1, sentence: '', status, shown: `${n}` })
+  const item = (n: number, status: string) => ({ n, row: 'row-cited', words: `${n}`, start: 0, end: 1, sentence: '', status, shown: `${n}` })
   const reply = async (statuses: string[], more: Any[] = []) => {
-    await $.state.set({ plugin: 'thimble', key: 'marks', id: 'row-sample' }, { key: 'row-sample', turnId: 't1', rows: ['row-sample'], startedAt: 0, settledAt: null, items: [...statuses.map((s, i) => item(i + 1, s)), ...more] })
-    await $.state.set({ plugin: 'thimble', key: 'marksRow', id: 'row-sample' }, 'row-sample')
+    await $.state.set({ plugin: 'thimble', key: 'marks', id: 'row-cited' }, { key: 'row-cited', turnId: 't2', rows: ['row-cited'], startedAt: 0, settledAt: null, items: [...statuses.map((s, i) => item(i + 1, s)), ...more] })
+    await $.state.set({ plugin: 'thimble', key: 'marksRow', id: 'row-cited' }, 'row-cited')
   }
   await tourStart($)
-  await $.state.set({ plugin: 'thimble', key: 'tourSample' }, 'row-sample')
-  await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), sample: 'row-sample' })
   await walk($, ['answer', 'e', 'v', 's'])
-  await reply(['deferred', 'deferred', 'deferred'])
-  // before c, a check that ends (another answer's) is not the step
-  await tourChecked($)
+  // before an answer to the question, a check that ends (another answer's) is not the step
+  await reply(['checking'])
+  await tourChecked($, true)
   expect((await tourNow($))?.at).toBe('cite')
-  await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), checkAt: 5 })
+  expect(await tourCites($, 'row-cited')).toBe(false)
+  // the answer came: it is the one the step checks, and the step row says its numbers are being checked
+  await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), cited: 'row-cited' })
+  expect(await tourCites($, 'row-cited')).toBe(true)
+  expect(await tourCites($, 'row-sample')).toBe(false)
+  expect(textOf(stepRowEl(els, (await tourNow($))!, true, 100))).toContain('› thimble is checking each number Claude cited against the data.')
   // one still checked, or one still waiting: not yet
   await reply(['verified', 'checking', 'corrected'])
   await tourChecked($)
   await reply(['verified', 'deferred', 'corrected'])
-  await tourChecked($)
+  await tourChecked($, true)
   expect((await tourNow($))?.at).toBe('cite')
   // each has its result. A narrowing changes no value, and words the person cited are none of Claude's numbers: the
   // count leaves both out
@@ -261,6 +276,17 @@ test('the cite step is done once each citation of the sample answer has its resu
   // CLOSE_MS after the end, the step row closes to one line
   await tick()
   expect(parsed(await $.state.get({ plugin: 'thimble', key: 'tour' })).closed).toBe(true)
+  // an answer that cites nothing: the step is done as its turn ends, and says so
+  const b = fake()
+  await tourStart(b.$)
+  await walk(b.$, ['answer', 'e', 'v', 's'])
+  await b.$.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow(b.$)), cited: 'row-plain' })
+  await tourChecked(b.$)
+  expect((await tourNow(b.$))?.at).toBe('cite')
+  await tourChecked(b.$, true)
+  const done = parsed(await b.$.state.get({ plugin: 'thimble', key: 'tour' }))
+  expect(done.at).toBe('end')
+  expect(textOf(stepRowEl(els, done, true, 100))).toContain('✓ Claude cited no numbers this time.')
 })
 
 /** A made-up engine for a check's run: versioned state, the checker's text, forks that start, and a validator that
@@ -306,45 +332,41 @@ function checking() {
   return { $, spawned, timers }
 }
 
-test("the sample answer's check is held until c: then each citation is checked at once, the wrong number lands corrected, and the cite step is done with what the check did", async () => {
-  setOptions({ citations: 'auto cite + verify', cards: 'off', explain: 'off', squeezeAnswers: false })
+test("the cite step's answer is checked as its turn ends, with Citations auto cite too: the wrong number it repeats lands corrected, and the step is done with what the check did; another answer's citations wait to be opened", async () => {
+  setOptions({ citations: 'auto cite', cards: 'off', explain: 'off', squeezeAnswers: false })
   noteViewport({ isFullscreen: true })
   try {
     const { $, spawned } = checking()
-    const text = 'Customers placed [36 orders](#) in March 2026. Most were loose-leaf tins, worth [$52](#). The shop refunded [7 orders](#).'
-    const statuses = async () => ((await rowMarks($, 'row-sample'))?.items ?? []).map(m => `${m.shown}:${m.status}`)
+    const statuses = async (row: string) => ((await rowMarks($, row))?.items ?? []).map(m => `${m.shown}:${m.status}`)
     await tourStart($)
-    // the turn that writes the sample answer ends: its check is held, its citations wait
-    await noteRow($, 'row-sample', text)
-    await startCheck($, { turnId: 't1', reason: 'answer' }, row => tourHolds($, row))
-    expect(spawned).toEqual([])
-    expect(await statuses()).toEqual(['36 orders:deferred', '$52:deferred', '7 orders:deferred'])
-    // the tour goes on to its cite step (Explainers, Cards and Simplify off)
     await $.state.set({ plugin: 'thimble', key: 'tourSample' }, 'row-sample')
     await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), sample: 'row-sample' })
     await tourDid($, 'answer')
     expect((await tourNow($))?.at).toBe('cite')
-    // a key other than c, or c with no tour on its cite step, is not taken
-    expect(await tourKey($, 'x', 0)).toBeNull()
-    // c: the check of every citation that waits, in one fork, and the citations held no more
-    const take = (await tourKey($, 'c', 0))!
-    await take.now!()
+    // an answer of another turn's: with auto cite its citations wait to be opened
+    await noteRow($, 'row-other', 'There were [36 orders](#).')
+    await startCheck($, { turnId: 't2', reason: 'answer' }, row => tourCites($, row))
+    expect(spawned).toEqual([])
+    expect(await statuses('row-other')).toEqual(['36 orders:deferred'])
+    // the cite step's answer (main's turn that ends records it first: turnEnded), checked at once
+    await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), cited: 'row-cited' })
+    await noteRow($, 'row-cited', 'Customers placed [36 orders](#) in March 2026, and the shop refunded [7 orders](#).')
+    await startCheck($, { turnId: 't3', reason: 'answer' }, row => tourCites($, row))
+    await tourChecked($, true)
     await new Promise(r => setTimeout(r, 5))
-    expect(spawned.map(a => a.description)).toEqual(['checking citations (c)'])
+    expect(spawned.map(a => a.description)).toEqual(['checking citations'])
     expect(String(spawned[0].prompt)).toContain('[7 orders]')
-    expect(await tourHolds($, 'row-sample')).toBe(false)
-    expect(await statuses()).toEqual(['36 orders:checking', '$52:checking', '7 orders:checking'])
-    // nothing waits now: c types
-    expect(await tourKey($, 'c', 0)).toBeNull()
+    expect(await statuses('row-cited')).toEqual(['36 orders:checking', '7 orders:checking'])
+    expect((await tourNow($))?.at).toBe('cite')
     // the check ends: each citation has its result, and the step is done with what the check did
     await endCheck($, { agentId: 'agent-1', reason: 'answer', answer: '```json\n[]\n```' })
     await tourChecked($)
-    expect(await statuses()).toEqual(['36 orders:verified', '$52:verified', '4 orders:corrected'])
+    expect(await statuses('row-cited')).toEqual(['36 orders:verified', '4 orders:corrected'])
     expect(await tourRuns($)).toBe(false)
     const t = parsed(await $.state.get({ plugin: 'thimble', key: 'tour' }))
     expect(t.done).toEqual(['answer', 'cite'])
-    expect(t.checked).toMatchObject({ n: 3, corrected: 1, failed: 0, fix: { was: '7 orders', now: '4 orders' } })
-    expect(checkedWords(t.checked)).toBe('thimble checked 3 numbers and corrected 1: 7 orders → 4 orders.')
+    expect(t.checked).toMatchObject({ n: 2, corrected: 1, failed: 0, fix: { was: '7 orders', now: '4 orders' } })
+    expect(checkedWords(t.checked)).toBe('thimble checked 2 numbers and corrected 1: 7 orders → 4 orders.')
   } finally {
     setOptions({})
   }
@@ -356,18 +378,16 @@ test('the plugin reloads while the cite step\'s check runs, and its fork is gone
   try {
     const { $ } = checking()
     await tourStart($)
-    await noteRow($, 'row-sample', 'Customers placed [36 orders](#) in March 2026. The shop refunded [7 orders](#).')
-    await startCheck($, { turnId: 't1', reason: 'answer' }, row => tourHolds($, row))
-    await $.state.set({ plugin: 'thimble', key: 'tourSample' }, 'row-sample')
-    await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), sample: 'row-sample' })
     await tourDid($, 'answer')
-    await (await tourKey($, 'c', 0))!.now!()
+    await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), cited: 'row-cited' })
+    await noteRow($, 'row-cited', 'Customers placed [36 orders](#) in March 2026. The shop refunded [7 orders](#).')
+    await startCheck($, { turnId: 't2', reason: 'answer' }, row => tourCites($, row))
     await new Promise(r => setTimeout(r, 5))
     expect((await tourNow($))?.at).toBe('cite')
     // at session start (marks/register.ts) the fork is gone (agent.list names none): its citations give up
     await resumeChecks($)
     await tourChecked($)
-    expect(((await rowMarks($, 'row-sample'))?.items ?? []).map(m => m.status)).toEqual(['failed', 'failed'])
+    expect(((await rowMarks($, 'row-cited'))?.items ?? []).map(m => m.status)).toEqual(['failed', 'failed'])
     expect(await tourRuns($)).toBe(false)
     expect(parsed(await $.state.get({ plugin: 'thimble', key: 'tour' })).checked).toEqual({ n: 2, corrected: 0, failed: 2 })
   } finally {
@@ -404,18 +424,18 @@ test('the step row counts the steps it shows, names the words of e in bold and i
   // v waits: 2 of 4; without clicks there is no e, so 1 of 3
   expect(textOf(row(at('v', ['answer', 'e'])))).toContain('thimble tour · 2 of 4')
   expect(textOf(row(at('v', ['answer']), false))).toContain('thimble tour · 1 of 3')
-  // s, then cite last: it introduces citations and names c, with clicks and without
+  // s, then cite last: it introduces citations and names Enter, with clicks and without
   expect(textOf(row(at('s', ['answer', 'e', 'v'])))).toContain('› Press s for a shorter, plainer version of the tea shop answer.')
-  const cite = textOf(row(at('cite', ['answer', 'e', 'v', 's'])))
+  const cite = textOf(row(at('cite', ['answer', 'e', 'v', 's'], { asked: true })))
   expect(cite).toContain('thimble tour · 4 of 4')
   expect(cite).toContain('✓ s wrote a simpler version.')
-  expect(cite).toContain('› Last, citations: Claude marks each number it states, and thimble checks it against the data. Press c to watch thimble check the tea shop answer.')
-  expect(textOf(row(at('cite', ['answer', 'v', 's']), false))).toContain('Press c to watch thimble check the tea shop answer.')
-  expect(nodes(row(at('cite', ['answer', 'e', 'v', 's']))).find(n => n.type === 'Text' && n.props?.children === 'c')?.props).toMatchObject({ bold: true })
-  // while its check runs
-  expect(textOf(row(at('cite', ['answer', 'e', 'v', 's'], { checkAt: 5 })))).toContain('› thimble is checking each number of the tea shop answer against the data.')
+  expect(cite).toContain('› Last, citations: press Enter to send the question in the prompt box. Claude cites each number in its answer, and thimble checks it against the data.')
+  expect(textOf(row(at('cite', ['answer', 'v', 's'], { asked: true }), false))).toContain('press Enter to send the question in the prompt box.')
+  expect(nodes(row(at('cite', ['answer', 'e', 'v', 's'], { asked: true }))).find(n => n.type === 'Text' && n.props?.children === 'Enter')?.props).toMatchObject({ bold: true, color: accent() })
+  // while the citations of its answer are checked
+  expect(textOf(row(at('cite', ['answer', 'e', 'v', 's'], { asked: true, cited: 'row-cited' })))).toContain('› thimble is checking each number Claude cited against the data.')
   // done: what the check did, then the end
-  const end = textOf(row(at('end', ['answer', 'e', 'v', 's', 'cite'], { checkAt: 5, checked: { n: 6, corrected: 1, failed: 0 } })))
+  const end = textOf(row(at('end', ['answer', 'e', 'v', 's', 'cite'], { asked: true, cited: 'row-cited', checked: { n: 6, corrected: 1, failed: 0 } })))
   expect(end).toContain('thimble tour · done')
   expect(end).toContain('✓ thimble checked 6 numbers and corrected 1.')
   expect(end.indexOf('The tour is over.')).toBeGreaterThan(end.indexOf('corrected 1.'))
@@ -433,9 +453,10 @@ test('what the check did, in words', () => {
   expect(checkedWords({ n: 6, corrected: 0, failed: 1 })).toBe('thimble checked 6 numbers and could not confirm 1.')
   expect(checkedWords({ n: 6, corrected: 0, failed: 0 })).toBe('thimble checked 6 numbers and found each right.')
   expect(checkedWords({ n: 1, corrected: 0, failed: 0 })).toBe('thimble checked 1 number and found it right.')
+  expect(checkedWords({ n: 0, corrected: 0, failed: 0 })).toBe('Claude cited no numbers this time.')
 })
 
-test('no reminder shows while the tour runs; answers are held after the sample answer; a /clear ends the tour', async () => {
+test('no reminder shows while the tour runs; answers are held after the sample answer, until the cite step; a /clear ends the tour', async () => {
   setOptions({ explain: 'on demand' })
   const { $ } = fake()
   $.clock.after = () => ({ cancel() {} })
@@ -445,6 +466,15 @@ test('no reminder shows while the tour runs; answers are held after the sample a
   expect(await answersNothing($, 't-mine')).toBe(false)
   await tourDid($, 'answer')
   expect(await answersNothing($, 't-mine')).toBe(true)
+  // the cite step's answer is a normal turn's
+  const b = fake()
+  b.$.clock.after = () => ({ cancel() {} })
+  await tourStart(b.$)
+  await walk(b.$, ['answer', 'e', 'v'])
+  expect(await answersNothing(b.$, 't-mine')).toBe(true)
+  await walk(b.$, ['s'])
+  expect((await tourNow(b.$))?.at).toBe('cite')
+  expect(await answersNothing(b.$, 't-mine')).toBe(false)
   await turnTour($)
   expect(await tourRuns($)).toBe(false)
   expect(await answersNothing($, 't-mine')).toBe(false)
@@ -480,7 +510,9 @@ const NO_FILES = (on: Any, files: Record<string, string> = {}) => {
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [String(e.props?.text ?? 'the engine')] }) as never)
 }
 
-const SAMPLE = 'Customers placed [36 orders](#) in March 2026. The shop refunded [7 orders](#). Most of the refunded orders arrived on time, so late delivery does not explain the refunds.'
+const SAMPLE = 'Customers placed 36 orders in March 2026. The shop refunded 7 orders. Most of the refunded orders arrived on time, so late delivery does not explain the refunds.'
+/** Claude's answer to the cite step's question: it restates the sample answer and cites its numbers, the wrong one too. */
+const CITED = 'Customers placed [36 orders](#) in March 2026, and the shop refunded [7 orders](#), most of them on time.'
 
 function textOf(n: Any): string {
   if (n == null || n === false) return ''
@@ -490,8 +522,9 @@ function textOf(n: Any): string {
 }
 
 /** A session where the tour runs through the whole hooks module: the prompts that reach Claude, the rows placed,
- *  Simplify's calls, the forks asked for, and a turn of main's. A key thimble does not take is typed into the box, as
- *  Claude Code types it. (This kit's spawns name no agent, so a check's run is tested on a made-up engine.) */
+ *  Simplify's calls, the forks asked for, what thimble put in the prompt box (an empty box), and a turn of main's. A
+ *  key thimble does not take is typed into the box, as Claude Code types it. (A check's run is tested on a made-up
+ *  engine.) */
 async function session($: Any, on: Any, files: Record<string, string> = {}) {
   NO_FILES(on, files)
   const clock = mock.clock(on, { now: 0 })
@@ -500,12 +533,14 @@ async function session($: Any, on: Any, files: Record<string, string> = {}) {
   const ran: Any[] = []
   const asked: Any[] = []
   const spawns: Any[] = []
+  const fills: string[] = []
   on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: `agent-${spawns.length}` } as never })
   on('agent.list', () => ({ value: [] }))
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('prompt.submit', (_$: unknown, e: Any) => { got.push({ text: String(e.text), by: String(e.origin?.kind ?? '') }); return { text: e.text } })
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText ?? ''}${e.text.slice(e.end)}`, cursor: e.start + String(e.inputText ?? '').length }) as never)
-  on('prompt.fill', () => ({ isFilled: true }) as never)
+  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }) as never)
+  on('prompt.fill', (_$: unknown, e: Any) => { fills.push(String(e.text)); return { isFilled: true } as never })
   on('ui.place', (_$: unknown, e: Any) => { placed.push(e.id); return { value: { isPlaced: true, requestId: `r-${e.id}` } } })
   on('command.run', (_$: unknown, e: Any) => { ran.push(e); return {} as never })
   on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: '<text>\nThe shop refunded a few orders.\n</text>', usage: {} } } })
@@ -522,7 +557,7 @@ async function session($: Any, on: Any, files: Record<string, string> = {}) {
   const answer = async (id: string, text: string) => textOf(await $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: id, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never))
   const ask = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
   const press = async (k: string) => { const r = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never); await clock.advance(400); return r }
-  return { clock, got, placed, ran, asked, spawns, turn, row, answer, ask, press }
+  return { clock, got, placed, ran, asked, spawns, fills, turn, row, answer, ask, press }
 }
 
 test("in a session: thimble draws the intro and the step row under the sample answer, sends Claude nothing, places the row under a reply, s simplifies the sample answer, and a second tour keeps the first one's rows", { options: { cards: 'off', explain: 'off', citations: 'off' } }, async ($, on) => {
@@ -593,74 +628,57 @@ function citesIn(drawn: Any): number {
 const CITE_ONLY = { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'auto cite + verify' } }
 const drawnAnswer = ($: Any, id: string, text: string) => $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: id, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
 
-test('in a session: the sample answer shows no citation and its check waits until the cite step; c asks for the check of every citation, and the citations show', CITE_ONLY, async ($, on) => {
+test('in a session: the sample answer cites nothing and starts no check; the cite step puts its question in the prompt box; Claude\'s answer to it is checked as the turn ends, and the step row moves under it', CITE_ONLY, async ($, on) => {
   noteViewport({ isFullscreen: true })
   const t = await session($, on)
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  // Citations checks each answer, but not this one yet: no check, and its cited words are plain words
   expect(t.spawns).toEqual([])
   const before = await drawnAnswer($, 'row-t1', SAMPLE)
   expect(citesIn(before)).toBe(0)
-  expect(textOf(before)).toContain('The shop refunded 7 orders.')
-  expect(textOf(before)).not.toContain('](#)')
-  // the one step on: cite, last, which introduces citations and names c
+  // the one step on: cite, last, which introduces citations: its question waits in the prompt box
   expect(textOf(before)).toContain('thimble tour · 1 of 1')
-  expect(textOf(before)).toContain('Last, citations: Claude marks each number it states, and thimble checks it against the data. Press c to watch thimble check the tea shop answer.')
-  // c: the check of every citation is asked for, once the key's word window has passed, and the citations show
-  expect(await t.press('c')).toEqual({ text: '', cursor: 0 })
-  expect(t.spawns.map(e => e.description)).toEqual(['checking citations (c)'])
-  const checking = await drawnAnswer($, 'row-t1', SAMPLE)
-  expect(citesIn(checking)).toBe(2)
-  expect(textOf(checking)).toContain('thimble is checking each number of the tea shop answer against the data.')
+  expect(textOf(before)).toContain('Last, citations: press Enter to send the question in the prompt box. Claude cites each number in its answer, and thimble checks it against the data.')
+  expect(t.fills).toEqual([CITE_QUESTION])
+  // the person sends it: a normal turn, whose answer cites its numbers, checked as it ends
+  await t.ask(CITE_QUESTION)
+  await t.turn('t2', CITE_QUESTION, CITED)
+  expect(t.got.map(p => p.text)).toContain(CITE_QUESTION)
+  expect(t.spawns.map(e => e.description)).toEqual(['checking citations'])
+  expect(citesIn(await drawnAnswer($, 'row-t2', CITED))).toBe(2)
+  // the step row stands under that answer now, and says its numbers are being checked
+  expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2'])
+  expect(textOf(await drawnAnswer($, 'row-t1', SAMPLE))).not.toContain('thimble tour')
+  expect(await t.row('tour-step-2')).toContain('› thimble is checking each number Claude cited against the data.')
 })
 
-test('in a session: before the cite step, c on words selected in the sample answer cites nothing: it is typed, and no check starts', { options: { cards: 'off', squeezeAnswers: false, citations: 'auto cite + verify' } }, async ($, on) => {
-  noteViewport({ isFullscreen: true })
-  on('ui.selection', () => ({ value: { text: '7 orders', requestId: 'row-t1' } }) as never)
-  const t = await session($, on)
-  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  expect(textOf(await drawnAnswer($, 'row-t1', SAMPLE))).toContain('Highlight loose-leaf tins in the answer above, then press e.')
-  expect(await t.press('c')).toEqual({ text: 'c', cursor: 1 })
-  await t.clock.advance(1000)
-  expect(t.spawns).toEqual([])
-  expect(citesIn(await drawnAnswer($, 'row-t1', SAMPLE))).toBe(0)
-})
-
-test('in a session: a click on the cite step\'s line does what c does', CITE_ONLY, async ($, on) => {
+test('in a session: with Citations auto cite, the cite step\'s answer is checked as its turn ends too', { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'auto cite' } }, async ($, on) => {
   noteViewport({ isFullscreen: true })
   const t = await session($, on)
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  const ui = await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-t1', viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { text: SAMPLE, isFirstOfReply: true } } as never)
-  await ui.press({ key: 'tour-check' })
-  await ui.unmount()
-  await t.clock.advance(100)
-  expect(t.spawns.map(e => e.description)).toEqual(['checking citations (c)'])
-  expect(textOf(await t.answer('row-t1', SAMPLE))).toContain('thimble is checking each number of the tea shop answer against the data.')
+  expect(t.fills).toEqual([CITE_QUESTION])
+  await t.ask(CITE_QUESTION)
+  await t.turn('t2', CITE_QUESTION, CITED)
+  expect(t.spawns.map(e => e.description)).toEqual(['checking citations'])
+  // a later answer is no answer of the step's: its citations wait to be opened, as with auto cite
+  await t.ask('And the late ones?')
+  await t.turn('t3', 'And the late ones?', '[6 orders](#) arrived late.')
+  expect(t.spawns.length).toBe(1)
 })
 
-test('in a session: c then a letter is a word, and the check is not asked for; a tour started again before its cite step leaves the earlier sample answer with its citations, which open and are checked', CITE_ONLY, async ($, on) => {
+test("in a session: Claude's answer to the cite step's question cites nothing: the step ends as its turn ends, and says so", CITE_ONLY, async ($, on) => {
   noteViewport({ isFullscreen: true })
   const t = await session($, on)
-  const tour = () => $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
-  await tour()
+  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
-  // c, then a letter: the person types a word
-  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'c' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'c' } as never)
-  expect(await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'a' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'a' } as never)).toEqual({ text: 'ca', cursor: 2 })
-  await t.clock.advance(1000)
+  await t.ask(CITE_QUESTION)
+  await t.turn('t2', CITE_QUESTION, 'The shop sold 36 orders and refunded a few.')
   expect(t.spawns).toEqual([])
-  expect(citesIn(await drawnAnswer($, 'row-t1', SAMPLE))).toBe(0)
-  expect(textOf(await drawnAnswer($, 'row-t1', SAMPLE))).toContain('Press c to watch thimble check the tea shop answer.')
-  // the tour again: the first sample answer is held no more, its citations wait to be checked when opened
-  await t.clock.advance(20_000)
-  await tour()
-  expect(citesIn(await drawnAnswer($, 'row-t1', SAMPLE))).toBe(2)
-  const spawned = t.spawns.length
-  expect(await t.press(']')).toEqual({ text: '', cursor: 0 })
-  expect(t.spawns.slice(spawned).map(e => e.description)).toEqual(['checking a citation'])
+  const end = await t.row('tour-step-2')
+  expect(end).toContain('thimble tour · done')
+  expect(end).toContain('✓ Claude cited no numbers this time.')
+  expect(end).toContain('The tour is over.')
 })
 
 test("the person's /reload-plugins soon after an install in this session runs /thimble:tour once; a later one, or another session's, does not", async ($, on) => {

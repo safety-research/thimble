@@ -12,7 +12,7 @@
 // Its result is what the person sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it
-//   startCheck($, e, holds)   at the end of main's turn: the reply's marks (store.ts, all `checking`), the forks
+//   startCheck($, e, checks)  at the end of main's turn: the reply's marks (store.ts, all `checking`), the forks
 //   endCheck($, e)            at the end of a checker's turn: the validator, its marks' statuses
 //   resumeChecks($)           at session start: the checks a reload of the plugin left running, on the busy line again;
 //                             a check whose fork is gone gives up, and says so
@@ -58,8 +58,6 @@
 //                             needed; a repair's own failure starts none. Call it in a hook around endCheck's
 //                             (marks/register.ts): the repair's fork skips the hook that spawned it, so its end still
 //                             reaches endCheck
-//   waitingCheck($, key)      the check of a reply's marks that wait (`deferred`), as the tour's cite step starts it
-//                             (tour/tour.ts): a function that starts it inside the key's hook, as g starts one again
 //   repairsDue(key)           whether a check of the reply ended with citations autoRepair has yet to repair
 //   errorWordsOf($, x, n)     the words of an error or a refusal a line quotes (bar/notice.ts reasonOf), each path of
 //                             this machine in them named as the validator names a cited file (core/text.js errorWords)
@@ -68,9 +66,8 @@
 // Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
 // cited words), and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual`,
 // Claude makes none; `off`, none. In every mode but off, words the person selects and asks about (c, marks/cite.ts)
-// wait `deferred` until the tray opens them, as one Claude made. A reply its caller holds (`holds`: the tour's sample
-// answer while its cite step is still to come, tour/tour.ts tourHolds) waits `deferred` in every mode: the step's key
-// checks all of its marks at once (waitingCheck), and a tour that ends first leaves them to be checked when opened.
+// wait `deferred` until the tray opens them, as one Claude made. A reply its caller names (`checks`: the answer of
+// the tour's cite step, tour/tour.ts tourCites) is checked after it in `auto cite` too, as in `auto cite + verify`.
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). A check
@@ -557,12 +554,10 @@ async function sayRefusing($: Engine): Promise<void> {
 }
 
 /** The words the forks of thimble's checks show as in /tasks, by which allowsCheck knows a checker's spawn: a reply's
- *  check, a citation's that was opened, a check g started again, and the check the tour's cite step started with c (a
- *  repair's: REPAIR_DESCRIPTION). */
+ *  check, a citation's that was opened, and a check g started again (a repair's: REPAIR_DESCRIPTION). */
 const CHECK_DESCRIPTION = 'checking citations'
 const OPENED_DESCRIPTION = 'checking a citation'
 export const AGAIN_DESCRIPTION = 'checking citations again (g)'
-export const TOUR_DESCRIPTION = 'checking citations (c)'
 
 /** Claude Code's verdict on a call as a tool.check hook reads it (Claude Code 2.1.307): the engine's own carries no
  *  `plugin`; an answer of a plugin's hook beneath reaches it settled, so an ask a plugin made, its own or one only the
@@ -578,7 +573,7 @@ export async function allowsCheck($: Engine, e: { input?: unknown }, origin: { p
   if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting) return false
   if (origin?.plugin !== 'thimble') return false
   const input = (e.input ?? {}) as { description?: unknown; subagent_type?: unknown }
-  if (![CHECK_DESCRIPTION, OPENED_DESCRIPTION, AGAIN_DESCRIPTION, TOUR_DESCRIPTION, REPAIR_DESCRIPTION].includes(String(input.description))) return false
+  if (![CHECK_DESCRIPTION, OPENED_DESCRIPTION, AGAIN_DESCRIPTION, REPAIR_DESCRIPTION].includes(String(input.description))) return false
   if (input.subagent_type !== undefined && input.subagent_type !== 'fork') return false
   return checksAllowed($)
 }
@@ -712,21 +707,21 @@ async function showRunning($: Engine, key: string, total: number, agents: string
 
 /** At the end of one of main's turns: when its reply holds marks, the reply's marks go in the store, and the checker
  *  forks start, each with its share of the marks. An interrupted turn's marks did not run (failed; x starts their
- *  check). A reply `holds` names by its key waits, its marks `deferred` (the tour's sample answer: marks/register.ts).
- *  Call it inside the turn.complete hook, so the plugin's other hooks serve the fork (core/forks.ts). */
-export async function startCheck($: Engine, e: { turnId: string; reason: string }, holds?: (key: string) => Promise<boolean>): Promise<void> {
+ *  check). A reply `checks` names by its key is checked after it in every mode that cites (the answer of the tour's
+ *  cite step: marks/register.ts). Call it inside the turn.complete hook, so the plugin's other hooks serve the fork
+ *  (core/forks.ts). */
+export async function startCheck($: Engine, e: { turnId: string; reason: string }, checks?: (key: string) => Promise<boolean>): Promise<void> {
   const noted = ((await $.state.get(ROWS)).value ?? []) as { row: string; text: string; at: number }[]
   // the rows stay noted until their reply is in the store, so they draw pending until then (awaitsCheck)
   const done = async () => { await $.state.set(ROWS, []) }
   const reply = noted.filter(r => r.text.trim())
   if (!reply.length || !claudeCites()) return await done()
-  const key = reply[reply.length - 1]!.row
-  // a reply held (the tour's sample answer, while its cite step is still to come): its marks wait for the step's key
-  // (waitingCheck)
-  const later = choiceOf('citations') !== 'auto cite + verify' || (!!holds && (await holds(key)))
+  // a reply checked now in every mode that cites: the answer of the tour's cite step
+  const later = choiceOf('citations') !== 'auto cite + verify' && !(checks && (await checks(reply[reply.length - 1]!.row)))
   const items = itemsOf(reply, later)
   if (!items.length) return await done()
   const now = Number(await $.clock.now())
+  const key = reply[reply.length - 1]!.row
   const rows = [...new Set([...items.map(m => m.row), key])]
   try {
     await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: later ? now : null, items, wroteAt: reply[reply.length - 1]!.at })
@@ -779,9 +774,8 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
 }
 
 /** What g starts again: the forks of a reply's check, one per share with its prompt (the marks that still wait), or a
- *  repair. Made before the key's hook gives its answer, so the spawns are the first calls it makes (startAgain).
- *  `description`: the words its forks show (AGAIN_DESCRIPTION when none). */
-type Again = { kind: 'check'; whole: Check; reply: string; note?: string; shares: { marks: number[]; prompt: string }[]; description?: string } | { kind: 'repair'; repair: Repair }
+ *  repair. Made before the key's hook gives its answer, so the spawns are the first calls it makes (startAgain). */
+type Again = { kind: 'check'; whole: Check; reply: string; note?: string; shares: { marks: number[]; prompt: string }[] } | { kind: 'repair'; repair: Repair }
 
 /** The check a line that offers g is about, as g starts it again: null when none of its marks waits any more (each was
  *  opened and checked since; a repair's citation no longer failed, or checked again now), or thimble cannot read its
@@ -842,7 +836,7 @@ async function startAgain($: Engine, a: Again, hold: RepairHold): Promise<void> 
   held = hold
   let forks: { agentId?: string; deny?: string }[]
   try {
-    forks = await Promise.all(a.shares.map(s => spawnFork($, { kind: 'checker', prompt: s.prompt, description: a.description ?? AGAIN_DESCRIPTION })))
+    forks = await Promise.all(a.shares.map(s => spawnFork($, { kind: 'checker', prompt: s.prompt, description: AGAIN_DESCRIPTION })))
   } finally {
     if (held === hold) held = null
   }
@@ -863,26 +857,6 @@ async function startAgain($: Engine, a: Again, hold: RepairHold): Promise<void> 
   const deny = forks.find(f => !f.agentId)?.deny
   if (refused.length) await sayCannotStart($, await refusedLine($, deny), true, { kind: 'check', whole: { ...a.whole, marks: refused }, reply: a.reply, ...(a.note ? { note: a.note } : {}) })
   if (started.length) await showRunning($, a.whole.key, a.whole.marks.length - refused.length, started)
-}
-
-/** The check of every mark of reply `key` that waits (`deferred`), as the tour's cite step starts it with c
- *  (tour/tour.ts tourKey): its forks, one per share, made before the key's hook gives its answer, so the function
- *  returned makes the spawns its first calls, each waiting out the key's word window (`hold`), as g's do. The cards'
- *  index is the last check's, as a repair's is. Null when no mark waits, or thimble cannot read its checker text. */
-export async function waitingCheck($: Engine, key: string): Promise<((hold: RepairHold) => Promise<void>) | null> {
-  const r = await replyOf($, key)
-  const items = (r?.items ?? []).filter(m => m.status === 'deferred')
-  if (!r || !items.length) return null
-  let template = ''
-  try { template = await promptText($, 'checker') } catch { return null }
-  const cwd = String(await $.session.cwd())
-  const root = await startDir($)
-  const at = Number(await $.clock.now())
-  const note = 'The analyst asked thimble to check these citations now. They may stand in an earlier reply than your last.'
-  const whole: Check = { agentId: '', key, turnId: r.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: at, spawnedAt: at, wroteAt: wroteAtOf(r) }
-  const shares = splitMarks(items).map(share => ({ marks: share.map(m => m.n), prompt: `${checkerPrompt(template, share, cwd, root, lastIndex)}\n\n${note}` }))
-  const again: Again = { kind: 'check', whole, reply: LAST_REPLY, note, shares, description: TOUR_DESCRIPTION }
-  return hold => startAgain($, again, hold)
 }
 
 /** At the end of a side thread's turn (threads/thread.ts): its answer's marks are checked as a reply's are, in the

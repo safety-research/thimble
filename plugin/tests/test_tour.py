@@ -74,7 +74,8 @@ def test_the_help_names_the_tour():
 
 
 def test_the_sample_is_small_made_up_data_with_the_numbers_the_tours_answer_states():
-    """The answer in skills/tour/SKILL.md cites these numbers; one of them (the refunds) is wrong on purpose."""
+    """The answer in skills/tour/SKILL.md states these numbers, with no citations; one of them (the refunds) is wrong on
+    purpose."""
     rows = list(csv.DictReader((TR.SAMPLE / "orders.csv").open()))
     assert len(rows) == 36
     assert sum(int(r["total_usd"]) for r in rows) == 1872
@@ -82,5 +83,6 @@ def test_the_sample_is_small_made_up_data_with_the_numbers_the_tours_answer_stat
     assert sum(r["arrived"] == "late" for r in rows) == 6
     assert sum(r["region"] == "North" for r in rows) == 14
     skill = (Path(TR.SAMPLE).parents[1] / "skills" / "tour" / "SKILL.md").read_text()
-    for cited in ("[7 orders](#)", "[6 orders](#)", "[36 orders](#)", "[$1,872](#)", "[$52](#)", "[14 of the 36](#)"):
-        assert cited in skill
+    for stated in ("refunded 7 orders", "6 orders", "36 orders", "$1,872", "$52", "14 of the 36"):
+        assert stated in skill
+    assert "](#)" not in skill
