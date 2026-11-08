@@ -66,8 +66,7 @@ Options go after `bash -s --`:
 - `--bin-dir DIR`: the commands go in `DIR`, not in `~/.local/bin`.
 - `--ref REF`: a branch or tag of thimble in place of the newest release, to try a branch before its release: the
   release's file when the tag has one, else GitHub's archive of it. Put the same name in place of `main` in the
-  address. A release from before thimble's releases had files installs with its own script: the address with its tag
-  in place of `main`.
+  address.
 - `--remove-0.9`: see [thimble 0.9](#thimble-09).
 
 You can run it again at any time: an install in `~/.thimble` stays as it is, with your fixes, and the script puts in
@@ -90,10 +89,8 @@ place any part that is missing. It does the same when you run it from a download
   folder.
 - `~/.local/bin/thimble` and `~/.local/bin/thimble-browser`: the commands, which run the code in `~/.thimble`.
 
-An install from before 0.10.8 (from a clone such as `~/thimble`, or from `~/thimble-0.10.8`) moves into `~/.thimble`
-when you run the script: Claude Code loads the plugin from there, with its settings as they were, your fixes stay, and
-the script says which old folder is no longer used. `thimble update` alone moves it too: the plugin and the `thimble`
-command at once, and `thimble-browser` the next time it starts. After that start, the old folder is no longer used.
+An install from before 0.10.8 (in a clone such as `~/thimble`, or in `~/thimble-0.10.8`) moves into `~/.thimble`, with
+its settings and fixes, when you run the script or `thimble update`.
 
 ## Update
 
@@ -114,8 +111,7 @@ GitHub counts the downloads of each release's file; thimble sends nothing else.
     rm -rf ~/.thimble ~/.thimble-browser
 
 The last line also deletes your fixes, the workbench's workspaces and the plugin's labels. Your data folders stay as
-they are (delete a `thimble/` folder that a build before 0.10.0 made in a data folder). The workbench's headless
-Chromium stays in `~/.cache/ms-playwright`: delete it if nothing else uses it.
+they are. The workbench's headless Chromium stays in `~/.cache/ms-playwright`: delete it if nothing else uses it.
 
 ## The dev install
 
