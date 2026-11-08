@@ -12,20 +12,21 @@ guarded route without a valid proof with 401. The CLI believes no answer without
 the recorded port learns nothing from it and cannot answer it.
 
 Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
-mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
-server makes when the link is shown (mint: thimble-browser's terminal, main's Stop hook); the page trades it for an
-HttpOnly, SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as it
-does PAIR_TTL_S after it was made or when a newer code for the same workspace is made. A browser that is signed in
-already spends a code with no change. The server keeps only the sha256 of each code, and of each browser's cookie and key
-(PAIRED_FILE, read at start and then kept in memory), so no file, transcript or link holds a credential that lasts. The
-token proves only the routes hooks, the shim, the module and the CLI use (guarded); with it a process can mint a code,
-and each new sign-in prints a line in main's terminal and posts a notice.
+mode) must come from a signed-in browser (analyst). The dashboard link carries the install's sign-in key after `#p=`
+(link_key), as a Jupyter link carries its token: the same link every time thimble-browser prints it, good in any number
+of browsers and with no expiry, until `thimble unpair` changes the key (rotate_link_key), which every earlier link then
+stops working with. The key sits in <home>/LINK_KEY, readable by its owner alone, beside server.json and SESSION_KEY,
+and no agent reads it (runtime.PRIVATE_FILES, userconf.private_paths). The page trades it for an HttpOnly,
+SameSite=Strict cookie and a random key of that browser's own (claim); a browser that is signed in already trades it for
+no change. The server keeps only the sha256 of each browser's cookie and key (PAIRED_FILE, read at start and then kept
+in memory). The fragment never reaches a server's log or a Referer. The token proves only the routes hooks, the shim,
+the module and the CLI use (guarded); with it a process can ask for the link's key (POST /api/ui/pair), and each new
+sign-in prints a line in main's terminal and posts a notice.
 
 A page that is not signed in asks whether it is (GET /api/ui/paired) before it shows its sign-in line, and the server
-counts that ask (want_link), at most once in LINK_EVERY_S unless a code was spent since, and never while a code is
-alive, since the link printed with it still signs the browser in. thimble-browser waits for the count in the terminal it
-holds (GET /api/ui/link-wanted, cli.new_links) and prints a new link there, with a new code from the token route, as at
-its start. So a code reaches that terminal alone, as the start's does, and nothing is written.
+counts that ask (want_link), at most once in LINK_EVERY_S. thimble-browser waits for the count in the terminal it holds
+(GET /api/ui/link-wanted, cli.new_links) and prints the link there again when its key changed since it last printed it
+(after `thimble unpair`), as at its start. So the key reaches that terminal alone, as the start's does.
 
 A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
 127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
@@ -87,6 +88,7 @@ NONCE_MAX = 128  # characters
 PROOF_TTL_S = 300
 PROOF_SCOPE = "thimble_proof"  # where a request's checked proof is kept in the ASGI scope's state (proven_by)
 SESSION_KEY = "session.key"  # in thimble's home: the secret media keys are signed with (module note)
+LINK_KEY = "link.key"  # in thimble's home: the key the sign-in link carries (link_key, module note)
 _secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name, with this server's port after it (ui_cookie)
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
@@ -100,7 +102,6 @@ BROWSER_KEY_SCOPE = "thimble_browser_key"  # where BrowserPath keeps a request's
 BROWSER_KEY_BYTES = 24  # a browser's key: secrets.token_urlsafe of this many bytes (32 characters)
 # in thimble's home: [{hash, key, at}], the sha256 of each signed-in browser's cookie and key (claim)
 PAIRED_FILE = "paired.json"
-PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
 LINK_EVERY_S = 60  # want_link counts a browser that is not signed in at most this often, so a page that reloads does
 # not fill thimble-browser's terminal with links
 LINK_WAIT_S = 25.0  # how long GET /api/ui/link-wanted holds thimble-browser's request while no browser wants a link
@@ -115,8 +116,7 @@ ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = "open thimble from the link `thimble-browser` printed in your terminal, to make changes"
 # the page's own words for it are lib/notices CODE_GONE_TEXT
-CODE_GONE = ("This sign-in link was already used or has expired. Open the new link in the terminal where "
-             "`thimble-browser` runs.")
+CODE_GONE = "This sign-in link isn't valid anymore. Run `thimble-browser` in your terminal for the current one."
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
 # these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
 OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
@@ -207,10 +207,11 @@ def _read_secret(path: Path) -> bytes:
         return b""
 
 
-def _session_secret(create: bool) -> bytes:
-    """The bytes of <home>/SESSION_KEY; b"" when there is none. With `create` and no key, fresh random bytes go in place
-    whole, readable by their owner alone, unless another start put a key there first, which is then the one used."""
-    path = home() / SESSION_KEY
+def _secret(name: str, create: bool) -> bytes:
+    """The bytes of the secret file <home>/`name`; b"" when there is none. With `create` and no key, fresh random bytes
+    go in place whole, readable by their owner alone, unless another start put a key there first, which is then the one
+    used."""
+    path = home() / name
     got = _read_secret(path)
     if got or not create:
         return got
@@ -219,7 +220,7 @@ def _session_secret(create: bool) -> bytes:
         if got:
             return got
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{SESSION_KEY}.")
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{name}.")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(secrets.token_hex(32))
@@ -234,10 +235,27 @@ def _session_secret(create: bool) -> bytes:
         return _read_secret(path)
 
 
-def ensure_session_key() -> None:
-    """Write <home>/SESSION_KEY when there is none, so the sessions' sandbox hides a file that is in place and the first
-    sessions to start find one key."""
-    _session_secret(True)
+def ensure_secrets() -> None:
+    """Write <home>/SESSION_KEY and <home>/LINK_KEY when there are none, so the sessions' sandbox hides files that are
+    in place and the first sessions to start find one key."""
+    _secret(SESSION_KEY, True)
+    _secret(LINK_KEY, True)
+
+
+def link_key(create: bool = True) -> str:
+    """The key the sign-in link carries after `#p=` (module note): the same every time, made at the first use unless
+    not `create` ('' when there is none then)."""
+    return _secret(LINK_KEY, create).decode("utf-8", "replace")
+
+
+def rotate_link_key() -> None:
+    """A new key in <home>/LINK_KEY, so every link printed before stops working (`thimble unpair`). It is written into
+    the file in place, not put in its place, so a sandbox that hides the file from a session keeps hiding it. No file:
+    nothing to change, and the next link_key makes one."""
+    with _secret_lock, contextlib.suppress(FileNotFoundError):
+        fd = os.open(home() / LINK_KEY, os.O_WRONLY | os.O_TRUNC)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(secrets.token_hex(32))
 
 
 def _same(a: str, b: str) -> bool:
@@ -258,13 +276,10 @@ def _sha(value: str) -> str:
 
 
 def _now() -> float:
-    """The clock codes expire by."""
+    """The clock shot tokens expire by, and want_link counts by."""
     return time.monotonic()
 
 
-# a live sign-in code's sha256 -> (when it expires on _now's clock, the workspace it was made for or ""); in memory
-# only, so a restart voids every code
-_codes: dict[str, tuple[float, str]] = {}
 # the signed-in browsers, [{hash, at}], as read from PAIRED_FILE in thimble's home at the first use (the home named
 # beside them) and then kept: another process's later edit of the file is not read until the next start
 _paired: list[dict[str, str]] | None = None
@@ -272,56 +287,30 @@ _paired_home = ""
 _pair_lock = threading.Lock()
 
 
-def mint(ws: str = "") -> str:
-    """A new sign-in code for the link of workspace `ws` ("" for the start page): it works once, for PAIR_TTL_S, and a
-    newer code for the same workspace voids it. Expired codes go."""
-    code = secrets.token_urlsafe(16)
-    now = _now()
-    with _pair_lock:
-        live = {h: v for h, v in _codes.items() if v[0] > now and v[1] != ws}
-        _codes.clear()
-        _codes.update(live)
-        _codes[_sha(code)] = (now + PAIR_TTL_S, ws)
-    return code
-
-
-def _spend(code: object) -> bool:
-    """Spend the code `code`: whether it was alive. A live code spent may be that of the last link thimble-browser
-    printed, so the next browser that wants a link gets one at once (want_link)."""
-    global _wanted_at
-    if not isinstance(code, str) or not code:
-        return False
-    with _pair_lock:
-        got = _codes.pop(_sha(code), None)
-        alive = got is not None and got[0] > _now()
-        if alive:
-            _wanted_at = None
-    return alive
+def _key_ok(code: object) -> bool:
+    """Whether `code` is the link's key now (link_key); never when there is none."""
+    key = link_key(create=False)
+    return isinstance(code, str) and bool(code) and bool(key) and _same(code, key)
 
 
 # how many asks of a browser that is not signed in want_link counted since the server started, and when it counted the
-# last one on _now's clock (None before the first, and again once a live code is spent); in memory only
+# last one on _now's clock (None before the first); in memory only
 _wanted = 0
 _wanted_at: float | None = None
 
 
 def want_link(scope: dict) -> None:
     """A browser that is not signed in asked whether it is (GET /api/ui/paired), as its page does before it shows the
-    sign-in line: count it (links_wanted), so thimble-browser prints a new link in its terminal (module note). Not while
-    a code is alive (made, and not yet spent or expired): the link printed with it still signs the browser in, and a new
-    code for its workspace would end it (mint), as when a tab left open from an earlier start asks right after
-    thimble-browser printed its link. After a counted ask, others count again LINK_EVERY_S later, or once a live code
-    was spent (_spend), which may be that link's. A screenshot's page (shot_proven) wants none, and neither does a
-    request a browser marks as from another site or another page (Sec-Fetch-Site other than same-origin, as an <img> on
-    another site's page sends), since each new link ends the one before it that waits to be used."""
+    sign-in line: count it (links_wanted), so thimble-browser prints the link in its terminal again when its key changed
+    (module note). After a counted ask, others count again LINK_EVERY_S later. A screenshot's page (shot_proven) wants
+    none, and neither does a request a browser marks as from another site or another page (Sec-Fetch-Site other than
+    same-origin, as an <img> on another site's page sends)."""
     global _wanted, _wanted_at
     headers = Headers(scope=scope)
     if shot_proven(headers, scope.get("method", "")) or headers.get("sec-fetch-site", "same-origin") != "same-origin":
         return
     now = _now()
     with _pair_lock:
-        if any(until > now for until, _ws in _codes.values()):
-            return
         if _wanted_at is None or now - _wanted_at >= LINK_EVERY_S:
             _wanted, _wanted_at = _wanted + 1, now
 
@@ -397,12 +386,12 @@ def media_key(c: str, slug: str, holder: str) -> str:
     loads (module note): the same for every load by that browser, so the frame's document, and its ETag, stay the
     same, and void once the browser is signed out, the shot's token ends or the server starts with a new token. A
     holder of '' gets a key that never works."""
-    return _media_mac(_session_secret(True), holder, c, slug)
+    return _media_mac(_secret(SESSION_KEY, True), holder, c, slug)
 
 
 def media_key_ok(c: str, slug: str, key: str) -> bool:
     """Whether `key` is media_key's for view `slug` of workspace `c` and a holder whose keys work now (_holders)."""
-    secret = _session_secret(False)
+    secret = _secret(SESSION_KEY, False)
     if not secret or not key:
         return False
     return any(_same(key, _media_mac(secret, h, c, slug)) for h in _holders())
@@ -531,15 +520,14 @@ def _gone() -> Response:
 
 
 def claim(body: Any, request: Request) -> tuple[Response, str]:
-    """(the answer to a page's POST /api/ui/key with its link's code, the id of the browser it signed in or ''): a
-    signed-in browser (which posts under its own path) spends the code and gets 204 and nothing more; any other browser
-    with a live code gets 200 {key} with a new cookie scoped to that key's path (set_cookie), and the sha256 of both
-    join the signed-in browsers; anything else, an old {key} body included, 410 CODE_GONE."""
+    """(the answer to a page's POST /api/ui/key with its link's key, the id of the browser it signed in or ''): a
+    signed-in browser (which posts under its own path) gets 204 and nothing more; any other browser with the link's key
+    now (_key_ok) gets 200 {key} with a new cookie scoped to that key's path (set_cookie), and the sha256 of both join
+    the signed-in browsers; anything else, a key `thimble unpair` changed or an old {key} body, 410 CODE_GONE."""
     code = body.get("code") if isinstance(body, dict) else None
     if analyst(request):
-        _spend(code)
         return Response(status_code=204), ""
-    if not _spend(code):
+    if not _key_ok(code):
         return _gone(), ""
     cookie = secrets.token_urlsafe(32)
     key = secrets.token_urlsafe(BROWSER_KEY_BYTES)
@@ -551,9 +539,11 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
 
 
 def unpair() -> None:
-    """Sign every browser out: no cookie proves anything until a browser signs in again."""
+    """Sign every browser out, and change the link's key (rotate_link_key): no cookie and no earlier link proves
+    anything."""
     with _pair_lock:
         _save([])
+    rotate_link_key()
 
 
 def sign_out(browser: str) -> bool:

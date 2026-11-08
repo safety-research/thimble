@@ -306,7 +306,7 @@ async def _lifespan(app: FastAPI):
         from . import cli
 
         cli.ensure_home()
-        hook_auth.ensure_session_key()
+        hook_auth.ensure_secrets()
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")
@@ -377,7 +377,7 @@ SIGNED_IN_NOTICE = "A browser signed in to thimble at {at}. If it was not you, c
 
 
 def signed_in(ws: object, browser: str) -> None:
-    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it as a notice
+    """A browser signed in with a link's key (hook_auth.claim): each workspace it may act in hears of it as a notice
     with Sign it out (sign-in:<browser>). The workspaces are the one the link named, when it is registered, and each
     whose main this server follows. The browser that signed in shows no notice of its own sign-in
     or of one before it (its id and when it signed in, GET /api/ui/paired); a browser signed in before it shows this
@@ -447,15 +447,15 @@ def create_app() -> FastAPI:
         return out
 
     @app.post("/api/ui/key")
-    def ui_claim(request: Request, body: dict = Body(...)):  # a link's one-time code, traded for the browser's cookie
+    def ui_claim(request: Request, body: dict = Body(...)):  # a link's key, traded for the browser's cookie
         r, new = hook_auth.claim(body, request)
         if new:
             signed_in(body.get("ws"), new)
         return r
 
-    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): Stop hook, `thimble up`
-    def ui_pair(body: dict = Body(default={})) -> dict:
-        return {"code": hook_auth.mint(str(body.get("ws") or "")), "expires_s": hook_auth.PAIR_TTL_S}
+    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): the key thimble-browser's link carries
+    def ui_pair() -> dict:
+        return {"code": hook_auth.link_key()}
 
     @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
     def ui_unpair() -> None:
@@ -482,8 +482,8 @@ def create_app() -> FastAPI:
     @app.get("/api/ui/paired")
     def ui_paired(request: Request) -> dict:
         paired = hook_auth.analyst(request)
-        # the page shows its sign-in line: thimble-browser prints a new link in its terminal, unless the link it printed
-        # last still works (hook_auth.want_link)
+        # the page shows its sign-in line: thimble-browser prints the link in its terminal again when its key changed
+        # (hook_auth.want_link)
         if not paired:
             hook_auth.want_link(request.scope)
         return {"paired": paired, "id": hook_auth.browser_id(request), "at": hook_auth.signed_in_at(request)}

@@ -10,12 +10,12 @@ others look after the server and its workspaces from a shell.
 
 <home> is `~/.thimble` or THIMBLE_HOME, which thimble-browser sets to its own home. <home>/server.json records {port,
 pid, url, repo, env, token}, readable by its owner alone; `token` is new at each start and is what this CLI proves it
-holds (hook_auth.py). A browser signs in with a one-time code from ui_url(pair=True), never with a value from this
-file. Only a terminal gets a link with a code: thimble-browser prints one at its start and a new one for a browser that
-is not signed in and opens the page once the last one was used or expired (new_links). `unpair` signs every browser
-out. Its `pid` is trusted only while it is a thimble server on its port (is_server checks the command line and working
-folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the
-record true before a start acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another
+holds (hook_auth.py). A browser signs in with the link's key from ui_url(pair=True), the same every time, never with
+a value from this file. Only a terminal gets a link with the key: thimble-browser prints it at its start, and again for
+a browser that is not signed in and opens the page once the key changed (new_links). `unpair` signs every browser out
+and changes the key. Its `pid` is trusted only while it is a thimble server on its port (is_server checks the command
+line and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host process).
+reconcile makes the record true before a start acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another
 install. This install's own server is the one whose /api/health names that pid as its leader (own_server):
 thimble-browser prints a link to it alone, and `stop` ends that pid alone. A server server.json does not record is never
 taken for it nor stopped, even one of this checkout and THIMBLE_HOME, such as one left running when its home was deleted
@@ -197,8 +197,8 @@ def new_token() -> str:
 
 def write_state(state: dict[str, Any]) -> None:
     """server.json, written whole into the private home (ensure_home), with the token the file held when `state` names
-    none, else a new one (hook_auth.py). The browser key earlier builds kept here is dropped: a browser signs in with a
-    one-time code (ui_url)."""
+    none, else a new one (hook_auth.py). The browser key earlier builds kept here is dropped: a browser signs in with
+    the link's key (ui_url)."""
     ensure_home()
     held = read_state()
     if not state.get("token"):
@@ -1325,32 +1325,31 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
 
 PAIR_TIMEOUT_S = 3.0
 PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
-UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. A browser that opens the page gets a new link in the "
-                 "terminal where `thimble-browser` runs.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble, and the sign-in links printed before no longer "
+                 "work. Run `thimble-browser` for the new link.")
 UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
                       f"restarts. To restart it, {config.RESTART_HOW}.")
 
 
-def pair_code(api: str, name: str | None) -> str:
-    """A one-time sign-in code for a browser from the server at `api` (`POST /api/ui/pair`, which needs the token:
-    hook_auth.mint), for workspace `name`; a newer code for the same workspace voids it. '' when the server gives none,
-    which is logged."""
-    status, body = _request("POST", f"{api}/api/ui/pair", {"ws": name} if name else {}, timeout=PAIR_TIMEOUT_S)
+def pair_code(api: str) -> str:
+    """The sign-in link's key from the server at `api` (`POST /api/ui/pair`, which needs the token: hook_auth.link_key),
+    the same every time until `thimble unpair`. '' when the server gives none, which is logged."""
+    status, body = _request("POST", f"{api}/api/ui/pair", {}, timeout=PAIR_TIMEOUT_S)
     code = body.get("code") if status == 200 and isinstance(body, dict) else None
     if isinstance(code, str) and code:
         return code
-    _log(f"no sign-in code from {api}: {status} {str(body)[:200]}")
+    _log(f"no sign-in key from {api}: {status} {str(body)[:200]}")
     return ""
 
 
 def ui_url(name: str | None, pair: bool = False) -> str:
-    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` a
-    one-time sign-in code after `#p=` (hook_auth.mint, pair_code), which the page trades for the browser's cookie. The
-    URL without a code when the server gives none."""
+    """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` the
+    link's key after `#p=` (hook_auth.link_key, pair_code), which the page trades for the browser's cookie. The URL
+    without a key when the server gives none."""
     st = read_state()
     base = str(st.get("url") or api_url())
     url = f"{base}/?ws={name}" if name else f"{base}/"
-    code = pair_code(str(st.get("api") or api_url()), name) if pair else ""
+    code = pair_code(str(st.get("api") or api_url())) if pair else ""
     return f"{url}#p={code}" if code else url
 
 
@@ -2383,7 +2382,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_unpair(_: argparse.Namespace) -> int:
     """`thimble unpair`: every browser signed out (`POST /api/ui/unpair` when the server answers, which forgets them at
-    once), and <home>/paired.json removed, so a server that starts later knows none either."""
+    once), and <home>/paired.json removed, so a server that starts later knows none either; and the link's key changed
+    (hook_auth.rotate_link_key, which the server does too), so no link printed before signs a browser in."""
+    from . import hook_auth  # noqa: PLC0415
+
     url = api_url()
     why = ""
     if healthy(url):
@@ -2395,6 +2397,10 @@ def cmd_unpair(_: argparse.Namespace) -> int:
         (home() / PAIRED_FILE).unlink(missing_ok=True)
     except OSError as e:
         why = why or f"{home() / PAIRED_FILE} could not be removed: {e.strerror}"
+    try:
+        hook_auth.rotate_link_key()
+    except OSError as e:
+        why = why or f"{home() / hook_auth.LINK_KEY} could not be changed: {e.strerror}"
     print(UNPAIR_FAILED_LINE.format(why=why) if why else UNPAIRED_LINE)
     return 1 if why else 0
 
@@ -2458,7 +2464,7 @@ def cmd_purge(args: argparse.Namespace) -> int:
 
 
 BROWSER_LINE = "thimble browser: {what}"
-NEW_LINK_LINE = "new sign-in link: {link}"  # new_links: a browser that is not signed in opened the page
+NEW_LINK_LINE = "new sign-in link: {link}"  # new_links: its key changed, and a browser not signed in opened the page
 LINK_RETRY_S = 2.0  # how long new_links waits before it asks again a server that did not answer
 
 
@@ -2583,8 +2589,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     Code session starts here: the server runs main and every agent itself (runtime.py). `--session` says which session
     of the folder the page opens (pick_session, open_session): a new one, as each `claude` starts a new session, as
     empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
-    chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets a new link
-    there once the last one was used or expired (watch_links). With `--detach` it returns once the link is printed and
+    chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets the new
+    link there once `thimble unpair` changed its key (watch_links). With `--detach` it returns once the link is printed and
     the server keeps running."""
     from . import claude_access  # noqa: PLC0415
 
@@ -2620,7 +2626,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
         with server_dirs():
             if not open_session(url, name, cwd, chosen):
                 return 1
-    print(BROWSER_LINE.format(what=ui_url(name, pair=to_terminal())), flush=True)
+    link = ui_url(name, pair=to_terminal())
+    print(BROWSER_LINE.format(what=link), flush=True)
     p = claude_access.problem_line()
     print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")), flush=True)
     if not env["dev"] and not has_ui_build():
@@ -2628,7 +2635,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if getattr(args, "detach", False):
         return 0
     print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
-    stop = watch_links(name)
+    stop = watch_links(name, link)
     try:
         hold_until_quit()
     finally:
@@ -2636,22 +2643,22 @@ def cmd_browser(args: argparse.Namespace) -> int:
     return 0
 
 
-def watch_links(name: str) -> threading.Event:
-    """new_links for workspace `name`, in a thread of its own, when stdout is the terminal (to_terminal), which alone
-    gets a code, as with the start's link. The event that ends it."""
+def watch_links(name: str, printed: str) -> threading.Event:
+    """new_links for workspace `name` after the link `printed`, in a thread of its own, when stdout is the terminal
+    (to_terminal), which alone gets the key, as with the start's link. The event that ends it."""
     stop = threading.Event()
     if to_terminal():
-        threading.Thread(target=new_links, args=(name, stop), name="thimble-new-links", daemon=True).start()
+        threading.Thread(target=new_links, args=(name, stop, printed), name="thimble-new-links", daemon=True).start()
     return stop
 
 
-def new_links(name: str, stop: threading.Event) -> None:
+def new_links(name: str, stop: threading.Event, printed: str) -> None:
     """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
-    a minute, and not while the link printed last still works), a new sign-in link for workspace `name` with a new code
-    (ui_url), printed as at the start (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once
-    the count or the server's start differs from the last answer; a server that started again counts from 0. A server
-    that does not answer is asked again LINK_RETRY_S later, and a link the server gives no code for is not printed
-    (pair_code logs why)."""
+    a minute), the sign-in link for workspace `name` (ui_url), printed as at the start (NEW_LINK_LINE) when it differs
+    from the one printed last (`printed` at first): its key changed (`thimble unpair`). It waits for one at GET
+    /api/ui/link-wanted, which answers once the count or the server's start differs from the last answer; a server that
+    started again counts from 0. A server that does not answer is asked again LINK_RETRY_S later, and a link the server
+    gives no key for is not printed (pair_code logs why)."""
     from . import hook_auth  # noqa: PLC0415
 
     seen: dict[str, Any] = {}
@@ -2667,8 +2674,9 @@ def new_links(name: str, stop: threading.Event) -> None:
         before = seen["wanted"] if seen and seen["boot"] == boot else 0
         if seen and wanted > before and not stop.is_set():
             link = ui_url(name, pair=True)
-            if "#p=" in link:
+            if "#p=" in link and link != printed:
                 _say(BROWSER_LINE.format(what=NEW_LINK_LINE.format(link=link)))
+                printed = link
         seen = {"boot": boot, "wanted": wanted}
 
 
@@ -2760,7 +2768,7 @@ def build_parser() -> argparse.ArgumentParser:
                                        "server down")
     dr.add_argument("--verbose", action="store_true", help="the full detail: paths, pids, ports, every switch, the log")
     dr.set_defaults(fn=cmd_doctor)
-    for name, fn, help_ in (("unpair", cmd_unpair, "sign out every browser"),
+    for name, fn, help_ in (("unpair", cmd_unpair, "sign out every browser and change the sign-in link"),
                             ("fix", cmd_fix, "development install, server down: run the fix ticket in the live checkout, "
                                                     "then restart"),
                             ("revert", cmd_revert, "development install: undo the last change thimble's dev agent applied")):

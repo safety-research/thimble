@@ -83,6 +83,7 @@ CARD_WAIT_MAX = 720
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
+LINK_KEY = "link.key"  # in thimble's home: the key the sign-in link carries (hook_auth.LINK_KEY)
 PAIRED_JSON = "paired.json"  # in thimble's home: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
 BYPASS_JSON = "bypass.json"  # in thimble's home: the rows the analyst chose Bypass for in Settings (bypass_file)
 EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
@@ -133,10 +134,10 @@ DEFAULTS["agents"]["cardCheck"]["auto"] = None
 
 def private_paths() -> list[str]:
     """The files a session thimble starts may not read or edit (private_rules, Session.settings): the local API's token,
-    the key the sessions' tokens are signed with, the hashes of the browsers signed in (hook_auth.PAIRED_FILE), and how
-    the workbench reaches Claude."""
-    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON, "claude-access.json",
-                                                          "anthropic-api-key")]
+    the key the sessions' tokens are signed with, the key the sign-in link carries, the hashes of the browsers signed in
+    (hook_auth.PAIRED_FILE), and how the workbench reaches Claude."""
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, LINK_KEY, PAIRED_JSON,
+                                                          "claude-access.json", "anthropic-api-key")]
 
 
 def private_rules() -> list[str]:
