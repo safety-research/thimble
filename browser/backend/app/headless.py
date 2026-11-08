@@ -9,7 +9,9 @@ is skipped. The words a launch leaves (missing) reach models, so they say what i
 it.
 
 Where no system browser is found, the workbench uses Playwright's own headless Chromium, which thimble's install and
-thimble update fetch, and thimble doctor checks: both ask `python -m app.headless [--fetch]` (check)."""
+thimble update fetch, and thimble doctor checks: both ask `python -m app.headless [--fetch]` (check). thimble-browser's
+start fetches it too when it is missing (`python -m app.headless --start`, at_start), as after an install or update by
+thimble 0.10.12 or before, which fetched none."""
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +20,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +45,9 @@ _plays: dict[str, bool | None] = {}
 # folder (browsers_dir); the server's Playwright (the card harness) and the page's (views and screenshots) each pin one
 CHROMIUM = "chromium-headless-shell"
 FETCH_TIMEOUT_S = 900.0
+BUILD_MB = 100  # the download of one build, which the start's line names: about 85 MB on macOS, 110 MB on Linux
+# the file Playwright leaves in a build's folder once it unpacked the build whole; it fetches a build without it again
+INSTALLED = "INSTALLATION_COMPLETE"
 
 
 class Missing(RuntimeError):
@@ -92,15 +98,16 @@ def browsers_dir(environ: Mapping[str, str] | None = None, platform_: str | None
 
 
 def fetched(browsers_json: Path) -> bool:
-    """Whether the headless Chromium the Playwright with this browsers.json launches is in Playwright's browsers folder;
-    with no readable browsers.json, whether any headless Chromium is."""
+    """Whether the headless Chromium the Playwright with this browsers.json launches is in Playwright's browsers folder,
+    whole (INSTALLED: a download stopped while it unpacks, by Ctrl-C say, leaves part of it); with no readable
+    browsers.json, whether any headless Chromium is."""
     browsers = browsers_dir()
     try:
         data = json.loads(browsers_json.read_text("utf-8"))
         rev = next(str(b["revision"]) for b in data["browsers"] if b.get("name") == CHROMIUM)
     except (OSError, ValueError, KeyError, TypeError, StopIteration):
-        return any(browsers.glob("chromium_headless_shell-*"))
-    return (browsers / f"chromium_headless_shell-{rev}").is_dir()
+        return any(browsers.glob(f"chromium_headless_shell-*/{INSTALLED}"))
+    return (browsers / f"chromium_headless_shell-{rev}" / INSTALLED).is_file()
 
 
 def browsers_json(kind: str) -> Path | None:
@@ -180,6 +187,23 @@ def check(fetch: bool = False) -> dict[str, Any]:
             "fix": "Fetch it: " + " && ".join(fetch_command(k) for k in kinds)}
 
 
+def at_start() -> None:
+    """What thimble-browser's start asks before the server starts (`python -m app.headless --start`): where a build of
+    Playwright's own Chromium that the workbench uses is missing (unfetched), as after an install or update by thimble
+    0.10.12 or before, one line that says it downloads, and about how big, then the fetch (check). When the fetch
+    fails, what goes unchecked and why, and the command that fetches it, on a line of its own, on stderr; the start goes
+    on either way. Nothing when every build is there."""
+    kinds = unfetched()
+    if not kinds:
+        return
+    print("thimble-browser: downloading the headless Chromium the workbench draws cards in, once (about "
+          f"{BUILD_MB * len(kinds)} MB)...", flush=True)
+    got = check(fetch=True)
+    if not got["ok"]:
+        print(f"thimble-browser: {got['why']}. Fetch it, then start thimble-browser again:\n  "
+              + " && ".join(fetch_command(k) for k in unfetched()), file=sys.stderr)
+
+
 def launch(kind: str) -> str | None:
     """The browser `kind` starts by thimble's config (userconf.browser): the system browser's path, '' for Playwright's
     own Chromium; None, with `kind` marked missing, when the config turns it off or names a system browser that is not
@@ -223,5 +247,11 @@ async def plays_recordings(path: str) -> bool | None:
 
 
 if __name__ == "__main__":
-    # thimble's install, thimble update and thimble doctor: the answer is the last line of stdout
-    print(json.dumps(check(fetch="--fetch" in sys.argv[1:])))
+    if "--start" in sys.argv[1:]:
+        # thimble-browser's start: its lines are for the person, and Ctrl-C ends the start with no traceback
+        if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+        at_start()
+    else:
+        # thimble's install, thimble update and thimble doctor: the answer is the last line of stdout
+        print(json.dumps(check(fetch="--fetch" in sys.argv[1:])))

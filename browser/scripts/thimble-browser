@@ -85,6 +85,13 @@ if [ ! -f "$root/backend/.venv/thimble-compiled" ]; then
   fi
 fi
 
+# the headless Chromium the workbench draws cards in: where no Chrome, Edge or Chromium of the system's is found,
+# Playwright's own, which the install and thimble update fetch (backend app/headless.py). An install or update by
+# thimble 0.10.12 or before fetched none, and its server only logs that cards are not checked. The workbench's own check
+# downloads what is missing, once, and says so on one line; a download that fails says why and the command that fetches
+# it, and the server starts all the same
+(cd "$root/backend" && "$py" -m app.headless --start) || true
+
 # run from live, its kernel is live's too
 live_kernel=
 if [ "$(cd "$fixes/live/browser" 2>/dev/null && pwd -P)" = "$root" ] && [ -x "$fixes/live/plugin/bin/thimble" ]; then
