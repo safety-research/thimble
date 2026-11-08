@@ -123,3 +123,17 @@ test("the tour's sample answer gets no look (tour/tour.ts tourSample): Claude wr
   expect(s.forks.length).toBe(1)
   expect(s.forks[0]).not.toContain('36 orders')
 })
+
+test("the tour's cite-step answer gets no look either (tour/tour.ts tourAnswer): a heads-up would cover its citations; the person's next answer does", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([READ])
+  // the cite step waits: the turn that ends now is the answer it checks
+  await s.$.state.set({ plugin: 'thimble', key: 'tour' }, { at: 'cite', done: ['answer', 'e', 'v', 's'], missed: [], startedAt: 0, k: 2, intro: 'tour-intro-1', sample: 't0-row-0', moved: null, cited: null })
+  await answered(s, { id: 't1', prompt: 'Summarize your answer in two sentences, and cite each number.', rows: ['The shop refunded [4 orders](#).'] })
+  expect(s.forks.length).toBe(0)
+  // the tour ended and keeps the row it checked; an answer of the person's own gets its look
+  await s.$.state.set({ plugin: 'thimble', key: 'tour' }, { at: 'end', done: ['answer', 'e', 'v', 's', 'cite'], missed: [], startedAt: 0, k: 2, intro: 'tour-intro-1', sample: 't0-row-0', moved: null, cited: 't1-row-0' })
+  await answered(s, { id: 't2', prompt: 'How many test runs failed?', rows: ['Two runs failed, both on the p95 check.'] })
+  expect(s.forks.length).toBe(1)
+  expect(s.forks[0]).not.toContain('4 orders')
+})

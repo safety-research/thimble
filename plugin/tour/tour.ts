@@ -294,6 +294,24 @@ export async function tourSample($: Engine, row: string | null | undefined): Pro
   return (await tourNow($))?.at === 'answer'
 }
 
+/** Whether `row` is an answer of the tour: its sample answer (tourSample), or its cite step's answer, also after the
+ *  tour ends (while the cite step waits for it, the answer of the turn that ends now). The look leaves both alone
+ *  (observer/observer.ts): the tour shows each feature at its own step, and a heads-up or an explainer of the look
+ *  would cover the cite step's citations. */
+export async function tourAnswer($: Engine, row: string | null | undefined): Promise<boolean> {
+  if (!row) return false
+  if (await tourSample($, row)) return true
+  const t = await stateNow($)
+  if (t?.at === 'cite' && !t.cited) return true
+  for (const x of [t, ...(await pastNow($))]) {
+    if (!x?.cited) continue
+    if (x.cited === row) return true
+    const [a, b] = [await turnOfRow($, row), await turnOfRow($, x.cited)]
+    if (a && b && a.turnId === b.turnId) return true
+  }
+  return false
+}
+
 /** Whether `row` is the answer of the cite step: the cite step waits, and the row is the answer it checks, or a row
  *  of that answer's turn (the checker names a reply by its last row: marks/checker.ts startCheck). Its citations are
  *  checked as its turn ends, in every mode that cites. */
