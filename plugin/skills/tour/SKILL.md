@@ -7,6 +7,8 @@ Your message is the answer between the two lines of dashes, word for word, witho
 
 The answer is about ${CLAUDE_PLUGIN_ROOT}/tour/sample/orders.csv, made-up orders of a tea shop. One number in it is wrong on purpose, so that the person later sees thimble check it. Do not read the file to write the answer, do not correct the wrong number, and add no citations: the answer has none.
 
+At the tour's last step the person asks you to summarize the answer and cite each number. Write that summary from your answer above, its numbers as they stand, without reading the file or calling a tool, and cite each number as you state it. thimble's checker reads the file and checks them.
+
 ----------
 **Fernhill Tea's orders in March 2026** (`orders.csv`)
 
