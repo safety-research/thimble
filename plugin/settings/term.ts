@@ -15,16 +15,11 @@
 //   firstPartyApi($)       whether Claude Code reaches Claude through Anthropic's first-party API, not Bedrock, Vertex
 //                          or Foundry: a setting that names its model ids (features.mjs `firstParty`) works only there
 //
-// The fields newer settings replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved
-// under them reaches the plugin: the first interactive session moves it to the settings that replaced it and sets them
-// back to their defaults. A setting the person changes moves them first too. A default that moved (features.mjs
-// DEFAULTS) is saved the same way, once: a value at the old default takes the new one, and the hidden field defaultsAt
-// says it was done. A setting that names first-party model ids is hidden from /config where Claude Code runs on another
-// provider.
+// A setting that names first-party model ids is hidden from /config where Claude Code runs on another provider.
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
 import { firstParty } from '../core/models.js'
-import { DEFAULTS, DEFAULTS_FIELD, OLD_PRESET, PRESET, RENAMED, RETIRED, SWITCHES, atDefault, atPreset, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, renamedTo, setOptions, switchOf, valueIn } from './features.mjs'
+import { OLD_PRESET, PRESET, RENAMED, SWITCHES, atPreset, currentValues, noteChange, renamedTo, setOptions, switchOf, valueIn } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -57,16 +52,13 @@ async function configRows($: Engine): Promise<Map<string, ConfigRow>> {
  *  name reads as its new one (RENAMED): Claude Code's row keeps it as saved. */
 export async function heldValues($: Engine): Promise<Record<string, boolean | string>> {
   const rows = await configRows($).catch(() => new Map<string, ConfigRow>())
-  // a value the retired fields saved stands while the setting that replaced it holds its default
   const values: Record<string, unknown> = currentValues()
   for (const s of SWITCHES) {
     const r = rows.get(s.key)
     const v = renamedTo(s.key, r?.value) ?? r?.value
     if (r && (s.choices ? s.choices.includes(v as string) : typeof v === 'boolean')) values[s.key] = v
   }
-  // with defaultsAt, so the values read again (the bar's preview, the preset's rows) read a moved default as these do
-  const at = typeof values.defaultsAt === 'string' ? { defaultsAt: values.defaultsAt } : {}
-  return { ...Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string])), ...at }
+  return Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string]))
 }
 
 /** Each feature's value as the settings show it: as Claude Code holds it (heldValues), but Minimal's while turning it
@@ -87,9 +79,6 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   const to = a.do === 'set' ? a.value : s.choices ? s.choices[(s.choices.indexOf(now as string) + 1) % s.choices.length] : !now
   if (s.choices ? !s.choices.includes(to as string) : typeof to !== 'boolean') return `× ${s.title} has no setting "${String(to)}".`
   if (to === now) return
-  // a value the retired fields still hold, and a default that moved, are saved first, so the change stands over them
-  await moveRetired($, currentValues()).catch(() => undefined)
-  await moveDefaults($).catch(() => undefined)
   const held = await heldValues($)
   if (s.key === 'minimal') return to ? minimalOn($, held) : minimalOff($)
   const denied = await setRow($, s.key, to as boolean | string)
@@ -191,70 +180,29 @@ export async function settleMinimal($: Engine): Promise<void> {
   else { await $.store.set(BEFORE, null); await setRow($, 'minimal', false) }
 }
 
-/** A retired field's row key, beside a feature's row key (`<plugin>.<field>`). */
-const retiredKey = (featureKey: string, field: string) => featureKey.replace(/\.[^.]+$/, `.${field}`)
-
-/** A value saved under the retired fields (`saved`), moved to the settings that replaced it where those hold their
- *  defaults, and the retired fields set back to theirs (a hidden row still takes $.config.set), so only the new settings
- *  say what the plugin does. Once: afterwards the retired fields hold their defaults and nothing moves. */
-async function moveRetired($: Engine, saved: Record<string, unknown>): Promise<void> {
-  const moved = movedFrom(saved) as Record<string, boolean | string>
-  const stale = Object.entries(RETIRED).filter(([field, f]) => saved[field] !== undefined && saved[field] !== f.default)
-  // a mode the manifest no longer offers (Heads-ups' on demand) reaches the plugin as its default, so its row, which
-  // keeps it as saved, says it was saved
+/** A mode saved under its old name (features.mjs RENAMED) saved under its new one. A mode the manifest no longer offers
+ *  (Heads-ups' on demand) reaches the plugin as its default, so its row, which keeps it as saved, says it was saved. */
+async function saveRenamed($: Engine): Promise<void> {
   const rows = await configRows($)
-  const renamed = Object.keys(RENAMED).filter(key => renamedTo(key, rows.get(key)?.value) ?? renamedTo(key, saved[key]))
-  if (!stale.length && !renamed.length) return
-  const any = rows.values().next().value as ConfigRow | undefined
-  if (!any) return
-  // a mode saved under its old name is saved under its new one
-  for (const key of renamed) {
+  for (const key of Object.keys(RENAMED)) {
     const r = rows.get(key)
     const to = renamedTo(key, r?.value)
     if (r && !r.isLocked && to) await $.config.set({ key: r.key, value: to }).catch(() => undefined)
   }
-  for (const [key, value] of Object.entries(moved)) {
-    const r = rows.get(key)
-    if (r && !r.isLocked && atDefault(key, r.value)) await $.config.set({ key: r.key, value }).catch(() => undefined)
-  }
-  for (const [field, f] of stale) await $.config.set({ key: retiredKey(any.key, field), value: f.default }).catch(() => undefined)
-  noteSettled()
-}
-
-/** A default that moved, saved once where the setting holds the old default (and no retired field's value stands for
- *  it), then defaultsAt set, so a value the person sets afterwards stays. While no default moved, nothing is saved:
- *  each save loads the plugin again, and Claude Code says so in the conversation. */
-async function moveDefaults($: Engine): Promise<void> {
-  const saved = currentValues()
-  if (saved.defaultsAt === DEFAULTS.at || !Object.keys(DEFAULTS.moved).length) return
-  const rows = await configRows($)
-  const any = rows.values().next().value as ConfigRow | undefined
-  if (!any) return
-  const moved = movedFrom(saved) as Record<string, unknown>
-  for (const [key, m] of Object.entries(DEFAULTS.moved)) {
-    const r = rows.get(key)
-    // this load's copy says what stands now (a value the retired fields saved has just moved into it)
-    if (r && !r.isLocked && saved[key] === m.from && r.value === m.from && !(key in moved)) await $.config.set({ key: r.key, value: m.to }).catch(() => undefined)
-  }
-  await $.config.set({ key: retiredKey(any.key, 'defaultsAt'), value: DEFAULTS.at }).catch(() => undefined)
-  noteDefaults()
 }
 
 export const registerSettings: Register = (on, options) => {
   setOptions(options)
-  // the retired fields, and defaultsAt, stay out of /config, as does a setting of first-party model ids on another
-  // provider
+  // a setting of first-party model ids stays out of /config on another provider
   on('config.describe', async ($, e, next) => {
     const m = /^(.+)\.([^.]+)$/.exec(e.key)
     const ours = m && (m[1] === $.plugin.name || m[1]!.startsWith(`${$.plugin.name}@`))
-    if (ours && (m![2]! in RETIRED || m![2]! in DEFAULTS_FIELD)) return next({ ...e, isHidden: true })
     if (ours && switchOf(m![2]!)?.firstParty && !(await firstPartyApi($))) return next({ ...e, isHidden: true })
     return next(e)
   }).catch(($, e, next) => next(e))
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
-    await moveRetired($, currentValues()).catch(() => undefined)
-    await moveDefaults($).catch(() => undefined)
+    await saveRenamed($).catch(() => undefined)
     await settleMinimal($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
