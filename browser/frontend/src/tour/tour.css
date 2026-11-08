@@ -99,6 +99,10 @@
   position: absolute !important;
   z-index: auto;
 }
+/* a menu the demo opens (Color by's), under the demo's pointer */
+.tour-fx > .popover {
+  z-index: 1;
+}
 .tour-fx > .tour-cursor,
 .tour-fx > .tour-key,
 .tour-fx > .tour-ripple {
