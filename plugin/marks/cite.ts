@@ -10,7 +10,8 @@
 //
 // c only cites: it acts while words are selected that it has not cited yet, which the bar shows as `c cite`, in the
 // citations' purple, first of the keys that act on them (`c cite · e explain · a ask`; the claims keep
-// their item at the right, under their own key, w); with none, c is typed into the prompt.
+// their item at the right, under their own key, w); with none, c is typed into the prompt. Words of the tour's sample
+// answer wait until its cite step introduces citations (tour/tour.ts tourHolds): c cites none of them before.
 // Whether words wait reads every answer's words, so it is kept in memory for the selection the bar last drew with, and
 // c's key reads the selection alone while that one stands.
 //
@@ -31,6 +32,7 @@ import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
+import { tourHolds } from '../tour/tour'
 import { openTray, trayFocus } from '../tray/seam'
 import { awaitsCheck } from './checker'
 import { askedWords, carrier, codeRanges, linksIn, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections, withoutLinks } from './message.js'
@@ -140,6 +142,8 @@ async function showCitation($: Engine, row: string, n: number): Promise<void> {
  *  inside or across it, the one whose check rewrote their sentence when they stand in that sentence, else a new one,
  *  whose check opening it starts. A sentence says why there is none. */
 export async function citeWords($: Engine, row: string, words: string): Promise<string | void> {
+  // the tour's sample answer has no citations until its cite step starts (tour/tour.ts tourHolds)
+  if (await tourHolds($, row)) return 'the tour shows citations at its last step.'
   const raw = (await messageOf($, row))?.text ?? ''
   const v = await squeezeView($, row, raw).catch(() => null)
   if (typeof v?.text === 'string' && v.text !== raw) return 'c cites Claude\'s own words: press 0 to see the answer as written, then select again.'
@@ -229,7 +233,8 @@ export async function citeShown($: Engine): Promise<boolean> {
 /** citeShown of a selection read before, kept for c's key (waitKept). */
 async function shownFor($: Engine, raw: Sel | undefined): Promise<boolean> {
   const sel = await answerSelectionOf($, raw)
-  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && (await answered($))
+  // words of the tour's sample answer wait for its cite step (tour/tour.ts tourHolds): c is typed, or starts that step
+  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && !(await tourHolds($, sel?.requestId)) && (await answered($))
   waitKept = { sel: selectionKey(raw), shown }
   return shown
 }

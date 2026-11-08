@@ -8,18 +8,22 @@
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
-//                    reload of the plugin left running (checker.ts resumeChecks)
+//                    reload of the plugin left running (checker.ts resumeChecks), and the tour hears those that gave up
+//                    (tour/tour.ts tourChecked)
 //   session.append   main's text rows, as they are stored
-//   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others)
+//   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others); the
+//                    tour's sample answer waits for its cite step (tour/tour.ts tourHolds)
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
-//                    autoRepair), as x does
+//                    autoRepair), as x does. After each, the tour hears that a check ended (tour/tour.ts
+//                    tourChecked): its cite step is done once each citation of its sample answer has its result
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
 //                    Claude Code refused is noted as it ends (checker.ts readEnded), and so is its Python that don't
 //                    ask mode refused (checker.ts pythonEnded)
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
-//   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
-//                    refused when a word came (a repair thimble starts itself has no word window)
+//   agent.spawn      a repair's fork (x in the tray), a check g starts again, and the tour's check c starts: waits
+//                    out the key's word window, refused when a word came (a repair thimble starts itself has no word
+//                    window)
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
 //                    Code's own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask
 //                    mode would refuse it (checker.ts allowsCheck)
@@ -54,13 +58,17 @@ import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, a
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
+// the tour's cite step (tour/tour.ts)
+import { tourChecked, tourHolds } from '../tour/tour'
+import { TOUR_DESCRIPTION } from './checker'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
-const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
+/** The spawns a key started that wait out its word window: x's repair, a check g starts again, and the check c starts
+ *  in the tour's cite step. */
+const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION, TOUR_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
 /** Why thimble answers allow to Claude Code at tool.check on a check of its own, on its read of a file, and on its
  *  Python. */
 const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
@@ -147,6 +155,8 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     try { await restoreMarks($) } catch { /* the marks of earlier replies draw failed: their check did not run */ }
     try { await resumeChecks($) } catch { /* the checks that run end as they would */ }
+    // a check that gave up as the plugin loaded can be the last result the tour's cite step waits for
+    await tourChecked($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 
@@ -167,7 +177,8 @@ export const registerMarks: Register = on => {
   on('turn.complete', { reason: /^(answer|aborted|refusal|error)$/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) {
-      try { await startCheck($, e) } catch { /* the reply stands; its marks stay drawn as written */ }
+      // the tour's sample answer waits for its cite step (tour/tour.ts tourHolds)
+      try { await startCheck($, e, row => tourHolds($, row)) } catch { /* the reply stands; its marks stay drawn as written */ }
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -179,6 +190,7 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     if (forkOf(e.agentId)?.kind === 'checker') {
       try { await autoRepair($, e.agentId!) } catch { /* the citations stay failed, and x repairs them */ }
+      await tourChecked($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -187,6 +199,8 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     if (forkOf(e.agentId)?.kind === 'checker') {
       try { await endCheck($, { agentId: e.agentId!, reason: e.reason, answer: e.answer, usage: e.usage }) } catch { /* endCheck says its own failures */ }
+      // a repair's fork skips the hook around this one, which it was spawned in: its end reaches the tour here
+      await tourChecked($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -287,7 +301,8 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const view = await textView($, row, raw)
   const els = $.ui.resolve(e) as Any
   if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
-  const marksOn = featureOn('citations')
+  // the tour's sample answer draws its citations as plain words until its cite step starts (tour/tour.ts tourHolds)
+  const marksOn = featureOn('citations') && !(await tourHolds($, row))
   const written = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
   const own = written === raw

@@ -184,18 +184,22 @@ declare module 'claude-code' {
       observerLooks: { session: string; msgs: unknown[] } | null
 
       // ---- the tour (tour/tour.ts)
-      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `v`, `ask`, `s`, `cite`, or `end`), the
-       *  steps done and those that did not work, when it started, the row of its sample answer, the ids of its placed
-       *  rows (the intro, the step row placed under a later reply) and how many were placed; null with no tour */
+      /** the tour /thimble:tour started: the step that waits (`answer`, `e`, `v`, `s`, `cite`, or `end`), the steps
+       *  done and those that did not work, when it started, the row of its sample answer, the ids of its placed rows
+       *  (the intro, the step row placed under a later reply) and how many were placed, when c started the cite step's
+       *  check and what that check did; null with no tour */
       tour: {
-        at: 'answer' | 'e' | 'v' | 'ask' | 's' | 'cite' | 'end'; done: ('answer' | 'e' | 'v' | 'ask' | 's' | 'cite')[]
-        missed: ('answer' | 'e' | 'v' | 'ask' | 's' | 'cite')[]; startedAt: number; k: number
+        at: 'answer' | 'e' | 'v' | 's' | 'cite' | 'end'; done: ('answer' | 'e' | 'v' | 's' | 'cite')[]
+        missed: ('answer' | 'e' | 'v' | 's' | 'cite')[]; startedAt: number; k: number
         intro: string | null; sample: string | null; moved: string | null
+        checkAt?: number | null; checked?: { n: number; corrected: number; failed: number } | null
       } | null
       /** the tours started before the one that runs, as they were then: their rows still draw them */
       tourPast: unknown[] | null
       /** the row of the tour's sample answer, which the observer does not look at; kept after the tour ends */
       tourSample: string | null
+      /** the frame of the shimmer on the words the tour's step e names, which moves while that step waits */
+      tourShimmer: number | null
 
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */
