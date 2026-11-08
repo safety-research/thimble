@@ -5,12 +5,13 @@
 // head holds the Label tool switch, on or off: whether Claude makes labels in this workspace (LabelTool), which applies
 // at once.
 //
-// A label's row: its color, name, question, values with their counts, Show in (Files · Cards · Report, where it shows,
-// with what it found there) and its switch. It opens its detail in the sidebar: the label's definition (a model label's
+// A label's row: its color, name, question and values with their counts, and for a label over files its switch, which
+// turns it on or off in Files. A label over cards or report sentences has no switch, since nothing paints its values on
+// the cards or in the report yet. A row opens its detail in the sidebar: the label's definition (a model label's
 // question, editable; a regex or code shown as it is, the code's first lines with the rest a click away), its values
-// with bars, what it reads and how it was made (regex, code, or read by Claude), with Edit, Show in, the records it
-// found, each a click away, with "N more", and Run again, Color Files by it, Turn off and Delete. The labels end in
-// "+ New label".
+// with bars, what it reads and how it was made (regex, code, or read by Claude), with Edit, the records it found, each
+// a click away, with "N more", and Run again, Color Files by it and Turn off (a label over files), and Delete. The
+// labels end in "+ New label".
 //
 // A comment category's row: its color, name, open comments, definition, Show in (Chat · Cards · Report, each a toggle
 // of where the check comments, with its comments there) and its switch, which shows or hides its comments everywhere.
@@ -226,7 +227,7 @@ function Swatch({ color, hollow }: { color: string; hollow?: boolean }) {
   return <span className={`lside-swatch${hollow ? ' is-hollow' : ''}`} style={{ '--sw': color } as React.CSSProperties} aria-hidden="true" />
 }
 
-/** Show in: one chip per surface, checked where the label or the check applies, with what it found there. */
+/** A check's Show in: one chip per surface, checked where the check applies, with what it found there. */
 function ShowIn({ items, onToggle }: { items: { key: string; label: string; on: boolean; n: number; disabled?: boolean; title?: string }[]; onToggle?: (key: string, on: boolean) => void }) {
   return (
     <div className="lside-showin">
@@ -256,12 +257,6 @@ function ShowIn({ items, onToggle }: { items: { key: string; label: string; on: 
   )
 }
 
-function labelShowIn(k: Concept) {
-  const on = labelSurface(k)
-  const n = k.n_labeled ?? Object.values(k.counts ?? {}).reduce((a, b) => a + b, 0)
-  return <ShowIn items={(['files', 'cards', 'report'] as const).map((s) => ({ key: s, label: s === 'files' ? 'Files' : s === 'cards' ? 'Cards' : 'Report', on: s === on, n: s === on ? n : 0, disabled: true }))} />
-}
-
 function Values({ k, bars = false }: { k: Concept; bars?: boolean }) {
   const classes = classesOf(k)
   const max = Math.max(1, ...classes.map((c) => k.counts?.[c.name] ?? 0))
@@ -285,8 +280,10 @@ function Values({ k, bars = false }: { k: Concept; bars?: boolean }) {
 const setLabel = (ws: string, id: string, patch: Parameters<typeof labelApi.update>[2]) => labelApi.update(ws, id, patch).catch(fail)
 
 function LabelRow({ ws, label: k, onOpen }: { ws: string; label: Concept; onOpen: () => void }) {
+  // `shown` is on or off in Files, so only a label over files is ever off
+  const files = isFilesLabel(k)
   return (
-    <div className={`lside-row${k.shown ? '' : ' is-off'}`} data-label={k.id}>
+    <div className={`lside-row${files && !k.shown ? ' is-off' : ''}`} data-label={k.id}>
       <div className="lside-row-head">
         <span className="lside-tag" style={{ color: mainColour(k) }}>
           <Icon name="label" size={14} />
@@ -294,12 +291,11 @@ function LabelRow({ ws, label: k, onOpen }: { ws: string; label: Concept; onOpen
         <button type="button" className="lside-name" onClick={onOpen}>
           {k.name}
         </button>
-        <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />
+        {files && <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />}
         <Button variant="icon" size="sm" icon="chevron-right" title="Open" aria-label={`Open ${k.name}`} onClick={onOpen} />
       </div>
       {k.description && <p className="lside-question">{k.description}</p>}
       <Values k={k} />
-      {labelShowIn(k)}
     </div>
   )
 }
@@ -325,6 +321,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
   }, [ws, k.id, k.n_labeled, k.rev])
   const how = howMade(k.kind)
   const n = k.n_labeled ?? 0
+  const files = isFilesLabel(k)
   return (
     <div className="lside-detail" data-label={k.id}>
       <div className="lside-row-head">
@@ -332,7 +329,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
           <Icon name="label" size={14} />
         </span>
         <span className="lside-title">{k.name}</span>
-        <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />
+        {files && <Switch checked={!!k.shown} onChange={(on) => void setLabel(ws, k.id, { shown: on })} label={`${k.name}: ${k.shown ? 'on' : 'off'}`} />}
       </div>
       {/* a big run of this label that waits for the person's choice, as above the chat's composer */}
       <LabelAsks ws={ws} concept={k.id} />
@@ -356,7 +353,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
       <Values k={k} bars />
       <h4 className="lside-label">Reads</h4>
       <p className="lside-reads">
-        <span className="mono">{k.glob || (isFilesLabel(k) ? 'the files' : labelSurface(k) === 'cards' ? 'the cards' : 'the report')}</span>
+        <span className="mono">{k.glob || (files ? 'the files' : labelSurface(k) === 'cards' ? 'the cards' : 'the report')}</span>
         {` · one value per ${unitWord(k.unit, 1)} · ${how}`}
         <button
           ref={edit}
@@ -367,8 +364,6 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
           Edit
         </button>
       </p>
-      <h4 className="lside-label">Show in</h4>
-      {labelShowIn(k)}
       <h4 className="lside-label">
         Found <span className="lside-n">{rows?.total.toLocaleString('en-US') ?? ''}</span>
       </h4>
@@ -418,7 +413,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
         >
           Run again
         </Button>
-        {isFilesLabel(k) && (
+        {files && (
           <Button
             variant="secondary"
             size="sm"
@@ -431,9 +426,11 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
             Color Files by it
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={() => void setLabel(ws, k.id, { shown: !k.shown })}>
-          {k.shown ? 'Turn off' : 'Turn on'}
-        </Button>
+        {files && (
+          <Button variant="ghost" size="sm" onClick={() => void setLabel(ws, k.id, { shown: !k.shown })}>
+            {k.shown ? 'Turn off' : 'Turn on'}
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
