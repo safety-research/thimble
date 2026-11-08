@@ -39,7 +39,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, askBar, askKey, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { tourKey, tourSpans, tourUnder } from '../tour/tour'
+import { tourSpans, tourUnder } from '../tour/tour'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
@@ -207,18 +207,20 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}), ...(x.color ? { color: x.color } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, then the keys that act on
- *  the selected words, each in its color while words are selected: c cite (purple), e explain (teal), a ask (blue).
- *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached), the left names only those. An
+/** The features' items at the bar's left, after v: s right after it (its feature acts on the answer, as v does), b,
+ *  the tray's steps (at rest its ]), then the keys that act on the selected words, each in its color while words are
+ *  selected: c cite (purple), e explain (teal), a ask (blue).
+ *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached), the left names only those, after
+ *  v and s (bar/bar.tsx leftItems). An
  *  item whose key what holds the keys takes now (`held`, heldKeys: the open tray's keys are in its header) is left
  *  out: each key shows once, where it acts. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
   const free = keyFree(preview ? new Set() : held ?? (await heldKeys($)))
   return [
+    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(free),
     // the keys of a card ] reached are the tray's own
     ...tray.filter(x => x.focus || free(x)),
-    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(free),
     ...items(await safe(citeBar($, on, preview), []), preview).filter(free),
     ...items(await safe(explainBar($, on, preview), []), preview).filter(free),
     ...items(await safe(askBar($, on, preview), []), preview).filter(free),
@@ -252,15 +254,13 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray (while open its own keys, 0 closes it;
  *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, 0), { } over the answers, then the
- *  keys that act on the selected words, while they wait (else typed): e, c and a, and c with none selected while the
- *  tour's cite step waits for it (tour/tour.ts tourKey); then w (the claims), then t. */
+ *  keys that act on the selected words, while they wait (else typed): e, c and a; then w (the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   return (await safe(trayKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(citeKey($, key, until), null))
-    ?? (await safe(tourKey($, key, until), null))
     ?? (await safe(askKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))

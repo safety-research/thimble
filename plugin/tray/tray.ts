@@ -56,8 +56,7 @@
 // A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray
 // does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
 // the person sends a prompt, and gives way to the side pane a or + opens; while they scroll the transcript it stays as
-// it is, until 0 closes it or they open another mark. What the person opens reaches main through core/engaged.ts. The
-// tour's sample answer has no citations here until its cite step starts (tour/tour.ts tourHolds).
+// it is, until 0 closes it or they open another mark. What the person opens reaches main through core/engaged.ts.
 //
 //   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
 //   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
@@ -92,7 +91,6 @@ import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
-import { tourHolds } from '../tour/tour'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
@@ -217,8 +215,7 @@ async function shownOf($: Engine, row: string): Promise<{ text: string; marks: {
   try { v = await squeezeView($, row, raw) } catch { v = null }
   if (v?.hidden) return null
   const shown = typeof v?.text === 'string' ? v.text : raw
-  // the tour's sample answer shows its citations as plain words until its cite step starts
-  const marksOn = featureOn('citations') && !(await tourHolds($, row))
+  const marksOn = featureOn('citations')
   const text = marksOn ? shown : withoutMarks(shown)
   const own = text === raw
   // Claude's own words, with the words the analyst asked about as marks and each sentence a check rewrote in place of
@@ -633,8 +630,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
- *  names only those; while a tray is open, ] and [ beside the bar's own keys (its other keys are in its header); at
- *  rest, ] (restItem). */
+ *  names only those, after v and s (bar/bar.tsx leftItems); while a tray is open, ] and [ beside the bar's own keys
+ *  (its other keys are in its header); at rest, ] (restItem). */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)

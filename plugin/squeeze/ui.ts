@@ -16,7 +16,7 @@
 // the block. The keys act while the block stands on the newest answer and main's turn does not run; in the fullscreen
 // layout a click on a choice does the same. A catch-up has the same row.
 // s on an answer that has a block already brings the block into view, with no call; the bar names s only while the
-// newest answer has none.
+// newest answer has none, or, lit, while the first version of the simpler version s started is on its way.
 // s while main's turn runs waits for the answer it writes and then does the same (answerDone). With two or more replies
 // since the person's last prompt not yet caught up on, the bar also names `b catch up on N replies` (Catch-up): b writes
 // one catch-up of them, drawn below the newest of them as one more answer, while the replies still show as written
@@ -45,12 +45,11 @@ import { accent } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { mainRuns, mainTurn } from '../core/turn'
 import type { Take } from '../hooks/keys'
-import { marksIn, withoutMarks } from '../marks/message.js'
+import { marksIn } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { tourHolds } from '../tour/tour'
 import { trayHeld } from '../tray/seam'
 import { cardDid, cardHidden } from './cards'
 import { CHOICES, atOf, cardNotes, catchUpStands, choiceAt, isSimplify, revealCut } from './chips.mjs'
@@ -301,7 +300,8 @@ async function rowKeyTake($: Engine, key: string): Promise<Take | null> {
 /** What the bar says: `s simplify` while the newest answer has no block standing on it (the block's row names its own keys), and `b catch
  *  up on N replies` while replies piled up since the person's last prompt. While main's turn runs, s waits for the
  *  answer it writes: while it waits, `s simplify` is lit (its words in thimble's color), and a press ends the wait, as
- *  s again does. */
+ *  s again does. While the first version of the simpler version s started is on its way, `s simplify` stays, lit, until
+ *  that version shows with its row: the press does not take s off the bar before anything shows for it. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
   if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'simplify' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
@@ -312,10 +312,13 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const pile = row ? await pileUp($, on) : null
   const wait = turn ? await waitNow($) : null
   const block = !turn && row ? await catchUpOn($, row) : null
-  const named = !block || !blockOn(block) || (await firstFailed($, block))
+  const failed = !!block && (await firstFailed($, block))
+  // a simpler version whose first text is still on its way: its row shows nothing yet, so s stays, lit
+  const writing = !!block && !failed && isSimplify(block) && typeof block.shown !== 'string'
+  const named = !block || !blockOn(block) || failed || writing
   const s: BarItem | null = turn
     ? { id: 'squeeze', key: 's', words: 'simplify', ...(wait ? { color: accent() } : {}), press: () => waitTake($, wait ? null : { turn }, wait).now!() }
-    : named ? { id: 'squeeze', key: 's', words: 'simplify', press: async () => (await restTake($, row!)).now!() } : null
+    : named ? { id: 'squeeze', key: 's', words: 'simplify', ...(writing ? { color: accent() } : {}), press: async () => (await restTake($, row!)).now!() } : null
   return [
     ...(squeezing && s ? [s] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
@@ -402,15 +405,10 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   seeView(cols)
   const ui = await uiOf($, cu.id)
   const busy = !!ui.running || (await levelsNow($, cu)).pending
-  const cut = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
-  // the simpler version of the tour's sample answer draws its citations as plain words until the tour's cite step
-  // starts, as the answer does (tour/tour.ts tourHolds)
-  let held = false
-  for (const r of cu.catchup?.rows ?? []) held = held || (await tourHolds($, r))
-  const text = held ? withoutMarks(cut) : cut
+  const text = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
   const items: MarkItem[] = []
   const from: { row: string; n: number }[] = []
-  for (const r of held ? [] : cu.catchup?.rows ?? []) {
+  for (const r of cu.catchup?.rows ?? []) {
     for (const it of (await rowMarks($, r))?.items ?? []) {
       from.push({ row: it.row, n: it.n })
       items.push({ ...it, n: from.length })
