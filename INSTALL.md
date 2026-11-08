@@ -17,8 +17,9 @@ One script installs both, or the plugin alone, in `~/.thimble`.
   runtime](https://github.com/anthropics/sandbox-runtime), which the code Claude writes for a card runs in (on Ubuntu:
   `sudo apt-get install bubblewrap socat ripgrep`). macOS has its own sandbox.
 
-The install checks these first. When something is missing, it says what, with the command that installs it, and
-installs nothing until it is there.
+The install checks these first, except the sandbox's packages. When something is missing, it says what, with the
+command that installs it, and installs nothing until it is there. When the sandbox cannot start, the install finishes
+and its last note says how to fix it.
 
 ### Windows
 

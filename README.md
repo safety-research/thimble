@@ -3,7 +3,7 @@
 **thimble is a Claude Code plugin for making sense of large volumes of agent outputs.** It gives Claude tools to cite, visualize and label your data, and gives you an interface to understand and verify Claude's work faster.
 
 > [!CAUTION]
-> - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
+> - **thimble is a research prototype.** Expect bugs and rough edges.
 > - **thimble is not an official Anthropic product.**
 
 For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
@@ -17,8 +17,8 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
 - **Claims** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. thimble pulls the claims out of every reply in the background; set Claims to on demand to pull them out only when you ask (`f` in the pane).
-- **Simplify** (`s`): a shorter, plainer version of the last answer, below it; under it, `1`–`4` make it shorter, longer, plainer or more expert, and `0` hides it.
-- **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
+- **Simplify** (`s`): a shorter, plainer version of the last answer, below it; under it, `1`–`4` make it shorter, longer, explain more or assume more, and `0` hides it.
+- **Side threads** (`a`): ask about selected words or part of a card without derailing the session; `t` lists them.
 
 ## Installation
 
@@ -36,7 +36,7 @@ Claude asks whether you want both the terminal plugin and the browser workbench 
 curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 ```
 
-It installs thimble in `~/.thimble`. Adding `-s -- --no-browser` after `bash` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and troubleshooting.
+It installs thimble in `~/.thimble`. Adding `-s -- --no-browser` after `bash` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers the options, updates and troubleshooting.
 
 ## Usage
 
@@ -56,11 +56,11 @@ Run `thimble-browser` in a folder of files to open the browser workbench.
 
 ## Requirements
 
-Claude Code 2.1.314+, macOS or Linux, git, curl, Python 3.10+ and Node.js 22.18+. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 2 GB of disk. On Windows, thimble runs in WSL 2, with the Linux tools installed in its distribution and your data in its home folder; not in WSL 1, and not on Windows itself yet ([INSTALL.md](INSTALL.md#windows)).
+Claude Code 2.1.314+, macOS or Linux, git, curl, Python 3.10+ and Node.js 22.18+; on Linux also bubblewrap, socat and ripgrep, for the sandbox that cards run in. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 2 GB of disk. On Windows, thimble runs in WSL 2, with the Linux tools installed in its distribution and your data in its home folder; not in WSL 1, and not on Windows itself yet ([INSTALL.md](INSTALL.md#windows)).
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it collects no data of its own, its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network. A fix of thimble is made in a copy, by a Claude whose shell runs in the same sandbox and reaches only the npm and PyPI registries; the code that turns fixes off and undoes them runs from the installed release, which no fix changes.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it sends no data of its own (it keeps a log of its model calls in `~/.thimble/events`, and the workbench keeps a log of your actions in each workspace in `~/.thimble-browser`, on your machine only), its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network. A fix of thimble is made in a copy, by a Claude whose shell runs in the same sandbox and reaches only the npm and PyPI registries; the code that turns fixes off and undoes them runs from the installed release, which no fix changes.
 
 ## License
 
