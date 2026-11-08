@@ -630,8 +630,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
- *  names only those; while a tray is open, ] and [ beside the bar's own keys (its other keys are in its header); at
- *  rest, ] (restItem). */
+ *  names only those, after v and s (bar/bar.tsx leftItems); while a tray is open, ] and [ beside the bar's own keys
+ *  (its other keys are in its header); at rest, ] (restItem). */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)

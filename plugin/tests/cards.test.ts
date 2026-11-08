@@ -274,30 +274,41 @@ test('a key at an empty prompt reaches the focused card in view when it lists th
   expect((await edit('o')).text).toBe('o')
 })
 
-test('a card on screen with keys of its own takes none of thimble\'s: the bar names its keys, then v visualize · s simplify, and s simplifies the answer', { options: { cards: 'on demand', squeezeAnswers: true, citations: 'off', explain: 'off' } }, async ($, on) => {
+test('a card on screen with keys of its own takes none of thimble\'s: the bar names its keys, then v visualize · s simplify, also while ] stands on the card and while the simpler version is on its way', { options: { cards: 'on demand', squeezeAnswers: true, citations: 'off', explain: 'off' } }, async ($, on) => {
   const w = world(on)
   on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text }))
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   const simplified: Any[] = []
-  on('model.complete', (_$: unknown, e: Any) => { simplified.push(e); return { value: { isAnswered: true, text: '<text>\nTwo runs failed.\n</text>', usage: {} } } })
+  let give: () => void = () => {}
+  on('model.complete', async (_$: unknown, e: Any) => {
+    simplified.push(e)
+    await new Promise<void>(r => { give = r })
+    return { value: { isAnswered: true, text: '<text>\nTwo runs failed.\n</text>', usage: {} } }
+  })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   await $.turn.start({ text: 'which runs failed?', turnId: 't1' } as never)
-  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed, ada and bram.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t1' } as never)
-  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed, ada and bram.', durationMs: 10, isAborted: false } as never)
-  await w.clock.advance(100)
   // a card whose view asks for o and for s: s is thimble's, so the card keeps o alone
   const input = { title: 'Scores', data: 'runs.json', view: VIEW.replace('const keys = "o"', 'const keys = "os"') }
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_61', ...input } as never)
   await shown($, callRow('toolu_made_up_61', input))
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed, ada and bram.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed, ada and bram.', durationMs: 10, isAborted: false } as never)
   await w.clock.advance(100)
   expect(textOf(await $.ui.render(BAND))).toContain('o card keys · v visualize · s simplify')
-  // s at the empty prompt simplifies the answer, as the bar says
   const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // ] stands on the card, which holds the keys: the bar names its keys after v and s, which still act at the prompt
+  expect(await edit(']')).toEqual({ text: '', cursor: 0 })
+  await w.clock.advance(1000)
+  expect(textOf(await $.ui.render(BAND))).toMatch(/v visualize · s simplify · a ask/)
+  // s at the empty prompt simplifies the answer, as the bar says; while its first version is on its way, s stays
   expect(await edit('s')).toEqual({ text: '', cursor: 0 })
   await w.clock.advance(1000)
   expect(simplified.length).toBe(1)
   expect(String(simplified[0].prompt)).toContain('Two runs failed, ada and bram.')
+  expect(textOf(await $.ui.render(BAND))).toContain('v visualize · s simplify')
+  give()
+  await w.clock.advance(5000)
 })
 
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {

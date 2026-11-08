@@ -210,7 +210,8 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
 /** The features' items at the bar's left, after v: s right after it (its feature acts on the answer, as v does), b,
  *  the tray's steps (at rest its ]), then the keys that act on the selected words, each in its color while words are
  *  selected: c cite (purple), e explain (teal), a ask (blue).
- *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached), the left names only those. An
+ *  While an item of what holds the keys shows (`focus`: the keys of a card ] reached), the left names only those, after
+ *  v and s (bar/bar.tsx leftItems). An
  *  item whose key what holds the keys takes now (`held`, heldKeys: the open tray's keys are in its header) is left
  *  out: each key shows once, where it acts. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {

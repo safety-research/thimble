@@ -52,7 +52,8 @@ type Any = any
 export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'labels') => unknown }
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
- *  what holds the keys now (a card ] reached); while any shows, the bar's left names only those, after the busy step.
+ *  what holds the keys now (a card ] reached); while any shows, the bar's left names only those, after the busy step,
+ *  v and s.
  *  (The open tray's keys are in its header, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: the key and its words
  *  drawn lit (`s ● short`), in the color of what the key gives (`e explain`, teal), or as a failure, not dim.
  *  `shorter`: the words in fewer cells, longest first, which a narrow bar draws after
@@ -126,12 +127,15 @@ function fill(xs: Item[], first: number, rest: number): Item[][] {
 }
 
 /** The bar's items at its left, after `thimble` and the busy step: v, then the features' items; each while what holds
- *  the keys (`held`: core/answerview.ts heldKeys) does not take its key. */
+ *  the keys (`held`: core/answerview.ts heldKeys) does not take its key. While a card ] reached holds the keys, its
+ *  keys, after v and s, which act on the answer at the prompt then too. */
 async function leftItems($: Engine, on: (key: string) => boolean, preview: boolean, held: Set<string>): Promise<Item[]> {
   const out: Item[] = []
   const features = await barLeft($, on, preview, held)
-  if (features.some(x => x.focus)) return features.filter(x => x.focus)
   const free = keyFree(held)
+  // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
+  const v: Item[] = on('cards') && (preview || (await vReady($))) && free({ key: 'v' }) ? [{ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) }] : []
+  if (features.some(x => x.focus)) return [...v, ...features.filter(x => x.focus || x.id === 'squeeze')]
   // the keys of the card on screen that takes them, each a click that presses it: those that reach it, as what holds
   // the keys takes the others (a fix's line its y d n)
   if (!preview && on('cards')) {
@@ -140,9 +144,7 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
       if (keys) out.push({ id: `card-key-${k.key}`, key: keys, words: k.words, ...(keys.length === 1 ? { press: () => pressKey($, keys) } : {}) })
     }
   }
-  // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
-  if (on('cards') && (preview || (await vReady($))) && free({ key: 'v' })) out.push({ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) })
-  out.push(...features)
+  out.push(...v, ...features)
   return out
 }
 
