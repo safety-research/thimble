@@ -252,9 +252,9 @@ finish() {
   if [ -n "${CLAUDECODE:-}" ]; then
     if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] &&
       printf '%s %s\n' "$CLAUDE_CODE_SESSION_ID" "$(date +%s)" >"$home/tour-next" 2>/dev/null; then
-      reload="Type /reload-plugins now. thimble's two-minute tour starts right after."
+      reload="Type /reload-plugins to enable thimble and start the tour."
     else
-      reload="Type /reload-plugins now, then /thimble:tour for thimble's two-minute tour."
+      reload="Type /reload-plugins to enable thimble, then /thimble:tour to start the tour."
     fi
   else
     # in a terminal, the notes come first, so the question to take the tour stands right under how to try thimble

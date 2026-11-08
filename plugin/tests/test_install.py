@@ -423,14 +423,14 @@ def test_an_install_inside_claude_code_names_reload_plugins_and_the_tour_starts_
     assert p.returncode == 0, text_of(p)
     # the line to type /reload-plugins is the last one, on its own, after any notes
     assert p.stdout.rstrip().splitlines()[-2:] == [
-        "", "Type /reload-plugins now. thimble's two-minute tour starts right after."], p.stdout
+        "", "Type /reload-plugins to enable thimble and start the tour."], p.stdout
     assert "thimble is installed from your clone ~/thimble." in p.stdout.splitlines()
     named, at = (w.th / "tour-next").read_text().split()
     assert named == "made-up-session" and abs(int(at) - time.time()) < 600
     assert "thimble tour" not in p.stdout
     (w.th / "tour-next").unlink()
     p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1")
-    assert p.stdout.rstrip().splitlines()[-1] == "Type /reload-plugins now, then /thimble:tour for thimble's two-minute tour."
+    assert p.stdout.rstrip().splitlines()[-1] == "Type /reload-plugins to enable thimble, then /thimble:tour to start the tour."
     assert not (w.th / "tour-next").exists()
 
 
