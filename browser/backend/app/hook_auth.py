@@ -1,4 +1,4 @@
-"""The routes only thimble's CLI calls (cli._request): the registration of a folder, the sign-in codes and the dev
+"""The routes only thimble's CLI calls (cli._request): the registration of a folder, the sign-in link's key and the dev
 agent's own steps (guarded).
 
 Any process on the machine can reach a loopback port, so each side proves it holds the token the supervisor writes into
@@ -14,7 +14,7 @@ the recorded port learns nothing from it and cannot answer it.
 Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
 mode) must come from a signed-in browser (analyst). The dashboard link carries the install's sign-in key after `#p=`
 (link_key), as a Jupyter link carries its token: the same link every time thimble-browser prints it, good in any number
-of browsers and with no expiry, until `thimble unpair` changes the key (rotate_link_key), which every earlier link then
+of browsers and with no expiry, until `thimble-browser --unpair` changes the key (rotate_link_key), which every earlier link then
 stops working with. The key sits in <home>/LINK_KEY, readable by its owner alone, beside server.json and SESSION_KEY,
 and no agent reads it (runtime.PRIVATE_FILES, userconf.private_paths). The page trades it for an HttpOnly,
 SameSite=Strict cookie and a random key of that browser's own (claim); a browser that is signed in already trades it for
@@ -26,7 +26,7 @@ sign-in prints a line in main's terminal and posts a notice.
 A page that is not signed in asks whether it is (GET /api/ui/paired) before it shows its sign-in line, and the server
 counts that ask (want_link), at most once in LINK_EVERY_S. thimble-browser waits for the count in the terminal it holds
 (GET /api/ui/link-wanted, cli.new_links) and prints the link there again when its key changed since it last printed it
-(after `thimble unpair`), as at its start. So the key reaches that terminal alone, as the start's does.
+(after `thimble-browser --unpair`), as at its start. So the key reaches that terminal alone, as the start's does.
 
 A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
 127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
@@ -73,7 +73,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 # the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes thimble-browser
-# and `thimble unpair` call
+# and `thimble-browser --unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert",
     "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
@@ -116,7 +116,7 @@ ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = "open thimble from the link `thimble-browser` printed in your terminal, to make changes"
 # the page's own words for it are lib/notices CODE_GONE_TEXT
-CODE_GONE = "This sign-in link isn't valid anymore. Run `thimble-browser` in your terminal for the current one."
+CODE_GONE = "This sign-in link isn't valid anymore. Open the newest link in the terminal where `thimble-browser` runs."
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
 # these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
 OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
@@ -252,7 +252,7 @@ def link_key(create: bool = True) -> str:
 
 
 def rotate_link_key() -> None:
-    """A new key in <home>/LINK_KEY, so every link printed before stops working (`thimble unpair`). It is written into
+    """A new key in <home>/LINK_KEY, so every link printed before stops working (`thimble-browser --unpair`). It is written into
     the file in place, not put in its place, so a sandbox that hides the file from a session keeps hiding it. No file:
     nothing to change, and the next link_key makes one."""
     with _secret_lock, contextlib.suppress(FileNotFoundError):
@@ -539,7 +539,7 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
     """(the answer to a page's POST /api/ui/key with its link's key, the id of the browser it signed in or ''): a
     signed-in browser (which posts under its own path) gets 204 and nothing more; any other browser with the link's key
     now (_key_ok) gets 200 {key} with a new cookie scoped to that key's path (set_cookie), and the sha256 of both join
-    the signed-in browsers; anything else, a key `thimble unpair` changed or an old {key} body, 410 CODE_GONE."""
+    the signed-in browsers; anything else, a key `thimble-browser --unpair` changed or an old {key} body, 410 CODE_GONE."""
     code = body.get("code") if isinstance(body, dict) else None
     if analyst(request):
         return Response(status_code=204), ""

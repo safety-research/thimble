@@ -74,10 +74,10 @@ export function describeDetail(d: unknown): string {
 
 let keyReady: Promise<void> | null = null
 const CLAIM_WAITS_MS = [0, 500, 2000] // before each try of the claim while the server does not answer
-// whether the server refused the last code this page posted with 410: used, replaced by a newer one, or expired
+// whether the server refused the last key this page posted with 410: `thimble-browser --unpair` changed it
 let codeGone = false
 
-/** Whether the server refused the link's sign-in key with 410 at the last claim (`thimble unpair` changed it);
+/** Whether the server refused the link's sign-in key with 410 at the last claim (`thimble-browser --unpair` changed it);
  * shell/SignIn starts its line with it. */
 export const claimRefused = (): boolean => codeGone
 
@@ -90,7 +90,7 @@ function setHash(params: URLSearchParams): void {
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + (rest ? `#${rest}` : ''))
 }
 
-/** Sign this browser in with the key in the link thimble showed (`#p=`, the same every time until `thimble unpair`:
+/** Sign this browser in with the key in the link thimble showed (`#p=`, the same every time until `thimble-browser --unpair`:
  * backend hook_auth.link_key), which the server trades for the cookie that every read of the server's data and every
  * analyst action needs (backend hook_auth), and take the key out of the address once the server has answered.
  * 200 {key}: signed in, with the key of the path the cookie is scoped to, which the page keeps (lib/browserKey) and

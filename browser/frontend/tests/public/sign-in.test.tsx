@@ -10,7 +10,7 @@ import { act, createElement } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const LINE = "This browser isn't signed in. Run thimble-browser in your terminal and open the link it prints."
+const LINE = "This browser isn't signed in. Open the link in the terminal where thimble-browser runs."
 const KEY = 'Ab3_-'.repeat(6)
 
 let paired = false

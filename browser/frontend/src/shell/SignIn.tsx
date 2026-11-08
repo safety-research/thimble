@@ -3,7 +3,7 @@
 // server answers its reads all the same (lib/api signedIn: a page thimble's screenshot tool loads with a read
 // credential of its own). Every read of the server's data needs one of them (backend hook_auth), so a browser that is
 // not signed in sees one line that says so and names the way in, and neither the start page nor the shell mounts, so
-// nothing polls. The link thimble-browser prints is the same every time until `thimble unpair` changes it, and its
+// nothing polls. The link thimble-browser prints is the same every time until `thimble-browser --unpair` changes it, and its
 // question to /ui/paired has thimble-browser print it again in its terminal once it changed (backend
 // hook_auth.want_link). A read refused later for want of sign-in
 // (a sign-in notice's Sign it out: bus `signedOut`) brings the line back. A link opened in this tab
@@ -14,12 +14,12 @@ import { claimRefused, signedIn } from '../lib/api'
 import { bus } from '../lib/bus'
 
 /** The way in, which ends each line; a span in backticks is drawn as code. */
-export const WAY_IN = 'Run `thimble-browser` in your terminal and open the link it prints.'
+export const WAY_IN = 'Open the link in the terminal where `thimble-browser` runs.'
 /** The line a browser that is not signed in sees. */
 export const SIGN_IN_LINE = `This browser isn't signed in. ${WAY_IN}`
-/** The line when the server refused the link's key with 410 (`thimble unpair` changed it): the current link is the one
+/** The line when the server refused the link's key with 410 (`thimble-browser --unpair` changed it): the current link is the one
  * thimble-browser prints now, not the one this page opened. */
-export const CODE_GONE_LINE = "This link isn't valid anymore, so this browser isn't signed in. Run `thimble-browser` in your terminal for the current one."
+export const CODE_GONE_LINE = "This link isn't valid anymore, so this browser isn't signed in. Open the newest link in the terminal where `thimble-browser` runs."
 
 type State = 'wait' | 'in' | 'out'
 

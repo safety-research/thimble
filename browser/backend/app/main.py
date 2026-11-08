@@ -457,7 +457,7 @@ def create_app() -> FastAPI:
     def ui_pair() -> dict:
         return {"code": hook_auth.link_key()}
 
-    @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
+    @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble-browser --unpair`
     def ui_unpair() -> None:
         hook_auth.unpair()
 

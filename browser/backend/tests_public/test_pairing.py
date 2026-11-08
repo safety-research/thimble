@@ -1,6 +1,6 @@
 """Signing a browser in to thimble (hook_auth: link_key, claim, the signed-in browsers; main: the /api/ui routes and
 signed_in). The dashboard link carries the install's sign-in key after `#p=`, the same every time and good in any
-browser until `thimble unpair` changes it; the page trades it for a cookie and a key, and the server keeps only the
+browser until `thimble-browser --unpair` changes it; the page trades it for a cookie and a key, and the server keeps only the
 sha256 of each cookie and key. The cookie is scoped to the path of that browser's key, /b/<key>/api/, and counts only
 there. Each new sign-in shows twice: a notice with Sign it out, and a line under main's next reply."""
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _no_main():
 def test_a_browser_reads_once_it_signs_in_with_its_link_s_key_and_nothing_after_unpair(client, plugin_headers):
     """hook_auth.LocalReadGuard: a browser without the cookie reads no data (401 and the body that tells the page to
     show its sign-in line), only whether it is signed in and the health check; it reads once it traded its link's
-    key, which signs in another browser too; `thimble unpair` takes both back and changes the key, so the old link
+    key, which signs in another browser too; `thimble-browser --unpair` takes both back and changes the key, so the old link
     signs no browser in and the new one does, while the CLI's proof still reads."""
     refused = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
     r = client.get(f"/api/ws/{CORPUS}/canvas")
@@ -123,7 +123,7 @@ def test_after_unpair_the_next_signed_out_page_has_the_new_link_printed_at_once(
 
 def test_the_terminal_prints_the_link_again_only_once_it_changed(monkeypatch):
     """cli.new_links: each answer of /api/ui/link-wanted with a higher count is a browser that is not signed in; the
-    link is printed for it only when it differs from the one printed last (`thimble unpair` changed the key)."""
+    link is printed for it only when it differs from the one printed last (`thimble-browser --unpair` changed the key)."""
     import threading
 
     from app import cli
@@ -148,7 +148,7 @@ def test_the_terminal_prints_the_link_again_only_once_it_changed(monkeypatch):
 
 
 def test_unpair_with_the_server_down_signs_out_and_changes_the_link(monkeypatch, capsys):
-    """`thimble unpair` while no server answers: paired.json goes and link.key holds a new key in the same file, so a
+    """`thimble-browser --unpair` while no server answers: paired.json goes and link.key holds a new key in the same file, so a
     server that starts later knows no browser and no earlier link. With a server that answers, the server changes the
     key and the CLI leaves it, so a link printed for a page signed out at that moment is not changed under it."""
     import argparse

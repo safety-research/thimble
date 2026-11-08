@@ -1326,14 +1326,14 @@ def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = F
 PAIR_TIMEOUT_S = 3.0
 PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
 UNPAIRED_LINE = ("thimble: every browser is signed out of thimble, and the sign-in links printed before no longer "
-                 "work. Run `thimble-browser` for the new link.")
+                 "work. The new link shows in the terminal where `thimble-browser` runs, or at its next start.")
 UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
                       f"restarts. To restart it, {config.RESTART_HOW}.")
 
 
 def pair_code(api: str) -> str:
     """The sign-in link's key from the server at `api` (`POST /api/ui/pair`, which needs the token: hook_auth.link_key),
-    the same every time until `thimble unpair`. '' when the server gives none, which is logged."""
+    the same every time until `thimble-browser --unpair`. '' when the server gives none, which is logged."""
     status, body = _request("POST", f"{api}/api/ui/pair", {}, timeout=PAIR_TIMEOUT_S)
     code = body.get("code") if status == 200 and isinstance(body, dict) else None
     if isinstance(code, str) and code:
@@ -2381,7 +2381,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_unpair(_: argparse.Namespace) -> int:
-    """`thimble unpair`: every browser signed out (`POST /api/ui/unpair` when the server answers, which forgets them at
+    """`thimble-browser --unpair`: every browser signed out (`POST /api/ui/unpair` when the server answers, which forgets them at
     once), and <home>/paired.json removed, so a server that starts later knows none either; and the link's key changed
     (hook_auth.rotate_link_key), so no link printed before signs a browser in. A server that answers changes the key
     itself, and this CLI then leaves it, so the link thimble-browser prints for a page signed out at that moment is not
@@ -2595,7 +2595,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
     of the folder the page opens (pick_session, open_session): a new one, as each `claude` starts a new session, as
     empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
     chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets the new
-    link there once `thimble unpair` changed its key (watch_links). With `--detach` it returns once the link is printed and
+    link there once `thimble-browser --unpair` changed its key (watch_links). With `--detach` it returns once the link is printed and
     the server keeps running."""
     from . import claude_access  # noqa: PLC0415
 
@@ -2660,7 +2660,7 @@ def watch_links(name: str, printed: str) -> threading.Event:
 def new_links(name: str, stop: threading.Event, printed: str) -> None:
     """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
     a minute), the sign-in link for workspace `name` (ui_url), printed as at the start (NEW_LINK_LINE) when it differs
-    from the one printed last (`printed` at first): its key changed (`thimble unpair`). It waits for one at GET
+    from the one printed last (`printed` at first): its key changed (`thimble-browser --unpair`). It waits for one at GET
     /api/ui/link-wanted, which answers once the count or the server's start differs from the last answer; a server that
     started again counts from 0. A server that does not answer is asked again LINK_RETRY_S later, and a link the server
     gives no key for is not printed (pair_code logs why)."""

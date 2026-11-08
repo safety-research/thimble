@@ -6,7 +6,7 @@
 // with the key of one shown replaces it in place, any other is added at the end. The history the stream replays is
 // left to the read, which already holds what is open.
 //
-// Signing in (lib/api.ts claimKey): a link whose sign-in key `thimble unpair` changed shows as a
+// Signing in (lib/api.ts claimKey): a link whose sign-in key `thimble-browser --unpair` changed shows as a
 // notice this page makes itself (showCodeGone, an id under PAGE_NOTICE), in every workspace's strip and on the start
 // page, whose × sends nothing. A browser's sign-in posts a `sign-in` notice with Sign it out (backend main.signed_in);
 // the browser that signed in leaves out its own and those of sign-ins before it (setBrowserId, from GET /ui/paired),
@@ -74,8 +74,8 @@ export function withoutNotice(list: readonly Notice[], gone: { id?: string; key?
 }
 
 /** The words of backend hook_auth.CODE_GONE: the sign-in key of the link this page opened is not the install's key
- * anymore (`thimble unpair` changed it). */
-export const CODE_GONE_TEXT = "This sign-in link isn't valid anymore. Run `thimble-browser` in your terminal for the current one."
+ * anymore (`thimble-browser --unpair` changed it). */
+export const CODE_GONE_TEXT = "This sign-in link isn't valid anymore. Open the newest link in the terminal where `thimble-browser` runs."
 /** The start of the id of a notice this page made, which the server does not hold. */
 export const PAGE_NOTICE = 'page:'
 
