@@ -2383,14 +2383,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def cmd_unpair(_: argparse.Namespace) -> int:
     """`thimble unpair`: every browser signed out (`POST /api/ui/unpair` when the server answers, which forgets them at
     once), and <home>/paired.json removed, so a server that starts later knows none either; and the link's key changed
-    (hook_auth.rotate_link_key, which the server does too), so no link printed before signs a browser in."""
+    (hook_auth.rotate_link_key), so no link printed before signs a browser in. A server that answers changes the key
+    itself, and this CLI then leaves it, so the link thimble-browser prints for a page signed out at that moment is not
+    changed a second time under it."""
     from . import hook_auth  # noqa: PLC0415
 
     url = api_url()
     why = ""
+    rotated = False
     if healthy(url):
         status, body = _request("POST", f"{url}/api/ui/unpair", {})
-        if status not in (200, 204):
+        rotated = status in (200, 204)
+        if not rotated:
             why = f"it answered {status or str(body)[:120]}"
             _log(f"unpair: {status} {str(body)[:200]}")
     try:
@@ -2398,7 +2402,8 @@ def cmd_unpair(_: argparse.Namespace) -> int:
     except OSError as e:
         why = why or f"{home() / PAIRED_FILE} could not be removed: {e.strerror}"
     try:
-        hook_auth.rotate_link_key()
+        if not rotated:
+            hook_auth.rotate_link_key()
     except OSError as e:
         why = why or f"{home() / hook_auth.LINK_KEY} could not be changed: {e.strerror}"
     print(UNPAIR_FAILED_LINE.format(why=why) if why else UNPAIRED_LINE)

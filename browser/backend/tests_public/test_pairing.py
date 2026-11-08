@@ -97,3 +97,74 @@ def test_a_new_sign_in_shows_a_notice_whose_sign_it_out_signs_that_browser_out(c
     assert other.get("/api/ui/paired").json()["paired"] is False and client.get("/api/ui/paired").json()["paired"]
     assert other.get(f"/api/ws/{CORPUS}/canvas").status_code == 401
     assert not [n for n in notices.open_notices(CORPUS) if n["key"] == f"sign-in:{theirs}"], "its notice went"
+
+
+@pytest.mark.real_read_guard
+def test_a_restart_keeps_the_link_and_every_signed_in_browser(client, plugin_headers):
+    """A server that starts again reads the signed-in browsers from paired.json and the key from link.key: the link
+    thimble-browser prints is the one it printed before, and a browser signed in before reads with no new sign-in."""
+    code = client.post("/api/ui/pair", headers=plugin_headers()).json()["code"]
+    sign_in(client, code)
+    hook_auth._paired = None  # what a new server knows: the files alone
+    assert client.post("/api/ui/pair", headers=plugin_headers()).json()["code"] == code
+    assert client.get("/api/corpora").status_code == 200
+
+
+def test_after_unpair_the_next_signed_out_page_has_the_new_link_printed_at_once(client, plugin_headers):
+    """want_link counts a page that is not signed in at most once a minute; unpair counts the next one at once, so the
+    pages it signed out have thimble-browser print the new link right away, not a minute after an earlier ask."""
+    assert client.get("/api/ui/paired").json()["paired"] is False
+    assert client.get("/api/ui/paired").json()["paired"] is False
+    assert hook_auth.links_wanted() == 1, "a page that reloads counts once a minute"
+    assert client.post("/api/ui/unpair", headers=plugin_headers()).status_code == 204
+    client.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 2
+
+
+def test_the_terminal_prints_the_link_again_only_once_it_changed(monkeypatch):
+    """cli.new_links: each answer of /api/ui/link-wanted with a higher count is a browser that is not signed in; the
+    link is printed for it only when it differs from the one printed last (`thimble unpair` changed the key)."""
+    import threading
+
+    from app import cli
+
+    stop = threading.Event()
+    answers = iter([1, 2, 3, 4])
+    links = iter(["http://x/#p=a", "http://x/#p=b", "http://x/#p=b"])
+    printed: list[str] = []
+
+    def request(method, url, body=None, timeout=None):
+        n = next(answers, None)
+        if n is None:
+            stop.set()
+            return 0, {}
+        return 200, {"boot": "1", "wanted": n}
+
+    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(cli, "ui_url", lambda name, pair=False: next(links))
+    monkeypatch.setattr(cli, "_say", lambda *lines: printed.extend(lines))
+    cli.new_links("w", stop, "http://x/#p=a")
+    assert printed == [cli.BROWSER_LINE.format(what=cli.NEW_LINK_LINE.format(link="http://x/#p=b"))]
+
+
+def test_unpair_with_the_server_down_signs_out_and_changes_the_link(monkeypatch, capsys):
+    """`thimble unpair` while no server answers: paired.json goes and link.key holds a new key in the same file, so a
+    server that starts later knows no browser and no earlier link. With a server that answers, the server changes the
+    key and the CLI leaves it, so a link printed for a page signed out at that moment is not changed under it."""
+    import argparse
+
+    from app import cli
+
+    key = hook_auth.link_key()
+    path = hook_auth.home() / hook_auth.LINK_KEY
+    (hook_auth.home() / hook_auth.PAIRED_FILE).write_text("[]")
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=None: False)
+    assert cli.cmd_unpair(argparse.Namespace()) == 0
+    assert capsys.readouterr().out.strip() == cli.UNPAIRED_LINE
+    assert not (hook_auth.home() / hook_auth.PAIRED_FILE).exists()
+    assert hook_auth.link_key() not in ("", key) and path.stat().st_mode & 0o777 == 0o600
+    served = hook_auth.link_key()
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=None: True)
+    monkeypatch.setattr(cli, "_request", lambda *a, **k: (204, {}))
+    assert cli.cmd_unpair(argparse.Namespace()) == 0
+    assert hook_auth.link_key() == served, "the server changed it, not the CLI a second time"

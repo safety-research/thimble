@@ -556,9 +556,12 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
 
 def unpair() -> None:
     """Sign every browser out, and change the link's key (rotate_link_key): no cookie and no earlier link proves
-    anything."""
+    anything. The next browser that is not signed in counts at once (want_link), so thimble-browser prints the new link
+    as soon as a page that was signed out asks, even when an ask counted less than LINK_EVERY_S before."""
+    global _wanted_at
     with _pair_lock:
         _save([])
+        _wanted_at = None
     rotate_link_key()
 
 
