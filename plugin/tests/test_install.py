@@ -18,6 +18,7 @@ import sys
 import tarfile
 import time
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -393,23 +394,43 @@ def test_the_install_fetches_the_headless_chromium_cards_are_checked_in_and_says
     assert w.python()[3:] == ["-m app.headless"]
 
 
+# the server's python in a clone that thimble-browser starts: the start's check of the headless Chromium (python -m
+# app.headless --start, backend app/headless.py, whose tests have what it says) logs where it ran in start.log beside
+# it, says FAKE_START on stdout and FAKE_START_ERR on stderr, and ends with FAKE_START_EXIT; the server and the setup
+# say how they were started
+START_PYTHON = ('if [ "$*" = "-m app.headless --start" ]; then\n'
+                '  echo "$(pwd -P) $THIMBLE_HOME" >> "$(dirname "$0")/start.log"\n'
+                '  [ -z "$FAKE_START" ] || echo "$FAKE_START"\n'
+                '  [ -z "$FAKE_START_ERR" ] || echo "$FAKE_START_ERR" >&2\n'
+                '  exit "${FAKE_START_EXIT:-0}"\n'
+                'fi\n'
+                'echo "server: $*"\n')
+
+
+def clone_browser(w: World) -> tuple[Path, Callable[..., subprocess.CompletedProcess]]:
+    """A clone's workbench, as thimble-browser starts it: the script itself, the server's python (START_PYTHON) and a
+    built page; and its start, in a folder of data unless other arguments are given."""
+    browser = w.tmp / "clone" / "browser"
+    (browser / "scripts").mkdir(parents=True)
+    shutil.copy(ROOT / "browser" / "scripts" / "thimble-browser", browser / "scripts" / "thimble-browser")
+    stub(browser / "backend" / ".venv" / "bin" / "python", START_PYTHON)
+    (browser / "frontend" / "dist").mkdir(parents=True)
+    (browser / "frontend" / "dist" / "index.html").write_text("<title>thimble</title>\n")
+    (w.home / "data").mkdir()
+
+    def start(*args: str, **env: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(browser / "scripts" / "thimble-browser"), *(args or [str(w.home / "data")])],
+                              capture_output=True, text=True, env=w.env(**env), cwd=w.home, timeout=60)
+
+    return browser, start
+
+
 def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_left_them_uncompiled(w):
     """thimble-browser's start, for an install that thimble 0.10.12 or before made or updated (and a clone's): the
     server's packages that have no mark of their compile are compiled once, by the install's command, before the server
     starts. A compile that fails says so with what uv said, and the server starts all the same."""
-    browser = w.tmp / "clone" / "browser"
-    (browser / "scripts").mkdir(parents=True)
-    shutil.copy(ROOT / "browser" / "scripts" / "thimble-browser", browser / "scripts" / "thimble-browser")
-    stub(browser / "backend" / ".venv" / "bin" / "python", 'echo "server: $*"\n')
-    (browser / "frontend" / "dist").mkdir(parents=True)
-    (browser / "frontend" / "dist" / "index.html").write_text("<title>thimble</title>\n")
-    (w.home / "data").mkdir()
+    browser, start = clone_browser(w)
     mark = browser / "backend" / ".venv" / IN.FX.COMPILED
-
-    def start(**env: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["bash", str(browser / "scripts" / "thimble-browser"), str(w.home / "data")],
-                              capture_output=True, text=True, env=w.env(**env), cwd=w.home, timeout=60)
-
     p = start(FAKE_UV_FAILS="1")
     assert p.returncode == 0 and p.stdout.splitlines() == [
         "thimble-browser: compiling the server's packages, once...",
@@ -426,6 +447,29 @@ def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_le
     assert w.uv() == [sync, sync] and mark.is_file() and p.stderr == ""
     p = start()
     assert p.returncode == 0 and p.stdout.splitlines()[0].startswith("server: ") and w.uv() == [sync, sync], text_of(p)
+
+
+def test_thimble_browser_downloads_the_headless_chromium_once_where_an_install_left_it_out(w):
+    """thimble-browser's start, for an install that thimble 0.10.12 or before made or updated (and a clone's), on a
+    machine with no Chrome, Edge or Chromium: before the server starts, the workbench's own check downloads the headless
+    Chromium it draws cards in when it is missing (python -m app.headless --start, in the server's folder, with the
+    workbench's home), and what it says reaches the terminal. A check that fails leaves the server to start all the
+    same, and --setup downloads nothing."""
+    browser, start = clone_browser(w)
+    (browser / "backend" / ".venv" / IN.FX.COMPILED).touch()
+    server = f"server: -m app.cli browser --cwd {(w.home / 'data').resolve()} --session new"
+    line = "thimble-browser: downloading the headless Chromium the workbench draws cards in, once (about 200 MB)..."
+    p = start(FAKE_START=line)
+    assert p.returncode == 0 and p.stdout.splitlines() == [line, server] and p.stderr == "", text_of(p)
+    log = browser / "backend" / ".venv" / "bin" / "start.log"
+    assert log.read_text().splitlines() == [f"{(browser / 'backend').resolve()} {w.home / '.thimble-browser'}"]
+    failed = ("thimble-browser: no headless Chromium, so cards are not checked (its download failed: made-up). Fetch "
+              "it, then start thimble-browser again:")
+    p = start(FAKE_START=line, FAKE_START_ERR=failed, FAKE_START_EXIT="1")
+    assert p.returncode == 0 and p.stdout.splitlines() == [line, server] and p.stderr.splitlines() == [failed], \
+        text_of(p)
+    p = start("--setup")
+    assert p.stdout.splitlines() == ["server: -m app.claude_access setup"] and len(log.read_text().splitlines()) == 2
 
 
 @pytest.mark.parametrize("args, given", [
