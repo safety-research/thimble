@@ -24,7 +24,7 @@ os.environ.setdefault("THIMBLE_CARD_CHECK", "off")
 os.environ.setdefault("THIMBLE_VIEW_REVIEW", "off")
 # No view proposer run after a turn of main (proposer.py): the tests that need it turn it on.
 os.environ.setdefault("THIMBLE_PROPOSE_VIEWS", "off")
-# No fix of the person's thimble (app/fixes.py): file_dev_ticket and File a code ticket file code tickets then, and the
+# No fix of the person's thimble (app/fixes.py): file_dev_ticket and POST /dev/tickets file code tickets then, and the
 # tests of the fixes turn them on.
 os.environ.setdefault("THIMBLE_FIXES", "off")
 # The suite's corpora are the synthetic ones, always: an inherited THIMBLE_DATA_DIR would point config.DATA_DIR at

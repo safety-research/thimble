@@ -1082,16 +1082,8 @@ export interface NewTicketBody {
   title: string
   body: string
   target?: unknown
-  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  /** where it was filed: `ui` for Report a problem's Fix it with /thimble-fix (backend dev.SOURCES) */
   source?: 'ui'
-}
-
-/** The ticket runner's state (`GET /dev/status`): `tickets` is '' where code tickets run here (a development install),
- * else why they do not (backend dev.ticket_problem). */
-export interface DevStatus {
-  running: boolean
-  tickets: string
-  queued: number
 }
 
 // ---- settings ----

@@ -1,6 +1,6 @@
 """thimble fix in the browser workbench: the person asks for a change to their own thimble in their own words
-(`/thimble-fix <words>` in the chat, or Report a problem's File a code ticket), Claude makes it in a copy of thimble,
-and when the kernel's checks pass, the chat asks the person to use it; their click puts it on and
+(`/thimble-fix <words>` in the chat, or Report a problem's Fix it with /thimble-fix), Claude makes it in a copy of
+thimble, and when the kernel's checks pass, the chat asks the person to use it; their click puts it on and
 thimble-browser starts again from it. The same records and verbs as the terminal's /thimble-fix
 (plugin/engine/kernel/fixes.py), so a fix made in one is on in the other once it starts again.
 
@@ -58,7 +58,8 @@ restart; the newest row of a fix shows its state now, with the clicks it takes.
 A dev install's launcher (scripts/install.sh --local) starts the server from the clone, while Use it now starts it from
 live, where the fixes are: on a server that runs from the clone, Your fixes shows a fix that is on as off, and says why,
 and its Use it starts the server from live again (not_here).
-THIMBLE_FIXES=off turns fixes off on this server (the code tickets then take their entry points again).
+THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file code tickets again,
+and Report a problem offers no fix (problem, which GET /fixes answers).
 """
 from __future__ import annotations
 
