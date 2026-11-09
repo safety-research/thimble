@@ -334,7 +334,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     const shown = withoutCardLinks(text)
     return shown === raw ? below() : below({ ...e, props: { ...e.props, text: shown } })
   }
-  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) return plain()
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !under.length && !placesCards) return plain()
   // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations`
   // runs (the tray's `checking` turns with it)
   const spin = reply?.checking ? await spinNow($) : SPIN[0]!
@@ -358,10 +358,10 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
   // the citations' tint is the theme set's (view.ts citeLook)
   if (marks.length) await themeNow($)
-  const body = marks.length || spans.length || view.dim || view.lead || placesCards
+  const body = marks.length || spans.length || view.dim || placesCards
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
-      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
+      spans, dim: view.dim, focus: focus >= 0 ? focus : null, cards,
       // Minimal: plain words at rest, each row's marks under the pointer (view.ts), where Claude Code reports the
       // pointer; elsewhere the marks stand at rest as in any mode
       plain: minimalOn() && (await pointerReported($, e)),

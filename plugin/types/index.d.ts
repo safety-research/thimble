@@ -121,8 +121,6 @@ declare module 'claude-code' {
       answerMsg: StateFamily<unknown>
       /** the turn a text row belongs to, by the row */
       answerRowTurn: StateFamily<string>
-      /** the answer the person picked for the keys with { and } or by opening one of its marks, or null: the newest */
-      answerSel: string | null
       /** main's turns answer nothing while this is true (the tour after its sample answer: core/answers.ts holdAnswers) */
       answersHeld: boolean | null
 
