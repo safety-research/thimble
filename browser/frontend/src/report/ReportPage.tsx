@@ -20,6 +20,9 @@ import { Margin, RAIL_ROOM } from './Margin'
 import { allSentences, paragraphOf, passageOrder, readableText, TITLE_ID } from './model'
 import { Sidebar } from './Sidebar'
 
+/** A value for an attribute selector: CSS.escape where the page has it (jsdom, in the tests, does not). */
+const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'))
+
 const CANVAS_DEBOUNCE_MS = 400
 
 export interface ReportPageProps {
@@ -156,7 +159,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     if (!box || !col) return
     const base = box.getBoundingClientRect().top - box.scrollTop
     const spanOf = (sid: string): [number, number] | null => {
-      const r = col.querySelector(`[data-sid="${CSS.escape(sid)}"]`)?.getBoundingClientRect()
+      const r = col.querySelector(`[data-sid="${esc(sid)}"]`)?.getBoundingClientRect()
       return r ? [r.top - base, r.bottom - base] : null
     }
     setColumns(checkColumns(shown, on, checks.list, spanOf, Math.max(1, box.scrollHeight)))
