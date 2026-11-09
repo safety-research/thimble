@@ -865,8 +865,8 @@
 }
 
 /* the page: the cell's paper to the pane's edge, a column as wide as the pane (gutters of 40 at the left and 108 at
-   the right for the block actions) and the margin beside it. Figures take the column's width; text keeps a card's
-   width (--w-card), a line that reads comfortably */
+   the right for the block actions) and the margin beside it, or over it in a narrow page. Figures take the column's
+   width; text keeps a card's width (--w-card), a line that reads comfortably */
 .wu-page {
   flex: 1;
   min-width: 0;
@@ -879,6 +879,7 @@
   display: none;
 }
 .wu-page-row {
+  position: relative;
   display: flex;
   justify-content: center;
   min-height: 100%;
@@ -1294,6 +1295,24 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   width: 228px;
   margin-left: 12px;
   margin-right: 16px;
+}
+/* in a page too narrow for both, the margin stands over the page's right edge and takes no room, so the text column
+   keeps the page's width less its gutters. It shows only the open comment (Margin.tsx `over`), over the text and the
+   block actions (BlockNote's side menu, z-index 20), and lets a click beside the card reach the page. In the narrowest
+   pane it is narrower, so the card stays inside the page. The card shows at its passage at once, rather than sliding
+   there from the top */
+.wu-rail.is-over {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  width: min(228px, 100% - 40px);
+  pointer-events: none;
+}
+.wu-rail.is-over > .wu-cm {
+  pointer-events: auto;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
 }
 .wu-cm {
   position: absolute;
