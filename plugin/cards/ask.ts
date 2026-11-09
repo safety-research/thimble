@@ -1,7 +1,7 @@
 // ask.ts: the card runner (runner.mjs) from the hooks. One runner per session, started the first time a card needs it,
 // in Anthropic's sandbox runtime (srt; argv.mjs says how), and reached over a Unix socket ($.http.fetch with
 // socketPath: a round trip takes a millisecond or two). The runner has a folder of its own, mode 700, which holds only
-// its socket and is the one folder it may write: `cards-<hash>` in the first of these folders whose path is short
+// its socket and is the one folder it may write: `cards-<hash>` in the first of these folders whose real path is short
 // enough for a socket (argv.mjs's SOCKET_MAX: 108 bytes on Linux, 104 on macOS): <THIMBLE_HOME>/run,
 // $XDG_RUNTIME_DIR/thimble, <temp folder>/thimble-<user>, /tmp/thimble-<user>, and /tmp/thimble-<hash of the user>,
 // which fits whatever the names; each is made with mode 700 and used only when it is a folder this user owns, not a
@@ -10,9 +10,14 @@
 // never started, it stopped, the session was resumed) is started again, and a card it does not hold is loaded again
 // from its copy on disk (draw.ts).
 //
+// The runner gets every path as its real path: its code (in the plugin's folder as setup.mjs names it, the folder its
+// probe starts a runner from), the card copies, a card's rows and its own folder. The sandbox shows each folder only at
+// its real path, so a path through a link, such as thimble's home on a disk mounted behind one, is not there for the
+// runner.
+//
 //   sandbox($)         the sandbox, from sandbox/setup.mjs, which installs srt the first time (it runs at each session
-//                      start, register.ts): {ok, node, nodeVersion, grants, srt, platform, why, fix}, where `grants`
-//                      says which of the runner's grants its Node takes; kept once it works, asked again until
+//                      start, register.ts): {ok, node, nodeVersion, grants, srt, plugin, platform, why, fix}, where
+//                      `grants` says which of the runner's grants its Node takes; kept once it works, asked again until
 //                      then. Each hook that asks runs setup.mjs itself: a hook's own time is bounded (10 s) while a `$`
 //                      call it makes is not, so a card called while the session start installs srt waits in its own
 //                      setup.mjs, which waits for that install, and not on the session start's promise
@@ -47,7 +52,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Sandbox = { ok: boolean; node: string; nodeVersion?: string; grants?: Record<string, boolean>; srt: string; platform: string; why: string; fix: string }
+export type Sandbox = { ok: boolean; node: string; nodeVersion?: string; grants?: Record<string, boolean>; srt: string; plugin: string; platform: string; why: string; fix: string }
 /** Why the runner cannot start; `machine` when the fix is the machine's (a package, a setting), not thimble's. */
 type Down = { why: string; machine?: boolean }
 const downOf = (s: Sandbox): Down => ({ why: sandboxWhy(s), machine: !!s.fix })
@@ -76,7 +81,7 @@ async function setup($: Engine, probe = false): Promise<Sandbox> {
   const said = String(r.stderr).trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 200)
   const noNode = r.exitCode === 127 || /ENOENT|not found/i.test(said)
   return {
-    ok: false, node: '', srt: '', platform: '',
+    ok: false, node: '', srt: '', plugin: '', platform: '',
     why: noNode ? 'Node is not on the PATH, and the card runner and its sandbox run on it' : `thimble could not set up its sandbox (${said || `exit ${r.exitCode}`})`,
     fix: noNode ? 'Install Node 22.18 or later' : '',
   }
@@ -86,7 +91,7 @@ async function setup($: Engine, probe = false): Promise<Sandbox> {
  *  cards draw as soon as the person fixed it, with no new session. */
 export async function sandbox($: Engine): Promise<Sandbox> {
   if (works) return works
-  const s = await setup($).catch(err => ({ ok: false, node: '', srt: '', platform: '', why: String((err as Error)?.message || err), fix: '' }))
+  const s = await setup($).catch(err => ({ ok: false, node: '', srt: '', plugin: '', platform: '', why: String((err as Error)?.message || err), fix: '' }))
   if (s.ok) works = s
   return s
 }
@@ -101,7 +106,7 @@ export function sandboxNotice($: Engine, text: string, machine: boolean): void {
   else failNotice($, text, 'sandbox')
 }
 
-/** The runner's socket in its own folder: its path, or why no folder can hold it. */
+/** The runner's socket in its own folder, by its real path: its path, or why no folder can hold it. */
 async function socketPath($: Engine): Promise<{ sock?: string; error?: string }> {
   const home = await thimbleHome($)
   const id = `${home}\0${await sessionKey($)}`
@@ -112,9 +117,16 @@ async function socketPath($: Engine): Promise<{ sock?: string; error?: string }>
   const xdg = String((await $.env.get('XDG_RUNTIME_DIR')) || '').replace(/\/+$/, '')
   const dirs = [runDir(home), xdg && `${xdg}/thimble`, `${await tempDir($)}/thimble-${user}`, `/tmp/thimble-${user}`, `/tmp/thimble-${shortHash(user)}`].filter(Boolean) as string[]
   for (const dir of dirs) {
-    const sock = `${dir}/${name}/cards.sock`
-    if (sock.length > SOCKET_MAX) continue
-    if (!(await ownFolder($, sock))) continue
+    // the socket's path must fit as named and as its real path, which a link on the way can make longer: when the real
+    // path does not fit, the folder made for it goes, and the next folder holds the socket
+    if (`${dir}/${name}/cards.sock`.length > SOCKET_MAX) continue
+    const run = await ownFolder($, `${dir}/${name}/cards.sock`)
+    if (!run) continue
+    const sock = `${run}/cards.sock`
+    if (sock.length > SOCKET_MAX) {
+      await removeFolder($, sock)
+      continue
+    }
     found.set(id, sock)
     return { sock }
   }
@@ -123,12 +135,19 @@ async function socketPath($: Engine): Promise<{ sock?: string; error?: string }>
 
 const folderOf = (sock: string) => sock.slice(0, sock.lastIndexOf('/'))
 
-/** Make the socket's folder and the one it is in, each with mode 700, a folder this user owns and no link: whether
- *  they are. A runner that stopped took its folder with it, so a new one makes it again. */
-async function ownFolder($: Engine, sock: string): Promise<boolean> {
+/** Make the socket's folder and the one it is in, each with mode 700, a folder this user owns and no link: the socket
+ *  folder's real path when they are, else ''. A runner that stopped took its folder with it, so a new one makes it
+ *  again. */
+async function ownFolder($: Engine, sock: string): Promise<string> {
   const run = folderOf(sock)
-  const own = 'for d in "$1" "$2"; do mkdir -p -m 700 "$d" && test ! -L "$d" && test -d "$d" && test -O "$d" && chmod 700 "$d" || exit 1; done'
-  return (await $.process.run(['sh', '-c', own, 'sh', folderOf(run), run])).exitCode === 0
+  const own = 'for d in "$1" "$2"; do mkdir -p -m 700 "$d" && test ! -L "$d" && test -d "$d" && test -O "$d" && chmod 700 "$d" || exit 1; done; cd "$2" && pwd -P'
+  const r = await $.process.run(['sh', '-c', own, 'sh', folderOf(run), run])
+  return r.exitCode === 0 ? String(r.stdout).trim() : ''
+}
+
+/** A file by its real path, as the runner's sandbox shows it: every link on the way followed. */
+async function realFile($: Engine, path: string): Promise<string> {
+  return (await $.fs.stat(path, { resolve: true }).catch(() => null))?.realPath ?? path
 }
 
 /** Remove the runner's folder (its socket), when no other runner uses it. */
@@ -152,16 +171,18 @@ async function start($: Engine, sock: string): Promise<Down | null> {
   const s = await sandbox($)
   if (!s.ok) return downOf(s)
   if (!(await ownFolder($, sock))) return { why: `thimble could not make the card runner's folder ${folderOf(sock)}` }
-  const cards = await cardsDir($)
-  const made = await $.process.run(['mkdir', '-p', '-m', '700', cards])
-  if (made.exitCode !== 0) return { why: `thimble could not make its folder ${cards} (${String(made.stderr).trim().slice(0, 160)})` }
+  // the card copies' folder, made, by its real path
+  const named = await cardsDir($)
+  const made = await $.process.run(['sh', '-c', 'mkdir -p -m 700 "$1" && cd "$1" && pwd -P', 'sh', named])
+  if (made.exitCode !== 0) return { why: `thimble could not make its folder ${named} (${String(made.stderr).trim().slice(0, 160)})` }
+  const cards = String(made.stdout).trim()
   runner.exit = ''
   runner.stop?.()
   // a runner of another conversation (/clear) takes its folder with it
   if (runner.sock && runner.sock !== sock) await removeFolder($, runner.sock)
   runner.sock = sock
   const argv = runnerArgv({
-    plugin: $.plugin.root, node: s.node, grants: s.grants, srt: s.srt, platform: s.platform, cards, run: folderOf(sock), sock,
+    plugin: s.plugin, node: s.node, grants: s.grants, srt: s.srt, platform: s.platform, cards, run: folderOf(sock), sock,
     home: String((await $.env.get('HOME')) || ''), thimbleHome: await thimbleHome($), path: String((await $.env.get('PATH')) || '/usr/bin:/bin'),
   })
   const mine = {}
@@ -266,9 +287,12 @@ export async function ask($: Engine, op: string, body: unknown): Promise<Any> {
   const where = await socketPath($)
   if (!where.sock) return { ok: false, error: where.error, down: true }
   const sock = where.sock
+  // a card's rows by their real path, as the runner sees the card copies
+  const rows = (body as Any)?.rows
+  const sent = typeof rows === 'string' ? { ...(body as object), rows: await realFile($, rows) } : body
   if (runner.sock && runner.sock !== sock) runner.up = false
   if (runner.up) {
-    try { return await post($, sock, op, body) } catch { return stopped() }
+    try { return await post($, sock, op, sent) } catch { return stopped() }
   }
   if (!runner.starting) {
     runner.starting = (async () => {
@@ -283,7 +307,7 @@ export async function ask($: Engine, op: string, body: unknown): Promise<Any> {
   // also a runner another load of the module started: its folder goes at the session's end
   runner.sock = sock
   try {
-    return await post($, sock, op, body)
+    return await post($, sock, op, sent)
   } catch {
     return stopped()
   }
