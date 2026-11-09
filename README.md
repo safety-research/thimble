@@ -54,7 +54,7 @@ Run `claude` in a folder of files. Click `thimble` above the prompt to turn feat
 
 Run `thimble-browser` in a folder of files.
 
-![the browser workbench answering whether agents reviewed before approving: a chat answer with citations, an agent transcript colored by an activity label, a timeline of every agent's labeled work and approvals, and a table of what each approver ran](docs/assets/thimble-browser.png)
+![the browser workbench answering whether agents reviewed before approving: a chat answer with citations, an agent transcript colored by an activity label, and a timeline of every agent's labeled work and approvals](docs/assets/thimble-browser.png)
 
 ## Requirements
 
