@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // The chat as the analyst uses it (src/chat/ChatPanel.tsx, useChat.ts, Rows.tsx), over a stand-in server that answers
 // the routes the panel calls as the server does: a question goes to main, and the answer shows with the card it made
-// and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a rewind
-// takes a message back; a side thread says it is starting, then that it works, and ends on its answer.
+// and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a model
+// picked under the composer shows there at once; a rewind takes a message back; a side thread says it is starting, then
+// that it works, and ends on its answer.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
@@ -32,6 +33,14 @@ function answer(u: string, init?: RequestInit): unknown {
     // idle, main takes the message as its next turn, and its log holds it
     if (!chats.main.meta.running) chats.main.events.push({ type: 'user', ts: T, text: body.payload.text, by: 'browser' })
     return { id: 'e2', kind: 'main', delivered: 1 }
+  }
+  if (u.endsWith('/session/model')) {
+    // main's meta holds the pick at once (events._choose), with the effort main runs at on it by Claude Code's
+    // defaults (high on Opus 4.8, medium on Opus 5.5 and Sonnet 5.5); a model without fast mode turns fast mode off
+    const held = chats.main.meta.attached!
+    const fast = body.model.includes('opus') ? {} : { fast_choice: false }
+    chats.main.meta = { ...chats.main.meta, attached: { ...held, model_choice: body.model, settings_effort: body.model.endsWith('4-8') ? 'high' : 'medium', ...fast } }
+    return { model: body.model }
   }
   if (u.endsWith('/interrupt')) return { stopped: true }
   if (u.endsWith('/chats/main/rewind')) {
@@ -138,6 +147,37 @@ test('while main works, a message sent waits until main reads it, and Stop main 
   expect(el.querySelector('.chat-pending')).toBeNull()
   expect(messages(el)).toEqual(['Count the runs per agent.', 'And how many files are there?'])
   expect(squares(el).map((b) => b.getAttribute('aria-label'))).toEqual(['Send'])
+})
+
+test('a model picked in the line under the composer shows there at once, with the effort and fast mode main runs it at', async () => {
+  // main's replies came from Opus 5.5 at medium, with fast mode on
+  chats.main.meta = main({ attached: { ...ATTACHED, effort: 'medium', settings_effort: 'medium', fast_choice: true } })
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  const line = () => el.querySelector<HTMLElement>('.chat-composer .model-line')!
+  const bolt = () => line().querySelector<HTMLElement>('.fast-bolt')!
+  /** The line's model and effort, its menu's checked model, and its bolt: pressed, locked. */
+  const shown = async () => {
+    await click(line().querySelector<HTMLElement>('[aria-label="Model for main and its threads"]')!)
+    const checked = document.querySelector('.menu-item.checked')?.getAttribute('data-item')
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    return [line().querySelector('.model-line-part')?.textContent, line().querySelector('.model-line-effort')?.textContent, checked, bolt().getAttribute('aria-pressed'), bolt().getAttribute('aria-disabled')]
+  }
+  const pick = async (model: string) => {
+    await click(line().querySelector<HTMLElement>('[aria-label="Model for main and its threads"]')!)
+    await click(document.querySelector<HTMLElement>(`.menu-item[data-item="model:${model}"]`)!)
+    await settle()
+    await settle()
+  }
+  expect(await shown()).toEqual(['Opus 5.5', 'medium', 'model:claude-opus-5-5', 'true', null])
+  await pick('claude-sonnet-5-5')
+  expect(posted).toEqual([{ url: '/api/ws/mini/session/model', body: { model: 'claude-sonnet-5-5' } }])
+  // before main replies on it: the line and its menu name Sonnet 5.5, whose bolt is off and locked, since it has no
+  // fast mode
+  expect(await shown()).toEqual(['Sonnet 5.5', 'medium', 'model:claude-sonnet-5-5', 'false', 'true'])
+  await pick('claude-opus-4-8')
+  // Opus 4.8 at the effort main runs it at, with fast mode off until the bolt turns it on
+  expect(await shown()).toEqual(['Opus 4.8', 'high', 'model:claude-opus-4-8', 'false', null])
 })
 
 test('Rewind asks under the message first, then takes it and what came after back, its words in the box again', async () => {

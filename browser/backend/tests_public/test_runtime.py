@@ -522,6 +522,35 @@ async def test_a_new_session_is_empty_and_the_last_comes_back_whole(on, monkeypa
     assert [r["first"] for r in folder_sessions.listing(CORPUS)] == ["What happened?", "Hi"]
 
 
+# --------------------------------------------------------------------------- main's model, effort and fast mode
+
+
+def main_choices() -> dict[str, Any]:
+    """Main's model, effort and fast mode as main's meta holds them for the line under the composer."""
+    held = agents.ensure_main(CORPUS)["attached"] or {}
+    return {k: held.get(k) for k in ("model_choice", "effort_choice", "fast_choice")}
+
+
+async def test_main_s_choices_show_at_once_and_fast_mode_comes_on_only_from_its_bolt(on, monkeypatch):
+    """The line under the composer (events.model_route, effort_route, fast_route): main's meta holds each choice at once,
+    before main replies on it. A model without fast mode turns fast mode off, as Claude Code's /model does, so a model
+    with it picked again runs at standard speed until the bolt turns fast mode on. A new chat holds the choices too."""
+    client = api_key(monkeypatch, [text("Hi."), text("On Sonnet."), text("Back on Opus.")])
+    await main_turn("Hi")
+    await events.fast_route(CORPUS, events.MainChoice(fast=True))
+    await events.model_route(CORPUS, events.MainChoice(model="claude-sonnet-5-5"))
+    assert main_choices() == {"model_choice": "claude-sonnet-5-5", "effort_choice": None, "fast_choice": False}
+    await main_turn("And now?")
+    await events.model_route(CORPUS, events.MainChoice(model="claude-opus-5-5"))
+    await main_turn("And on Opus?")
+    assert [(b["model"], b.get("speed")) for b in client.bodies] == [
+        ("claude-opus-5-5", None), ("claude-sonnet-5-5", None), ("claude-opus-5-5", None)]
+    await events.effort_route(CORPUS, events.MainChoice(effort="low"))
+    await events.fast_route(CORPUS, events.MainChoice(fast=True))
+    assert await runtime._spaces[CORPUS].switch(None)
+    assert main_choices() == {"model_choice": "claude-opus-5-5", "effort_choice": "low", "fast_choice": True}
+
+
 # --------------------------------------------------------------------------- rewind
 
 

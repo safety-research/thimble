@@ -601,12 +601,23 @@ def current(c: str) -> Live | None:
     return _live.get(c)
 
 
+CHOICES = ("model", "effort", "fast")  # what the composer's chip chooses for main (models.main in the settings)
+
+
+def chosen(choice: dict[str, Any] | None) -> dict[str, Any]:
+    """Main's choices, as the settings keep them (models.main) or as just made, the way main's `attached` holds them
+    for the composer's chip: model_choice, effort_choice and fast_choice."""
+    return {f"{k}_choice": v for k, v in (choice or {}).items() if k in CHOICES}
+
+
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
-           config_dir: str | None = None, *, effort: str | None = None) -> Live | None:
+           config_dir: str | None = None, *, effort: str | None = None,
+           choice: dict[str, Any] | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
     unset, None for not known). `attached.settings_effort` is the effort main runs at while the composer chose none, for
     the composer's chip: `effort`, which the server's runtime gives (runtime.Space.attach), else the analyst's own
-    (cc_settings.analyst_effort)."""
+    (cc_settings.analyst_effort). A new session's `attached` holds `choice` too (chosen), what the settings keep for main
+    (models.main), which main's turns run with: a new chat's chip shows them before its first reply."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
@@ -648,7 +659,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
         own = effort or (cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None)
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since,
-                            **({"settings_effort": own} if own else {})}
+                            **({"settings_effort": own} if own else {}), **chosen(choice)}
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)

@@ -1766,9 +1766,10 @@ export interface Attached {
   model?: string
   /** the effort they ran at, as the mirror last read it */
   effort?: string
-  /** what the composer's chip chose for main's next launch, while this session runs */
+  /** the effort the composer's chip or Settings chose for main's next turn, as the settings keep it (models.main): from
+   * the session's start and from the moment it is picked (backend session.chosen) */
   effort_choice?: MainEffort
-  /** the model the composer's menu chose for main's next turn (events.model_route) */
+  /** the model the composer's menu or Settings chose for main's next turn (events.model_route), held the same way */
   model_choice?: string
   /** the effort main runs at while the composer chose none: the analyst's own Claude Code settings' for main's model,
    * else Claude Code's default for it (cc_settings.session_effort); where main's effort menu opens */
@@ -1779,7 +1780,8 @@ export interface Attached {
    * bypassPermissions, dontAsk), which the dev agent's program follows until the analyst sets its row, Bypass as Manual
    * (backend modes.py) */
   permission_mode?: string
-  /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
+  /** whether the composer's bolt or Settings turned fast mode on for main's next turn, held the same way; a model
+   * without fast mode turns it off (events.model_route) */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string
