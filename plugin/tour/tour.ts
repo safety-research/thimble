@@ -130,6 +130,11 @@ export type Tour = TourState & { at: Step }
 /** The skill, as Claude Code names it (with the plugin's name, or without). */
 export const TOUR_SKILL = /^(?:thimble:)?tour$/
 
+/** The first Claude Code that places the tour's rows ($.ui.place), as scripts/install.sh, kernel/tour.py and INSTALL.md
+ *  name it. thimble runs on older ones, where /thimble:tour says TOO_OLD at once and the tour does not start. */
+export const TOUR_CLAUDE_CODE = '2.1.314'
+export const TOO_OLD = `The tour needs Claude Code ${TOUR_CLAUDE_CODE} or later: update it (claude update), then type /thimble:tour again.`
+
 /** The file in thimble's home that an install inside Claude Code writes the session's id and the time to
  *  (scripts/install.sh). */
 export const NEXT_FILE = 'tour-next'
@@ -352,6 +357,15 @@ export async function tourCites($: Engine, row: string | null | undefined): Prom
   return !!a && !!b && a.turnId === b.turnId
 }
 
+/** Whether this Claude Code is older than TOUR_CLAUDE_CODE; false where its version names no release. */
+async function tooOld($: Engine): Promise<boolean> {
+  const v = await $.session.version().then(r => r.base ?? r.version, () => '')
+  const n = (s: string) => (/^(\d+)\.(\d+)\.(\d+)/.exec(s) ?? []).slice(1).map(Number)
+  const [have, need] = [n(v), n(TOUR_CLAUDE_CODE)]
+  const k = have.findIndex((x, i) => x !== need[i])
+  return have.length === 3 && k >= 0 && have[k]! < need[k]!
+}
+
 /** A row placed at the transcript's end: null once placed, else the error. A failure leaves the tour without it. */
 async function place($: Engine, id: string): Promise<unknown> {
   try { await $.ui.place({ id }); return null } catch (err) { return err ?? 'no reason given' }
@@ -392,8 +406,8 @@ export function placeIntro($: Engine): Promise<void> {
     const k = t.k + 1
     const intro = `tour-intro-${k}`
     await save($, { ...t, k, intro })
-    // the intro is the tour's first row: a Claude Code older than 2.1.314 cannot place it (kernel/doctor.py
-    // CLAUDE_CODE_MIN), and an update of thimble does not check Claude Code, so the line says why, with the fix
+    // the intro is the tour's first row: a Claude Code older than 2.1.314 cannot place it (TOUR_CLAUDE_CODE), and one
+    // whose version names no release starts the tour anyway (tooOld), so the line says why, with the fix
     const err = await place($, intro)
     if (err) failNotice($, `The tour could not draw its intro (${reasonOf(err)}). It needs Claude Code 2.1.314 or later: update it (claude update), then type /thimble:tour again.`)
   })
@@ -709,20 +723,25 @@ function startAfterInstall($: Engine): void {
 }
 
 export const registerTour: Register = on => {
-  // /thimble:tour: the tour starts, and the intro stands under its prompt
+  // /thimble:tour: the tour starts, and the intro stands under its prompt; on a Claude Code too old for its rows, the
+  // prompt does not enter, and the person reads why
   on('prompt.submit', { origin: { kind: /./ } }, async ($, e, next) => {
+    const tour = !!e.command && TOUR_SKILL.test(String(e.command.name ?? ''))
+    if (tour && (await tooOld($))) return { drop: TOO_OLD }
     const r = await next(e)
-    if (e.command && TOUR_SKILL.test(String(e.command.name ?? ''))) {
+    if (tour) {
       await tourStart($).catch(() => undefined)
       await placeIntro($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  // Claude starts the skill with the Skill tool: the tour starts, and the skill runs as written
+  // Claude starts the skill with the Skill tool: the tour starts, and the skill runs as written; on a Claude Code too old
+  // for its rows, Claude reads why instead
   on('tool.call', { tool: 'Skill', skill: TOUR_SKILL }, async ($, e, next) => {
     const skill = String((e as { skill?: unknown }).skill ?? '')
     if (e.agentId === undefined && TOUR_SKILL.test(skill)) {
+      if (await tooOld($)) return { deny: TOO_OLD }
       await tourStart($).catch(() => undefined)
       await placeIntro($).catch(() => undefined)
     }
@@ -730,8 +749,10 @@ export const registerTour: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // the skill expanded some other way (the first prompt of `thimble tour`): the tour starts too. The prompt is not in
-  // the transcript yet, so the intro waits for main's turn to start
+  // the transcript yet, so the intro waits for main's turn to start. On a Claude Code too old for its rows, Claude says
+  // why instead of the skill
   on('skill.prompt', { skill: TOUR_SKILL }, async ($, e, next) => {
+    if (await tooOld($)) return next({ ...e, text: `Reply with this sentence alone: ${TOO_OLD}` })
     const r = await next(e)
     await tourStart($).catch(() => undefined)
     return r

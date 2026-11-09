@@ -56,7 +56,7 @@ Run `thimble-browser` in a folder of files to open the browser workbench. The fi
 
 ## Requirements
 
-Claude Code 2.1.314+, macOS or Linux, git, curl, Python 3.10+ and Node.js 22.18+; on Linux also bubblewrap, socat and ripgrep, for the sandbox that cards run in. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 2 GB of disk. On Windows, thimble runs in WSL 2, with the Linux tools installed in its distribution and your data in its home folder; not in WSL 1, and not on Windows itself yet ([INSTALL.md](INSTALL.md#windows)).
+Claude Code 2.1.307+ (2.1.314+ for the tour), macOS or Linux, git, curl, Python 3.10+ and Node.js 22.18+; on Linux also bubblewrap, socat and ripgrep, for the sandbox that cards run in. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 2 GB of disk. On Windows, thimble runs in WSL 2, with the Linux tools installed in its distribution and your data in its home folder; not in WSL 1, and not on Windows itself yet ([INSTALL.md](INSTALL.md#windows)).
 
 ## Security & Privacy
 

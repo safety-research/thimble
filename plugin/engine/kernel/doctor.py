@@ -20,7 +20,7 @@ from . import fixes as FX
 from .store import thimble_home
 
 NODE_MIN = (22, 18)  # the terminal plugin's, as scripts/install.sh and sandbox/setup.mjs name it
-CLAUDE_CODE_MIN = (2, 1, 314)  # as scripts/install.sh, INSTALL.md and CI name it
+CLAUDE_CODE_MIN = (2, 1, 307)  # as scripts/install.sh, INSTALL.md and CI name it (the tour needs more: kernel/tour.py)
 
 Row = tuple[bool | None, str, str]  # works (None: not installed, by choice), what, and the fix or the step that adds it
 
