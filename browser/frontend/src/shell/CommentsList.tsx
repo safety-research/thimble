@@ -38,12 +38,12 @@ export interface CommentItem {
 
 /** The message Apply sends to main: which comment, where, and what it says. Pure. */
 export function applyText(c: CommentItem, name: string): string {
-  const who = c.check != null ? `the check “${name}”` : c.author === 'claude' ? 'your own note' : 'my note'
+  const who = c.check != null ? `from “${name}”` : c.author === 'claude' ? 'of your own note' : 'of my note'
   const doc = c.doc && c.doc.slug !== SLUG ? `the ${c.doc.name}` : 'the report'
   const at =
     c.surface === 'report' ? `in ${doc}${c.quote ? ` at “${c.quote}”` : ''} (${c.ref})` : c.surface === 'chat' ? `on your answer${c.quote ? ` at “${c.quote}”` : ''}` : `on ${c.ref}`
   const said = [c.text.trim(), c.details.trim()].filter(Boolean).join('\n\n')
-  return `Apply this comment of ${who} ${at}: ${said}`
+  return `Apply this comment ${who} ${at}: ${said}`
 }
 
 /** The open comments of the written documents, in the type bar's order, the report's from the first render, as before

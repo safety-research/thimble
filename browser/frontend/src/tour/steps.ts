@@ -633,8 +633,8 @@ const reportExample = (api: Api): Example => {
     if (rulerMarks) rulerMarks.style.display = plain ? 'none' : ''
     if (rulerThumb) rulerThumb.className = plain ? 'reader-ruler-thumb plain' : rulerWith.thumb
   }
-  // the Comments sidebar, which the checks step opens: the checks with their comments, + New check at their end, and
-  // the new one among them once made
+  // the Comments sidebar, which the checks step opens: the checks with their comments, + Ask for comments at their end,
+  // and the new one among them once made
   const side = sideExample(api, 'comments')
   const sideRow = side.aside.querySelector<HTMLElement>('[data-category="alternative-explanations"]')
   const sideCount = side.aside.querySelector('.lside-heading .lside-n')
@@ -730,8 +730,8 @@ const reportExample = (api: Api): Example => {
 }
 /** The captured Report (examples.json) as the Report stands now: no Slides, Story or Video beside it; the cards an
  * orientation made listed under Your work; a figure's caption whole, as text, with no scroll of its own (the capture
- * has the field it was once edited in); and no Comments pane in the sidebar, the checks being in the top bar's
- * Comments. */
+ * has the field it was once edited in); no Comments pane in the sidebar, the checks being in the top bar's
+ * Comments; and a comment's head with no "check" after its name. */
 const asReportNow = (w: HTMLElement) => {
   w.querySelectorAll('.wu-types .seg-opt').forEach((b) => {
     if (/^(slides|story|video)$/.test(b.querySelector('[data-doc-chip]')?.getAttribute('data-doc-chip') ?? '')) b.remove()
@@ -754,6 +754,7 @@ const asReportNow = (w: HTMLElement) => {
     ta.replaceWith(cap)
   })
   w.querySelector('.wu-side .wu-checks')?.remove()
+  w.querySelectorAll('.wu-cm-meta').forEach((m) => m.remove())
 }
 // the page scrolled so `el` stands `above` px (as drawn) from the page's top
 const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth = true) => {

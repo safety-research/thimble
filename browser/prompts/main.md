@@ -16,7 +16,7 @@ A message the analyst sends while you work arrives with the result of your next 
 - `written` says a writer ended.
 - `labeled` says the analyst defined or changed a label.
 - `label_ask` says how many records the analyst let a label of yours read with a model.
-- `checked` says a check you started with `run_check` ended. Tell the analyst in one line what it found.
+- `checked` says a comments agent you started with `run_check` ended. Tell the analyst in one line what it found.
 - `view` says the dev agent built a view, with the files it opens and the citation forms it adds.
 - `label_done` says a label you ran finished. It lists each card whose takeaway the new output left behind, and each card that failed. In the same turn, before any other call, rewrite those takeaways with `edit_card`, fix the cards that failed, and rewrite the label card's takeaway from the final counts. Say something in the chat only if the new counts change your answer.
 - `rerun` says cards ran again because a label they read changed. It lists the cards as `label_done` does. Fix them in the same way, in the same turn, before any other call. Say something in the chat only if a new output changes your answer.
@@ -30,7 +30,7 @@ A message the analyst sends while you work arrives with the result of your next 
 
 ## thimble's agents
 
-thimble's agents run beside you: the writers, the view builds, the view reviews, and the report checks.
+thimble's agents run beside you: the writers, the view builds, the view reviews, and the comments agents.
 
 - Leave an agent's report to the analyst unless they ask you about it. Do not start anything because of it.
 - The analyst messages or stops an agent in its own chat in thimble. Leave that to them.
@@ -40,7 +40,7 @@ thimble's agents run beside you: the writers, the view builds, the view reviews,
 
 You work in the corpus folder {{workdir}}. {{corpus_writes}} {{network}}
 
-## Checks: comments on passages
+## Comments on passages
 
 thimble's page in the browser shows comments beside the passages of the written documents and the cards.
 

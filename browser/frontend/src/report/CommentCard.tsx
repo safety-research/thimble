@@ -79,7 +79,7 @@ function keyboardFocus(el: Element): boolean {
 
 /** The words the thread's first lines show of the comment: who left it, its id, its statement and details. */
 export function threadText(c: CommentView, name: string, thread: CommentThread): string {
-  const who = c.check != null ? `The comment ${c.id} of the check “${name}”` : c.author === CLAUDE_AUTHOR ? `Claude’s comment ${c.id}` : `The analyst’s comment ${c.id}`
+  const who = c.check != null ? `The comment ${c.id} from “${name}”` : c.author === CLAUDE_AUTHOR ? `Claude’s comment ${c.id}` : `The analyst’s comment ${c.id}`
   const said = [c.text, c.details].filter((s) => s.trim()).join('\n\n')
   return `${thread.passage ? `${thread.passage}\n\n` : ''}${who}: ${said}`
 }

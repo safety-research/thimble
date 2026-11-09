@@ -168,7 +168,7 @@ def _dir(c: str) -> Path:
 
 def _path(c: str, cid: str) -> Path:
     if not ID_RE.match(cid or ""):
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     return _dir(c) / f"{cid}.json"
 
 
@@ -310,9 +310,9 @@ def create(c: str, name: str, prompt: str, *, created_by: str, covers: Any = Non
     400 for an empty name or prompt."""
     name, prompt = _collapse(name)[:NAME_CHARS], str(prompt or "").strip()[:PROMPT_CHARS]
     if not name or not prompt:
-        raise HTTPException(400, "a check needs a name and a prompt")
+        raise HTTPException(400, "a comments agent needs a name and a prompt")
     if by_name(c, name) is not None:
-        raise HTTPException(409, f"a check named {name!r} exists")
+        raise HTTPException(409, f"a comments agent named {name!r} exists")
     made = save(c, {"id": _new_id(c, name), "name": name, "prompt": prompt, "colour": _free_colour(c), "shown": False,
                     "builtin": False, "covers": covers_of(covers), "created_by": created_by, "ts": _now(), "version": 1,
                     "runs": {}})
@@ -329,17 +329,18 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
 
     check = read(c, cid)
     if check is None:
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     if name is not None:
         name = _collapse(name)[:NAME_CHARS]
         other = by_name(c, name)
         if not name or (other is not None and other["id"] != cid):
-            raise HTTPException(409 if name else 400, f"a check named {name!r} exists" if name else "a check needs a name")
+            raise HTTPException(409 if name else 400, f"a comments agent named {name!r} exists" if name
+                                else "a comments agent needs a name")
         check["name"] = name
     if prompt is not None:
         prompt = str(prompt).strip()[:PROMPT_CHARS]
         if not prompt:
-            raise HTTPException(400, "a check needs a prompt")
+            raise HTTPException(400, "a comments agent needs a prompt")
         if prompt != check.get("prompt"):
             check["prompt"], check["prompt_set"] = prompt, True  # the analyst's words, which stay (_as_now)
             check["version"] = int(check.get("version") or 1) + 1
@@ -915,7 +916,7 @@ async def _launch(act: _Active) -> None:
     c = act.c
     check = read(c, act.check)
     if check is None:
-        _finish(act, "failed", f"no check {act.check}")
+        _finish(act, "failed", f"Comments has no {act.check}")
         return
     cover = [p for p in passages_of(c, act.doc) if p["ref"] in set(act.covered)]
     if act.doc == ANSWERS and _is_lens(check):
@@ -933,7 +934,7 @@ async def _launch(act: _Active) -> None:
     ans = await subagents.start_job(
         c, ROLE, session_key(act.check, act.doc), read_parts.named(paths, "check-task-file", "check-task-files"),
         subagents.values_for(c, ROLE), act.route,
-        description=f"check: {check['name']} · "
+        description=f"comments: {check['name']} · "
                     f"{CANVAS_NAME if act.doc == CANVAS else ANSWERS_NAME if act.doc == ANSWERS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,
               "brief": tools.hint("check-instructions", check=check["name"],
@@ -1423,8 +1424,8 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             refused.append(getattr(ans, "reason", "") or str(rec.get("summary") or "") or "it did not start")
             continue
         if fork is not None:
-            res = await tools._fork_start(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
-                                          agent="the check")
+            res = await tools._fork_start(ctx, ans, what=f"a run of the comments agent “{check['name']}” on "
+                                                         f"{target_name(doc)}", agent="the comments agent")
             (refused if res.is_error else lines).append(res.text)
             continue
         lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=target_name(doc),

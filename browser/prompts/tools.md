@@ -397,16 +397,16 @@ Start a writer as a subagent of this session. The writer writes or revises one d
 
 ## run_check
 
-Run a report check over the written documents or the cards. A check asks one question of every passage. It leaves a comment beside each passage that the question applies to. A new name creates the check, and a known name runs it again. For one note on one passage, use `add_comment`.
+Run a comments agent over the written documents or the cards. A comments agent asks one question of every passage. It leaves a comment beside each passage that the question applies to. A new name creates the comments agent, and a known name runs it again. For one note on one passage, use `add_comment`.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, or a new one."},
-    "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. A new check needs it. For an existing check, it replaces the instructions."},
-    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
-    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents alone or on the cards alone. A new check then covers only that. Default: what the check covers."}
+    "name": {"type": "string", "description": "The comments agent's name, or a new one."},
+    "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. A new comments agent needs it. For an existing comments agent, it replaces the instructions."},
+    "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to comment on again, report:<doc>#<id>. Default every passage but the locked ones already read."},
+    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents alone or on the cards alone. A new comments agent then covers only that. Default: what the comments agent covers."}
   },
   "required": ["name"]
 }
@@ -414,13 +414,13 @@ Run a report check over the written documents or the cards. A check asks one que
 
 ## stop_check
 
-Turn a report check off, as the switch in the Comments pane does. This hides its tints and comments and stops its runs.
+Turn a comments agent off, as the switch in the Comments pane does. This hides its tints and comments and stops its runs.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name."}
+    "name": {"type": "string", "description": "The comments agent's name."}
   },
   "required": ["name"]
 }
@@ -1042,19 +1042,19 @@ There is no document {doc}. The documents are {docs}. To make a new one, pass it
 
 ## run_check-started
 
-check {check} started ({how}) on {doc}, {passages}
+comments agent “{check}” started ({how}) on {doc}, {passages}
 
 ## run_check-no-doc
 
-No document is written yet, so the check {check} has nothing to read. It is on, and it runs once a document is written.
+No document is written yet, so the comments agent “{check}” has nothing to read. It is on, and it runs once a document is written.
 
 ## run_check-no-cards
 
-The check {check} is on, and has no card to read yet.
+The comments agent “{check}” is on, and has no card to read yet.
 
 ## run_check-no-instructions
 
-There is no check named {check}. Call `run_check` again with its `instructions` to create it. The checks are {names}.
+There is no comments agent named {check}. Call `run_check` again with its `instructions` to create it. The comments agents are {names}.
 
 ## run_check-no-passage
 
@@ -1122,15 +1122,15 @@ When you finish, your comments replace the open comments that this check left be
 
 ## stop_check-stopped
 
-check {check} turned off, its runs stopped on {docs}
+comments agent “{check}” turned off, its runs stopped on {docs}
 
 ## stop_check-off
 
-check {check} turned off, with no run running
+comments agent “{check}” turned off, with no run running
 
 ## stop_check-none
 
-There is no check named {check}. The checks are {names}.
+There is no comments agent named {check}. The comments agents are {names}.
 
 ## check-document
 
@@ -1140,7 +1140,7 @@ The document, `{ref}`, with the id of every passage.
 
 ## check-instructions
 
-The check {check}, which says what to comment on.
+The comments agent “{check}”, which says what to comment on.
 
 {prompt}
 

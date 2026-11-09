@@ -1,6 +1,6 @@
 ---
 name: check
-description: Runs one of the analyst's report checks over a document, and comments on the passages the check applies to.
+description: Runs one of the analyst's comments agents over a document, and comments on the passages its instructions apply to.
 model: claude-opus-5-5
 effort: high
 color: green
