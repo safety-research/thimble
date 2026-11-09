@@ -14,6 +14,12 @@
 //   a p      cards/head.ts headKey   the header of the card the keys reach: a ask, p artifact
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
+//   letters  core/pane.ts paneKey    the side pane that names the key in its key row: pressed there, and the pane
+//                                    takes the keyboard back
+//
+// The side pane comes first right after the person deleted the words they typed: typing took the keyboard from the
+// pane, and its keys act again as they did before. When the box is empty for another reason (a prompt was sent, a
+// click landed elsewhere, another key here was taken), the pane comes last, so what the person turned to keeps its keys.
 //
 // Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so. g, the
 // person's OK, is one of them, so that no line or card shown with its line offers it too.
@@ -44,6 +50,7 @@ import { cardTake } from '../cards/draw'
 import { HEAD_KEYS, headKey } from '../cards/head'
 import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
 import { drawsHere } from '../core/host'
+import { paneKey } from '../core/pane'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
 import { ALLOW_KEY, checkKey } from '../marks/checker'
@@ -70,13 +77,19 @@ type Window = { at: number; keys: string; undo: (() => Promise<unknown>)[]; card
 let open: Window | null = null
 /** The keys thimble took since the person last typed into the box. */
 let taken = ''
+/** Whether the person's last edit deleted the words they had typed, so the box is empty again: the side pane's keys
+ *  come first at the next key (takerOf). */
+let emptied = false
 
 const isLetter = (k: string) => /^\p{L}$/u.test(k)
 const failed = (key: string, err: unknown) => `The ${key} key did not run: ${String((err as Error)?.message || err).slice(0, 200)}`
 
-/** Who takes the key now, in the order above. */
+/** Who takes the key now, in the order above: the side pane first after the person deleted the words they typed, else
+ *  last. */
 async function takerOf($: Engine, key: string, until: number): Promise<Take | null> {
-  return (await checkKey($, key, until)) ?? (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await headKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
+  const first = emptied ? await paneKey($, key) : null
+  if (first) return first
+  return (await checkKey($, key, until)) ?? (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await headKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key)) ?? (emptied ? null : await paneKey($, key))
 }
 
 /** A key a click pressed (a key a failure line names, bar/bar.tsx): done at once, by whoever takes it now, as if it
@@ -181,11 +194,14 @@ export const registerKeys: Register = on => {
 
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     if (!drawsHere()) return next(e)
-    // the box holds what the person typed: every key types
+    // the box holds what the person typed: every key types. An edit that deletes all of it puts the side pane's keys
+    // first again (takerOf)
     if (e.text !== '' && !(taken && taken.endsWith(e.text))) {
       taken = ''
       open = null
-      return next(e)
+      const r = await next(e)
+      emptied = r.text === ''
+      return r
     }
     // the box shows empty: an edit applies to the empty box
     const empty = { ...e, text: '', cursor: 0, start: 0, end: 0 }
@@ -195,6 +211,8 @@ export const registerKeys: Register = on => {
     // Claude Code gives this hook a short budget; past it, its .catch typed the key and the edit went on without it
     const live = () => !next.signal.aborted
     const r = k ? await press($, k.key, now, live) : await burst($, [...e.inputText], now, live)
+    // a key taken or typed: the side pane's keys come last again
+    emptied = false
     if (!live()) return { text: e.text, cursor: e.cursor }
     if (r === true) return { text: '', cursor: 0 }
     taken = ''

@@ -29,6 +29,12 @@
 // keys of its own, but sends ↑ and ↓ in a pane that can scroll as scrolls, and a row under the frame that is never
 // shown keeps the pane scrollable.
 //
+// The keys of a pane's key row are its Buttons' hotkeys, which Claude Code hands the pane only while it holds the
+// keyboard. Claude Code moves the keyboard to the prompt box once a letter goes into the box or a click lands outside
+// the pane, and does not give it back when the box is empty again. So a key of the pane typed at the empty prompt
+// reaches hooks/keys.ts, which gives it to the pane (paneKey): it presses the pane's Button for that key, and the pane
+// takes the keyboard back (paneTakesKeys), so the keys after it act in the pane at once.
+//
 // (Each kind's draw is imported and called by name: Claude Code follows `$` only into functions a file declares or
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
@@ -153,8 +159,42 @@ async function isOpen($: Engine): Promise<boolean> {
 
 export async function closePane($: Engine): Promise<void> {
   await dropSelection($)
+  laid = null
   await $.state.set(NOW, null)
   await $.ui.close({ id: PANE_ID })
+}
+
+/** The open pane takes the keyboard back, as when the person opened it: its keys act in it, ↑ and ↓ move in it, esc
+ *  closes it. Claude Code gives it the keyboard only while the prompt box is empty and nothing else holds the keys;
+ *  otherwise the keyboard stays where it is. */
+export async function paneTakesKeys($: Engine): Promise<void> {
+  const now = await paneNow($)
+  if (!now || !(await isOpen($))) return
+  await $.ui.open({ id: PANE_ID, title: now.title ?? now.kind, focus: true, closeOnEscape: true, ...(now.rows ? { rows: now.rows } : {}) })
+}
+
+/** A key of the side pane's key row typed at the empty prompt, for hooks/keys.ts: once no letter followed it within the
+ *  word window, it presses the pane's Button for that key, as the pane does while it holds the keyboard, and the pane
+ *  takes the keyboard back. Null when the pane does not show or its drawing names no such key. A key whose press a
+ *  feature's ui.press hook answers (the claims' x and f, which start a fork) does nothing here; the pane holds the
+ *  keyboard after it, so the same key pressed again acts. */
+export async function paneKey($: Engine, key: string): Promise<{ later: () => Promise<unknown> } | null> {
+  const kind = laid?.keys.has(key) ? laid.kind : null
+  if (!kind || !(await showsKind($, kind))) return null
+  return {
+    later: async () => {
+      // as drawn once the window closed: the pane may have moved, or closed, meanwhile
+      const press = laid?.kind === kind ? laid.keys.get(key) : undefined
+      if (!press || !(await showsKind($, kind))) return
+      await press()
+      await paneTakesKeys($)
+    },
+  }
+}
+
+/** Whether the side pane is open on a pane of this kind. */
+async function showsKind($: Engine, kind: string): Promise<boolean> {
+  return (await paneNow($))?.kind === kind && (await isOpen($))
 }
 
 export async function paneNow($: Engine): Promise<PaneNow | null> {
@@ -196,10 +236,10 @@ const NAMED: Record<string, string> = { settings: 'Settings' }
 /** The kinds with a side thread under them. */
 const THREADED = new Set(['evidence', 'labels', 'coverage', 'claims'])
 
-/** The last drawing's layout, for the ui.scroll hook: which pane, whether its input bar is pinned to its bottom, how
- *  many rows of its drawing do not fit, the keys its Buttons press, and how a drawing that scrolls a part of itself
- *  scrolls it (scrollsOwn). */
-let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown>; own: ((by: number) => unknown) | null; arrows?: ((dir: number) => unknown) | null } | null = null
+/** The last drawing's layout, for the ui.scroll hook and the keys at the prompt (paneKey): which pane and its kind,
+ *  whether its input bar is pinned to its bottom, how many rows of its drawing do not fit, the keys its Buttons press,
+ *  and how a drawing that scrolls a part of itself scrolls it (scrollsOwn). */
+let laid: { id: string; kind: string; pinned: boolean; over: number; keys: Map<string, () => unknown>; own: ((by: number) => unknown) | null; arrows?: ((dir: number) => unknown) | null } | null = null
 /** A drawing that fits the pane but scrolls a part of itself (the claims' detail under their overview) names how, while
  *  it draws: the wheel and the page keys then move that part, by `by` rows (a page key by the pane's rows). */
 let own: ((by: number) => unknown) | null = null
@@ -286,7 +326,10 @@ const idOf = (now: PaneNow) => `${now.kind}:${JSON.stringify(now.args ?? null)}`
  *  fixer gets a text copy of the screen (fix/screen.ts). */
 export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any): Promise<unknown> {
   try {
-    if (!now) return els.Text({ dimColor: true, children: 'Nothing is open here.' })
+    if (!now) {
+      laid = null
+      return els.Text({ dimColor: true, children: 'Nothing is open here.' })
+    }
     const W = Math.max(20, Number(e?.props?.bodyColumns) || 80)
     // the rows Claude Code shows of the pane: a frame no taller, so its input bar stays in view in a short one
     const H = Math.max(4, Number(e?.props?.scroll?.bodyRows) || 40)
@@ -328,7 +371,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     // it, and a copy for the fixer (no placement) is never framed
     const framed = placement === 'dock' || (placement === 'inline' && T + treeRows(drawn, W) + C + U > H)
     if (!framed) {
-      laid = { id, pinned: false, over: 0, keys, own, arrows }
+      laid = { id, kind: now.kind, pinned: false, over: 0, keys, own, arrows }
       const parts = [...top, drawn, ...conv, ...under]
       return parts.length === 1 ? drawn : els.Box({ flexDirection: 'column', children: parts })
     }
@@ -355,7 +398,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
       scrolled = { ...scrolled, by, pick: picked.key }
     }
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
-    laid = { id, pinned: true, over, keys, own, arrows }
+    laid = { id, kind: now.kind, pinned: true, over, keys, own, arrows }
     const left = over - scrolled.by
     // in the frame only the body gives way: Claude Code's Box and Text shrink unless told otherwise, so beside a drawing
     // far taller than the frame the top row and this cue would shrink to nothing (a Box holds the cue: a Text takes no
@@ -429,6 +472,8 @@ export const registerPanes: Register = on => {
     // words selected in the pane stay Claude Code's selection after it closes; e and c no longer take them
     await dropSelection($)
     const r = await next(e)
+    // its keys are gone with it: the prompt types them again (paneKey)
+    laid = null
     // closed, though the bar may not draw again: the next w, r or l opens its pane (claims/seam.ts, bar/register.ts),
     // and no side thread's input bar keeps the ring (threads/seam.ts)
     claimsPaneClosed()
