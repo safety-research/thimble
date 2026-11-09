@@ -82,9 +82,9 @@ ERROR_MIME = "application/vnd.thimble.error+json"
 # kind of card that shows each; their text/plain listing is what a model reads
 DRAWING_MIMES = {"application/vnd.thimble.diagram+json": "diagram", "application/vnd.thimble.timeline+json": "timeline"}
 LABEL_KINDS = ("prompt", "regex", "code")
-LABEL_SCOPES = ("files", "canvas", "report")
+LABEL_SCOPES = ("files", "report")  # what a label is over (concepts.SCOPES): records of files, or the report's sentences
 # a label's stored unit (concepts.UNITS) as a result names it
-UNIT_WORDS = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}
+UNIT_WORDS = {"agent": "file", "run": "run", "span": "sentence"}
 # apply_label's `unit` for files: what one value goes to, as concepts.FILE_UNITS names it
 LABEL_UNITS = {"records": "record", "files": "agent", "runs": "run"}
 CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom")
@@ -2324,7 +2324,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         except (TypeError, ValueError):
             return err("apply_label: `limit` must be an integer")
     # a label is one scope's: the same name over another scope would redefine it there and drop its rows, such as the
-    # analyst's label over files when a chat labels cards after it
+    # analyst's label over files when a chat labels the report's sentences after it
     prior = concepts.find_concept(ctx.ws, name)
     if prior is not None and concepts.SCOPE_OF_UNIT.get(prior["unit"]) != scope:
         return err(hint("apply_label-other-scope", label=prior["name"], ref=f"concept:{prior['id']}",
@@ -2435,9 +2435,8 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     values = [values] if isinstance(values, str) else values if isinstance(values, builtins.list) else None
     k = concepts.find_concept(ctx.ws, name)
     if k is not None and k["unit"] not in concepts.FILE_UNITS:
-        where = concepts.SCOPE_OF_UNIT[k["unit"]]
         return err(hint("show_label-not-files", label=k["name"], units=f"{UNIT_WORDS.get(k['unit'], k['unit'])}s",
-                        where="the canvas" if where == "canvas" else "the report"))
+                        where="the report"))
     was = bool(k["shown"]) if k is not None else None
     k = await asyncio.to_thread(concepts.show_concept, ctx.c, name, on, values, colours)
     ref = f"[[concept:{k['id']}]]"

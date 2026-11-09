@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // A card on the canvas as the analyst reads it (src/canvas/Cell.tsx, CardFace.tsx, CheckDetails.tsx): a card whose run
-// failed says so in one line; a click on a takeaway's citation opens its evidence and a click on its words edits it; and
-// the card check marks a card only when it found a problem, and its details hold the fix's Undo.
+// failed says so in one line; a click on a takeaway's citation opens its evidence and a click on its words edits it; the
+// card check marks a card only when it found a problem, and its details hold the fix's Undo; and a label's card names
+// its label by the label's own tag alone.
 import { act } from 'react'
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
@@ -10,7 +11,7 @@ import { CheckDetails } from '../../src/canvas/CheckDetails.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
 import { DOUBLE_MS } from '../../src/canvas/layout.ts'
 import { ERROR_MIME } from '../../src/components/Outputs.tsx'
-import type { Cell, MimeBundle } from '../../src/lib/types.ts'
+import type { Cell, Concept, MimeBundle } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
@@ -110,4 +111,31 @@ test("the card check marks a card only for a problem it found, and the card's de
   )
   expect([...details.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual(['Undo', 'Check again'])
   expect(details.textContent).toContain('agent-03 merged every PR.')
+})
+
+test("a label card names its label by the label's own tag, with no thimble tag that says Label", async () => {
+  const k = {
+    id: 'k1', name: 'shows a failure', description: '', unit: 'record', kind: 'regex', spec: '(?i)fail', labels: ['yes', 'no'], created_by: 'main',
+    ts: '2026-11-01T00:00:00Z', glob: 'runs/*.jsonl', counts: { yes: 10, no: 2 }, n_labeled: 12,
+    classes: [{ name: 'yes', color: 1, highlight: true }, { name: 'no', color: 0, highlight: false }],
+  } as Concept
+  const withLabel = { ...ctx, concepts: new Map([['k1', k]]) }
+  const labelCard = (title: string) =>
+    mount(
+      <CanvasContext.Provider value={withLabel}>
+        <CardFace cell={{ id: 'c9', kind: 'label', title, created_by: 'main', ts: '2026-11-01T00:00:00Z', payload: { concept: 'k1' }, status: 'ok' } as Cell} width={400} label={{ concept: k, error: null, reload: async () => undefined, set: () => undefined }} onCheckAgain={noop} />
+      </CanvasContext.Provider>,
+    )
+  // its question of its own, then the label's tag on the row under it
+  const asked = await labelCard('Which runs show a failure?')
+  await settle()
+  expect(asked.querySelector('.bcell-label-who')?.textContent).toBe('shows a failure')
+  // the label's name as its head
+  const named = await labelCard('shows a failure')
+  await settle()
+  expect(named.querySelector('.bcell-label-name')?.textContent).toBe('shows a failure')
+  for (const el of [asked, named]) {
+    expect(el.querySelector('.bcell-kind-tag')).toBeNull()
+    expect(el.querySelector('svg.icon-thimble')).toBeNull()
+  }
 })

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A new label in the label editor (src/files/LabelCard.tsx), which Files' Labels sidebar and the popover a view opens
-// both draw: its name and its prompt typed, Run creates the label over the files it applies to, with the two classes a
-// new label starts with, and starts its run.
+// both draw: it labels the records of files or the report's sentences, never cards; its name and its prompt typed, Run
+// creates the label over the files it applies to, with the two classes a new label starts with, and starts its run.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { LabelCard } from '../../src/files/LabelCard.tsx'
@@ -58,4 +58,12 @@ test('a new label with a name and a prompt: Run creates it over the files it app
   expect((posts[0].body.classes as { name: string }[]).map((c) => c.name)).toEqual(['match', 'no match'])
   expect(runs).toEqual([['k9', { id: 'run-1', state: 'running' }]])
   expect(closed).toHaveBeenCalled()
+})
+
+test("a new label is over the files or the report's sentences, and never over cards", async () => {
+  vi.stubGlobal('fetch', async () => new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } }))
+  const el = await mount(<LabelCard ws="w" label={null} labels={NO_LABELS} appliesTo={['transcript.jsonl']} onClose={() => undefined} onRun={() => undefined} />)
+  await settle()
+  const over = [...el.querySelectorAll('[role="radiogroup"][aria-label="Over"] [role="radio"]')]
+  expect(over.map((b) => b.textContent)).toEqual(['Files', 'Sentences'])
 })

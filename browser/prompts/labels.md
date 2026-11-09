@@ -9,12 +9,11 @@ The analyst described a label in their own words. thimble applies your label at 
   - a row of a database or a CSV file is a dict of its columns
   - a record of a JSON document is its value
   - a page of a PDF is {"page", "text"}
-  - a card is a dict with its text, kind, question, takeaway, group and groups
 
   When the label marks files, the unit is the whole file: {"path", "data", "records"}. `data` is the parsed JSON document, the JSON lines' records, the CSV file's or database's rows, the PDF's pages, or the file's text. `records` are the file's records, as above.
 - A prompt fits only when the value takes reading for meaning. A model then reads every unit against your definition, and that is slow. So write the definition as one or two sentences that two careful readers would apply the same way.
 
-Give two or a few short values, with the positive value first and the negative value last, for example "match" and "no match". Name the label in a few words taken from the description. Label the records of files, unless the description is about cards or report sentences. For records, mark span when the value rests on some words of the record. Mark record when it rests on the whole record, and file when it rests on the whole file.
+Give two or a few short values, with the positive value first and the negative value last, for example "match" and "no match". Name the label in a few words taken from the description. Label the records of files, unless the description is about report sentences. For records, mark span when the value rests on some words of the record. Mark record when it rests on the whole record, and file when it rests on the whole file.
 
 The analyst asked for: {{description}}
 

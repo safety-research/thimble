@@ -689,8 +689,7 @@
   pointer-events: none;
   user-select: none;
 }
-/* a label over cards or report sentences: the canvas or report glyph in the label's colour, where a label over files
-   has its square */
+/* a label over report sentences: the report glyph in the label's color, where a label over files has its square */
 .files-label-over {
   flex: none;
   color: var(--c);
@@ -3588,7 +3587,7 @@
 
 /* the ? that says what labels or fields are (files/LabelsHelp HelpButton): a borderless icon button the size of its
    heading's text, centered on its line in a menu and in the Labels sidebar's name, in the quiet ink until hovered or
-   focused; and the grey thimble tag of a label card and a label's edit card (ThimbleTag) */
+   focused; and the grey thimble tag of a label's edit card (ThimbleTag) */
 .labels-help-heading {
   display: flex;
   align-items: center;

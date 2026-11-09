@@ -48,7 +48,7 @@ CUTS: dict[str, tuple[str | tuple[str, str], ...]] = {
     "tools.md": (
         ", and label=<label> draws a label's values in its colors",
         " In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict.",
-        ", the records in Files or the report's sentences by a value of a label that exists, and the cards also",
+        "the records in Files or the report's sentences by a value of a label that exists, and ",
         "no label and ",
         '    "label": {"type": "string", "description": "A label\'s name or id. An empty string drops the label from the '
         'filter."},\n',

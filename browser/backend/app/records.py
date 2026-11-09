@@ -18,6 +18,11 @@ top or one level down. Another binary file has no records. A view's reader
 may split any other file into records named `<path>#<locator>` in its own notation; labels and marks key those by their
 ref as they key these.
 
+A fragment keeps the records under it (iter_records' `under`). A JSON pointer that no record of the document lies under
+names a place of its own (json_place): its records are the members of the array it names, or of the object whose every
+member is an object or an array, such as a chat's messages stored by their ids; any other value is one record. A `*` in
+the pointer stands for every member at its level, so `/messages/*` names each message, as the terminal reads it.
+
 A record is {ref, n, record, text, line, end_line}: `n` its place in the file (a line's number for a line), `record` the
 value a code label gets, `text` what a model or a regex reads, and `line`..`end_line` the lines of the file it spans when
 the file is text, so the File browser opens it there (None for a database row or a PDF page). The byte offsets of a JSON
@@ -47,6 +52,7 @@ JSON_SNIFF_BYTES = 64 * 1024
 JSON_INDEX_MAX_BYTES = 1024 * 1024 * 1024  # a larger .json file reads as lines
 JSON_RECORDS_MAX = 1_000_000  # values at a document's top or one level down that its index holds at most, else it reads as lines
 POINTER_PARSE_MAX_BYTES = 64 * 1024 * 1024  # a pointer to a value no record holds is looked up in a document this size at most
+MEMBERS_MIN_BYTES = 64 * 1024  # an object or array this large keeps its members' spans (_MEMBERS) for the next lookup in it
 CACHE_MAX_FILES = 32
 CACHE_MAX_BYTES = 256 * 1024 * 1024
 COUNT_BLOCK = 1 << 20
@@ -127,14 +133,15 @@ def pointer_parts(pointer: str) -> list[str]:
 
 
 class _Cache:
-    """A least-recently-used map of path -> ((size, mtime_ns), value, nbytes), bounded by entries and bytes."""
+    """A least-recently-used map of path (or a path and a place in it) -> ((size, mtime_ns), value, nbytes), bounded by
+    entries and bytes."""
 
     def __init__(self, max_files: int, max_bytes: int) -> None:
         self.max_files, self.max_bytes = max_files, max_bytes
         self.items: "OrderedDict[str, tuple[tuple[int, int], Any, int]]" = OrderedDict()
         self.lock = threading.Lock()
 
-    def get(self, path: Path, key: tuple[int, int]) -> Any:
+    def get(self, path: Path | str, key: tuple[int, int]) -> Any:
         with self.lock:
             hit = self.items.get(str(path))
             if hit is None or hit[0] != key:
@@ -142,7 +149,7 @@ class _Cache:
             self.items.move_to_end(str(path))
             return hit[1]
 
-    def put(self, path: Path, key: tuple[int, int], value: Any, nbytes: int = 0) -> None:
+    def put(self, path: Path | str, key: tuple[int, int], value: Any, nbytes: int = 0) -> None:
         with self.lock:
             self.items[str(path)] = (key, value, nbytes)
             self.items.move_to_end(str(path))
@@ -154,6 +161,8 @@ class _Cache:
 
 _KINDS = _Cache(4096, 1 << 62)        # path -> its reader, for a .json file whose sniff or index decided it
 _JSON = _Cache(CACHE_MAX_FILES, CACHE_MAX_BYTES)
+_PLACES = _Cache(CACHE_MAX_FILES, CACHE_MAX_BYTES)  # a path and fragments -> the records under them (json_place)
+_MEMBERS = _Cache(256, CACHE_MAX_BYTES // 4)  # a path and a large object's or array's span -> its members (_members_kept)
 _CSV = _Cache(CACHE_MAX_FILES, CACHE_MAX_BYTES)
 _builds: dict[str, threading.Lock] = {}
 _builds_lock = threading.Lock()
@@ -437,6 +446,132 @@ def json_index(path: Path) -> _JsonIndex | None:
         return idx
 
 
+def _members(mm: Any, a: int, b: int) -> tuple[int | None, list[tuple[str, int, int]]]:
+    """The value in mm[a:b], a span as _scan_json gives one: the byte that opens it (`[` or `{`) and its members as
+    (key, start, end), an object's entries by their keys and an array's elements by their indexes, each span the
+    member's value with the white space around it; (None, []) for any other value."""
+    opener: int | None = None
+    depth = 0
+    out: list[tuple[str, int, int]] = []
+    start: int | None = None
+    key = ""
+
+    def close(end: int) -> None:
+        if start is not None and _NON_SPACE.search(mm, start, end) is not None:
+            out.append((key if opener == _OPEN_O else str(len(out)), start, end))
+
+    for m in _TOKENS.finditer(mm, a, b):
+        s, e = m.span()
+        c = mm[s]
+        if depth == 0:
+            if c not in (_OPEN_A, _OPEN_O):
+                return None, []
+            opener, depth = c, 1
+            start = e if c == _OPEN_A else None
+        elif c == _QUOTE:
+            if depth == 1 and opener == _OPEN_O and start is None:
+                try:
+                    key = str(json.loads(m.group()))
+                except ValueError:
+                    key = m.group()[1:-1].decode("utf-8", "replace")
+        elif c == _COLON:
+            if depth == 1 and opener == _OPEN_O:
+                start = e
+        elif c == _COMMA:
+            if depth == 1:
+                close(s)
+                start = e if opener == _OPEN_A else None
+        elif c in (_OPEN_A, _OPEN_O):
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0:
+                close(s)
+                break
+    return opener, out
+
+
+def _members_kept(path: Path, key: tuple[int, int], mm: Any, a: int, b: int) -> tuple[int | None, list[tuple[str, int, int]]]:
+    """_members of the value in mm[a:b], kept while the file's size and mtime stay the same when the value spans
+    MEMBERS_MIN_BYTES or more, so that each lookup in a large document scans it once and not again."""
+    if b - a < MEMBERS_MIN_BYTES:
+        return _members(mm, a, b)
+    name = f"{path}@{a}-{b}"
+    hit = _MEMBERS.get(name, key)
+    if hit is None:
+        hit = _members(mm, a, b)
+        _MEMBERS.put(name, key, hit, 64 + sum(100 + len(k) for k, _s, _e in hit[1]))
+    return hit
+
+
+def _named(members: Any, parts: list[str], start: tuple[str, int, int], star: bool = True) -> list[tuple[str, int, int]]:
+    """(pointer, start, end) of each value the keys of a JSON pointer name below the value `start` names, in file order;
+    `members(a, b)` gives the members of the value in that span (_members). With `star`, a key `*` names every member of
+    an object or an array at its level."""
+    found = [start]
+    for part in parts:
+        found = [(f"{here}/{pointer_escape(k)}", s, e) for here, a, b in found for k, s, e in members(a, b)[1]
+                 if (star and part == "*") or k == part]
+    return found
+
+
+def _opens(mm: Any, a: int, b: int) -> bool:
+    """Whether the value in mm[a:b] is an object or an array."""
+    m = _NON_SPACE.search(mm, a, b)
+    return m is not None and mm[m.start()] in (_OPEN_A, _OPEN_O)
+
+
+def _place(mm: Any, members: Any, pointer: str, a: int, b: int) -> list[tuple[str, int, int]]:
+    """The records at the place a pointer names (module note): the members of an array, or of an object whose every
+    member is an object or an array; else the value itself. `members(a, b)` as _named takes it."""
+    opener, kids = members(a, b)
+    if opener == _OPEN_A or (opener == _OPEN_O and all(_opens(mm, s, e) for _k, s, e in kids)):
+        return [(f"{pointer}/{pointer_escape(k)}", s, e) for k, s, e in kids]
+    return [(pointer, a, b)]
+
+
+def json_place(path: Path, idx: _JsonIndex, wants: tuple[str, ...]) -> _JsonIndex:
+    """The records of a JSON document under the fragments `wants` (iter_records' `under`), as an index of their own, in
+    file order and each once: for each fragment, the records of the document's index that lie under it, else, for a JSON
+    pointer, the records of the places it names (module note). Kept per path and fragments while the file's size and
+    mtime stay the same."""
+    key = _key(path)
+    name = f"{path}#" + "\n".join(wants)
+    hit = _PLACES.get(name, key)
+    if hit is not None:
+        return hit
+    spans: dict[str, tuple[int, int, int, int]] = {}  # pointer -> (start, end, line, end line)
+    places: list[str] = []
+    for w in wants:
+        kept = [i for i, p in enumerate(idx.pointers) if _under(p, (w,))]
+        for i in kept:
+            spans.setdefault(idx.pointers[i], (idx.starts[i], idx.ends[i], idx.lines[i], idx.end_lines[i]))
+        if not kept and w.startswith("/"):
+            places.append(w)
+    if places:
+        with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            def members(a: int, b: int) -> tuple[int | None, list[tuple[str, int, int]]]:
+                return _members_kept(path, key, mm, a, b)
+
+            found = [r for w in places for here, a, b in _named(members, pointer_parts(w), ("", 0, len(mm)))
+                     for r in _place(mm, members, here, a, b)]
+            bounds = [(p, _value_start(mm, s, e), _value_end(mm, s, e)) for p, s, e in found if p not in spans]
+        marks = sorted({x for _p, s, e in bounds for x in (s, max(s, e - 1))})
+        line_at = dict(zip(marks, _line_numbers(path, marks)))
+        for p, s, e in bounds:
+            spans.setdefault(p, (s, e, line_at[s], line_at[max(s, e - 1)]))
+    sel = _JsonIndex()
+    for p, (s, e, line, end_line) in sorted(spans.items(), key=lambda kv: kv[1][0]):
+        sel.at[p] = len(sel.pointers)
+        sel.pointers.append(p)
+        sel.starts.append(s)
+        sel.ends.append(e)
+        sel.lines.append(line)
+        sel.end_lines.append(end_line)
+    _PLACES.put(name, key, sel, sel.nbytes)
+    return sel
+
+
 def _json_value(path: Path, idx: _JsonIndex, i: int) -> Any:
     with open(path, "rb") as f:
         f.seek(idx.starts[i])
@@ -454,24 +589,34 @@ def _json_record(path: Path, rel: str, idx: _JsonIndex, i: int) -> dict[str, Any
 
 
 def _pointer_lookup(path: Path, rel: str, pointer: str, idx: _JsonIndex) -> dict[str, Any] | None:
-    """A value the pointer names that is no record of the index: the document read whole (up to POINTER_PARSE_MAX_BYTES),
-    with the lines of the record that holds it."""
-    if path.stat().st_size > POINTER_PARSE_MAX_BYTES:
+    """A value the pointer names that is no record of the index, such as a record at a place of its own (json_place):
+    found in the document's bytes (up to POINTER_PARSE_MAX_BYTES), from the record that holds it when one does, with the
+    lines it spans and that record's place. Of an object's entries that share a key, the last, as JSON reads it."""
+    key = _key(path)
+    if key[0] > POINTER_PARSE_MAX_BYTES:
         return None
+    holder = next((i for i, p in enumerate(idx.pointers) if pointer.startswith(p + "/")), None)
+    with open(path, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        def members(a: int, b: int) -> tuple[int | None, list[tuple[str, int, int]]]:
+            return _members_kept(path, key, mm, a, b)
+
+        if holder is None:
+            found = _named(members, pointer_parts(pointer), ("", 0, len(mm)), star=False)
+        else:
+            held = idx.pointers[holder]
+            found = _named(members, pointer_parts(pointer[len(held):]), (held, idx.starts[holder], idx.ends[holder]), star=False)
+        if not found:
+            return None
+        _p, s, e = found[-1]
+        start, end = _value_start(mm, s, e), _value_end(mm, s, e)
+        raw = mm[start:end]
     try:
-        value: Any = json.loads(path.read_bytes().decode("utf-8", "replace"))
+        value: Any = json.loads(raw.decode("utf-8", "replace"))
     except ValueError:
         return None
-    for part in pointer_parts(pointer):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        elif isinstance(value, list) and part.isdigit() and int(part) < len(value):
-            value = value[int(part)]
-        else:
-            return None
-    holder = next((i for i, p in enumerate(idx.pointers) if pointer.startswith(p + "/")), None)
+    line, end_line = _line_numbers(path, [start, max(start, end - 1)])
     return {"ref": f"{rel}#{pointer}", "n": None if holder is None else holder + 1, "record": value, "text": _blocks_text(value),
-            "line": None if holder is None else idx.lines[holder], "end_line": None if holder is None else idx.end_lines[holder]}
+            "line": line, "end_line": end_line}
 
 
 def _blocks_text(value: Any) -> str:
@@ -700,8 +845,8 @@ Under = str | list[str] | tuple[str, ...] | None  # one fragment or several (ite
 def iter_records(path: Path, rel: str, kind: str | None = None, under: Under = None) -> Iterator[dict[str, Any]]:
     """Every record of the file in order (module note). `kind` is the source kind (corpus.source_kind) a line's blocks
     are read by; `under`, one fragment or several, keeps the records whose fragment is one of them or lies below it
-    (`prs` keeps the rows of a database's table prs, `/messages` the elements of a document's messages, `row=3` that
-    row of a CSV)."""
+    (`prs` keeps the rows of a database's table prs, `/messages` the elements of a document's messages, or its entries
+    when it stores them by id (json_place), `row=3` that row of a CSV)."""
     wants = _wants(rel, under)
     records = _all_records(path, rel, kind or corpus.source_kind(rel), wants)
     if not wants:
@@ -723,9 +868,9 @@ def _all_records(path: Path, rel: str, kind: str, wants: tuple[str, ...]) -> Ite
             yield from _lines(path, rel, kind, start, min(total, start + CHUNK - 1))
     elif reader == "json":
         idx = json_index(path)
-        for i, p in enumerate(idx.pointers):
-            if _under(p, wants):
-                yield _json_record(path, rel, idx, i)
+        kept = json_place(path, idx, wants) if wants else idx
+        for i in range(len(kept.pointers)):
+            yield _json_record(path, rel, kept, i)
     elif reader == "csv":
         csv.field_size_limit(1 << 30)
         idx = csv_index(path, rel)
@@ -769,12 +914,18 @@ def _wants(rel: str, under: Under) -> tuple[str, ...]:
 
 
 def _under(fragment: str, wants: tuple[str, ...]) -> bool:
+    """Whether the fragment is one of `wants` or lies below one. A `*` in a JSON pointer stands for any key at its
+    level."""
     if not wants:
         return True
     for under in wants:
         w = under.rstrip("/") or "/"
         if fragment == w or fragment.startswith(w if w.endswith("/") else w + "/"):
             return True
+        if "*" in w and w.startswith("/") and fragment.startswith("/"):
+            have, need = fragment.split("/"), w.split("/")
+            if len(have) >= len(need) and all(n in ("*", h) for h, n in zip(have, need)):
+                return True
     return False
 
 
@@ -798,7 +949,7 @@ def count(path: Path, rel: str, under: Under = None) -> int:
         return corpus.line_count(path)
     if reader == "json":
         idx = json_index(path)
-        return sum(1 for p in idx.pointers if _under(p, wants))
+        return len((json_place(path, idx, wants) if wants else idx).pointers)
     if reader == "csv":
         return len(csv_index(path, rel).offsets)
     if reader == "sqlite":
@@ -832,8 +983,8 @@ def records_at(path: Path, rel: str, places: list[int], kind: str | None = None,
         return [r for n in want if n <= total for r in _lines(path, rel, kind, n, n)]
     if reader == "json":
         idx = json_index(path)
-        kept = [i for i, p in enumerate(idx.pointers) if _under(p, wants)]
-        return [_json_record(path, rel, idx, kept[n - 1]) for n in want if n <= len(kept)]
+        kept = json_place(path, idx, wants) if wants else idx
+        return [_json_record(path, rel, kept, n - 1) for n in want if n <= len(kept.pointers)]
     if reader == "csv":
         idx = csv_index(path, rel)
         return [_csv_record(path, rel, idx, n - 1) for n in want if n <= len(idx.offsets)]

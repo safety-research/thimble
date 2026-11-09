@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A label in the Labels sidebar (src/shell/LabelsSidebar.tsx). What a label reads decides where its values are, so its
 // row and its detail have no Show in. Its switch turns it on or off in Files, so a label over files keeps it, and Turn
-// off in its detail; a label over cards or report sentences has neither, is never dimmed as off, and keeps the rest.
+// off in its detail; a label over report sentences has neither, is never dimmed as off, and keeps the rest.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { LabelsSidebar } from '../../src/shell/LabelsSidebar.tsx'
@@ -13,8 +13,8 @@ const label = (id: string, name: string, unit: string, values: string[]) => ({
   id, name, unit, kind: 'prompt', description: `Which ${name}?`, spec: '', labels: values, glob: unit === 'record' ? 'runs/*.jsonl' : '', shown: false,
   classes: values.map((v, i) => ({ name: v, color: i + 1, highlight: true })), counts: Object.fromEntries(values.map((v) => [v, 2])), n_labeled: 2 * values.length,
 })
-// over records, over cards and over report sentences
-const LABELS = [label('k1', 'stage', 'record', ['ingest', 'other']), label('k2', 'shows a failure', 'cell', ['failure', 'no failure']), label('k3', 'hedged', 'span', ['hedged', 'other'])]
+// over records and over report sentences
+const LABELS = [label('k1', 'stage', 'record', ['ingest', 'other']), label('k3', 'hedged', 'span', ['hedged', 'other'])]
 
 let puts: { url: string; body: unknown }[]
 
@@ -45,19 +45,17 @@ const words = (el: HTMLElement, sel: string) => [...el.querySelectorAll(sel)].ma
 test('no label has Show in; only the label over files has a switch, and only it shows as off', async () => {
   const el = await mount(<LabelsSidebar ws="w1" section="labels" onClose={() => undefined} />)
   await settle()
-  expect(words(el, '.lside-row .lside-name')).toEqual(['stage', 'shows a failure', 'hedged'])
-  for (const id of ['k1', 'k2', 'k3']) {
+  expect(words(el, '.lside-row .lside-name')).toEqual(['stage', 'hedged'])
+  for (const id of ['k1', 'k3']) {
     expect(row(el, id).querySelector('.lside-showin')).toBeNull()
     expect(row(el, id).textContent).not.toContain('Show in')
     // the values stay
     expect(row(el, id).querySelectorAll('.lside-value')).toHaveLength(2)
   }
   expect(switchIn(row(el, 'k1'))).not.toBeNull()
-  expect(switchIn(row(el, 'k2'))).toBeNull()
   expect(switchIn(row(el, 'k3'))).toBeNull()
   // each is off in Files, which only the label over files shows
   expect(row(el, 'k1').classList.contains('is-off')).toBe(true)
-  expect(row(el, 'k2').classList.contains('is-off')).toBe(false)
   expect(row(el, 'k3').classList.contains('is-off')).toBe(false)
 
   // the switch of the label over files turns it on in Files, as before
@@ -83,7 +81,7 @@ test("a label's detail has no Show in, and only a label over files has its switc
   expect(words(files, '.lside-foot button')).toEqual(['Run again', 'Color Files by it', 'Turn on', 'Delete'])
   await back()
 
-  for (const id of ['k2', 'k3']) {
+  for (const id of ['k3']) {
     const d = await open(id)
     expect(words(d, '.lside-label')).not.toContain('Show in')
     expect(d.querySelector('.lside-showin')).toBeNull()
@@ -91,7 +89,8 @@ test("a label's detail has no Show in, and only a label over files has its switc
     expect(words(d, '.lside-foot button')).toEqual(['Run again', 'Delete'])
     // Edit, the definition and the values stay
     expect(words(d, '.lside-reads button')).toEqual(['Edit'])
-    expect(d.querySelector<HTMLTextAreaElement>('textarea.lside-ask')?.value).toBe(id === 'k2' ? 'Which shows a failure?' : 'Which hedged?')
+    expect(d.querySelector<HTMLTextAreaElement>('textarea.lside-ask')?.value).toBe('Which hedged?')
+    expect(d.querySelector('.lside-reads .mono')?.textContent).toBe('the report')
     expect(d.querySelectorAll('.lside-value')).toHaveLength(2)
     await back()
   }

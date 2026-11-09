@@ -9,7 +9,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ChipContext } from '../chat/markdown'
 import { readSeen } from '../chat/seen'
 import { Chip } from '../components/Chip'
-import { FilterChip } from '../components/FilterChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
@@ -27,14 +26,13 @@ import { track } from '../lib/telemetry'
 import type { CanvasResponse, CardDrawn, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { anchorElement, capturePng, describeElement } from '../pointer/capture'
-import { NO_FILTER, activeParts, bothKeep, cardParts, keepShown, keptBy, readFilter, searchText, type CardFilter, type FilterCard, type FilterPart } from './cardFilter'
+import { NO_FILTER, activeParts, cardParts, keepShown, keptBy, readFilter, searchText, type CardFilter, type FilterCard, type FilterPart } from './cardFilter'
 import { useChecks } from '../report/Checks'
 import { CellCard, type CardAction, type CardField, type Edge } from './Cell'
 import { CommentLayer, shownCanvasComments, useCanvasComments } from './CommentLayer'
-import { conceptName, useConcepts } from './concepts'
+import { useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
-import { Controls, MINIMAP_ROOM, type CanvasLabel } from './Controls'
-import { labelValues } from './details'
+import { Controls, MINIMAP_ROOM } from './Controls'
 import { DetailPanel, LabelPanel, type OutputCite } from './DetailPanel'
 import { Focus } from './Focus'
 import { addSeen, canvasLanding, type Landing } from './landing'
@@ -62,7 +60,6 @@ import {
   clampScale,
   clampWidth,
   extentOf,
-  filterSet,
   firstCardOf,
   FIT_MIN_SCALE,
   fitView,
@@ -91,7 +88,6 @@ import {
   placeFree,
   readable,
   removeLocal,
-  scopeForUnit,
   showCard,
   stepZoom,
   toPlane,
@@ -106,7 +102,6 @@ import {
 } from './layout'
 
 const REFETCH_DEBOUNCE_MS = 250
-const ROWS_LIMIT = 5000
 /** a change of the card filter waits this long for the next before it is written, so typed words go as one write */
 const FILTER_WRITE_MS = 200
 const EMPTY: ReadonlySet<string> = new Set()
@@ -187,7 +182,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [data, setData] = useState<CanvasResponse | null>(null)
   const [chats, setChats] = useState<ChatMeta[]>([])
   const [filters, setFilters] = useState<Filters | null>(null)
-  const [keep, setKeep] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
   // the frames the person collapsed with a click on their title, kept in this browser: every other frame is open, and
@@ -344,7 +338,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     setFilters(null)
     setCardFilterState(NO_FILTER)
   }, [ws])
-  /** Clear filters: the label part and every card part, in one write. */
+  /** Clear filters: every card part, in one write. */
   const clearCanvasFilter = useCallback(() => {
     const w = cardWrite.current
     if (w.timer != null) window.clearTimeout(w.timer)
@@ -372,28 +366,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       if (timer != null) window.clearTimeout(timer)
     }
   }, [load, loadChats, loadFilters])
-
-  // the label part of the canvas's filter; its card parts are cardFilter
-  const canvasLabel = filters?.canvas
-  const canvasFilter = canvasLabel?.concept && canvasLabel.value != null ? { concept: canvasLabel.concept, value: canvasLabel.value } : null
-  useEffect(() => {
-    if (!canvasFilter) {
-      setKeep(null)
-      return
-    }
-    let alive = true
-    const fetchRows = () =>
-      api
-        .conceptRows(ws, canvasFilter.concept, { value: canvasFilter.value, limit: ROWS_LIMIT })
-        .then((r) => alive && setKeep(filterSet(r.rows)))
-        .catch(() => alive && setKeep(null))
-    void fetchRows()
-    const off = bus.on('concepts', (e) => e.concept === canvasFilter.concept && void fetchRows())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [ws, canvasFilter?.concept, canvasFilter?.value])
 
   // a change the route has not made yet, shown at once; the reload after the route agrees with it
   const change = useCallback(
@@ -520,7 +492,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   )
   const refresh = useCallback(() => void load(), [load])
 
-  // ---- the card filter (cardFilter.ts) with the label filter: the cards neither leaves out ----
+  // ---- the card filter (cardFilter.ts): the cards it keeps ----
 
   const filterCards = useMemo(
     (): FilterCard[] =>
@@ -529,28 +501,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         : [],
     [board, threadOf],
   )
-  const kept = useMemo(() => bothKeep(keep, keptBy(filterCards, cardFilter)), [keep, filterCards, cardFilter])
-  const canvasLabels = useMemo(
-    (): CanvasLabel[] =>
-      [...concepts.values()]
-        .filter((k) => scopeForUnit(k.unit) === 'canvas')
-        .map((k) => ({ concept: k.id, name: k.name, values: labelValues(k.labels, k.counts).map((value) => ({ value, count: k.counts?.[value] ?? 0 })) }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [concepts],
-  )
-  const setLabelFilter = async (concept: string, value: string | null) => {
-    try {
-      if (value == null) {
-        track('filter-clear', { target: `concept:${concept}`, detail: { scope: 'canvas', via: 'filter-menu' } })
-        await api.deleteFilter(ws, 'canvas')
-      } else {
-        track('filter-set', { target: `concept:${concept}`, detail: { scope: 'canvas', value, via: 'filter-menu' } })
-        await api.putFilter(ws, 'canvas', concept, value)
-      }
-    } catch (e) {
-      fail(e)
-    }
-  }
+  const kept = useMemo(() => keptBy(filterCards, cardFilter), [filterCards, cardFilter])
   // a card's details opened from inside the card (a label card's Definition and records), out of focus mode
   const openDetail = useCallback((id: string) => {
     setFocus(null)
@@ -1402,14 +1353,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
 
   // ---- drawing ----
 
-  const clearFilter = async () => {
-    track('filter-clear', { target: canvasFilter ? `concept:${canvasFilter.concept}` : null, detail: { scope: 'canvas', via: 'chip' } })
-    try {
-      await api.deleteFilter(ws, 'canvas')
-    } catch (e) {
-      fail(e)
-    }
-  }
   const groupName = (id: string) => board?.group.get(id)?.name ?? 'group'
   const detailCell = detail ? data?.cells.find((c) => c.id === detail) ?? null : null
   const focusCell = focus ? data?.cells.find((c) => c.id === focus) ?? null : null
@@ -1482,9 +1425,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
 
   return (
     <div className={`board${drag ? ' is-dragging' : ''}`}>
-      {(canvasFilter || activeParts(cardFilter).length > 0) && (
+      {activeParts(cardFilter).length > 0 && (
         <div className="board-band">
-          {canvasFilter && <FilterChip concept={canvasFilter.concept} name={conceptName(concepts, canvasFilter.concept)} value={canvasFilter.value} count={keep?.size} onClear={() => void clearFilter()} />}
           {activeParts(cardFilter).map((part) => (
             <Chip key={part} kind="value" active count={keptBy(filterCards, cardFilter, part)?.size} trailingIcon="x" onClick={() => setCardFilter(clearPart(cardFilter, part))} aria-label={`Clear the filter ${partLabel(cardFilter, part, groupName)}`}>
               {partLabel(cardFilter, part, groupName)}
@@ -1651,9 +1593,6 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 onClear={clearCanvasFilter}
                 cards={filterCards}
                 groupName={groupName}
-                labels={canvasLabels}
-                label={canvasFilter ? { concept: canvasFilter.concept, value: canvasFilter.value } : null}
-                onLabel={(concept, value) => void setLabelFilter(concept, value)}
                 keep={kept}
                 filterReady={filters != null}
                 ws={ws}

@@ -17,6 +17,7 @@ import type {
   FilterScope,
   Group,
   HostAskChoice,
+  LabelScope,
   LabelRowsResponse,
   LabelsForPath,
   NewCellBody,
@@ -493,10 +494,11 @@ export const api = {
   conceptRows: (c: string, id: string, opts: { value?: string; limit?: number; offset?: number } = {}) => j<LabelRowsResponse>(`${ws(c)}/concepts/${enc(id)}/rows${q(opts)}`),
   labelsForPath: (c: string, path: string) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path })}`),
   filters: (c: string) => j<Filters>(`${ws(c)}/filters`),
-  putFilter: (c: string, scope: FilterScope, concept: string, value: string) => j<Filters>(`${ws(c)}/filters`, { method: 'PUT', body: JSON.stringify({ scope, concept, value }) }),
-  /** the scope's label filter; `whole` clears the canvas's card parts too */
+  /** the label filter of Files or the report */
+  putFilter: (c: string, scope: LabelScope, concept: string, value: string) => j<Filters>(`${ws(c)}/filters`, { method: 'PUT', body: JSON.stringify({ scope, concept, value }) }),
+  /** the label filter of Files or the report; `whole` clears the canvas's card parts */
   deleteFilter: (c: string, scope: FilterScope, whole = false) => j<Filters>(`${ws(c)}/filters/${scope}${whole ? '?whole=true' : ''}`, { method: 'DELETE' }),
-  /** the canvas filter's card parts, all at once (a part left out is unset); its label part stays */
+  /** the canvas filter's card parts, all at once (a part left out is unset) */
   putCardFilter: (c: string, parts: Required<CardFilterParts>) => j<Filters>(`${ws(c)}/filters/canvas/cards`, { method: 'PUT', body: JSON.stringify(parts) }),
 
   // ---- views and proposals ----

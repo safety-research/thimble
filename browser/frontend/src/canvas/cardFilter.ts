@@ -1,7 +1,7 @@
 // The board's card filter, set in the controls' menu (Controls.tsx) or by a chat's set_filter: by kind, group, maker,
 // check state, starred, locked, and by words (each must start a word of the card's question or takeaway). Within a part
-// any choice keeps a card; across parts a card must pass each. It combines with the label filter. The server keeps the
-// whole canvas filter so every tab and the chat see the same one, and backend filters.py reads it as this file does.
+// any choice keeps a card; across parts a card must pass each. The server keeps the whole canvas filter so every tab
+// and the chat see the same one, and backend filters.py reads it as this file does.
 // Pure.
 import type { CardFilterParts } from '../lib/types'
 
@@ -88,13 +88,6 @@ export function keptBy(cards: readonly FilterCard[], f: CardFilter, only?: Filte
   const parts = only ? [only] : activeParts(f)
   if (!parts.length || (only && !partOn(f, only))) return null
   return new Set(cards.filter((c) => parts.every((p) => passes(c, f, p))).map((c) => c.id))
-}
-
-/** Two keep sets as one: a card either leaves out is left out; null (no filter) keeps every card. */
-export function bothKeep(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): Set<string> | null {
-  if (!a) return b ? new Set(b) : null
-  if (!b) return new Set(a)
-  return new Set([...a].filter((id) => b.has(id)))
 }
 
 /** The choices the menu lists for a part, each with how many cards have it, most first, then by name. */

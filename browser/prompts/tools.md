@@ -102,13 +102,13 @@ Define a category and apply it to every unit of a scope. You get the counts per 
 {
   "type": "object",
   "properties": {
-    "scope": {"type": "string", "enum": ["files", "canvas", "report"], "description": "Records of files, cards, or report sentences."},
+    "scope": {"type": "string", "enum": ["files", "report"], "description": "Records of files, or report sentences."},
     "name": {"type": "string"},
     "question": {"type": "string", "description": "The one question its card answers."},
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "prompt: a model judges each unit. regex: a regex matches its text. code: your code defines label(unit), which returns (value, confidence). In label(unit), each unit takes this form. A JSONL record is its dict. A text line or a sentence is a dict with its words in unit['text']. A row of a database or a CSV file is a dict of its columns. A record of a JSON document is its value. A PDF page is a dict with its page and text. A card is a dict with its text, kind, question, takeaway, group and groups (the titles of the frames around it). A whole file is a dict with its path, records and data (the whole file parsed, or its text). A run is a dict with its paths, records and files (each file whole, by its path). Some records save a whole document again, for example a wiki page's revision. A model or a regex reads such a record as what it changed from the save before. Code reads it whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "prompt: a model judges each unit. regex: a regex matches its text. code: your code defines label(unit), which returns (value, confidence). In label(unit), each unit takes this form. A JSONL record is its dict. A text line or a sentence is a dict with its words in unit['text']. A row of a database or a CSV file is a dict of its columns. A record of a JSON document is its value. A PDF page is a dict with its page and text. A whole file is a dict with its path, records and data (the whole file parsed, or its text). A run is a dict with its paths, records and files (each file whole, by its path). Some records save a whole document again, for example a wiki page's revision. A model or a regex reads such a record as what it changed from the save before. Code reads it whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
@@ -168,7 +168,7 @@ Delete a label, with its marks, its card and any filter that uses it. Use it onl
 
 ## set_filter
 
-Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter. The other parts stay.
+Filter the records in Files or the report's sentences by a value of a label that exists, and the cards by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter. The other parts stay.
 
 ```json
 {
