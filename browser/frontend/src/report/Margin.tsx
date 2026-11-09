@@ -2,6 +2,8 @@
 // with its passage and stacked so no two meet (checkComments.ts stackCards). Each is the comment card the canvas draws
 // too (CommentCard.tsx): its check's name and its statement, its details on request and ✓, and, while it is active, a
 // field that opens a thread on the passage. A new comment from the toolbar is a card with a field until Enter stores it.
+// In a page too narrow for the margin beside its text, the margin stands over the page's right edge (`over`): it takes
+// no room from the text and shows only the active comment, which a click on its tinted passage opens, and the new one.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import { TextArea } from '../components/Field'
 import { bus } from '../lib/bus'
@@ -33,6 +35,9 @@ export interface MarginProps {
   column: RefObject<HTMLElement | null>
   /** a passage's text, for the thread a reply opens */
   textOf: (sid: string) => string
+  /** the page is too narrow to hold the margin beside its text: the margin stands over the page and shows only the
+   * active comment and the new one */
+  over?: boolean
 }
 
 const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'))
@@ -42,7 +47,7 @@ const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escap
 const passageEl = (col: HTMLElement, sid: string): Element | null =>
   col.querySelector(`[data-sid="${esc(sid)}"]`) ?? col.querySelector(`[data-anchor-cell][data-anchor$="#${esc(sid)}"]`)
 
-export function Margin({ ws, slug, comments, look, active, onActivate, onResolve, draft, onDraft, onDraftCancel, column, textOf }: MarginProps) {
+export function Margin({ ws, slug, comments, look, active, onActivate, onResolve, draft, onDraft, onDraftCancel, column, textOf, over = false }: MarginProps) {
   const rail = useRef<HTMLDivElement | null>(null)
   const cards = useRef(new Map<string, HTMLDivElement>())
   const [tops, setTops] = useState<Map<string, number>>(new Map())
@@ -95,9 +100,11 @@ export function Margin({ ws, slug, comments, look, active, onActivate, onResolve
     else cards.current.delete(id)
   }
 
+  // over the page, a card would hide the text under it, so only the open one shows
+  const cardsShown = over ? comments.filter((c) => c.id === active) : comments
   return (
-    <div className="wu-rail" ref={rail} aria-label="Comments">
-      {comments.map((c) => {
+    <div className={'wu-rail' + (over ? ' is-over' : '')} ref={rail} aria-label="Comments">
+      {cardsShown.map((c) => {
         const top = tops.get(c.id)
         return (
           <CommentCard
