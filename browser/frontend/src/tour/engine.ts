@@ -303,6 +303,9 @@ const textRows = (rects: Iterable<DOMRect>) => {
 
 /** The tour's one way to draw markup: its own strings and the examples bundled with it (examples.json), never anything
  * the server, a model or the corpus wrote. */
+/** What the banner across the top says while the tour's steps run. */
+export const BANNER = 'The tour shows example data, not your files'
+
 export function setMarkup(el: Element, markup: string): void {
   el.innerHTML = markup
 }
@@ -896,6 +899,8 @@ export function createTour(snaps: Snaps): Tour {
   }
 
   const go = (k: number) => {
+    // the banner that says the tour shows example data, from the first step on; the page moves down under it
+    document.documentElement.classList.add('tour-banner-on')
     if (k < 0 || k >= steps.length) return void end()
     if (steps[i]?.leave) {
       leaving = true
@@ -1356,7 +1361,8 @@ export function createTour(snaps: Snaps): Tour {
       '<div class="tour-ex"></div><svg class="tour-dim" aria-hidden="true"><defs><mask id="tour-mask" maskUnits="userSpaceOnUse"></mask></defs>' +
       '<rect class="tour-dim-fill" x="0" y="0" width="100%" height="100%" mask="url(#tour-mask)"/></svg>' +
       '<div class="tour-block"></div><div class="tour-fx"></div>' +
-      '<div class="tour-pop" role="dialog" aria-label="thimble tour"></div>',
+      '<div class="tour-pop" role="dialog" aria-label="thimble tour"></div>' +
+      `<div class="tour-banner" role="status">${BANNER}</div>`,
     )
     mask = root.querySelector('mask')!
     block = root.querySelector('.tour-block')!
@@ -1421,6 +1427,7 @@ export function createTour(snaps: Snaps): Tour {
     root.remove()
     host.remove()
     root = null
+    document.documentElement.classList.remove('tour-banner-on')
     i = -1
     steps = []
     holes = []
