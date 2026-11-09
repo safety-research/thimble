@@ -123,18 +123,31 @@ export function withAsked(text, items) {
 }
 
 /**
+ * A message with the citations the answer draws, as a rewrite keeps them (squeeze/term.ts): each sentence a check
+ * rewrote in place of Claude's (rewritesIn), each corrected citation's words in place of its own (withCorrections), and
+ * the words the analyst cited with c as citations (withAsked). Returns the text, its marks' items in order, and
+ * `asked`: the words of the analyst's citations, as the text writes them.
+ */
+export function citedText(text, items) {
+  const a = withAsked(text, items)
+  const s = withCorrections(rewritesIn(a.text, a.items).text, a.items)
+  const ms = marksIn(s)
+  const asked = ms.length === a.items.length ? ms.filter((m, k) => a.items[k]?.asked).map(m => m.words) : []
+  return { text: s, items: a.items, asked }
+}
+
+/**
  * A message as the person reads it: each sentence a check rewrote in place of Claude's (rewritesIn), and each
  * corrected citation's words in place of its own (withCorrections), the words the analyst asked about among them
  * (withAsked), which then read as plain words again: Claude did not cite them.
  */
 export function readText(text, items) {
-  const a = withAsked(text, items)
-  const s = withCorrections(rewritesIn(a.text, a.items).text, a.items)
+  const { text: s, items: its } = citedText(text, items)
   const ms = marksIn(s)
-  if (ms.length !== a.items.length) return s
+  if (ms.length !== its.length) return s
   let out = ''
   let at = 0
-  ms.forEach((m, k) => { if (a.items[k]?.asked) { out += s.slice(at, m.start) + m.words; at = m.end } })
+  ms.forEach((m, k) => { if (its[k]?.asked) { out += s.slice(at, m.start) + m.words; at = m.end } })
   return out + s.slice(at)
 }
 
