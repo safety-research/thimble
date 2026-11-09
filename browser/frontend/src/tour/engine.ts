@@ -12,8 +12,9 @@
 // (components/Tooltip HoverTips), by its rules, the ask key and a press included. Esc closes the tour; while an ask box
 // or a source is open, Esc closes only that.
 //
-// Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
-// their step ends. Nothing the tour shows reaches the server.
+// Examples are the tour's own markup (./examples.json, ./steps), or the frame of its example panes (src/example: thimble's
+// own Files pane and Labels sidebar over a made-up folder, whose requests are answered inside the frame), laid over the
+// page under the dim and removed when their step ends. Nothing the tour shows reaches the server.
 import { markTips, placeAtPointer, TIP_MARK } from '../components/Tooltip'
 import { askKeyLabel, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { setGuard } from './freeze'
@@ -82,7 +83,7 @@ export interface Step {
   example?: (api: Api) => Example
   /** an animation, stopped when the tour moves */
   demo?: (api: Api, signal: AbortSignal) => Promise<void>
-  /** an element whose clicks and typing reach the page */
+  /** an element whose clicks and typing reach the page, through an opening of its own in the block */
   allow?: (api: Api) => Element | null
   /** an element the wheel scrolls */
   scroll?: (api: Api) => HTMLElement | null
@@ -389,14 +390,20 @@ export function createTour(snaps: Snaps): Tour {
     const boxes = rs.map((r) => ({ x: r.x - pad, y: r.y - pad, w: r.width + 2 * pad, h: r.height + 2 * pad }))
     setMarkup(mask, FULL + boxes.map((b) => `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${rad}" ry="${rad}" fill="#000"/>`).join(''))
     drawn = { holes: boxes, targets: rs.map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })), pad }
-    // the block takes every click, except over an opening: a frame the analyst may use, an allowed element, or a try
-    // step's cutout, where the guard lets only a ⌘-click through
+    // the block takes every click, except over an opening: a frame the analyst may use or a try step's cutout, where the
+    // guard lets only a ⌘-click through, and an allowed element
     const inter = s.interact ? rectOf(s.interact(api)) : null
-    open = inter ? { x: inter.x, y: inter.y, w: inter.width, h: inter.height } : (s.try || (s.allow && s.allow(api))) && boxes[0] ? boxes[0] : null
-    if (open) {
-      const [a, b, c, d] = [open.x, open.y, open.x + open.w, open.y + open.h]
-      block.style.clipPath = `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${a}px ${b}px, ${a}px ${d}px, ${c}px ${d}px, ${c}px ${b}px, ${a}px ${b}px)`
-    } else block.style.clipPath = ''
+    open = inter ? { x: inter.x, y: inter.y, w: inter.width, h: inter.height } : s.try && boxes[0] ? boxes[0] : null
+    const allowed = s.allow ? rectOf(s.allow(api)) : null
+    const openings = [...(open ? [open] : []), ...(allowed ? [{ x: allowed.x, y: allowed.y, w: allowed.width, h: allowed.height }] : [])]
+    block.style.clipPath = openings.length
+      ? `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${openings
+          .map((o) => {
+            const [a, b, c, d] = [o.x, o.y, o.x + o.w, o.y + o.h]
+            return `${a}px ${b}px, ${a}px ${d}px, ${c}px ${d}px, ${c}px ${b}px, ${a}px ${b}px, 0 0`
+          })
+          .join(', ')})`
+      : ''
     const first = i === 0,
       lastStep = n === total && !steps.slice(i + 1).some((x) => !x.sub)
     const after = s.after && run && run.after ? ` <span class="tour-after">${s.after}</span>` : ''

@@ -158,11 +158,16 @@ describe('the source', () => {
     }
     // Outputs inlines html through purifyHtml and svg through inlineSvg, which ends in purifySvg. The product tour draws
     // only its own strings and the examples bundled with it (tour/examples.json), through its one sink, setMarkup, and
-    // nothing under src/tour reads the API; its example view is the app's own file (public/tour/timeline). A new sink
-    // needs the same review, and then a line here.
+    // nothing under src/tour reads the API; its example view is the app's own file (public/tour/timeline), and its
+    // example panes are the app's own components in a frame of their own (src/example), whose requests the example
+    // answers there: only the frame's walls (example/shield.ts) hold the network's fetch. A new sink needs the same
+    // review, and then a line here.
     expect(sinks).toEqual(['components/Outputs.tsx', 'tour/engine.ts'])
     expect(readFileSync(path.join(SRC, 'tour/engine.ts'), 'utf8').match(/\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML/g)).toHaveLength(1)
     for (const f of sources(path.join(SRC, 'tour'))) expect(readFileSync(f, 'utf8'), f).not.toMatch(/lib\/api|fetch\(|EventSource/)
+    for (const f of sources(path.join(SRC, 'example'))) {
+      if (!f.endsWith('shield.ts')) expect(readFileSync(f, 'utf8'), f).not.toMatch(/fetch\(|EventSource|XMLHttpRequest|sendBeacon/)
+    }
     expect(readFileSync(path.join(SRC, 'components/Outputs.tsx'), 'utf8')).toMatch(/purifyHtml\(html\)/)
     expect(readFileSync(path.join(SRC, 'lib/svg.ts'), 'utf8')).toMatch(/purifySvg\(new XMLSerializer\(\)\.serializeToString\(svg\)\)/)
   })

@@ -364,13 +364,6 @@
   background: color-mix(in oklab, var(--tint) 30%, transparent);
 }
 
-/* the example transcript lays out every record, so its height holds still while the wheel scrolls it */
-.tour-ex-reader .reader-record,
-.tour-ex-reader .reader-line {
-  content-visibility: visible;
-  contain-intrinsic-size: none;
-}
-
 /* The chat step: an example exchange in the chat's own markup. */
 .tour-ex-chat {
   overflow: hidden;
