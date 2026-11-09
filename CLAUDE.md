@@ -9,7 +9,7 @@ When someone asks you to install thimble, ask what they want, run the install sc
 
 1. Ask, with your question tool:
    - **The plugin and the workbench** (recommended): in Claude Code, Claude draws cards of the data, and a second
-     Claude checks claims against the files; the workbench does the same in a web page on this machine. About 1 GB.
+     Claude checks claims against the files; the workbench does the same in a web page on this machine. About 2 GB.
    - **The plugin alone**: only the Claude Code part.
 
    When they choose the workbench, then ask how it reaches Claude:
