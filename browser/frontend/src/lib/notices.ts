@@ -6,7 +6,7 @@
 // with the key of one shown replaces it in place, any other is added at the end. The history the stream replays is
 // left to the read, which already holds what is open.
 //
-// Signing in (lib/api.ts claimKey): a link's sign-in code that was used, replaced by a newer one or expired shows as a
+// Signing in (lib/api.ts claimKey): a link whose sign-in key `thimble-browser --unpair` changed shows as a
 // notice this page makes itself (showCodeGone, an id under PAGE_NOTICE), in every workspace's strip and on the start
 // page, whose × sends nothing. A browser's sign-in posts a `sign-in` notice with Sign it out (backend main.signed_in);
 // the browser that signed in leaves out its own and those of sign-ins before it (setBrowserId, from GET /ui/paired),
@@ -73,9 +73,9 @@ export function withoutNotice(list: readonly Notice[], gone: { id?: string; key?
   return [...list]
 }
 
-/** The words of backend hook_auth.CODE_GONE: the sign-in code of the link this page opened was used, replaced by a
- * newer one, or expired. */
-export const CODE_GONE_TEXT = 'This sign-in link was already used or has expired. Open the new link in the terminal where `thimble-browser` runs.'
+/** The words of backend hook_auth.CODE_GONE: the sign-in key of the link this page opened is not the install's key
+ * anymore (`thimble-browser --unpair` changed it). */
+export const CODE_GONE_TEXT = "This sign-in link isn't valid anymore. Open the newest link in the terminal where `thimble-browser` runs."
 /** The start of the id of a notice this page made, which the server does not hold. */
 export const PAGE_NOTICE = 'page:'
 
@@ -120,7 +120,7 @@ export function showPageNotice(n: Notice): void {
 
 const CODE_GONE_ID = `${PAGE_NOTICE}code-gone`
 
-/** The link's sign-in code was used, replaced or expired (POST /ui/key answered 410, or refused it otherwise). */
+/** The link's sign-in key isn't valid anymore (POST /ui/key answered 410, or refused it otherwise). */
 export function showCodeGone(): void {
   showPageNotice({ id: CODE_GONE_ID, key: CODE_GONE_ID, kind: 'sign-in', text: CODE_GONE_TEXT })
 }

@@ -12,6 +12,31 @@
   z-index: var(--z-scrim);
   pointer-events: none;
 }
+/* the banner across the top while the steps run: the tour shows example data. The page moves down under it, so the
+   tour's cutouts, measured from the page, follow */
+.tour-banner {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--tour-banner-h);
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font: 500 13px / 1 var(--font-body);
+}
+:root {
+  --tour-banner-h: 28px;
+}
+.tour-banner-on .tour-banner {
+  display: flex;
+}
+.tour-banner-on #root {
+  height: calc(100% - var(--tour-banner-h));
+  margin-top: var(--tour-banner-h);
+}
 .tour-dim {
   position: absolute;
   inset: 0;
@@ -94,9 +119,14 @@
   position: absolute;
   z-index: auto;
 }
-.tour-fx .refchip-pop {
+.tour-fx .refchip-pop,
+.tour-fx .answer-cm-pop {
   position: absolute !important;
   z-index: auto;
+}
+/* a menu the demo opens (Color by's), under the demo's pointer */
+.tour-fx > .popover {
+  z-index: 1;
 }
 .tour-fx > .tour-cursor,
 .tour-fx > .tour-key,
@@ -321,6 +351,17 @@
 .refchip-value.tour-hot {
   background: var(--accent-soft);
   border-radius: 2px;
+}
+/* a citation's mark and a check's tinted words under the analyst's pointer, as thimble's own hover draws them
+   (marks.css, chat.css) */
+.mark.tour-hot .mark-words {
+  background: var(--cite-tint);
+}
+.mark.is-failed.tour-hot .mark-words {
+  background: var(--cite-tint-failed);
+}
+.chat-text mark.answer-tint.tour-hot {
+  background: color-mix(in oklab, var(--tint) 30%, transparent);
 }
 
 /* the example transcript lays out every record, so its height holds still while the wheel scrolls it */

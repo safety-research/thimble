@@ -8,7 +8,7 @@ none:
 
 - **token**: the token in `server.json`, proven with each request. thimble's CLI uses these routes, and only
   these.
-- **code**: a link's one-time sign-in code, which the page trades for the browser's cookie and its key.
+- **code**: the sign-in link's key, which the page trades for the browser's cookie and its key.
 - **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.
 - **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI
   proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone

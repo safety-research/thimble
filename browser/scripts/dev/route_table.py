@@ -7,7 +7,7 @@ The table is read from the server's own routes (app.main.app.routes), so a new r
 backend/tests_public/test_route_auth.py fails until the table is written again. Each route takes one of:
 
     token            the token in server.json, proven with each request (hook_auth.guarded): thimble's CLI
-    code             a link's one-time sign-in code, traded for the browser's cookie and its key (POST /api/ui/key)
+    code             the sign-in link's key (`#p=`), traded for the browser's cookie and its key (POST /api/ui/key)
     cookie           a signed-in browser's cookie (hook_auth.analyst): every other write
     cookie or token  a read (GET) of every other route (hook_auth.LocalReadGuard): a signed-in browser's cookie, or the
                      token proven as above (the CLI); a page screenshot carries a shot token instead
@@ -94,7 +94,7 @@ def render(table: list[tuple[str, str, str, str]]) -> str:
         "",
         "- **token**: the token in `server.json`, proven with each request. thimble's CLI uses these routes, and only",
         "  these.",
-        "- **code**: a link's one-time sign-in code, which the page trades for the browser's cookie and its key.",
+        "- **code**: the sign-in link's key, which the page trades for the browser's cookie and its key.",
         "- **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.",
         "- **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI",
         "  proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone",

@@ -106,7 +106,7 @@ export type Events = {
   /** the server refused a read because this browser is not signed in (401 with `signin: true`, lib/api signInNeeded):
    * a sign-in notice's Sign it out signed it out; shell/SignIn shows its line in place of the app */
   signedOut: Record<string, never>
-  /** a link with a sign-in code was opened in this tab, which changed only the address's hash (lib/api
+  /** a link with a sign-in key was opened in this tab, which changed only the address's hash (lib/api
    * claimOnHashChange): shell/SignIn checks again whether this browser is signed in */
   newLink: Record<string, never>
 }
