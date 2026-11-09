@@ -5,7 +5,7 @@ chat, the folder's files with views built for them, a canvas of cards, labels, a
 that cite every claim.
 
 It runs on your machine. A small server listens on 127.0.0.1 and serves the page, and runs the chat and thimble's
-agents (side threads, the writers, the view builders, the report checks) itself, on one of three ways to reach Claude:
+agents (side threads, the writers, the view builders, the comments) itself, on one of three ways to reach Claude:
 
 | Way | What runs |
 |---|---|
