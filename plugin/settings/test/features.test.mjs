@@ -7,7 +7,7 @@ import test from 'node:test'
 
 import { SWITCHES, choiceOf, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, setOptions, switchesFrom } from '../features.mjs'
 
-test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
+test("the manifest's userConfig is the features, each at its default until an option sets it; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
   {
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
@@ -67,12 +67,12 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('cards'), 'off')
     setOptions({})
   }
-  // Citations: auto cite + verify by default; Claude cites in the two auto modes, c cites selected words in every mode
-  // but off; a value outside them is the default
+  // Citations: manual by default, where Claude cites nothing and c cites selected words; Claude cites in the two auto
+  // modes, c cites selected words in every mode but off; a value outside them is the default
   {
     setOptions({})
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
-    assert.equal(claudeCites(), true)
+    assert.equal(choiceOf('citations'), 'manual')
+    assert.equal(claudeCites(), false)
     assert.equal(featureOn('cite'), true)
     setOptions({ citations: 'auto cite' })
     assert.equal(claudeCites(), true)
@@ -90,24 +90,27 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cite'), false)
     assert.equal(switchesFrom({ citations: 'off' })('cite'), false)
     setOptions({ citations: 'sometimes' })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(choiceOf('citations'), 'manual')
     setOptions({})
   }
   // a value that settings.json still holds under a field of the manifest until 0.10.12 changes nothing
   {
-    setOptions({ marks: false, citationChecks: 'off', squeeze: false, counts: false, claims: false, defaultsAt: 'none' })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    setOptions({ marks: true, citationChecks: 'on', squeeze: false, counts: false, claims: true, defaultsAt: 'none' })
+    assert.equal(choiceOf('citations'), 'manual')
     assert.equal(featureOn('squeezeAnswers'), true)
     assert.equal(featureOn('labels'), true)
-    assert.equal(choiceOf('claims'), 'auto')
+    assert.equal(choiceOf('claims'), 'off')
     setOptions({})
   }
   // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only when Claims
-  // is auto (auto by default, a value outside its modes too); Claims off is no claims
+  // is auto; Claims off is no claims (off by default, a value outside its modes too)
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
-    assert.equal(choiceOf('claimsMode'), 'auto')
+    assert.equal(choiceOf('claimsMode'), 'off')
+    assert.equal(featureOn('claims'), false)
+    assert.equal(lensesAfterReply('claims'), false)
+    setOptions({ claimsMode: 'auto' })
     assert.equal(featureOn('claims'), true)
     assert.equal(lensesAfterReply('claims'), true)
     setOptions({ claimsMode: 'on demand' })
@@ -121,7 +124,15 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('observer'), false)
     assert.equal(featureOn('claims'), false)
     setOptions({ claimsMode: true })
-    assert.equal(choiceOf('claimsMode'), 'auto')
+    assert.equal(choiceOf('claimsMode'), 'off')
+    setOptions({})
+  }
+  // Coverage: off by default; an option turns it on
+  {
+    setOptions({})
+    assert.equal(featureOn('coverage'), false)
+    setOptions({ coverage: true })
+    assert.equal(featureOn('coverage'), true)
     setOptions({})
   }
   // Minimal is a preset: its modes (PRESET) keep Claude citing, each citation verified when it is opened, and the

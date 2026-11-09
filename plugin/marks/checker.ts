@@ -66,11 +66,11 @@
 //                             this machine in them named as the validator names a cited file (core/text.js errorWords)
 //
 // The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
-// Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
-// cited words), and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual`,
+// Claude's marks after each reply; `auto cite`, a reply's marks wait `deferred` (drawn as the reply's own cited words),
+// and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual` (the default),
 // Claude makes none; `off`, none. In every mode but off, words the person selects and asks about (c, marks/cite.ts)
-// wait `deferred` until the tray opens them, as one Claude made. A reply its caller names (`checks`: the answer of
-// the tour's cite step, tour/tour.ts tourCites) is checked after it in `auto cite` too, as in `auto cite + verify`.
+// wait `deferred` until the tray opens them, as one Claude made. A reply its caller names (`checks`: the answer of the
+// tour's cite step, tour/tour.ts tourCites) is checked after it in `auto cite` too, as in `auto cite + verify`.
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). A check

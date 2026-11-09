@@ -8,8 +8,8 @@ This repository holds two products: the terminal plugin for Claude Code (`plugin
 When someone asks you to install thimble, ask what they want, run the install script, and pass on what it says.
 
 1. Ask, with your question tool:
-   - **The plugin and the workbench** (recommended): in Claude Code, Claude cites its claims, a second Claude checks
-     them, and Claude draws cards of the data; the workbench does the same in a web page on this machine. About 1 GB.
+   - **The plugin and the workbench** (recommended): in Claude Code, Claude draws cards of the data, and a second
+     Claude checks claims against the files; the workbench does the same in a web page on this machine. About 1 GB.
    - **The plugin alone**: only the Claude Code part.
 
    When they choose the workbench, then ask how it reaches Claude:

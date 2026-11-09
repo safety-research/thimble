@@ -13,10 +13,8 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 ## Features
 
 - **Cards**: interactive graphs of your data, drawn in the terminal, that you can click and ask about. `v` (visualize) draws one for the last answer.
-- **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
+- **Citations** (`c`): select words in an answer and press `c`, and a second Claude checks them against your files. Set Citations to auto cite to have Claude cite every claim on its own.
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
-- **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
-- **Claims** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. thimble pulls the claims out of every reply in the background; set Claims to on demand to pull them out only when you ask (`f` in the pane).
 - **Simplify** (`s`): a shorter, plainer version of the last answer, below it; under it, `1`–`4` make it shorter, longer, explain more or assume more, and `0` hides it.
 - **Side threads** (`a`): ask about selected words or part of a card without derailing the session; `t` lists them.
 

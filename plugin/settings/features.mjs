@@ -43,7 +43,7 @@ export const SWITCHES = [
     says: { on: MINIMAL_SAYS, off: MINIMAL_SAYS },
   },
   {
-    key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite + verify', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
+    key: 'citations', title: 'Citations', group: 'Answers', default: 'manual', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
     does: 'auto cite + verify: Claude cites what each answer rests on, and a second Claude verifies each citation after each answer. auto cite: Claude cites, and a citation is verified when you open it, which spends fewer tokens. manual: select words and press c to cite them. off: no citations.',
     says: {
       'auto cite + verify': 'Claude cites what each answer rests on, and a second Claude verifies each citation.',
@@ -105,7 +105,7 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'claimsMode', title: 'Claims', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
+    key: 'claimsMode', title: 'Claims', group: 'Panes', default: 'off', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
     does: 'Press w to see the conversation\'s claims. auto: thimble pulls them out of each answer in the background, which uses tokens. on demand: only when you press f in the pane. off: no Claims pane.',
     says: {
       'auto': 'Press w to see the claims. thimble pulls them out of each answer in the background, which uses tokens.',
@@ -119,7 +119,7 @@ export const SWITCHES = [
     says: { on: 'Press l to see the labels Claude made, with their values and records.', off: 'No Labels pane, and Claude makes no labels.' },
   },
   {
-    key: 'coverage', title: 'Coverage', group: 'Panes', default: true,
+    key: 'coverage', title: 'Coverage', group: 'Panes', default: false,
     does: 'Press r to see which files Claude has read, by folder. No model call: thimble counts the files after each turn.',
     says: { on: 'Press r to see which files Claude has read, by folder.', off: 'No Coverage pane.' },
   },
