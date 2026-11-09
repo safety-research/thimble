@@ -12,7 +12,7 @@ https://github.com/user-attachments/assets/878ed146-fc7c-486a-8f41-ac14b24c5068
 
 ## Features
 
-![thimble's bar above Claude Code's prompt: v visualize, s simplify, \] show explainer, c cite, e explain, a ask, t 1 thread, l 1 label](docs/assets/thimble-bar.png)
+![thimble's bar above Claude Code's prompt: j k card keys, v visualize, s simplify, \] show heads up, c cite, e explain, a ask, t 1 thread](docs/assets/thimble-bar.png)
 
 Press a key at an empty prompt, or click it:
 
@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/script
 
 Run `claude` in a folder of files. Click `thimble` above the prompt to turn features on or off.
 
-![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
+![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with a citation checked on selected words](docs/assets/thimble-term.png)
 
 ### Browser workbench
 
