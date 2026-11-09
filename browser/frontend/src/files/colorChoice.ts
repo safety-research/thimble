@@ -29,7 +29,7 @@ export interface ChoiceSource {
 /** The source of a choice (ChoiceSource); null for Off. Pure. */
 export function choiceSource(c: ColorChoice): ChoiceSource | null {
   if (c.by === 'key') return { from: 'data', word: 'from your data', tip: `${c.key} is a field of your records: its values come from your data, as the file holds them` }
-  if (c.by === 'label') return { from: 'thimble', word: 'thimble label', tip: 'A thimble label: thimble gave these values by running the label over your records; they are not in your file' }
+  if (c.by === 'label') return { from: 'thimble', word: 'Label', tip: 'A thimble label: thimble gave these values by running the label over your records; they are not in your file' }
   return null
 }
 

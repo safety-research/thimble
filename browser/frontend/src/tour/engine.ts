@@ -5,8 +5,9 @@
 // reach the page; on a step with `scroll`, the wheel over the element it names scrolls it; on a step with `interact`,
 // the frame it names takes the pointer and the wheel; on a step marked `try`, holding ⌘ (Ctrl off a Mac) and moving
 // over its cutout highlights what is under the pointer, a ⌘-click or ⌘-drag there reaches the page, and once the ask box
-// is open, typing in it does, and Enter closes it as Esc does, sending nothing; on a step with `chips`, hovering an
-// underlined value in its card shows that value's source; on a step with `tips`, resting on a mark of its example that
+// is open, typing in it does, and Enter closes it as Esc does, sending nothing; on a step with `chips`, hovering a
+// citation in its example (a card's underlined value, a mark in the chat) or a check's tinted words shows what the step
+// gives it, as a citation's source or a comment; on a step with `tips`, resting on a mark of its example that
 // names a value (`data-tip`, a record's label and value) shows that name, as thimble's one tooltip does
 // (components/Tooltip HoverTips), by its rules, the ask key and a press included. Esc closes the tour; while an ask box
 // or a source is open, Esc closes only that.
@@ -91,7 +92,7 @@ export interface Step {
   interact?: (api: Api) => Element | null
   /** the cutout takes a ⌘-click or ⌘-drag */
   try?: boolean
-  /** a hover on an underlined value of the example's card */
+  /** a hover or a click on a citation (CHIPS) inside the example's `chipsIn` element, else its `card` */
   chips?: (api: Api, chip: Element) => void
   /** the part of the example whose marks name a value on hover (`data-tip`): the pointer resting on one shows its name */
   tips?: (api: Api) => Element | null
@@ -169,6 +170,9 @@ export interface Api {
   /** close the page's ask box as Esc does */
   closeBox: () => void
   showSource: (chip: Element, opts?: { demo?: boolean }) => HTMLElement | null
+  /** `el` (markup of the tour's own) shown at `at` as a citation's source is, for `chip`, which is tinted as open: it
+   * goes as a source goes */
+  showBeside: (chip: Element, el: HTMLElement, at: { x: number; y: number }, opts?: { demo?: boolean }) => HTMLElement
   closeSource: () => void
   /** the demo's name for a mark (its `data-tip`), as thimble's one tooltip shows it for the pointer at (x, y); removed
    * with the demo */
@@ -236,6 +240,9 @@ const CONTAINED = ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup', 'clic
 // the attributes the app reads (anchors, refs, telemetry), renamed data-tour-* in a snapshot so the app takes none of it
 // for its own
 const RENAME = new Set(['data-anchor', 'data-anchor-text', 'data-anchor-parts', 'data-anchor-cell', 'data-cell', 'data-ref', 'data-tel', 'data-panel', 'data-chat-current', 'data-cite-home'])
+/** what a `chips` step's hover takes: a card's old citation chip, a citation's mark (marks/Mark.tsx) and a check's
+ * tinted words in an answer (chat/markdown.tsx rehypeAnswerMarks) */
+const CHIPS = '.refchip-value, .mark[data-mark-look], mark.answer-tint'
 const ARROW = 'M3 2 L3 18 L7.2 11.4 L16 13 Z'
 const POINTER = 'M4 2 L4 19 L8.3 14.9 L11.2 21.4 L14 20.2 L11.2 13.8 L17 13.8 Z'
 const FULL = '<rect x="0" y="0" width="100%" height="100%" fill="#fff"/>'
@@ -554,6 +561,10 @@ export function createTour(snaps: Snaps): Tour {
         live()
         return showSource(chip, o)
       },
+      showBeside(chip, el, at, o) {
+        live()
+        return showBeside(chip, el, at, o)
+      },
       cursor: {
         show: (x, y) => (live(), c.show(x, y)),
         move: (x, y, ms, s2) => (live(), c.move(x, y, ms, s2 ?? sig)),
@@ -870,6 +881,7 @@ export function createTour(snaps: Snaps): Tour {
     closeMock,
     closeBox,
     showSource: (chip, o) => showSource(chip, o),
+    showBeside: (chip, el, at, o) => showBeside(chip, el, at, o),
     closeSource: () => closeSource(),
     showTip: (mark, x, y) => showTip(mark, x, y),
     hideTip: () => hideTip(),
@@ -1038,14 +1050,14 @@ export function createTour(snaps: Snaps): Tour {
     cueEl.dataset.target = [end.left, end.top, end.right, end.bottom].map(Math.round).join()
   }
 
-  // ---- the values of a `chips` step's card: the one under a point (the card may sit under the block, so every layer at
-  // the point is looked at), a hover mark on it, and its source
+  // ---- the citations of a `chips` step's example: the one under a point (the example may sit under the block, so every
+  // layer at the point is looked at), a hover mark on it, and its source
   const chipAt = (x: number, y: number): Element | null => {
-    const card = run?.els?.card as Element | undefined
-    if (!card) return null
+    const within = (run?.els?.chipsIn ?? run?.els?.card) as Element | undefined
+    if (!within) return null
     const stack = document.elementsFromPoint(x, y)
     if (stack[0] && (pop.contains(stack[0]) || fx.contains(stack[0]))) return null
-    return stack.find((el) => el.classList?.contains('refchip-value') && card.contains(el)) || null
+    return stack.find((el) => el.matches?.(CHIPS) && within.contains(el)) || null
   }
   let hot: Element | null = null
   const setHot = (chip: Element | null) => {
@@ -1091,18 +1103,30 @@ export function createTour(snaps: Snaps): Tour {
       }
     } else window.clearTimeout(hideT)
   }
-  const removeSources = () => fx?.querySelectorAll('[data-src]').forEach((e) => e.remove())
+  // the citation or tinted words whose source or comment is open, tinted as thimble tints an open one
+  let opened: Element | null = null
+  const openOn = (chip: Element) => {
+    opened = chip
+    chip.classList.add(chip.matches('mark.answer-tint') ? 'answer-tint-open' : 'is-open')
+  }
+  const removeSources = () => {
+    fx?.querySelectorAll('[data-src]').forEach((e) => e.remove())
+    opened?.classList.remove('is-open', 'answer-tint-open')
+    opened = null
+  }
   const closeSource = () => {
     removeSources()
     shownFor = null
   }
-  // the source of a value, as thimble shows it: its captured label, below the value. `demo`: the demo's, removed with it
+  // the source of a value, as thimble shows it: its captured label (examples.json `pops`, by the citation's place),
+  // below the value, which is tinted as an open citation is. `demo`: the demo's, removed with it
   const showSource = (chip: Element, { demo = false } = {}): HTMLElement | null => {
     removeSources()
     const ref = chip.getAttribute('data-ref') || chip.getAttribute('data-tour-ref') || ''
-    const table = (run?.els?.real === false && snaps.popsPlain) || snaps.pops
+    const table = snaps.pops
     const html = table && typeof table === 'object' ? table[ref] : undefined
     if (!html) return null
+    if (chip.classList.contains('mark')) openOn(chip)
     const el = snap(null, null, html).firstElementChild as HTMLElement
     el.dataset[demo ? 'demo' : 'src'] = '1'
     if (demo) el.dataset.src = '1'
@@ -1119,6 +1143,17 @@ export function createTour(snaps: Snaps): Tour {
     const below = c.y + c.height + 6
     const top = below + eh > innerHeight - 12 ? Math.max(12, c.y - eh - 6) : below
     Object.assign(el.style, { left: `${left}px`, top: `${top}px` })
+    return el
+  }
+
+  const showBeside = (chip: Element, el: HTMLElement, at: { x: number; y: number }, { demo = false } = {}): HTMLElement => {
+    removeSources()
+    openOn(chip)
+    el.dataset.src = '1'
+    if (demo) el.dataset.demo = '1'
+    el.classList.add('tour-in')
+    fx.append(el)
+    Object.assign(el.style, { position: 'absolute', left: `${Math.max(12, Math.min(innerWidth - el.offsetWidth - 12, at.x))}px`, top: `${Math.max(12, Math.min(innerHeight - el.offsetHeight - 12, at.y))}px` })
     return el
   }
 

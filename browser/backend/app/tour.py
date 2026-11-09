@@ -1,7 +1,7 @@
 """The product tour's first-launch state: tour.json in thimble's home, one offer for the person. Each dashboard the page
 opens offers the tour until the analyst answers the offer, and the page records here that they did, whatever they chose,
-so a page no one looked at (one opened as the server started) does not use the offer up; Settings replays the tour at
-any time without reading this.
+so a page no one looked at (one opened as the server started) does not use the offer up; /tour in the chat
+(chat/commands.ts) replays the tour at any time without reading this.
 
 The answer is written in this server's home ($THIMBLE_HOME/tour.json: THIMBLE_HOME, else ~/.thimble) and read from each
 of thimble's homes on this machine (homes): this server's, the browser workbench's (THIMBLE_BROWSER_HOME, else
