@@ -606,8 +606,10 @@
   color: var(--status-negative);
   font: var(--type-body-sm);
 }
+/* the buttons go onto a second row in a window too narrow for them */
 .problem-foot {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
   margin-top: 2px;

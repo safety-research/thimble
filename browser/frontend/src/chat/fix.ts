@@ -63,6 +63,7 @@ export interface FixRow {
 }
 
 export interface FixStatus {
+  /** why fixes cannot be made here, '' where /thimble-fix works (backend fixes.problem) */
   problem: string
   fixes: FixRow[]
 }
