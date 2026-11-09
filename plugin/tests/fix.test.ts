@@ -4,7 +4,7 @@
 // shows; no fix starts from Claude's words; Claude can neither apply nor send a fix, the fixer included, whose shell
 // runs in the sandbox the kernel describes and whose writes stay in its copy; the fixer's end puts the fix's line above
 // the bar and sends a notification; d shows what changed; y applies it with a secret only that press holds and reloads
-// the plugins. All data is made up. `claude plugin test plugin`.
+// the plugins, and the line then offers u to undo it. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { fixKey, fixLineRows } from '../fix/line'
@@ -84,6 +84,10 @@ function setup() {
       if (!JSON.parse(files.get(`${HOME}/fixes/asks/1.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix apply: only the person's key press in thimble does that" }
       Object.assign(fix, { state: 'on', work: null })
       return ok({ id: 1, reload: true, version: '0.10.2+fix.c0ffee1' })
+    }
+    if (verb === 'undo') {
+      Object.assign(fix, { state: 'off' })
+      return ok({ id: 1, title: fix.title, reload: true, version: '0.10.2' })
     }
     if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.2', newer: false })
     return ok({})
@@ -242,7 +246,7 @@ test("a request forks the session into its copy with a text copy of the screen; 
   expect((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-7', command: 'thimble fix list' }, ran)).result.ran).toBe('thimble fix list')
 })
 
-test("the fixer's end: the line and a notification say it is fixed; d shows what changed; y applies it with the press's secret and reloads", async () => {
+test("the fixer's end: the line and a notification say it is fixed; d shows what changed; y applies it with the press's secret and reloads; u then undoes it", async () => {
   const s = setup()
   await requested(s)
   expect(s.verbs()).toContain('done 1 --summary - --title Bar says read for coverage')
@@ -283,9 +287,42 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(asked).toMatch(/"key":"[0-9a-f]{64}"/)
   expect(asked).not.toContain(String(apply?.stdin))
   expect(s.commands).toEqual(['reload-plugins'])
-  // once the fix is on and loaded, its line goes; the transcript keeps one line that says so
-  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // the reload loads the plugin again (its session start), and the line says the fix is on, with u to undo it
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
+  expect(keyButton(rows, 'u')).not.toBe(null)
   expect(await fixKey(s.$, 'y')).toBe(null)
+  // u: the fix goes off, and the plugins load again
+  await (await fixKey(s.$, 'u'))!.later()
+  expect(s.verbs()).toContain('undo 1')
+  expect(s.commands).toEqual(['reload-plugins', 'reload-plugins'])
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again')
+  expect(await fixKey(s.$, 'u')).toBe(null)
+})
+
+test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {
+  const s = setup()
+  await requested(s)
+  // Claude's turn runs (core/turn.ts keeps it in $.state)
+  const TURN = { plugin: 'thimble', key: 'mainTurn' }
+  await s.$.state.set(TURN, 't-main')
+  await (await fixKey(s.$, 'y'))!.later()
+  expect(s.commands).toEqual([])
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · reloads when Claude finishes · u undo')
+  // the turn's end runs the reload, and the plugin's new load keeps the line
+  await s.$.state.set(TURN, null)
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.commands).toEqual(['reload-plugins'])
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
+  expect(await fixKey(s.$, 'u')).not.toBe(null)
+  // the person's next prompt: the line goes, and u is typed as usual
+  await s.call('prompt.submit', { text: 'thanks', origin: { kind: 'composer' } }, async (e: Any) => e)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
   expect(await fixKey(s.$, 'u')).toBe(null)
 })
 
