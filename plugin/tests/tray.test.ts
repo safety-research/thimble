@@ -1,7 +1,8 @@
-// The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws
+// The cite and explain tray (tray/): ] at an empty prompt opens it on the newest answer's first citation, which draws
 // in focus; its card shows the check and the evidence; a question typed with it open carries nothing of it and closes
-// the tray; a press on a citation opens it too; 0 closes it; v closes it so the card shows, and a letter after v puts
-// it back; ] and [ reach a card where the reply draws it. All data is made up. `claude plugin test plugin`.
+// the tray; a press on a citation opens it too; 0 closes it; a press on an older answer's citation marks no answer, and
+// ] from rest still starts at the newest answer; v closes it so the card shows, and a letter after v puts it back; ]
+// and [ reach a card where the reply draws it. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
@@ -136,6 +137,36 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('failed: 12')
   expect(band).not.toContain('a ask')
+})
+
+// a second answer, newer than TEXT's, with a citation of its own
+const NEWER = 'Most of them, [9 of 12](#), ran on the old build.'
+const NEWER_CITE = {
+  n: 1, row: 'row-t2', words: '9 of 12', start: NEWER.indexOf('[9 of 12]'), end: NEWER.indexOf('[9 of 12]') + 12, sentence: NEWER, status: 'verified', shown: '9 of 12', reason: 'Line 2 says 9.',
+  evidence: { kind: 'quote', file: 'runs/builds.txt', line: '2', lines: [{ n: 2, text: 'old build: 9', highlight: [11, 12] }] },
+}
+
+test('a press on a citation of an older answer opens the tray and marks no answer; once 0 closes it, ] starts at the newest answer', CITES, async ($, on) => {
+  await resumed($, on, QUOTED, {
+    'marks/row-t2.json': JSON.stringify({ key: 'row-t2', turnId: 't2', rows: ['row-t2'], startedAt: 2, settledAt: 3, items: [NEWER_CITE] }),
+    'answers/t2.json': JSON.stringify({ v: 1, turn: { turnId: 't2', n: 2, prompt: { text: 'which build?', by: 'composer', row: 'row-q2' }, rows: ['row-t2'], answer: 'row-t2', reason: 'answer', startedAt: 2, endedAt: 3, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t2', turnId: 't2', text: NEWER, at: 3 }] }),
+  })
+  // a press on the older answer's citation opens the tray on it
+  const cite = all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
+  const ui = await $.ui.mount(answer('row-t1', TEXT))
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  expect(textOf(await $.ui.render(above()))).toContain('failed: 12')
+  // 0 closes it, and the older answer keeps its ●: nothing stands in its place
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  const older = textOf(await $.ui.render(answer('row-t1', TEXT)))
+  expect(older).toContain('●')
+  expect(older).not.toContain('▸')
+  // from rest, ] opens the newest answer's citation, not the older one again
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('old build: 9')
+  expect(band).not.toContain('failed: 12')
 })
 
 test('v with the tray open closes it, so the card that draws under the answer shows; a letter right after v puts it back', CITES, async ($, on) => {

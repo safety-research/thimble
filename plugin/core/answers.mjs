@@ -7,7 +7,6 @@
 //   sinceLastPrompt(turns)        -> since the person's last prompt: that prompt, the text rows after it in order, and
 //                                    the answers among them (each turn's last text row; a turn that ended in an error
 //                                    answered nothing)
-//   stepFrom(list, at, dir)       -> the row `dir` steps from `at` in `list`, or null past either end
 //   oneLine(text, n)              -> text on one line, cut to n characters
 
 /** A word that names a label in a command: what `thimble label` takes (engine/kernel/labels.py names). */
@@ -75,14 +74,6 @@ export function sinceLastPrompt(turns) {
   const replies = after.map(t => t?.answer).filter(r => typeof r === 'string' && r)
   const p = last >= 0 ? list[last].prompt : null
   return { prompt: p ? { row: p.row ?? null, text: String(p.text || '') } : null, rows, replies }
-}
-
-/** The item `dir` (1 or -1) steps from `at` in `list`; from an item not in the list, the last (-1) or nothing (1). */
-export function stepFrom(list, at, dir) {
-  const xs = Array.isArray(list) ? list : []
-  const i = at == null ? -1 : xs.indexOf(at)
-  const to = i < 0 ? (dir < 0 ? xs.length - 1 : -1) : i + dir
-  return to >= 0 && to < xs.length ? xs[to] : null
 }
 
 /** Text on one line, each run of white space one space, cut to `n` characters with `…`. */
