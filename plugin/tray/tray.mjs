@@ -8,10 +8,12 @@
 //   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id})
 //   a tray    {stack: [frame, ...]} or null
 //   a stop    what ] and [ move through, in reading order: a mark of a row ({row, kind, n | id, at}) or a card ({row,
-//             card}): drawn under a row (v's), or drawn inline at a call of Claude's, with the row next to it
+//             card}): on a line of the row's text, drawn under a row (v's, and a catch-up's or a simpler version's), or
+//             drawn inline at a call of Claude's, with the row next to it
 //
 //   sameRef(a, b), open(f), push(tray, f), back(tray), top(tray), base(tray)
-//   stopsOfRow(row, cites, spans, cards)   one row's stops: its citations and spans by where they stand, then its cards
+//   stopsOfRow(row, cites, spans, cards, placed)   one row's stops: its citations, spans and the cards on lines of its
+//                                          text by where they stand, then the cards under it
 //   stopsOfTurn(rows, stopsOf, inline)     a turn's stops: its rows' and the cards Claude drew between them
 //   rowsOf(line, width)                    the rows a line takes when it wraps
 //   indexOf(list, at), stepFrom(list, k, dir), restStop(pool, dir)   where ] and [ go next, and from rest
@@ -73,13 +75,13 @@ export const top = tray => (tray && Array.isArray(tray.stack) && tray.stack.leng
 export const base = tray => (tray && Array.isArray(tray.stack) && tray.stack.length ? tray.stack[0] : null)
 
 /**
- * One row's stops in reading order: its citations (`cites`: [{n, start, words}], n > 0, a citation the check knows) and
- * the features' spans on its words (`spans`: [{id, kind, start, end}], an explainer or a heads-up), by where each
- * starts, then the cards drawn under it (`cards`: their ids, oldest first). An explainer or a heads-up on a citation's
- * words, or over them, stops before that citation, as a click on the words opens it first: ] then goes on to the
- * citation.
+ * One row's stops in reading order: its citations (`cites`: [{n, start, words}], n > 0, a citation the check knows),
+ * the features' spans on its words (`spans`: [{id, kind, start, end}], an explainer or a heads-up) and the cards its
+ * text places on lines of their own (`placed`: [{id, at}], `at` where the line starts), by where each starts; then the
+ * cards drawn under it (`cards`: their ids, in the order they draw). An explainer or a heads-up on a citation's words,
+ * or over them, stops before that citation, as a click on the words opens it first: ] then goes on to the citation.
  */
-export function stopsOfRow(row, cites, spans, cards) {
+export function stopsOfRow(row, cites, spans, cards, placed) {
   const known = (cites || []).filter(c => c && c.n > 0)
   const end = c => (typeof c.end === 'number' ? c.end : c.start + 1 + (typeof c.words === 'string' ? c.words.length : 0))
   const under = s => known.filter(c => c.start < s.end && s.start < end(c)).map(c => c.start)
@@ -92,13 +94,24 @@ export function stopsOfRow(row, cites, spans, cards) {
     }),
   ].sort((a, b) => a.at - b.at || (a.kind === 'citation' ? -1 : 1))
     .map(m => ({ ...m, at: Math.ceil(m.at) }))
-  return [...marks, ...(cards || []).map(id => ({ row, card: id }))]
+  // a card on a line of the text stands before the marks under that line (a mark never starts on the card's line)
+  const lines = (placed || []).filter(c => c && c.id && typeof c.at === 'number').sort((a, b) => a.at - b.at)
+  const out = []
+  let k = 0
+  for (const m of marks) {
+    while (k < lines.length && lines[k].at < m.at) out.push({ row, card: lines[k++].id })
+    out.push(m)
+  }
+  for (; k < lines.length; k++) out.push({ row, card: lines[k].id })
+  return [...out, ...(cards || []).map(id => ({ row, card: id }))]
 }
 
 /**
- * A turn's stops in reading order: each text row's stops (`stopsOf(row)`: its marks, then the cards drawn under it),
- * with the cards Claude drew inline between them (`inline`: [{id, after}], `after` the number of the turn's text rows
- * above the card's call). A card drawn before the first text row goes with that row, one after a row with that row.
+ * A turn's stops in reading order: each text row's stops (`stopsOf(row)`: its marks and the cards on lines of its
+ * text, then the cards drawn under it), with the cards Claude drew inline between them (`inline`: [{id, after}],
+ * `after` the number of the turn's text rows above the card's call). A card drawn before the first text row goes with
+ * that row; one drawn after a row goes with that row, after the cards drawn under it, since the row draws them as part
+ * of it.
  */
 export function stopsOfTurn(rows, stopsOf, inline) {
   const out = []
@@ -106,12 +119,8 @@ export function stopsOfTurn(rows, stopsOf, inline) {
   const last = (rows || []).length - 1
   ;(rows || []).forEach((row, i) => {
     if (i === 0) for (const c of cards) if (!(c.after > 0)) out.push({ row, card: c.id })
-    const own = stopsOf(row) || []
-    const mine = own.filter(p => !p.card)
-    const under = own.filter(p => p.card)
-    out.push(...mine)
+    out.push(...(stopsOf(row) || []))
     for (const c of cards) if (c.after > 0 && (c.after === i + 1 || (i === last && c.after > last + 1))) out.push({ row, card: c.id })
-    out.push(...under)
   })
   return out
 }
