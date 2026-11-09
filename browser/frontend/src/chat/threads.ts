@@ -222,7 +222,8 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
       done: m.status === 'done' || m.status === 'failed' || m.status === 'stopped',
       parent: parentOf(m),
       lastTs: m.last_ts ?? m.ts_end ?? m.created_at,
-      ended: !agent || m.status === 'running' ? null : m.status === 'done' ? 'done' : m.status === 'failed' || m.status === 'stopped' ? 'failed' : null,
+      // an agent at work again (a fix's chat while the kernel checks its change) shows its spinner, not how it ended
+      ended: !agent || isRunning ? null : m.status === 'done' ? 'done' : m.status === 'failed' || m.status === 'stopped' ? 'failed' : null,
       endTs: m.ts_end ?? null,
       hidden: !shown && left,
       waiting,

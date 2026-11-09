@@ -231,6 +231,23 @@
   gap: 5px;
   min-width: 0;
 }
+/* the thread of a side thread's line (a writer, a dev ticket, a fix) shows its whole name: a name too long for the line
+   goes on to a second line in its chip, never cut */
+.chat-agent-note .chat-thread-chip {
+  align-items: flex-start;
+  justify-content: flex-start;
+  height: auto;
+  padding-block: 2px;
+  white-space: normal;
+  text-align: left;
+}
+.chat-agent-note .chat-thread-chip .chip-ico {
+  margin-top: 3px;
+}
+.chat-agent-note .chat-thread-chip .chip-text {
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
 /* the comment a thread is about, on its own line under the anchor's chip: its square and check's name start the text,
    which wraps under them, three lines at most */
 .chat-anchor-comment {
@@ -497,10 +514,12 @@ button.chat-call-chip:hover,
   margin-top: 2px;
 }
 /* the call chip, shared by a folded run of calls, its failed count and a subagent: a filled tonal chip at the size of
-   .chip-sans, its words in mono at 11.5, with a chevron that turns while open */
+   .chip-sans, its words in mono at 11.5, with a chevron that turns while open. Its words start at its left edge (a bare
+   button centers them), so words too long for it end in … at the right */
 .chat-callchip {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   box-sizing: border-box;
   min-width: 0;
@@ -610,29 +629,22 @@ button.chat-call-chip:hover,
 .chat-agent-head > .chat-callchip {
   flex: 0 1 auto;
 }
+/* a name too long for the chat's width ends in …, once its steps and time gave way */
 .chat-agent-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-primary);
   font-weight: 500;
 }
-/* an agent with a thread of its own keeps its state and the thread's link on the chip's line: its name gives way */
-.chat-agent-threaded {
-  flex-wrap: nowrap;
-}
-.chat-agent-threaded .chat-agent-name {
-  min-width: 6em;
+.chat-agent-target {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.chat-agent-threaded .chat-agent-meta {
-  flex: 0 1000 auto;
-}
-.chat-agent-threaded .chat-thread-chip {
-  flex: none;
-}
-.chat-agent-target {
   color: var(--text-secondary);
 }
 .chat-agent-meta {
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1982,10 +1994,10 @@ button.chat-strip-head:hover {
 .chat-notice-row[data-closed] .chat-notice-ico {
   color: var(--text-tertiary);
 }
-/* thimble fix (chat/FixStrip.tsx): one row above the composer while Claude works on the person's fix, a spinner and
-   its step on the card's surface; once it ended, a row in the chat where it ended, on the result's wash while it asks
-   (ready: positive, did not pass: warning), with a ready fix's buttons on a row of their own under the words; a row
-   with nothing left to ask is a quiet line */
+/* thimble fix (chat/FixStrip.tsx): how the person's fix ended, a row in the chat where it ended, on the card's surface
+   while thimble starts again with it (a spinner and its words), on the result's wash while it asks (ready: positive,
+   did not pass: warning), with a ready fix's buttons on a row of their own under the words; a row with nothing left to
+   ask is a quiet line */
 .chat-fix {
   display: flex;
   flex: none;

@@ -32,10 +32,11 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              registry's fixer text (plugin/prompts/fixer.md), the person's words and a text copy of what
                              the page shows. It runs with main's tools and Edit and Write, in the runtime's usual
                              sandbox, which writes only its copy and its temp folder (runtime.spec_of). It runs in the
-                             background, as a subagent of main in a chat of its own that the thread tree lists
+                             background, in a chat of its own that the thread tree lists as it lists a side thread
                              (`fixing <name>`, or `changing <name>` for a round of a fix the person has): main's chat
-                             shows it where main started it, as the card of a subagent with its steps (an `agent`
-                             record whose `run` is the round), and its thread shows its whole run
+                             shows it where main started it as a side thread's line (an `agent` record), and its
+                             thread shows its whole run. Its chat runs while the fixer works and while the kernel
+                             checks its change (_checking)
     its end (settle)         the kernel commits the change, refuses a change to the way back (the fix flow, the privacy
                              scan) or a binary file, and runs the checks of the parts of thimble the change touched
                              (`fix done`), as it checks the fixes an update puts back, one fix at a time; a fix that
@@ -124,7 +125,7 @@ _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarti
 _asked: dict[str, _Asking] = {}
 # workspace → each /thimble-fix posted there that no turn of main's read yet, by the id of the event that carries it
 _waiting: dict[str, dict[str, _Asking]] = {}
-_since: dict[int, float] = {}  # fix id → when this server's work on it began (a new fix, a round, a redo)
+_checks: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its chat, while the kernel checks the fix
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
 _recovered = False
@@ -299,7 +300,7 @@ def press(fid: int) -> str:
     return secret
 
 
-# ------------------------------------------------------------------ what the row above the composer says
+# ------------------------------------------------------------------ how a fix ended: a row of the chat
 
 
 def _notes() -> dict[str, dict[str, Any]]:
@@ -339,14 +340,6 @@ def _row(fid: int, kind: str, said: str) -> None:
         agents.Recorder(at[0], at[1]).record("chip", **rec)
 
 
-def runs_of(c: str, chat: str) -> int:
-    """How many runs the fix's chat holds: each opens with the person's words (fixer_chat), so the next run's card in
-    main (its `run`) shows that run's steps alone."""
-    from . import agents  # noqa: PLC0415
-
-    return sum(1 for e in agents.read_events(agents.paths(c, chat)[1]) if e.get("type") == "user")
-
-
 def dismiss(fid: int) -> None:
     notes = _notes()
     if str(fid) in notes:
@@ -365,13 +358,27 @@ def _event(fid: int, state: str) -> None:
 
 def _phase_set(fid: int, phase: str | None) -> None:
     if phase:
-        if fid not in _phase:
-            _since[fid] = time.time()
         _phase[fid] = phase
     else:
         _phase.pop(fid, None)
-        _since.pop(fid, None)
     _event(fid, phase or "idle")
+    _checking(fid, phase == "testing")
+
+
+def _checking(fid: int, on: bool) -> None:
+    """The fix's chat runs on while the kernel checks the fix, so the thread tree and main's line of the fix show it at
+    work until the fix's row says how it ended. The terminal's bar keeps `fixing <name>` until then too."""
+    from . import agents  # noqa: PLC0415
+
+    at = where(fid) if on else _checks.pop(fid, None)
+    if at is None:
+        return
+    if on:
+        _checks[fid] = at
+    try:
+        agents.set_running(at[0], at[1], on)
+    except Exception:  # noqa: BLE001 — the checks run all the same
+        log.warning("fix %s: its chat was not marked %s", fid, "running" if on else "idle", exc_info=True)
 
 
 def status(every: bool = False) -> dict[str, Any]:
@@ -409,9 +416,6 @@ def status(every: bool = False) -> dict[str, Any]:
                      "blocked": bool(r.get("blocked")),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
                      "agent": conv.agent_id if conv is not None else n.get("agent"),
-                     # the row's timer: since this server began the work it shows (a round of a fix made long ago
-                     # starts at 0), else since the fix was made
-                     "created": _since.get(fid) or float(r.get("created") or 0),
                      "at": max(float(r.get("updated") or 0), float(n.get("at") or 0))})
     rows.sort(key=lambda x: -x["at"])
     return {"problem": why, "fixes": rows}
@@ -572,7 +576,7 @@ def fixer_chat(c: str, rec: dict[str, Any], agent_id: str, sid: str, *, asked: s
         agents.update_agent(c, chat, title=title, status="running", ts_end=None, result=None, agent_id=agent_id,
                             session=sid)
         if announce:
-            agents.mirror(c, "agent", chat=chat, role=FIXER, title=title, by=agents.BROWSER, run=runs_of(c, chat))
+            agents.mirror(c, "agent", chat=chat, role=FIXER, title=title, by=agents.BROWSER)
     if (asked or "").strip():
         agents.Recorder(c, chat).record("user", text=str(asked).strip(), by=agents.BROWSER)
     elif had is not None:
@@ -1075,10 +1079,9 @@ async def change(c: str, fid: int, words: str, page: str = "", *, said: str | No
         if said:
             agents.mirror(c, "user", by=agents.BROWSER, text=said)
         if at is not None:
-            run = runs_of(at[0], at[1])
             agents.Recorder(at[0], at[1]).record("user", text=words, by=agents.BROWSER)
             if announce:
-                agents.mirror(c, "agent", chat=at[1], role=FIXER, title=fixing_word(rec), by=agents.BROWSER, run=run)
+                agents.mirror(c, "agent", chat=at[1], role=FIXER, title=fixing_word(rec), by=agents.BROWSER)
         conv.queue.append(round_text(rec, words))
         live = True
     else:
