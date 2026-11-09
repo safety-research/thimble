@@ -33,6 +33,11 @@ const sectionOn = (feature: string) => (feature === 'cites' ? claudeCites() : fe
 /** A citation in the guidance's examples: a markdown link to `#`. */
 const MARK = /\[([^\]]*)\]\(#\)/g
 
+/** The sentences modesNow adds at the end (the last one opens a list of what comes only when the analyst asks). */
+const ON_DEMAND = 'Draw a card only when the analyst asks for one.'
+const CARDS_OFF = 'Cards are off, so draw no cards.'
+const ASKED = 'These come only when the analyst asks:'
+
 /** guidance.md as a conversation gets it, with `on(feature)` saying which features are on, and `modes` the sentences
  *  that say which modes are on (modesNow). */
 export function guidanceFor(text: string, on: (feature: string) => boolean, modes: string[] = []): string {
@@ -52,9 +57,9 @@ export function modesNow(): string[] {
   ].filter(Boolean) as string[]
   const list = asked.length > 1 ? `${asked.slice(0, -1).join(', ')} and ${asked.at(-1)}` : asked[0]
   return [
-    ...(choiceOf('cards') === 'on demand' ? ['Draw a card only when the analyst asks for one.'] : []),
-    ...(choiceOf('cards') === 'off' ? ['Cards are off, so draw no cards.'] : []),
-    ...(list ? [`These come only when the analyst asks: ${list}.`] : []),
+    ...(choiceOf('cards') === 'on demand' ? [ON_DEMAND] : []),
+    ...(choiceOf('cards') === 'off' ? [CARDS_OFF] : []),
+    ...(list ? [`${ASKED} ${list}.`] : []),
   ]
 }
 
@@ -66,11 +71,20 @@ export async function cardsGuidance($: Engine): Promise<string> {
   return (part ?? '').replace(/^## .*\n/, '').trim()
 }
 
-/** Whether the conversation's next request already holds this text (as context the engine framed around it). */
+/** Whether the newest copy of the guidance in the conversation's next request (as context the engine framed around it)
+ *  is this text. Only the newest counts, since Claude goes by the last copy it read: a switch changed and changed back
+ *  makes a text an older copy holds, as Cards on demand's copy holds Cards auto's, while the copy between them says
+ *  that cards are off. A copy is a user text that holds the guidance's first line, and it is this text when it holds
+ *  the text and no sentence of modesNow's that the text does not have. */
 async function holds($: Engine, text: string): Promise<boolean> {
   const messages = await $.session.messages({ as: 'api' })
   if (!Array.isArray(messages)) return false
-  return messages.some(m => m.role === 'user' && m.content.some(b => b.type === 'text' && typeof b.text === 'string' && b.text.includes(text)))
+  const plain = (s: string) => s.replace(MARK, '$1')
+  const first = plain(text.split('\n', 1)[0])
+  const copies = messages.filter(m => m.role === 'user').flatMap(m => m.content)
+    .filter(b => b.type === 'text' && typeof b.text === 'string' && plain(b.text).includes(first))
+  const newest = copies.at(-1)?.text
+  return typeof newest === 'string' && newest.includes(text) && [ON_DEMAND, CARDS_OFF, ASKED].every(m => text.includes(m) || !newest.includes(m))
 }
 
 export const registerGuidance: Register = on => {
