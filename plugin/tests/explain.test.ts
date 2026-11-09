@@ -2,7 +2,7 @@
 // press, on a faint version of the theme's teal and orange, and on the full one while the tray shows it; e explains the words selected in an answer, and with Citations manual, c makes
 // them a citation. While the tour waits for its selection step, the explainer shown is that step done. Until the tour's
 // cite step, an explainer's links are words and c cites nothing. After a tour, a link to its orders.csv opens the
-// plugin's copy of the file.
+// plugin's copy of the file, and e in its sample answer gives the explainer's writer the lines of that copy.
 // All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
@@ -16,20 +16,20 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, resetExplain, type ExplainPart } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { trayBar, trayKey, trayNow } from '../tray/tray'
-import { readText, withAsked } from '../marks/message.js'
+import { citedText, readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeBar, citeKey, citeWords } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { noteViewport } from '../cards/draw'
-import { tourDid, tourHoldsCites, tourNow, tourStart } from '../tour/tour'
+import { registerTour, tourDid, tourHoldsCites, tourNow, tourStart } from '../tour/tour'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-function setup(replies: Any[], o: { complete?: Any } = {}) {
+function setup(replies: Any[], o: { complete?: Any; tour?: boolean } = {}) {
   resetAnswers()
   resetObserver()
   resetExplain()
@@ -45,6 +45,8 @@ function setup(replies: Any[], o: { complete?: Any } = {}) {
   registerAnswers(on, {} as never)
   registerObserver(on, {} as never)
   registerExplain(on, {} as never)
+  // the tour's hooks: main's turn that ends while the tour waits for its sample answer holds that answer
+  if (o.tour) registerTour(on, {} as never)
   const state = new Map<string, { value: unknown; version: number }>()
   const files = new Map<string, string>()
   const calls: Any[] = []
@@ -246,6 +248,29 @@ test("after a tour, a link to the tour's orders.csv opens its lines from the plu
   expect(await placeLines(s.$, 'orders.csv', 2, 2)).toEqual([{ n: 2, text: 'mine' }])
 })
 
+test("e in the tour's sample answer gives the explainer's writer the lines of the tour's orders.csv, which the answer names and does not link; e in another answer that names it gives none", async () => {
+  setOptions({})
+  noteViewport({ isFullscreen: true })
+  const s = setup([LOOK], { complete: reply({ body: 'One of the three kinds of product.', here: '' }), tour: true })
+  s.$.ui.place = async () => ({ isPlaced: true, requestId: 'r-made-up' })
+  s.files.set('/made-up/plugin/tour/sample/orders.csv', 'order_id,product\nF-1001,Loose-leaf tin\nF-1002,Gift box\n')
+  const named = 'Customers placed 2 orders (`orders.csv`). Loose-leaf tins were most of the orders. Gift boxes made up the rest.'
+  // an answer of the person's own: its explainer is written from the conversation, which holds what Claude read
+  await answered(s, { id: 't1', prompt: 'What is in orders.csv?', text: named })
+  await pressE(s, { text: 'Gift boxes', requestId: 't1-row' })
+  expect(s.calls[0].prompt).toContain('The term: Gift boxes')
+  expect(s.calls[0].prompt).not.toContain('The files the answer cites')
+  // the tour's sample answer, which Claude wrote without reading the file: its explainer's writer, which reads no file
+  // itself, reads the lines of the plugin's copy
+  await tourStart(s.$)
+  await answered(s, { id: 't2', prompt: '/thimble:tour', text: named })
+  expect((await tourNow(s.$))?.at).toBe('e')
+  await pressE(s, { text: 'Loose-leaf tins', requestId: 't2-row' })
+  expect(s.calls[1].prompt).toContain('The term: Loose-leaf tins')
+  expect(s.calls[1].prompt).toContain('The files the answer cites, with their line numbers:\n--- orders.csv (lines 1–4 of 4)\n    1  order_id,product\n    2  F-1001,Loose-leaf tin\n    3  F-1002,Gift box')
+  expect((await tourNow(s.$))?.at).toBe('v')
+})
+
 test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {
   setOptions({ citations: 'manual' })
   try {
@@ -265,8 +290,10 @@ test('with Citations manual, c makes the selected words a citation of their answ
     const item = (await rowMarks(s.$, 't1-row'))!.items[0]!
     expect(item).toMatchObject({ n: 1, row: 't1-row', words: '41 of the 44 failures', asked: true, sentence: expect.stringContaining('[41 of the 44 failures]') })
     expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
-    // the answer reads the words as a citation; squeeze and the claims read them as plain words
+    // the answer reads the words as a citation, and so does the original a simpler version keeps the citations of;
+    // the claims read them as plain words
     expect(withAsked(plain, [item]).text).toContain('out: [41 of the 44 failures](#) came')
+    expect(citedText(plain, [item])).toMatchObject({ text: plain.replace('**41 of the 44** failures', '[41 of the 44 failures](#)'), asked: ['41 of the 44 failures'] })
     expect(readText(plain, [item])).toBe(plain.replace('**41 of the 44** failures', '41 of the 44 failures'))
     // once cited, the same selection no longer waits: c is typed and the bar does not name it until words are
     // selected anew

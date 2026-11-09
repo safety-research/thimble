@@ -19,7 +19,7 @@ usage() {
 Usage: install.sh [--no-browser] [--sign-in claude-code|api-key|wif] [--wif-file PATH] [--bin-dir DIR] [--ref REF]
                   [--local] [--remove-0.9]
 
-Installs thimble in ~/.thimble: the newest release, its plugin for Claude Code, and its browser workbench (about 1 GB).
+Installs thimble in ~/.thimble: the newest release, its plugin for Claude Code, and its browser workbench (about 2 GB).
 It checks first what thimble needs, and installs nothing while something is missing. Run it again at any time: an
 install in ~/.thimble stays as it is, with your fixes, and thimble update moves it to a newer release.
 
