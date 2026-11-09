@@ -43,7 +43,8 @@ type Engine = EngineInterface
 export type Prompt = { text: string; by: string; row: string | null; command?: string }
 export type LabelUse = { name: string; args: string[]; toolUseId: string; seq: number; ok: boolean }
 /** A card a card call of the turn drew: `after`, how many of the turn's text rows stand above it (the card draws at
- *  its call; a version drawn in an earlier call's place keeps that place). */
+ *  its call, unless a reply places it on a line of its own, cards/store.ts CardMeta.inRow; a version drawn in an
+ *  earlier call's place keeps that place). */
 export type CardUse = { id: string; toolUseId: string; seq: number; after?: number }
 export type TurnRec = {
   turnId: string; n: number; prompt: Prompt; rows: string[]; answer: string | null; reason: string | null

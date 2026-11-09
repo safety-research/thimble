@@ -1,7 +1,7 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws
 // in focus; its card shows the check and the evidence; a question typed with it open carries nothing of it and closes
 // the tray; a press on a citation opens it too; 0 closes it; v closes it so the card shows, and a letter after v puts
-// it back. All data is made up. `claude plugin test plugin`.
+// it back; ] and [ reach a card where the reply draws it. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
@@ -163,4 +163,42 @@ test('v with the tray open closes it, so the card that draws under the answer sh
   await $.prompt.edit(key('v'))
   await clock.advance(1000)
   expect(textOf(await $.ui.render(above()))).not.toContain('✓ verified')
+})
+
+// a reply that places a card on a line of its own after its first paragraph (Claude drew the card before it wrote the
+// reply), with a citation above the card and one under it
+const CARD = 'c0a1b2c3d4'
+const PLACED = `${TEXT}\n\n[Runs by status](card:${CARD})\n\nThe slowest run took [41 s](#).`
+const SLOWEST = {
+  n: 2, row: 'row-t1', words: '41 s', start: PLACED.indexOf('[41 s]'), end: PLACED.indexOf('[41 s]') + 9, sentence: 'The slowest run took [41 s](#).', status: 'verified', shown: '41 s', reason: 'Line 9 says 41 s.',
+  evidence: { kind: 'quote', file: 'runs/summary.txt', line: '9', lines: [{ n: 9, text: 'slowest: 41 s', highlight: [9, 13] }] },
+}
+
+test('] and [ walk the citations and the card in the order the reply draws them: a card it places after its first paragraph stands after that paragraph\'s citation, though Claude drew it before the reply', CITES, async ($, on) => {
+  await resumed($, on, QUOTED, {
+    'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [QUOTED, SLOWEST] }),
+    // the card's call came before the reply's text: none of the turn's text rows stands above it
+    'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [{ id: CARD, toolUseId: 'toolu_made_up_c1', seq: 1, after: 0 }], seq: 1 }, msgs: [{ row: 'row-t1', turnId: 't1', text: PLACED, at: 1 }] }),
+    [`cards/${CARD}/meta.json`]: JSON.stringify({ id: CARD, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_c1', turn: 't1', agentId: null, anchorRow: null, inRow: 'row-t1', callsBeforeRow: ['toolu_made_up_c1'], keys: [], read: '40 rows', columns: ['run', 'status'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_c1: { version: 1, title: 'Runs by status', file: 'runs.json', read: '40 rows' } }, at: 1 }),
+  })
+  const step = async (k: string) => {
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+    return textOf(await $.ui.render(above()))
+  }
+  // from rest, ] opens the citation above the card, and names the card as the next stop
+  let band = await step(']')
+  expect(band).toContain('12 of 40')
+  expect(band).toContain('] next card')
+  // ] reaches the card under the first paragraph, which takes the keys
+  band = await step(']')
+  expect(band).toContain('a ask · ] next citation · 0 back')
+  // ] goes on to the citation under the card, the last stop; [ goes back through the card to the first citation
+  band = await step(']')
+  expect(band).toContain('41 s')
+  expect(band).toContain('[ previous card')
+  band = await step('[')
+  expect(band).toContain('a ask · ] next citation · 0 back')
+  band = await step('[')
+  expect(band).toContain('12 of 40')
+  expect(band).toContain('] next card')
 })

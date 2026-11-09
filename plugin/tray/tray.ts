@@ -3,9 +3,10 @@
 //
 // It shows one mark at a time, the top of a stack (tray.mjs): a citation with its check and its evidence, or an
 // explainer (what a term is, where it mattered here) or an important detail (a heads-up). ] and [ at an empty prompt
-// step through the answers' citations, explainers, heads-ups and cards (drawn inline at Claude's calls, or under an
-// answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
-// reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
+// step through the answers' citations, explainers, heads-ups and cards, in the order the conversation draws them (a
+// heads-up on a citation's words before the citation; a card where it is drawn: on the line of a reply that places it,
+// under an answer by v, or at Claude's call), and open the tray on the one reached; a press on a citation or an
+// explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the mark it
 // opens (`] show explainer` for the answer's first mark, `] next citation` for a later one; on a narrow bar
 // `] explainer`, then `]` alone): while one of the answer's marks is not opened, the first such, its verb in
@@ -77,14 +78,14 @@ import { partsAround, printable } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
-import { anchoredAt, metaOf, setFocus } from '../cards/store'
+import { anchoredAt, metaOf, setFocus, type CardMeta } from '../cards/store'
 import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, errorWordsOf, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
-import { marksIn, plainSentence, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
+import { blocks, cardRef, marksIn, plainSentence, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
@@ -248,16 +249,38 @@ async function spansOf($: Engine, row: string, shown: { text: string; marks: { s
     .map(s => ({ ...s, kind: part?.items?.[s.id]?.kind === 'heads' ? 'heads' as const : 'explain' as const }))
 }
 
-/** One row's stops: its marks in reading order, then the cards drawn under it (v's). */
-async function rowStops($: Engine, row: string): Promise<Stop[]> {
+/** The cards a text places on lines of their own, each at where its line starts, as the reply draws them (marks/view.ts
+ *  messageEl: a paragraph that is only a card's link, marks/message.js cardRef); a card once, at its first line. */
+function cardLines(text: string): { id: string; at: number }[] {
+  const out: { id: string; at: number }[] = []
+  for (const b of blocks(text) as { type: string; start: number; end: number }[]) {
+    const id = b.type === 'para' ? cardRef(text.slice(b.start, b.end)) : null
+    if (id && !out.some(c => c.id === id)) out.push({ id, at: b.start })
+  }
+  return out
+}
+
+/** The row a card placed on a line of its own draws in (CardMeta.inRow): that row, or the row a catch-up or a simpler
+ *  version that places it stands under (`<row>#cu`, `<row>#s`: squeeze/term.ts cuId, simpleId). */
+const rowOfPlace = (inRow: string): string => inRow.replace(/#(cu|s)$/, '')
+
+/** One row's stops: its marks and the cards its text places on lines of their own, in reading order (a card where its
+ *  line stands: v's card under this answer, or one of Claude's that this row placed last, as cards/draw.ts framesIn
+ *  draws them), then the cards drawn under it: v's, then those of the catch-up or simpler version under it (`block`). */
+async function rowStops($: Engine, row: string, block: string[] = []): Promise<Stop[]> {
   const shown = await shownOf($, row)
   if (!shown) return []
+  const placed: { id: string; at: number }[] = []
+  for (const c of cardLines(shown.text)) {
+    const m = await metaOf($, c.id)
+    if (m && m.version > 0 && (m.anchorRow ? m.anchorRow === row : m.inRow === row) && !(await hiddenCard($, c.id))) placed.push(c)
+  }
   const cards: string[] = []
   for (const id of await anchoredAt($, row)) {
     const m = await metaOf($, id)
-    if (m && m.version > 0 && m.anchorRow === row && !(await hiddenCard($, id))) cards.push(id)
+    if (m && m.version > 0 && m.anchorRow === row && !placed.some(c => c.id === id) && !(await hiddenCard($, id))) cards.push(id)
   }
-  return stopsOfRow(row, await citesOf($, row, shown), await spansOf($, row, shown), cards) as Stop[]
+  return stopsOfRow(row, await citesOf($, row, shown), await spansOf($, row, shown), [...cards, ...block], placed) as Stop[]
 }
 
 /** The marks of the answer `row` stands in (its turn's text rows), as ] passes them, in reading order: no cards. */
@@ -297,12 +320,14 @@ async function hiddenCard($: Engine, id: string): Promise<boolean> {
 
 /** The cards Claude drew inline in a turn, each where its call stands among the turn's text rows (core/answers.ts
  *  CardUse.after; a card whose place was not kept goes after the turn's last row). A card stands in the turn of the call
- *  it draws at. */
-async function inlineCards($: Engine, t: TurnRec): Promise<{ id: string; after: number }[]> {
+ *  it draws at. A card a reply placed on a line of its own (CardMeta.inRow, in one of the rows `kept`) draws there, not
+ *  at its call, so it stands there (rowStops). `metas`: the cards, by id. */
+async function inlineCards($: Engine, t: TurnRec, metas: Map<string, CardMeta | null>, kept: Set<string>): Promise<{ id: string; after: number }[]> {
   const out: { id: string; after: number }[] = []
   for (const c of t.cards ?? []) {
-    const m = await metaOf($, c.id)
+    const m = metas.get(c.id)
     if (!m || !(m.version > 0) || m.anchorRow || out.some(x => x.id === c.id)) continue
+    if (m.inRow && kept.has(rowOfPlace(m.inRow))) continue
     if (m.turn ? m.turn !== t.turnId : m.toolUseId !== c.toolUseId) continue
     if (await hiddenCard($, c.id)) continue
     out.push({ id: c.id, after: typeof c.after === 'number' ? c.after : t.rows.length })
@@ -310,14 +335,26 @@ async function inlineCards($: Engine, t: TurnRec): Promise<{ id: string; after: 
   return out
 }
 
-/** What ] and [ move through, in reading order: each turn's text rows' marks, the cards Claude drew between them, and
- *  the cards under a row. */
+/** What ] and [ move through, in the order the conversation draws them: each turn's text rows' marks and the cards on
+ *  lines of their text, the cards Claude drew at calls between them, and the cards under a row. */
 async function allStops($: Engine): Promise<Stop[]> {
+  const turns = await turnsNow($)
+  const kept = new Set(turns.flatMap(t => t.rows))
+  const metas = new Map<string, CardMeta | null>()
+  for (const t of turns) for (const c of t.cards ?? []) if (!metas.has(c.id)) metas.set(c.id, await metaOf($, c.id))
+  // the cards a catch-up or a simpler version places on lines of its own: under the row it stands under, in the order
+  // Claude drew them
+  const inBlock = new Map<string, string[]>()
+  for (const m of metas.values()) {
+    if (!m || !(m.version > 0) || m.anchorRow || !m.inRow || rowOfPlace(m.inRow) === m.inRow) continue
+    const row = rowOfPlace(m.inRow)
+    if (kept.has(row) && !(await hiddenCard($, m.id))) inBlock.set(row, [...(inBlock.get(row) ?? []), m.id])
+  }
   const out: Stop[] = []
-  for (const t of await turnsNow($)) {
+  for (const t of turns) {
     const byRow = new Map<string, Stop[]>()
-    for (const row of t.rows) byRow.set(row, await rowStops($, row))
-    out.push(...(stopsOfTurn(t.rows, (row: string) => byRow.get(row) ?? [], await inlineCards($, t)) as Stop[]))
+    for (const row of t.rows) byRow.set(row, await rowStops($, row, inBlock.get(row)))
+    out.push(...(stopsOfTurn(t.rows, (row: string) => byRow.get(row) ?? [], await inlineCards($, t, metas, kept)) as Stop[]))
   }
   return out
 }
