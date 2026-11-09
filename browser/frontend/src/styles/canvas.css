@@ -1139,7 +1139,7 @@ audio.bcell-media {
 .bcell-label-head .bcell-label-meta {
   flex: 0 1 auto;
 }
-/* the small tag that says the card is a label's, first on its label row */
+/* the small grey tag with thimble's logo on a label's edit card (files/LabelsHelp ThimbleTag) */
 .bcell-kind-tag {
   flex: none;
   display: inline-flex;
@@ -1153,11 +1153,8 @@ audio.bcell-media {
   text-transform: uppercase;
   color: var(--text-secondary);
 }
-.bcell-label-head .bcell-kind-tag {
-  align-self: center;
-}
-/* a label card's label row under its question: the Label tag and the label's tag together, then what it says of the
-   label, which goes to a line of its own where the row is too narrow for it */
+/* a label card's label row under its question: the label's tag, then what it says of the label, which goes to a line
+   of its own where the row is too narrow for it */
 .bcell-label-row {
   gap: 2px 8px;
 }

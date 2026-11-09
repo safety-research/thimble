@@ -8,12 +8,13 @@
 
 Kinds: `prompt` sends units to the labels role's model in batches through the claude CLI (model.structured, `labels`
 tool); `regex` matches a pattern, in the scan pool (concept_scan.py) for file units; `code` runs a Python `label(unit)`
-in a dedicated kernel. Units: `record` (a line, `<path>#L<n>`), `agent` (a file), `run` (a run directory), `cell` (a
-card, `card:<id>`, `cell:<id>` read as the same unit) and `span` (a report sentence). An apply runs as a background task
-whose run record streams on GET .../events. A whole file (`agent`, a label that marks files) reaches code as the file
-whole (`data`, build_code_wrapper) beside its records, and a prompt as its records' texts, or a JSON document as itself,
-as far as its model's context holds (whole_read_chars), a JSON document shortened to fit (iter_units, fit_json); either
-up to WHOLE_MAX_BYTES. A run that reads some only in part keeps them as its `cut` (read_cut).
+in a dedicated kernel. Units: `record` (a line, `<path>#L<n>`), `agent` (a file), `run` (a run directory) and `span` (a
+report sentence). A label over cards (unit `cell`), which thimble made before 1.0, is no label now: read_concept leaves
+it out, and its files stay as they were. An apply runs as a background task whose run record streams on GET
+.../events. A whole file (`agent`, a label that marks files) reaches code as the file whole (`data`,
+build_code_wrapper) beside its records, and a prompt as its records' texts, or a JSON document as itself, as far as its
+model's context holds (whole_read_chars), a JSON document shortened to fit (iter_units, fit_json); either up to
+WHOLE_MAX_BYTES. A run that reads some only in part keeps them as its `cut` (read_cut).
 
 Trials: apply_label with a `limit` defines a trial (`trial: true`), left out of the Labels list and label counts until
 a run without a limit makes it a label; a limited run over files samples its units across files (trial_sample).
@@ -116,8 +117,8 @@ def _emit(c: str, event: dict) -> None:
 def _notify(c: str, concept_id: str, what: str, rows: bool = True) -> None:
     """`concepts {concept, what, rows, scope, shown}` on the workspace stream after a label is defined, changed, applied
     or deleted; `rows` False when its rows stay as they were (turned on or off, recoloured, a filter set), so the marks
-    read from them need not be read again. `scope` (files, canvas or report) and `shown` (on in Files) say where the
-    label shows, so the Files tab's dot lights only for marks that appear in Files; both are left out once the label is
+    read from them need not be read again. `scope` (files or report) and `shown` (on in Files) say where the label
+    shows, so the Files tab's dot lights only for marks that appear in Files; both are left out once the label is
     gone."""
     event: dict[str, Any] = {"type": "concepts", "concept": concept_id, "what": what, "rows": rows}
     try:
@@ -138,8 +139,10 @@ PALETTE = 12              # label colours --label-1..12, which new values take; 
 PICKS = 18                # the colours a value can hold: --label-1..18, 13 to 18 (red, purple, pink) only when picked
 QUIET_VALUES = frozenset({"no", "none", "other", "no match", "not", "neither", "n/a", "unknown"})  # values that say nothing
 LEFTOVER_WORDS = frozenset({"no", "not", "none", "neither", "nothing", "other", "unrelated", "irrelevant"})  # a leftover's first
-UNITS = (*FILE_UNITS, "cell", "span")
-SCOPES = {"files": "record", "canvas": "cell", "report": "span"}
+UNITS = (*FILE_UNITS, "span")
+SCOPES = {"files": "record", "report": "span"}  # what a label is over, and its unit
+GONE_UNITS = ("cell",)  # a label over cards, which thimble made before 1.0 (read_concept leaves it out)
+FILTER_SCOPES = ("files", "canvas", "report")  # a label's value filters Files or the report, card parts the canvas
 DEFAULT_LABELS = ["yes", "no"]
 REPORT_SLUG = "report"
 CODE_KERNEL = "labels"  # the dedicated kernel the code kind runs in
@@ -270,7 +273,7 @@ def is_negative(value: str, index: int, n: int) -> bool:
 
 def marks_of(unit: str, marks: Any = None) -> str | None:
     """What a label over files marks: `marks` when it fits the unit (span or record for records, file for files and
-    runs), else what the unit implies; None for a label of cards or report sentences."""
+    runs), else what the unit implies; None for a label of report sentences."""
     if unit not in FILE_UNITS:
         return None
     if unit == "record":
@@ -477,14 +480,16 @@ _NONE = object()  # read_concept's default: no file
 
 def read_concept(ws: Path, concept_id: str) -> dict | None:
     """The label `concept_id`, None when there is none: missing, unreadable, or no regular file, such as a link a card's
-    code left in its place, which is never followed there (read_json)."""
+    code left in its place, which is never followed there (read_json); or a label over cards (GONE_UNITS)."""
     p = _concept_file(ws, concept_id)
     try:
         data = read_json(p, _NONE)
     except ValueError:
         log.warning("unreadable concept %s", p)
         return None
-    return None if data is _NONE else _normalize(concept_id, data)
+    if data is _NONE or (isinstance(data, dict) and data.get("unit") in GONE_UNITS):
+        return None
+    return _normalize(concept_id, data)
 
 
 def write_concept(ws: Path, concept: dict) -> None:
@@ -824,14 +829,14 @@ def match_window(text: str, span: str) -> str | None:
 
 
 def unit_texts(c: str, concept: dict, refs_wanted: list[str], cap: int = EXAMPLE_TEXT_MAX) -> dict[str, str]:
-    """{ref: text} for the units the refs name, at most `cap` chars each: a cell or span from the scope's units (the
-    ref route does not resolve them), a file unit through refs.resolve. A ref that resolves to nothing is left out.
+    """{ref: text} for the units the refs name, at most `cap` chars each: a report sentence from the report's units
+    (the ref route does not resolve them), a file unit through refs.resolve. A ref that resolves to nothing is left out.
     Blocking (worker thread)."""
     wanted = [str(r) for r in refs_wanted if str(r)]
     if not wanted:
         return {}
     out: dict[str, str] = {}
-    if concept["unit"] in ("cell", "span"):
+    if concept["unit"] == "span":
         want = set(wanted)
         try:
             for u in scope_units(c, concept["unit"]):
@@ -1077,7 +1082,7 @@ def coverage(ws: Path, concept: dict, limit: int = COVERAGE_PAGE, offset: int = 
     """{unit, n_files, n_covered, rows, files: [{path, covered, rows}], not_covered: [path, ...], n_not_covered, offset}:
     how many of the corpus's files the label's rows cover, with how many rows, then the first `limit` covered files and
     `limit` of the files with none from `offset`, both by path. The files are those the Files tree lists, read from the
-    corpus's folder tree with no file stat'ed (corpus.search_paths). A cell or span unit has no files. Blocking (worker
+    corpus's folder tree with no file stat'ed (corpus.search_paths). A span unit has no files. Blocking (worker
     thread)."""
     limit = max(0, min(int(limit), COVERAGE_PAGE_MAX))
     offset = max(0, int(offset))
@@ -1789,49 +1794,6 @@ def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict]
     return [by_path[p] for g in picked for p in g["paths"]], len(groups)
 
 
-def cell_text(cell: dict) -> str:
-    """What a card says, as text: its question, code, takeaway, note text and output text."""
-    from . import notebook
-
-    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
-    parts = [str(cell.get("title") or ""), str(cell.get("code") or ""), str(cell.get("takeaway") or ""),
-             str(payload.get("text") or cell.get("text") or ""), notebook.outputs_text(cell.get("outputs") or [])]
-    return "\n\n".join(p for p in parts if p.strip())
-
-
-def cell_units(ws: Path) -> list[Unit]:
-    """One unit per card on the canvas (notebook.canvas; label cards aside), ref `card:<id>`, in group then card order. The
-    code kind's label(unit) gets the card's fields: `kind`, `question` (also `title`), `takeaway`, `code`, `payload`,
-    `group`, `groups` (every enclosing frame's title, outermost first) and its words as `text`."""
-    from . import notebook
-
-    board = notebook.canvas(ws)
-    rows = {g["id"]: g for g in board["groups"]}
-
-    def frames(gid: str | None) -> list[str]:
-        titles: list[str] = []
-        seen: set[str] = set()
-        while gid and gid in rows and gid not in seen:
-            seen.add(gid)
-            titles.append(str(rows[gid].get("title") or ""))
-            gid = rows[gid].get("parent")
-        return titles[::-1]
-
-    out: list[Unit] = []
-    for cell in board["cells"]:
-        if not isinstance(cell, dict) or not cell.get("id") or cell.get("kind") == "label":
-            continue
-        record = {k: cell.get(k) for k in ("id", "notebook", "title", "code", "takeaway", "payload")}
-        # a markdown card (kind `md`) shows as a note (frontend canvas/layout.kindOf)
-        record["kind"] = "note" if cell.get("kind") == "md" else cell.get("kind") or "code"
-        record["question"] = record["title"]
-        record["groups"] = frames(cell.get("notebook"))
-        record["group"] = record["groups"][-1] if record["groups"] else ""
-        record["text"] = cell_text(cell)
-        out.append(_one(f"card:{cell['id']}", record["text"], record))
-    return out
-
-
 def span_units(c: str, slug: str = REPORT_SLUG) -> list[Unit]:
     """One unit per sentence of the document `slug`, ref `report:<slug>#<sid>`, in document order; none without a document."""
     from . import investigation, report_types
@@ -1849,9 +1811,7 @@ def span_units(c: str, slug: str = REPORT_SLUG) -> list[Unit]:
 
 
 def scope_units(c: str, unit: str) -> list[Unit]:
-    """The cell or span units of a workspace (the file units come from iter_units)."""
-    if unit == "cell":
-        return cell_units(_ws(c))
+    """The span units of a workspace (the file units come from iter_units)."""
     if unit == "span":
         return span_units(c)
     raise ValueError(f"not a scope unit: {unit}")
@@ -2256,7 +2216,7 @@ FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
 LABEL_FAILED_TEXT = "The label {name} failed: {why}."
 LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
 LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
-UNIT_NOUNS = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}  # a unit as a notice names it
+UNIT_NOUNS = {"agent": "file", "run": "run", "span": "sentence"}  # a unit as a notice names it
 # units Claude's safeguards stopped the classifier on even alone and on the refusal row's model: left unlabeled and
 # told, not counted as failed, so the rest of the run stands
 BLOCKED_MESSAGE = "Claude's safeguards stopped the classifier on {n} {noun}{s}, so {they_are} left unlabeled"
@@ -2600,7 +2560,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         # the whole files or runs read in part are the run's `cut`, the cards cut its message
         read = read_cut(cut_refs, cut_tokens, cut_short, _runs[key].get("total"), unit) if cut_refs else None
         if cut and not read:
-            noun = {"agent": "file", "run": "run", "cell": "card"}.get(unit, unit)
+            noun = {"agent": "file", "run": "run"}.get(unit, unit)
             note(f"{cut:,} {noun}{'' if cut == 1 else 's'} ran past {cap:,} characters; the classifier read that much of each")
         if cancel.is_set() and (ready or not exhausted):
             note(_cancelled_message(labeled + failed, unit))
@@ -2898,7 +2858,7 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
     """The code the code kind runs in the labels kernel: the analyst's spec (defining `label(unit)`) plus a loop over the units
     that writes one JSON line per unit ({ref, label, confidence, spans?}, or {ref, error}) to `rows_file`. File units are
     read from `groups` (relative to the kernel's cwd), the records of their files that are not read as lines from
-    `parts_file` (_write_parts); cell and span units, and records the wrapper does not read itself, come from
+    `parts_file` (_write_parts); span units, and records the wrapper does not read itself, come from
     `units_file`. The paths must be absolute. With `quiet` (implicit_value), records of whole files that take that value
     get cover lines instead of rows.
 
@@ -3377,7 +3337,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             else:
                 units = await asyncio.to_thread(scope_units, c, unit)
                 matched = len(units)
-                if limit:  # a trial over cards or sentences, spread over the canvas or the document as one over files is
+                if limit:  # a trial over sentences, spread over the document as one over files is
                     units = [units[i] for i in spread(len(units), limit)]
                 total = len(units)
             _progress(c, concept_id, total=total, matched_total=matched)
@@ -3720,9 +3680,9 @@ def _record_line(c: str, ref: str) -> int | None:
 # --------------------------------------------------------------------------- filters
 #
 # One filter per scope, which the browser and a chat set alike, kept here so every tab shows the same one. In Files and
-# the report a filter is a label's value, {concept, value}. The canvas's filter can also hold the card parts its Filter
-# menu sets (CARD_PARTS); a card must pass every part that is set. filters.py reads the card parts on the server the way
-# the browser's cardFilter.ts reads them.
+# the report a filter is a label's value, {concept, value}. The canvas's filter is the card parts its Filter menu sets
+# (CARD_PARTS); a card must pass every part that is set. filters.py reads the card parts on the server the way the
+# browser's cardFilter.ts reads them.
 
 CARD_PARTS = ("kinds", "groups", "makers", "checks", "starred", "locked", "text")
 _CARD_LISTS = ("kinds", "groups", "makers", "checks")
@@ -3755,19 +3715,20 @@ def card_parts(raw: Any) -> dict:
 
 
 def read_filters(ws: Path) -> dict:
-    """{scope: filter} for the scopes with a filter: {concept, value} in Files and the report; in the canvas the label
-    part when it is set and each card part that is set (card_parts)."""
+    """{scope: filter} for the scopes with a filter: {concept, value} in Files and the report; in the canvas each card
+    part that is set (card_parts), and no label, which only a label over cards gave it before 1.0."""
     data = read_json(filters_file(ws), {})
     out: dict[str, dict] = {}
-    for scope in SCOPES:
+    for scope in FILTER_SCOPES:
         f = data.get(scope) if isinstance(data, dict) else None
         if not isinstance(f, dict):
             continue
-        entry: dict[str, Any] = {}
-        if f.get("concept") and f.get("value") is not None:
-            entry = {"concept": str(f["concept"]), "value": str(f["value"])}
         if scope == "canvas":
-            entry.update(card_parts(f))
+            entry = card_parts(f)
+        elif f.get("concept") and f.get("value") is not None:
+            entry = {"concept": str(f["concept"]), "value": str(f["value"])}
+        else:
+            entry = {}
         if entry:
             out[scope] = entry
     return out
@@ -3792,9 +3753,10 @@ def _files_label_off(c: str, ws: Path, concept_id: str) -> None:
 
 
 def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
-    """Choose `value` of the concept as the scope's filter (a canvas filter keeps its card parts); emits `filter {scope,
-    concept, value}`. In Files a filter is the label turned on with that value alone highlighted (`shown`, the classes'
-    `highlight`), and a filter on another label turns off the label the filter named before, so only the new one shows."""
+    """Choose `value` of the concept as the scope's filter, in Files or the report; emits `filter {scope, concept,
+    value}`. In Files a filter is the label turned on with that value alone highlighted (`shown`, the classes'
+    `highlight`), and a filter on another label turns off the label the filter named before, so only the new one shows.
+    The canvas's filter holds no label (set_card_filter)."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
     ws, concept = load_concept(c, concept_id)
@@ -3804,7 +3766,7 @@ def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
     with _filters_lock:
         filters = read_filters(ws)
         before = filters.get(scope) or {}
-        filters[scope] = {"concept": concept["id"], "value": value, **(card_parts(before) if scope == "canvas" else {})}
+        filters[scope] = {"concept": concept["id"], "value": value}
         _write_filters(ws, filters)
     if scope == "files":
         if before.get("concept") and before["concept"] != concept["id"]:
@@ -3821,13 +3783,12 @@ def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
 
 
 def set_card_filter(c: str, parts: dict) -> dict:
-    """Set the card parts of the canvas's filter, all of them at once (a part `parts` leaves out is unset); its label
-    part stays. Emits `filter {scope: canvas, concept?, value?}`."""
+    """Set the card parts of the canvas's filter, all of them at once (a part `parts` leaves out is unset). Emits
+    `filter {scope: canvas}`."""
     ws = _ws(c)
     with _filters_lock:
         filters = read_filters(ws)
-        entry = {k: v for k, v in (filters.get("canvas") or {}).items() if k in ("concept", "value")}
-        entry.update(card_parts(parts))
+        entry = card_parts(parts)
         if entry:
             filters["canvas"] = entry
         else:
@@ -3838,10 +3799,10 @@ def set_card_filter(c: str, parts: dict) -> dict:
 
 
 def clear_filter(c: str, scope: str, *, whole: bool = False) -> dict:
-    """Drop the scope's label filter, and with `whole` the canvas's card parts too, which a canvas filter keeps
-    otherwise; emits `filter {scope, concept?, value?}` with what is left. In Files the label turns off."""
-    if scope not in SCOPES:
-        raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
+    """Drop the scope's label filter, and with `whole` the canvas's card parts, which hold no label and stay otherwise;
+    emits `filter {scope, concept?, value?}` with what is left. In Files the label turns off."""
+    if scope not in FILTER_SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(FILTER_SCOPES)}")
     ws = _ws(c)
     with _filters_lock:
         filters = read_filters(ws)
@@ -3869,7 +3830,7 @@ def _clear_filters_of(c: str, concept_id: str) -> None:
 
 # --------------------------------------------------------------------------- revisions: the cards a change leaves stale
 
-UNIT_NAMES = {"record": ("record", "records"), "agent": ("file", "files"), "run": ("run", "runs"), "cell": ("card", "cards"),
+UNIT_NAMES = {"record": ("record", "records"), "agent": ("file", "files"), "run": ("run", "runs"),
               "span": ("sentence", "sentences")}
 
 
@@ -3938,7 +3899,7 @@ def stale_in(cell: dict, concepts_by_id: dict[str, dict]) -> dict[str, str]:
 
 def units_to_read(c: str, concept: dict, paths: list[str], limit: int | None, sources: list[dict] | None = None) -> int:
     """How many units a run of the label over `paths` (file units) or its scope reads: the records, files or runs
-    matched (counted up to PROMPT_APPLY_MAX + 1), the records `within` keeps, or the cards or sentences; at most
+    matched (counted up to PROMPT_APPLY_MAX + 1), the records `within` keeps, or the sentences; at most
     `limit`. Blocking (a thread)."""
     unit = concept["unit"]
     if unit in FILE_UNITS:
@@ -4080,7 +4041,7 @@ def card_stats(ws: Path, concept: dict) -> dict:
 # the row under a label card's values in card_output: the units the label labeled, which the card's label row states
 CARD_ALL_ROW = "all"
 # a unit's word over a label card's counts (the frontend's canvas/details unitWord, plural)
-CARD_UNIT_WORDS = {"record": "records", "cell": "cards", "span": "sentences", "agent": "files", "run": "runs"}
+CARD_UNIT_WORDS = {"record": "records", "span": "sentences", "agent": "files", "run": "runs"}
 
 
 def card_share(count: int, total: int) -> str:
@@ -4326,7 +4287,7 @@ def define_concept(c: str, name: str, description: str = "", kind: str = "prompt
 
 def covered(c: str, concept: dict, patterns: list[str], limit: int | None) -> bool:
     """Whether the label's rows already answer an apply of its definition: its last run was of this version, ended cleanly,
-    and covered the same files and limit (or, for cards and sentences, every unit the scope has now). Blocking (a thread)."""
+    and covered the same files and limit (or, for sentences, every unit the scope has now). Blocking (a thread)."""
     last = concept["applications"][-1] if concept["applications"] else None
     if not last or last.get("status") != "done" or last.get("version") != concept["version"] or last.get("stopped"):
         return False
@@ -4340,7 +4301,7 @@ def covered(c: str, concept: dict, patterns: list[str], limit: int | None) -> bo
         return whole or (limit is not None and last.get("limit") == limit)
     if not whole or limit is not None:
         return False
-    have = {str(r.get("ref") or "").replace("cell:", "card:", 1) for r in read_labels(_ws(c), concept["id"])}
+    have = {str(r.get("ref") or "") for r in read_labels(_ws(c), concept["id"])}
     return all(u.ref in have for u in scope_units(c, concept["unit"]))
 
 
@@ -4497,7 +4458,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
     """Turn a label over files on or off in Files and the views (`shown`), which never runs it, or leave it as it is when
     `on` is None; with `values`, on highlights those values alone. `colours` gives values colours by name (COLOUR_NAMES),
     a value that had the colour taking the one it leaves, as the Labels pane's palette does. Turning it off drops a Files
-    filter that names it. 404 for no such label, 400 for a label of cards or report sentences, a value it does not have
+    filter that names it. 404 for no such label, 400 for a label of report sentences, a value it does not have
     or a colour with no name here."""
     ws = _ws(c)
     concept = find_concept(ws, id_or_name)
@@ -4547,7 +4508,7 @@ _told_in_label_done: set[tuple[str, str]] = set()  # labels whose reruns label_d
 VERDICT_RERUN_DELAY_S = 2.0  # quiet after the analyst's last verdict on a label before the cards that read it run again
 _verdict_timers: dict[tuple[str, str], asyncio.TimerHandle] = {}  # (workspace, label id) -> its pending rerun_after_verdicts
 RERUN_OUTPUT_CHARS = 1500  # of each card's new output in what main hears of a rerun
-SCOPE_OF_UNIT = {**{u: "files" for u in FILE_UNITS}, "cell": "canvas", "span": "report"}
+SCOPE_OF_UNIT = {**{u: "files" for u in FILE_UNITS}, "span": "report"}
 
 
 def _start_reruns(c: str, concept_id: str) -> None:
@@ -5273,7 +5234,7 @@ def glob_route(c: str, pattern: str = "") -> dict:
 
 SAMPLE_RECORDS = 6     # records of the first file a draft reads
 SAMPLE_CUT = 700       # characters of each of them
-DRAFT_OVER = {"files": "files", "canvas": "cards", "report": "sentences"}  # a draft's scope as the edit card's Over
+DRAFT_OVER = {"files": "files", "report": "sentences"}  # a draft's scope as the edit card's Over
 
 
 class DraftBody(BaseModel):
@@ -5407,13 +5368,13 @@ def filters_route(c: str) -> dict:
 
 @router.put("/ws/{c}/filters")
 def set_filter_route(c: str, body: FilterBody) -> dict:
-    """The scope's label filter; the canvas's card parts stay."""
+    """The label filter of Files or the report."""
     return set_filter(c, body.scope, body.concept, body.value)
 
 
 @router.put("/ws/{c}/filters/canvas/cards")
 def set_card_filter_route(c: str, body: CardFilterBody) -> dict:
-    """The canvas filter's card parts, all at once; its label part stays."""
+    """The canvas filter's card parts, all at once."""
     return set_card_filter(c, body.model_dump())
 
 

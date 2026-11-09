@@ -2,7 +2,7 @@
 // on load is not new. On the canvas only a card made or deleted counts, not the many updates to an existing card. In
 // Files only what changes Files counts: a view built (a view proposal, a build under way or one that failed has nothing
 // to open there), a filter set on the files, or a label over files that is on there finishing its run, so its marks
-// appear. A label defined, starting its run, changed or deleted, and any label over cards or the report, light no dot.
+// appear. A label defined, starting its run, changed or deleted, and any label over the report, light no dot.
 // On the Report the analyst's own change to a comment (a comment added, resolved or opened again) lights none.
 // While a writer writes a document, the Report tab shows a spinner in the dot's place, and the dot once it ends.
 import { useEffect, useState } from 'react'

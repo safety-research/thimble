@@ -3,9 +3,9 @@ browser.
 
 concepts.py keeps the filters, one per scope in filters.json, so a filter a chat sets shows in every tab and one the
 analyst sets reaches the next list_cards. Neither tool makes a label or a card. set_filter changes only what it names: a
-label replaces the scope's label filter ("" drops it), each card part given replaces that part (an empty list or false
-unsets it). Everything a call names is checked before anything is set, so a refused call changes nothing. clear_filter
-drops the scope's whole filter.
+label replaces the label filter of Files or the report ("" drops it), and each card part given replaces that part of
+the canvas's filter (an empty list or false unsets it). Everything a call names is checked before anything is set, so a
+refused call changes nothing. clear_filter drops the scope's whole filter.
 
 The server reads a canvas filter the way the browser's cardFilter.ts does, so results and list_cards can say which cards
 it keeps. A text filter keeps a card when each of its words starts a word of the card's text, ignoring case.
@@ -26,7 +26,7 @@ _WORD_BREAK = re.compile(r"[^\w]+")  # what separates words for a text filter: a
 # the words the canvas's chips use for each part (Canvas.tsx PART_WORD), which the results use too
 PART_WORDS = {"kinds": "Kind", "groups": "Group", "makers": "Made by", "checks": "Check", "starred": "Starred",
               "locked": "Locked", "text": "Text"}
-SCOPE_UNITS = {"files": concepts.FILE_UNITS, "canvas": ("cell",), "report": ("span",)}
+SCOPE_UNITS = {"files": concepts.FILE_UNITS, "report": ("span",)}  # the labels a scope's filter can name
 # A card's check state and its words in the Filter menu and chips, by the mark the card shows (lib/cardCheck.ts
 # checkState): failed, the red ✕ for a real problem the check found (numbers its code types in, or a revision of the
 # check's that would not run); verified, a check read the card to the end and found no such problem; unverified, a check
@@ -162,12 +162,6 @@ def passes(card: dict, entry: dict) -> bool:
     return not entry.get("text") or text_matches(card["text"], entry["text"])
 
 
-def label_keeps(c: str, concept_id: str, value: str) -> set[str]:
-    """The ids of the cards the label gave `value`."""
-    got = concepts.concept_rows(config.workspace_dir(c), concept_id, value, concepts.ROWS_MAX, 0)
-    return {cite.strip_card(r.get("ref")) for r in got["rows"] if str(r.get("ref") or "").startswith(cite.CARD_PREFIXES)}
-
-
 def canvas_view(c: str) -> dict | None:
     """{entry, cards, kept}: the canvas's filter, the cards on the canvas and the ids of those it keeps; None while the
     canvas has no filter."""
@@ -175,9 +169,7 @@ def canvas_view(c: str) -> dict | None:
     if not entry:
         return None
     cards = canvas_cards(c)
-    label = label_keeps(c, entry["concept"], entry["value"]) if entry.get("concept") else None
-    kept = {x["id"] for x in cards if passes(x, entry) and (label is None or x["id"] in label)}
-    return {"entry": entry, "cards": cards, "kept": kept}
+    return {"entry": entry, "cards": cards, "kept": {x["id"] for x in cards if passes(x, entry)}}
 
 
 def describe(c: str, entry: dict) -> str:
@@ -300,14 +292,19 @@ def _kept_line(c: str) -> str:
 async def tool_set_filter(ctx: Any, args: dict[str, Any]) -> Any:
     """The `set_filter` tool."""
     scope = str(args.get("scope") or "").strip().lower()
-    if scope not in concepts.SCOPES:
-        return tools.err(f"set_filter: `scope` must be one of {', '.join(concepts.SCOPES)}")
+    if scope not in concepts.FILTER_SCOPES:
+        return tools.err(f"set_filter: `scope` must be one of {', '.join(concepts.FILTER_SCOPES)}")
     named = [p for p in concepts.CARD_PARTS if args.get(p) is not None]
     if named and scope != "canvas":
         return tools.err(f"set_filter: {', '.join(named)} filter the canvas's cards; set them with scope canvas")
     label = args.get("label")
+    if scope == "canvas" and label is not None and str(label).strip():
+        return tools.err("set_filter: a label filters the records in Files or the report's sentences; filter the cards "
+                         "by their kind, group, maker, check, star, lock or words")
+    if scope == "canvas" and not named:
+        return tools.err("set_filter: name a part of the card filter")
     if label is None and not named:
-        return tools.err(f"set_filter: name a `label`{', or a part of the card filter' if scope == 'canvas' else ''}")
+        return tools.err("set_filter: name a `label`")
     ws = ctx.ws
     concept, value = None, ""
     if label is not None and str(label).strip():
@@ -350,7 +347,7 @@ async def tool_set_filter(ctx: Any, args: dict[str, Any]) -> Any:
 async def tool_clear_filter(ctx: Any, args: dict[str, Any]) -> Any:
     """The `clear_filter` tool: the scope's whole filter goes."""
     scope = str(args.get("scope") or "").strip().lower()
-    if scope not in concepts.SCOPES:
-        return tools.err(f"clear_filter: `scope` must be one of {', '.join(concepts.SCOPES)}")
+    if scope not in concepts.FILTER_SCOPES:
+        return tools.err(f"clear_filter: `scope` must be one of {', '.join(concepts.FILTER_SCOPES)}")
     concepts.clear_filter(ctx.c, scope, whole=True)
     return tools.ok(tools.hint("clear_filter-cleared", scope=scope))

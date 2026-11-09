@@ -24,13 +24,6 @@ import { CANVAS, checksFor } from '../report/checkComments'
 import { useNewComments } from '../report/newComments'
 import { IconButton } from '../report/icons'
 
-/** A label the canvas can be filtered by (its unit is the card), with its values and how many cards each marks. */
-export interface CanvasLabel {
-  concept: string
-  name: string
-  values: { value: string; count: number }[]
-}
-
 /** Below this viewport width (screen px), the minimap would cover the text of a card at a readable zoom. */
 export const MINIMAP_ROOM = 1000
 const MAP_KEY = 'thimble.canvas.minimap'
@@ -65,17 +58,13 @@ export interface ControlsProps {
   onMinimap: (e: MouseEvent<HTMLDivElement>) => void
   /** the board's viewport is wide enough to show the minimap beside a card (MINIMAP_ROOM) */
   roomy: boolean
-  /** the card filter and what it can choose from; onClear clears it and the label filter together */
+  /** the card filter and what it can choose from; onClear clears it */
   filter: CardFilter
   onFilter: (f: CardFilter) => void
   onClear: () => void
   cards: readonly FilterCard[]
   groupName: (id: string) => string
-  /** the canvas's labels, the label filter set (the server's canvas filter), and a change to it (null clears it) */
-  labels: readonly CanvasLabel[]
-  label: { concept: string; value: string } | null
-  onLabel: (concept: string, value: string | null) => void
-  /** the cards the filters keep together; null when none is set */
+  /** the cards the filter keeps; null when none is set */
   keep: ReadonlySet<string> | null
   /** the server's filter has been read: until then the menu stays shut, so a choice made on an empty filter never
    * overwrites the one kept */
@@ -87,7 +76,7 @@ export interface ControlsProps {
 }
 
 export function Controls(p: ControlsProps) {
-  const set = activeParts(p.filter).length + (p.label ? 1 : 0)
+  const set = activeParts(p.filter).length
   const [choice, setChoice] = useState(storedMapChoice)
   const mapShown = minimapOpen(choice, p.roomy)
   const toggleMap = () => {
@@ -289,19 +278,6 @@ function FilterButton(p: ControlsProps & { set: number }) {
             open={open}
             rows={checks.length ? checks.map((s) => row(`checks:${s}`, CHECK_WORDS[s], f.checks.includes(s), checkCounts.get(s) ?? 0, () => p.onFilter({ ...f, checks: toggled(f.checks, s) }))) : null}
           />
-          {p.labels.some((l) => l.values.length) && (
-            <div className="bfilter-part">
-              <div className="menu-heading" role="presentation">
-                Label
-              </div>
-              {p.labels.flatMap((l) =>
-                l.values.map((v) => {
-                  const on = p.label?.concept === l.concept && p.label.value === v.value
-                  return row(`label:${l.concept}:${v.value}`, `${l.name} · ${v.value}`, on, v.count, () => p.onLabel(l.concept, on ? null : v.value))
-                }),
-              )}
-            </div>
-          )}
           <div className="bfilter-part">
             <div className="menu-heading" role="presentation">
               Marked
@@ -309,7 +285,7 @@ function FilterButton(p: ControlsProps & { set: number }) {
             {row('starred', 'Starred', f.starred, starred, () => p.onFilter({ ...f, starred: !f.starred }))}
             {row('locked', 'Locked', f.locked, locked, () => p.onFilter({ ...f, locked: !f.locked }))}
           </div>
-          {(filterOn(f) || p.label) && (
+          {filterOn(f) && (
             <>
               <div className="menu-sep" role="separator" />
               <button type="button" role="menuitem" className="menu-item" onClick={p.onClear}>

@@ -98,7 +98,7 @@ function labelOf(byId: ReadonlyMap<string, Concept>, named: string): Concept {
 
 function filesLabel(byId: ReadonlyMap<string, Concept>, named: string): Concept {
   const k = labelOf(byId, named)
-  if (!isFilesLabel(k)) throw new Error(`${k.name} labels cards or sentences, not records`)
+  if (!isFilesLabel(k)) throw new Error(`${k.name} labels sentences, not records`)
   return k
 }
 

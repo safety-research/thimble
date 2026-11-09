@@ -205,16 +205,16 @@ export const COVERAGE_PAGE = 200
 
 const count = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
 
-/** The coverage route's answer for APPLIED TO; null (no coverage yet, or a cell or span unit) groups to nothing. */
+/** The coverage route's answer for APPLIED TO; null (no coverage yet, or a span unit) groups to nothing. */
 export function groupCoverage(cov: Partial<ConceptCoverage> | null | undefined): CoverageGroups {
   const covered = Array.isArray(cov?.files) ? cov.files.filter((f): f is CoverageFile => !!f && typeof f.path === 'string') : []
   const notCovered = Array.isArray(cov?.not_covered) ? cov.not_covered.filter((p): p is string => typeof p === 'string') : []
   return { covered, notCovered, rows: count(cov?.rows), total: count(cov?.n_files), nCovered: count(cov?.n_covered), nNotCovered: count(cov?.n_not_covered) }
 }
 
-/** The word for a unit, singular or plural: `record` → `records`, `cell` → `cards`, `span` → `sentences`, `agent` → `files`, `run` → `runs`. */
+/** The word for a unit, singular or plural: `record` → `records`, `span` → `sentences`, `agent` → `files`, `run` → `runs`. */
 export function unitWord(unit: string | undefined, n: number): string {
-  const one: Record<string, [string, string]> = { record: ['record', 'records'], cell: ['card', 'cards'], span: ['sentence', 'sentences'], agent: ['file', 'files'], run: ['run', 'runs'] }
+  const one: Record<string, [string, string]> = { record: ['record', 'records'], span: ['sentence', 'sentences'], agent: ['file', 'files'], run: ['run', 'runs'] }
   const [s, p] = one[unit ?? ''] ?? [unit || 'unit', `${unit || 'unit'}s`]
   return n === 1 ? s : p
 }
@@ -264,8 +264,6 @@ export function scopeWord(unit: string | undefined): string {
     case 'agent':
     case 'run':
       return 'files'
-    case 'cell':
-      return 'canvas'
     case 'span':
       return 'report'
     default:
@@ -320,13 +318,13 @@ export const classifierWords = (kind: string, model = ''): string =>
 
 /** What a label card says of its label after its name: how the label is defined (classifierWords) and what it ran
  * over, `over 12,480 records in <files>` (a trial's `over a sample of`; its files as shortGlob writes them, else the
- * canvas or the report; `full`, every pattern whole, for the hover). A label that ran only over the records another label
- * gave one value says which before its files, `where ‘<that label>’ is ‘<value>’`, `withinName` that label's name, so
- * the line's cut falls on the files. Pure. */
+ * report; `full`, every pattern whole, for the hover). A label that ran only over the records another label gave one
+ * value says which before its files, `where ‘<that label>’ is ‘<value>’`, `withinName` that label's name, so the
+ * line's cut falls on the files. Pure. */
 export function labelIdentity(k: Pick<Concept, 'kind' | 'unit' | 'glob' | 'n_labeled' | 'counts' | 'trial' | 'within'>, model = '', withinName = ''): { how: string; where: string; full: string } {
   const how = classifierWords(k.kind, k.kind === 'prompt' ? model : '')
   const glob = isFilesLabel(k) ? shortGlob(k.glob) : null
-  const at = (place: string) => (glob ? `in ${place}` : place === 'canvas' ? 'on the canvas' : `in the ${place}`)
+  const at = (place: string) => (glob ? `in ${place}` : `in the ${place}`)
   const n = labeledTotal(k)
   const over = n > 0 ? `over ${k.trial ? 'a sample of ' : ''}${unitTotal(n, k.unit)}` : ''
   const narrow = k.within ? `where ‘${withinName || 'another label'}’ is ‘${k.within.value}’` : ''

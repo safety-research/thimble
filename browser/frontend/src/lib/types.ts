@@ -266,8 +266,10 @@ export interface CellName {
 // ---- labels and filters ----
 
 export type ConceptKind = 'prompt' | 'regex' | 'code'
-export type ConceptUnit = 'record' | 'cell' | 'span' | 'agent' | 'run'
+export type ConceptUnit = 'record' | 'span' | 'agent' | 'run'
 export type FilterScope = 'files' | 'canvas' | 'report'
+/** Where a label's value filters: the records in Files or the report's sentences. The canvas's filter holds no label. */
+export type LabelScope = 'files' | 'report'
 
 /** What a label over files marks in the reader: the texts that carry the value, the record, or the file. */
 export type LabelMarks = 'span' | 'record' | 'file'
@@ -297,7 +299,7 @@ export interface Concept {
   n_reviewed?: number
   /** every record the analyst gave a value by hand */
   n_marked?: number
-  /** a label over files: what it marks; null for a label of cards or report sentences */
+  /** a label over files: what it marks; null for a label of report sentences */
   marks?: LabelMarks | null
   /** what it applies to: comma-separated globs */
   glob?: string
@@ -350,7 +352,7 @@ export interface LabelRuler {
  * scope, its classifier and its values, the positive first. Nothing is stored until the row creates it. */
 export interface LabelDraft {
   name: string
-  over: 'files' | 'cards' | 'sentences'
+  over: 'files' | 'sentences'
   marks: LabelMarks | null
   glob: string
   kind: ConceptKind
@@ -417,12 +419,11 @@ export interface CardFilterParts {
   /** words, each of which starts a word of a kept card's question or takeaway */
   text?: string
 }
-/** The canvas's filter: a label value, the card parts, or both. */
-export type CanvasFilterEntry = Partial<FilterEntry> & CardFilterParts
 export interface Filters {
   files?: FilterEntry
   report?: FilterEntry
-  canvas?: CanvasFilterEntry
+  /** the canvas's filter: its card parts */
+  canvas?: CardFilterParts
 }
 
 // ---- views and proposals ----
@@ -1639,7 +1640,7 @@ export interface ConceptDetail extends Concept {
 }
 
 /** GET /concepts/{id}/coverage?offset=: how many corpus files the label's rows cover, with a page of each group (file
- * units; a cell or span unit has none). */
+ * units; a span unit has none). */
 export interface CoverageFile {
   path: string
   covered: boolean

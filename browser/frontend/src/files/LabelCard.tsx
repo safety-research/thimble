@@ -1,4 +1,4 @@
-// A label's edit card beside the Labels pane: what it labels (records of files, canvas cards or report sentences), for
+// A label's edit card beside the Labels pane: what it labels (records of files or report sentences), for
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
 // body, and the classes with colour and highlight switch (headed "Highlight in Files": which values Files colors,
 // PAINT_TIP). Colours and highlights save as they change; the rest is a
@@ -63,9 +63,8 @@ export interface Draft {
 }
 
 /** What a label labels, chosen when it is new, since its rows are of that unit. */
-const OVER: { value: LabelOver; label: string; icon: 'files' | 'canvas' | 'report'; title?: string }[] = [
+const OVER: { value: LabelOver; label: string; icon: 'files' | 'report'; title?: string }[] = [
   { value: 'files', label: 'Files', icon: 'files' },
-  { value: 'cards', label: 'Cards', icon: 'canvas' },
   { value: 'sentences', label: 'Sentences', icon: 'report', title: 'Report sentences' },
 ]
 
@@ -154,7 +153,7 @@ export function draftProblem(draft: Draft, classes: LabelClass[]): string {
 export function patchOf(draft: Draft, classes: LabelClass[]): ConceptPatch {
   return {
     name: draft.name.trim(),
-    // what a label over files marks and applies to; a label over cards or sentences has neither (the server refuses marks)
+    // what a label over files marks and applies to; a label over sentences has neither (the server refuses marks)
     ...(draft.over === 'files' ? { marks: draft.marks, glob: draft.glob } : {}),
     kind: draft.kind,
     model: draft.kind === 'prompt' ? draft.model : '',

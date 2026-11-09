@@ -14,17 +14,17 @@ export const isFilesLabel = (k: Pick<Concept, 'unit'>): boolean => FILE_UNITS.ha
 
 /** Whether the Files pane's Labels list shows a label: any label that is no trial, since a trial a chat ran on a few
  * units with `limit` is no label until it runs on everything (backend concepts.py, Trials), and a trial over files
- * that is on, since its marks in the reader and the views need their row. Labels over cards and report sentences are
- * listed too: the pane is where labels are made and edited, whatever they label (LabelsPane). */
+ * that is on, since its marks in the reader and the views need their row. Labels over report sentences are listed
+ * too: the pane is where labels are made and edited, whatever they label (LabelsPane). */
 export const listedInFiles = (k: Pick<Concept, 'unit' | 'trial' | 'shown'>): boolean => !k.trial || (isFilesLabel(k) && !!k.shown)
 
-/** What a label labels, as the edit card's Over names it: records or files (`files`), canvas cards, report sentences. */
-export type LabelOver = 'files' | 'cards' | 'sentences'
+/** What a label labels, as the edit card's Over names it: records or files (`files`), or report sentences. */
+export type LabelOver = 'files' | 'sentences'
 
-export const overOf = (k: Pick<Concept, 'unit'>): LabelOver => (k.unit === 'cell' ? 'cards' : k.unit === 'span' ? 'sentences' : 'files')
+export const overOf = (k: Pick<Concept, 'unit'>): LabelOver => (k.unit === 'span' ? 'sentences' : 'files')
 
 /** The unit a new label is created with: a label over files takes the one its marks imply (the server's MARKS_UNIT). */
-export const unitOfOver = (over: LabelOver, marks: LabelMarks): ConceptUnit => (over === 'cards' ? 'cell' : over === 'sentences' ? 'span' : marks === 'file' ? 'agent' : 'record')
+export const unitOfOver = (over: LabelOver, marks: LabelMarks): ConceptUnit => (over === 'sentences' ? 'span' : marks === 'file' ? 'agent' : 'record')
 
 /** What a label over files marks; a server that predates `marks` implies it from the unit. */
 export const marksOf = (k: Pick<Concept, 'unit' | 'marks'>): LabelMarks => k.marks ?? (k.unit === 'record' ? 'record' : 'file')
@@ -259,9 +259,9 @@ export function folderPresence(on: Concept[], presence: ReadonlyMap<string, Reco
   return out
 }
 
-const UNIT_WORDS: Record<string, [string, string]> = { record: ['record', 'records'], agent: ['file', 'files'], run: ['run', 'runs'], cell: ['card', 'cards'], span: ['sentence', 'sentences'] }
+const UNIT_WORDS: Record<string, [string, string]> = { record: ['record', 'records'], agent: ['file', 'files'], run: ['run', 'runs'], span: ['sentence', 'sentences'] }
 
-/** A label's unit as a count says it: records, files (a file label's unit, `agent`), runs, cards or sentences. */
+/** A label's unit as a count says it: records, files (a file label's unit, `agent`), runs or sentences. */
 export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?? [unit, `${unit}s`])[n === 1 ? 0 : 1]
 
 /** Where a label over files stands, for its row in the Labels pane: an apply running (done of total units, or of the
