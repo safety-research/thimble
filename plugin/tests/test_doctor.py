@@ -131,10 +131,10 @@ def test_a_workbench_without_the_headless_chromium_it_checks_cards_in_says_so_wi
 
 def test_each_place_that_names_the_claude_code_thimble_needs_names_the_one_ci_tests():
     """CI runs the plugin's tests (.github/workflows/ci.yml) on the oldest Claude Code that has what the plugin calls,
-    and on the first that places the tour's rows ($.ui.place). The doctor, the install, INSTALL.md, the README,
-    scripts/check.sh and the workbench (TESTED_CLAUDE_CODE) name the oldest; thimble tour, the install's end, INSTALL.md,
-    the README, the plugin's tour and its hooks tests name the tour's. A pin raised for a newer call fails here until each
-    of them names it too."""
+    and on the first that places the tour's rows ($.ui.place). The doctor, the install, INSTALL.md, scripts/check.sh and
+    the workbench (TESTED_CLAUDE_CODE) name the oldest; thimble tour, the install's end, INSTALL.md, the plugin's tour
+    and its hooks tests name the tour's. The README names no version. A pin raised for a newer call fails here until
+    each of them names it too."""
     root = Path(__file__).resolve().parents[2]
     v = r"(\d+\.\d+\.\d+)"
     numbers = lambda s: tuple(map(int, s.split(".")))  # noqa: E731
@@ -146,14 +146,12 @@ def test_each_place_that_names_the_claude_code_thimble_needs_names_the_one_ci_te
     assert ".".join(map(str, tour.CLAUDE_CODE_MIN)) == tour_pin, "plugin/engine/kernel/tour.py"
     for path, named in (("scripts/install.sh", r"tour_cc=(\S+)"),
                         ("INSTALL.md", rf"the tour needs {v} or later"),
-                        ("README.md", rf"{v}\+ for the tour"),
                         ("plugin/tour/tour.ts", rf"TOUR_CLAUDE_CODE = '{v}'|Claude Code {v} or later"),
                         ("plugin/tests/kit.ts", rf"'ui\.place': '{v}'")):
         found = {g for m in re.finditer(named, (root / path).read_text()) for g in m.groups() if g}
         assert found == {tour_pin}, path
     for path, named in (("scripts/install.sh", rf'ver_ge "\$v" {v}|Claude Code {v} or later'),
                         ("INSTALL.md", rf"Claude Code {v} or later|Claude Code is older than {v}"),
-                        ("README.md", rf"Claude Code {v}\+"),
                         ("scripts/check.sh", rf"Claude Code {v} or later"),
                         ("browser/backend/app/cli.py", rf'TESTED_CLAUDE_CODE = "{v}"')):
         found = {g for m in re.finditer(named, (root / path).read_text()) for g in m.groups() if g}
