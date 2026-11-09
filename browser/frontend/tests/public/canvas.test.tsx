@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-// The canvas (src/canvas/Canvas.tsx, layout.ts), over a stand-in server that answers its routes: a card Claude draws
-// shows its question and that it runs while the card check holds it, then its content and takeaway in the same place;
-// Card in the bar makes a loose card where the analyst is looking, clear of what is drawn; a card dropped on others
-// moves down to the first place where it covers none; Ctrl+G frames the selected cards where they stand, and moves no
-// other card under the frame; and the board's column goes around what the analyst placed.
+// The canvas (src/canvas/Canvas.tsx, layout.ts, Focus.tsx), over a stand-in server that answers its routes: a card
+// Claude draws shows its question and that it runs while the card check holds it, then its content and takeaway in the
+// same place; Escape in focus mode's ask box goes back to the board, and the card keeps what was typed there; Card in
+// the bar makes a loose card where the analyst is looking, clear of what is drawn; a card dropped on others moves down
+// to the first place where it covers none; Ctrl+G frames the selected cards where they stand, and moves no other card
+// under the frame; and the board's column goes around what the analyst placed.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { Canvas } from '../../src/canvas/Canvas.tsx'
@@ -153,6 +154,48 @@ test("a key pressed on a control in another part of the page, such as a button i
   expect(press(document.body, 'Enter')).toBe(true)
   await settle()
   expect(el.querySelector('.bfocus')).not.toBeNull()
+})
+
+test("Escape in focus mode's ask box goes back to the board, and the card keeps what was typed in the box", async () => {
+  data = { groups: [group('g1', { title: 'Deploys' })], cells: [note('a', 'g1'), note('b', 'g1')] }
+  const el = await mount(<Canvas ws="ws" active={true} />)
+  await settle()
+  const box = () => el.querySelector<HTMLTextAreaElement>('.bfocus-composer textarea')
+  const open = async (id: string) => {
+    await act(async () => void el.querySelector(`[data-cell="${id}"]`)!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, button: 0 })))
+    await settle()
+  }
+  const pick = async (title: string) => {
+    const item = [...el.querySelectorAll<HTMLButtonElement>('.bfocus-item')].find((b) => b.textContent === title)!
+    await act(async () => item.click())
+  }
+  // card a in focus mode, a question typed in its box
+  await open('a')
+  const field = box()!
+  await act(async () => {
+    field.focus()
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Why so many?')
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  // Escape with the cursor in the box: back to the board, card a still selected, the key marked taken
+  const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+  await act(async () => void field.dispatchEvent(esc))
+  await settle()
+  expect(el.querySelector('.bfocus')).toBeNull()
+  expect(esc.defaultPrevented).toBe(true)
+  expect(el.querySelector('.board-status')!.textContent).toContain('1 selected')
+  // back in focus mode, the question is still in the box; card b has a box of its own
+  await open('a')
+  expect(box()!.value).toBe('Why so many?')
+  await pick('Card b')
+  expect(box()!.value).toBe('')
+  await pick('Card a')
+  expect(box()!.value).toBe('Why so many?')
+  // the × keeps it too
+  await act(async () => el.querySelector<HTMLButtonElement>('.bfocus-close')!.click())
+  expect(el.querySelector('.bfocus')).toBeNull()
+  await open('a')
+  expect(box()!.value).toBe('Why so many?')
 })
 
 test('Card makes a loose card where the analyst is looking, clear of what is drawn, and no group', async () => {

@@ -34,7 +34,7 @@ import { useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
 import { Controls, MINIMAP_ROOM } from './Controls'
 import { DetailPanel, LabelPanel, type OutputCite } from './DetailPanel'
-import { Focus } from './Focus'
+import { FocusMode } from './Focus'
 import { addSeen, canvasLanding, type Landing } from './landing'
 import {
   BAR_ROOM,
@@ -1600,7 +1600,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
               />
               {detailCell && <DetailPanel key={detailCell.id} cell={detailCell} cite={cite?.cell === detailCell.id ? cite : null} history={historyOf?.cell === detailCell.id ? historyOf.seq : 0} onClose={() => setDetail(null)} />}
               {labelPanel && !detailCell && <LabelPanel key={labelPanel} conceptId={labelPanel} onClose={() => setLabelPanel(null)} />}
-              {focusCell && <Focus cell={focusCell} list={focusList} frame={(focusCell && board.group.get(board.cellById.get(focusCell.id)?.parent ?? '')?.name) || 'Canvas'} onPick={setFocus} onClose={() => setFocus(null)} onAskNew={(id, text) => void askNew(id, text)} />}
+              <FocusMode cell={focusCell} list={focusList} frame={(focusCell && board.group.get(board.cellById.get(focusCell.id)?.parent ?? '')?.name) || 'Canvas'} onPick={setFocus} onClose={() => setFocus(null)} onAskNew={(id, text) => void askNew(id, text)} />
             </ChipContext.Provider>
           </CanvasContext.Provider>
         )}
