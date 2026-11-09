@@ -198,7 +198,7 @@ test('an install updated from 0.10.12 keeps the settings the person set: its ses
   setOptions({})
 })
 
-test('↑ and ↓ pick the rows in their order, the Verifier rows too while Citations is on, which ↓ passes over once it is off; the ring onto another choice of the row picked sets it, and onto another row picks that row', async ($, on) => {
+test('↑ and ↓ pick the rows in their order, docked or inline, the Verifier rows too while Citations is on, which ↓ passes over once it is off; the ring onto another choice of the row picked sets it, and onto another row picks that row', async ($, on) => {
   const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'auto', claimsMode: 'off', labels: true, coverage: false }
   const set = settingsWorld(on, rows)
   // where the ring lands, as Claude Code moves it
@@ -234,6 +234,13 @@ test('↑ and ↓ pick the rows in their order, the Verifier rows too while Cita
   expect(rings.at(-1)).toMatchObject({ element: 'mode-details-auto' })
   expect(set.length).toBe(before)
   expect(await picked()).toEqual(['details'])
+  // inline (Claude Code's default layout), where the drawing fits the rows it is given, the pane is framed too: ↑ and ↓
+  // come as scrolls and move the pick, not Claude Code's ring, which would set each choice it passes
+  const inline = { ...(paneAt(110) as Any), props: { ...(paneAt(110) as Any).props, placement: 'inline', scroll: { offset: 0, bodyRows: 40 } } } as never
+  expect(keyed(await $.ui.render(inline), 'pane-frame')).toBeDefined()
+  await arrow(1)
+  expect(tintedIn(await $.ui.render(inline))).toEqual(['labels'])
+  expect(set.length).toBe(before)
   await pane.unmount()
   setOptions({})
 })
