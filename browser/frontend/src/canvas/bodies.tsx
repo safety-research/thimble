@@ -1,6 +1,6 @@
 // What a card shows between its question and its takeaway, by kind: a plot or table (components/Outputs), shell output,
 // a note's text, an example's quoted records, a label's values, a timeline or diagram (DataViz), a custom
-// card's frame, a plan's steps (PlanBody). `width` is the room the body has.
+// card's frame. `width` is the room the body has.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
@@ -25,7 +25,6 @@ import type { Cell, Concept, ConceptDetail, ResolvedRef } from '../lib/types'
 import { CanvasContext } from './context'
 import { CustomFrame, DatasetView } from './DataViz'
 import { conceptName, type ConceptDetailState } from './concepts'
-import { PlanBody } from './PlanBody'
 import { labeledTotal, labelIdentity, labelShares, labelValues, shownValues, unitWord } from './details'
 import { resolvedOf } from './excerpts'
 import { FACT_KINDS, recordFacts } from './facts'
@@ -71,8 +70,6 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
       const libs = Array.isArray(payload.libs) ? (payload.libs as unknown[]).filter((x): x is string => typeof x === 'string') : undefined
       return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} ws={ws} libs={libs} onTall={drawn ? (h) => drawn(cell.id, { height: h }) : undefined} onWide={drawn ? (w, f) => drawn(cell.id, { width: w, frame: f }) : undefined} /> : null
     }
-    case 'plan':
-      return <PlanBody cell={cell} />
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />
       const art = primaryArtifact(cell.outputs)

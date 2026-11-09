@@ -1790,13 +1790,12 @@ def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict]
 
 
 def cell_text(cell: dict) -> str:
-    """What a card says, as text: its question, code, takeaway, note text, a plan's steps and output text."""
+    """What a card says, as text: its question, code, takeaway, note text and output text."""
     from . import notebook
 
     payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
     parts = [str(cell.get("title") or ""), str(cell.get("code") or ""), str(cell.get("takeaway") or ""),
-             str(payload.get("text") or cell.get("text") or ""), "\n".join(notebook.plan_lines(cell)),
-             notebook.outputs_text(cell.get("outputs") or [])]
+             str(payload.get("text") or cell.get("text") or ""), notebook.outputs_text(cell.get("outputs") or [])]
     return "\n\n".join(p for p in parts if p.strip())
 
 
@@ -1972,19 +1971,31 @@ def definition_text(concept: dict) -> str:
     return concept["spec"].strip() if concept["kind"] == "prompt" and concept["spec"].strip() else concept["description"].strip()
 
 
-UNIT_WORDS = {"record": "record from a file", "agent": "whole file", "run": "whole run directory",
-              "cell": "card from the canvas", "span": "sentence from the report"}
+# The label classifier's text, plugin/prompts/labels.md, which the terminal's label reads read too: its head is what
+# every call reads, and its `## ` parts fill the head's slots that only some calls fill (labels_part).
+CLASSIFIER = "plugin:labels"
+
+
 def labels_part(heading: str, **values: str) -> str:
-    """A `## ` section of prompts/labels.md, which fills one of the file's own slots (the rationale asked for, the
-    examples and their lead line), so every sentence the classifier reads is in that one file."""
+    """A `## ` part of the label classifier's text (CLASSIFIER), which fills a slot of its head that only some calls
+    fill: the reason asked for, the words for a label with no definition, the analyst's examples and their lead line."""
+    from . import prompts  # noqa: PLC0415
+
+    return prompts.render_section(CLASSIFIER, heading, values).strip()
+
+
+def draft_part(heading: str, **values: str) -> str:
+    """A `## ` section of prompts/labels.md, the workbench's own text for a label the analyst describes: the draft and
+    the records it reads."""
     from . import prompts  # noqa: PLC0415
 
     return prompts.render_section("labels", heading, values).strip()
 
 
 def render_examples(examples: list[dict]) -> str:
-    """The `{{examples}}` slot: '' without examples, else a lead line and one block per example (ref, text, the
-    analyst's value and their note when they left one), each from labels.md's sections."""
+    """The `{{EXAMPLES}}` slot: '' without examples, else a lead line and one block per example (ref, text, the
+    analyst's value and their note when they left one), each from the classifier's parts, with a blank line before and
+    after them."""
     if not examples:
         return ""
     blocks = [labels_part("examples")]
@@ -1992,11 +2003,11 @@ def render_examples(examples: list[dict]) -> str:
         text = str(ex.get("text") or "").strip()
         if len(text) > EXAMPLE_TEXT_MAX:
             text = text[:EXAMPLE_TEXT_MAX] + "…"
-        block = labels_part("example", n=str(n), ref=str(ex.get("ref", "")), text=text, value=str(ex.get("value", "")))
+        block = labels_part("example", N=str(n), REF=str(ex.get("ref", "")), TEXT=text, VALUE=str(ex.get("value", "")))
         if str(ex.get("note") or "").strip():
-            block += "\n" + labels_part("example-note", note=str(ex["note"]).strip())
+            block += "\n" + labels_part("example-note", NOTE=str(ex["note"]).strip())
         blocks.append(block)
-    return "\n\n".join(blocks)
+    return "\n" + "\n\n".join(blocks) + "\n"
 
 
 def few_shot_examples(ws: Path, concept: dict, corpus_dir: Path | None = None, limit: int = EXAMPLES_MAX) -> list[dict]:
@@ -2030,24 +2041,27 @@ def label_input(concept: dict, items: list[tuple[str, str]], comment: bool = Tru
 
 
 def build_classify_prompt(inp: dict) -> tuple[str, str]:
-    """(system, user) for the labels task's input (label_input): labels.md's head, with the blank lines a slot left empty
-    (no examples, no rationale) closed up, and the items under their numbers and refs."""
-    from . import prompts
+    """(system, user) for the labels task's input (label_input): the head of the label classifier's text (CLASSIFIER),
+    with the workbench's words in its slots, the reason's words when a rationale is asked for and the analyst's
+    examples; and the items under their numbers and refs, which the terminal sends after the text."""
+    from . import prompts  # noqa: PLC0415
 
     label = inp["label"]
-    system = prompts.render_head("labels", {
-        "name": str(label["name"]), "unit": UNIT_WORDS.get(label["unit"], label["unit"]),
-        "definition": str(label.get("definition") or "") or labels_part("no-definition"),
-        "labels": ", ".join(label["values"]), "comment": labels_part("comment") if label.get("comment", True) else "",
-        "examples": render_examples(label.get("examples") or [])})
+    system = prompts.render_head(CLASSIFIER, {
+        "NAME": str(label["name"]),
+        "DEFINITION": str(label.get("definition") or "").strip() or labels_part("no-definition"),
+        "VALUES": ", ".join(label["values"]),
+        "EXAMPLES": render_examples(label.get("examples") or []),
+        "REASON_FIELD": f", {labels_part('reason')}" if label.get("comment", True) else ""})
     user = [f"### item {it['i']} [{it['ref']}]\n{it['text']}" for it in inp["items"]]
-    return re.sub(r"\n{3,}", "\n\n", system).strip(), "\n\n".join(user)
+    return system.strip(), "\n\n".join(user)
 
 
 def labels_tool(label: dict) -> Any:
     """The classifier's output schema as a model.ToolSpec for the labels task's `label` (label_input): one {i, label,
-    confidence, rationale?, quote?} entry per item. `label` is a free string (an off-list value is kept as data) and
-    `confidence` also accepts a string; `quote` is asked for when the label marks spans."""
+    confidence, rationale?, quote?} entry per item, the fields the classifier's text names in the workbench (slots.json
+    VALUE_NAME and REASON_NAME). `label` is a free string (an off-list value is kept as data) and `confidence` also
+    accepts a string; `quote` is asked for when the label marks spans."""
     from . import model
 
     props: dict[str, Any] = {
@@ -5352,8 +5366,8 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
 
     records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
     slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
-    prompt = labels_part("draft", description=str(inp.get("description") or ""),
-                         records=labels_part("records", **slots) if slots["lines"] else "")
+    prompt = draft_part("draft", description=str(inp.get("description") or ""),
+                        records=draft_part("records", **slots) if slots["lines"] else "")
     role = labels_model(c)
     with capture.scope("concepts draft", keep=True):
         return await model_mod.structured(prompt, tool=draft_tool(), model=model or role["model"],

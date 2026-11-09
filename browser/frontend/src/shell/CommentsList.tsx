@@ -28,7 +28,7 @@ export interface CommentItem {
   details: string
   /** the card's or the passage's ref, which Go to it opens */
   ref: string
-  /** where it stands, in words: "card abc · step 2", "the report", a document's name */
+  /** where it stands, in words: "card abc", "the report", a document's name */
   where: string
   /** the passage's words, for a comment in a document or on an answer */
   quote?: string | null
@@ -75,7 +75,7 @@ export function useCommentItems(ws: string) {
         text: c.text,
         details: c.details,
         ref: `card:${c.card}`,
-        where: `card ${c.card}${c.n != null ? ` · step ${c.n}` : ''}`,
+        where: `card ${c.card}`,
       })),
       ...docs.flatMap(({ slug, name, comments }) =>
         comments.map((c) => ({

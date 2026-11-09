@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A check of the analyst's own (src/shell/LabelsSidebar.tsx): the Comments sidebar's categories, the checks, end in
-// + New check, whose card takes a name and a prompt; Run adds the check over the documents, and it is listed with the
-// others.
+// + Ask for comments, whose card takes a name and a prompt; Run adds the check over the documents, and it is listed with
+// the others.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { LabelsSidebar } from '../../src/shell/LabelsSidebar.tsx'
@@ -28,7 +28,7 @@ async function type(el: HTMLTextAreaElement | HTMLInputElement, text: string) {
   })
 }
 
-test('+ New check, with a name and a prompt, adds a check over the documents, listed with the others', async () => {
+test('+ Ask for comments, with a name and a prompt, adds a check over the documents, listed with the others', async () => {
   const posts: { url: string; body: unknown }[] = []
   let checks: unknown[] = CHECKS
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
@@ -51,12 +51,12 @@ test('+ New check, with a name and a prompt, adds a check over the documents, li
   await settle()
   await act(async () => el.querySelector<HTMLButtonElement>('.lside-new .lside-add')!.click())
   await settle()
-  const card = document.querySelector<HTMLElement>('[aria-label="New check"]')!
+  const card = document.querySelector<HTMLElement>('[aria-label="Ask for comments"]')!
   await type(card.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, 'Missing baselines')
   await type(card.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!, 'Ask what the baseline was.')
   await act(async () => [...card.querySelectorAll('button')].find((b) => b.textContent === 'Run')!.click())
   await settle()
   expect(posts).toEqual([{ url: '/api/ws/w1/checks', body: { name: 'Missing baselines', prompt: 'Ask what the baseline was.', covers: ['documents'] } }])
-  expect(document.querySelector('[aria-label="New check"]')).toBeNull()
+  expect(document.querySelector('[aria-label="Ask for comments"]')).toBeNull()
   expect([...el.querySelectorAll('[data-category]')].map((r) => r.getAttribute('data-category'))).toContain('new')
 })

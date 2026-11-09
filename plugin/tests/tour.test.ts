@@ -23,7 +23,7 @@ import { endCheck, noteRow, resumeChecks, startCheck } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { checkedWords, CITE_QUESTION, CLOSE_MS, CLOSED, DONE_MS, E_WORDS, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourChecked, tourCites, tourDid, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
 import { test } from './kit'
-import { promptStub, tempRun } from './stubs'
+import { NOTICES, promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -314,7 +314,7 @@ function checking() {
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     session: { cwd: async () => '/made-up/data', id: async () => 's-tour', messages: async () => [] },
     fs: {
-      read: async (p: string) => { if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}'; throw new Error(`no file ${p}`) },
+      read: async (p: string) => { if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}'; if (p.endsWith('/prompts/notices.md')) return NOTICES; throw new Error(`no file ${p}`) },
       write: async () => undefined,
       list: async () => [],
       exists: async () => false,

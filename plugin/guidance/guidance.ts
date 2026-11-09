@@ -8,10 +8,11 @@
 //
 // The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a switched-off
 // feature is left out (SECTIONS). With Labels off, that is the Labels section, the one part that names labels or
-// `thimble label`, so Claude does not know of them, and `thimble label` refuses its commands (hooks/path.ts). While
+// `thimble label`, with the text on labels that the browser workbench reads too (prompts/guidance-labels.md), so Claude
+// does not know of them, and `thimble label` refuses its commands (hooks/path.ts). While
 // Claude does not cite (Citations manual or off), the citations in the other sections' examples read as plain words. A
-// mode that changes what Claude or the analyst does adds a sentence at the end (modesNow): Cards on demand, and the
-// modes in which citations or explainers come only when the analyst asks. A switch changed later makes a different
+// mode that changes what Claude or the analyst does adds a sentence at the end (modesNow): Cards on demand or off, and
+// the modes in which citations or explainers come only when the analyst asks. A switch changed later makes a different
 // text, which the next prompt carries beside the copy the conversation holds.
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -42,8 +43,8 @@ export function guidanceFor(text: string, on: (feature: string) => boolean, mode
 }
 
 /** The sentences on the modes Claude needs to know: with Cards on demand, that it draws a card only when the analyst
- *  asks for one; and one on what else comes only when the analyst asks for it, so Claude can say how thimble works
- *  now. */
+ *  asks for one, and with Cards off, that it draws none, since the other sections name cards; and one on what else
+ *  comes only when the analyst asks for it, so Claude can say how thimble works now. */
 export function modesNow(): string[] {
   const asked = [
     choiceOf('citations') === 'manual' && 'citations (they select words and press c)',
@@ -52,6 +53,7 @@ export function modesNow(): string[] {
   const list = asked.length > 1 ? `${asked.slice(0, -1).join(', ')} and ${asked.at(-1)}` : asked[0]
   return [
     ...(choiceOf('cards') === 'on demand' ? ['Draw a card only when the analyst asks for one.'] : []),
+    ...(choiceOf('cards') === 'off' ? ['Cards are off, so draw no cards.'] : []),
     ...(list ? [`These come only when the analyst asks: ${list}.`] : []),
   ]
 }

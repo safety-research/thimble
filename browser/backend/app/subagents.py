@@ -73,7 +73,7 @@ PLAN_FAILED = {"writer": ("the writer", "it could not save the document", "write
                "view-builder": ("the view's builder", "it could not build the view", "choose Retry on the view"),
                "view-reviewer": ("the view's reviewer", "it could not finish the review",
                                  "choose Review again on the view"),
-               "check": ("the check", "it could not comment on every passage", "choose Re-run on the check"),
+               "check": ("the comments agent", "it could not comment on every passage", "choose Re-run in Comments"),
                "dev-ticket": ("the ticket's agent", "it could not finish the change", "choose Retry on the ticket")}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)

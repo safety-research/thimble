@@ -102,17 +102,27 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 
 | Text | File | Read by | As |
 |---|---|---|---|
-| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | context beside the first prompt of every conversation, without the section of a switched-off feature |
-| card tool | `prompts/card-tool.md` | `cards/tool.ts` | the description of the `card` tool |
+| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | context beside the first prompt of every conversation: main's text, then the thimble command, without the section of a switched-off feature |
+| main's text | `prompts/main.md` | `prompts/guidance.md`, and the workbench's `browser/prompts/main.md` | the one text main reads in both modes: what thimble is and main's role, Communicating, What to make, Citing claims, Cards and Labels |
+| communicating | `prompts/communicating.md` | `prompts/main.md`, which includes it | main's Communicating: how to write for the analyst, which the workbench's writer reads too |
+| citing | `prompts/citing.md` | `prompts/main.md`, which includes it | main's Citing claims: what main cites, and where a fact comes from |
+| cards | `prompts/guidance-cards.md` | `prompts/main.md` | main's Cards section: when to draw a card, what it shows and its answer, which the card checks and the workbench's writer read too |
+| labels | `prompts/guidance-labels.md` | `prompts/main.md` | main's Labels section, which the workbench's writer reads too |
+| card tool | `prompts/card-tool.md` | `cards/tool.ts` | the description of the `card` tool, and below its `<!-- view -->` line the description of its `view` field |
 | card check | `prompts/card-check.md` | `cards/fit.ts` | one model call when a version of a card does not fit on the screen, which writes the version the analyst sees |
+| card criteria | `prompts/card-criteria.md` | `prompts/card-check.md`, which includes it | the card check's criterion for a card that does not fit, judged by what the analyst asked for |
 | checker | `prompts/checker.md` | `marks/checker.ts` | the prompt of the fork that checks a reply's marks |
+| notices | `prompts/notices.md` | `core/tell.ts`, built by `marks/notices.mjs` | what main reads after a check of its citations or a repair of one, the line that frames each report of thimble's, and a repair's request after the checker's text |
 | designer | `prompts/designer.md` | `designer/v.ts` | the prompt of the fork that `v` starts |
 | label classifier | `prompts/labels.md` | `labels/labels.ts` | each model call of a `--prompt` label |
 | observer | `prompts/observer.md`, `prompts/observer-turn.md` | `observer/observer.ts` | the prompt of the look after each answer: its frame, then the messages to read and what thimble already gave |
 | lenses | `prompts/lens-explain.md`, `prompts/lens-heads.md`, `prompts/lens-claims.md` | `observer/observer.ts` | the sections of the look's prompt, one per switch that is on |
 | explainer on demand | `prompts/explain-expand.md` | `explain/expand.ts` | one model call when the person asks what words of an answer mean |
+| what an explainer is | `prompts/explainer.md` | the texts that include it | the definition in the Explainers lens and the explainer on demand, and in the workbench's Explainers check over a document |
+| what a heads-up is | `prompts/heads-up.md` | the texts that include it | the definition in the Heads-ups lens, and in the workbench's Heads up check over a document |
 | squeeze | `prompts/squeeze.md` | `squeeze/term.ts` | one model call per change of an answer's chips |
 | side thread | `prompts/thread.md` | `threads/thread.ts` | the prompt of the fork that answers a side thread |
+| what thimble is | `prompts/thimble.md` | the texts that include it | the opening of main's text and of the side thread's and explainer's texts, and of the workbench's `browser/prompts/preamble.md` |
 | artifact | `prompts/artifact.md` | `cards/head.ts` | the prompt of the fork that p on a card starts, which publishes the card as a private claude.ai artifact |
 | fix request | `prompts/fix-request.md` | `fix/register.ts` | beside the person's words after `/thimble-fix <words>`: name the fix they change, or ask one short question |
 | fixer | `prompts/fixer.md` | `fix/fixer.ts`, `browser/backend/app/fixes.py` | the start of the first message of the fork that `/thimble-fix` starts |
@@ -136,12 +146,15 @@ When the model does something you do not want, change the cause, not the symptom
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
 The browser workbench (`browser/`) keeps its own texts in `browser/prompts/`. Of these it
-reads the texts of what it runs as the terminal does, the citation checker, the look and the fixer (`checker.md`,
-`observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`, `fixer.md`). Both modes read
-a text the same way: it may hold another text, `{{include:NAME}}`, and where the modes need different words it names
-them with a slot, `{{NAME}}`, whose words for each mode stand in `plugin/prompts/slots.json`: a name or a clause of at
-most one sentence. Its reader fills its other slots at each call (the registry's `fills`). A text of the workbench holds
-one as `{{include:plugin:NAME}}`, and `thimble dev prompts NAME browser` shows one as the workbench reads it.
+reads the texts of what it runs as the terminal does, the citation checker, the look, the fixer, a side thread's fork
+and the label classifier (`checker.md`, `observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`,
+`fixer.md`, `thread.md`, `labels.md`), the card check's criterion for a card that does not fit (`card-criteria.md`),
+and main's text (`main.md`, with `communicating.md`, `citing.md`, `guidance-cards.md` and `guidance-labels.md` in it)
+before main's own sections. Both modes
+read a text the same way: it may hold another text, `{{include:NAME}}`, and where the modes need different words it
+names them with a slot, `{{NAME}}`, whose words for each mode stand in `plugin/prompts/slots.json`: a name or a clause
+of at most one sentence. Its reader fills its other slots at each call (the registry's `fills`). A text of the workbench
+holds one as `{{include:plugin:NAME}}`, and `thimble dev prompts NAME browser` shows one as the workbench reads it.
 
 `scripts/check.sh parity` fails when the two modes read a text that both read differently, when another text a model
 reads copies 20 or more of its words in a row, when a slot lacks a mode's words or stands in no such text, or when a

@@ -34,10 +34,10 @@ export const ChipContext = createContext<ChipCtx>({ workspace: '', broken: new S
 
 const BRACKET_SRC = String.raw`\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]`
 /** A bare ref typed into prose renders as the same chip as its `[[ref]]`: a card's (`card:<id>`, `cell:<id>`, with its
- * run, output lines, step or table cell), a label's or a group's, a report's or one of its passages
+ * run, output lines or table cell), a label's or a group's, a report's or one of its passages
  * (`report:<slug>#<id>`), a view's or one of its units, a thread's. Each needs its prefix's
  * colon right before the id, so prose such as "the report: it" stays text. One capturing group (inlineParse counts on it). */
-export const BARE_SRC = String.raw`(?<![\w[|:/])((?:card|cell):[A-Za-z0-9_-]{6,}(?:@\d+|@out\d+#L\d+(?:-\d+)?|#step-\d+(?![\w/-])|#[^\s/]+\/[^\s,;)]*[^\s,;.)])?|(?:concept|group):[A-Za-z0-9_-]{6,}|report:[A-Za-z0-9_-]+(?:#[A-Za-z0-9_-]+)?|view:[a-z0-9][a-z0-9-]{0,39}(?:\/[^\s,;)]*[^\s,;.)])?|chat:[A-Za-z0-9_-]{6,}(?:#\d+)?)`
+export const BARE_SRC = String.raw`(?<![\w[|:/])((?:card|cell):[A-Za-z0-9_-]{6,}(?:@\d+|@out\d+#L\d+(?:-\d+)?|#[^\s/]+\/[^\s,;)]*[^\s,;.)])?|(?:concept|group):[A-Za-z0-9_-]{6,}|report:[A-Za-z0-9_-]+(?:#[A-Za-z0-9_-]+)?|view:[a-z0-9][a-z0-9-]{0,39}(?:\/[^\s,;)]*[^\s,;.)])?|chat:[A-Za-z0-9_-]{6,}(?:#\d+)?)`
 const BARE_PREFIXES = ['card:', 'cell:', 'concept:', 'group:', 'report:', 'view:', 'chat:']
 const TOKEN_RE = new RegExp(`${BRACKET_SRC}|${BARE_SRC}`, 'g')
 

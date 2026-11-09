@@ -3,7 +3,7 @@
 // takeaway (editable with RefEditor), the card check (CheckDetails, with the Undo of its fix), and the card's history.
 // What the analyst types is saved when the field is left. The card's History (its button on the card, or a row of the
 // history here) lists its edits, newest first; each opens the card as it was before that edit, to read (VersionView:
-// its question, steps or text, code, output and takeaway as stored then), with Restore, which makes the card that
+// its question, text, code, output and takeaway as stored then), with Restore, which makes the card that
 // version again as an edit of the analyst's (backend notebook.restore_version).
 // LabelPanel is the same panel for a label with no card of its own.
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
@@ -33,8 +33,6 @@ import { CanvasContext } from './context'
 import { detailBlocks, fieldWords, formatDuration, groupInputs, historyRows, truncatedSize, type DetailBlock, type HistoryRow } from './details'
 import { LabelDetails } from './LabelDetails'
 import { hhmm, isRunnable, kindOf } from './layout'
-import { planSteps } from './plan'
-import { PlanSteps } from './PlanBody'
 import { RefEditor } from './RefEditor'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -313,8 +311,8 @@ function HistoryList({ rows, onOpen }: { rows: HistoryRow[]; onOpen: (entry: str
   )
 }
 
-/** The card as it was before one of its edits (backend notebook.card_version_route), to read: its question, its steps
- * or text, its code, output and takeaway as stored then, a quiet Changed beside each part the edit replaced. Back
+/** The card as it was before one of its edits (backend notebook.card_version_route), to read: its question, its text,
+ * its code, output and takeaway as stored then, a quiet Changed beside each part the edit replaced. Back
  * returns to where it was opened; Restore makes the card this version again, as an edit of the analyst's. */
 function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: string; cell: Cell; entry: string; byName: (by: string | null | undefined) => string; onBack: () => void; onRestored: () => void }) {
   const ctx = useContext(CanvasContext)
@@ -350,7 +348,7 @@ function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: stri
   const blocks = v ? detailBlocks(v.outputs) : []
   const tag = (field: string) =>
     changed.has(field) ? (
-      <span className="plan-mark is-changed" title="This edit changed it">
+      <span className="bdetail-changed" title="This edit changed it">
         Changed
       </span>
     ) : null
@@ -377,12 +375,6 @@ function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: stri
             <span className="bdetail-label">Question{tag('title')}</span>
             <div className="bdetail-q-read">{v.title}</div>
           </section>
-          {kind === 'plan' && (
-            <section className="bdetail-sec">
-              <span className="bdetail-label">Steps{tag('payload')}</span>
-              <PlanSteps ws={ws} cellId={cell.id} steps={planSteps(v as Cell)} now={Date.now()} anchors={false} />
-            </section>
-          )}
           {kind === 'note' && (
             <section className="bdetail-sec">
               <span className="bdetail-label">Text{tag('payload')}</span>
@@ -391,7 +383,7 @@ function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: stri
               </div>
             </section>
           )}
-          {kind !== 'plan' && kind !== 'note' && v.payload != null && (
+          {kind !== 'note' && v.payload != null && (
             <section className="bdetail-sec">
               <span className="bdetail-label">{fieldWords(kind, ['payload']).replace(/^./, (c) => c.toUpperCase())}{tag('payload')}</span>
               <pre className="bdetail-shell">{JSON.stringify(v.payload, null, 2)}</pre>
@@ -413,7 +405,7 @@ function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: stri
               ))}
             </section>
           )}
-          {kind !== 'plan' && kind !== 'note' && (
+          {kind !== 'note' && (
             <section className="bdetail-sec">
               <span className="bdetail-label">Takeaway{tag('takeaway')}</span>
               <div className="bdetail-take">

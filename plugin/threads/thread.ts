@@ -37,7 +37,7 @@ import { tellAsked } from '../core/engaged'
 import { readKept, rootHere, startDir, writeKept, keptDir } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { narrowNotice, openPane } from '../core/pane'
-import { reportOf, takeFor, tellAtNextPrompt, tellFor } from '../core/tell'
+import { frameOf, reportOf, takeFor, tellAtNextPrompt, tellFor } from '../core/tell'
 import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
@@ -263,7 +263,8 @@ export async function askThread($: Engine, ask: { text: string; scope: ThreadSco
     let delivered = false
     // what waits for the thread about a card its fork drew (core/tell.ts tellFor) goes with its next question
     const told = await takeFor($, `thread:${key}`).catch(() => ({} as Record<string, string>))
-    const withTold = (s: string) => (Object.keys(told).length ? `${s}\n\n${reportOf(Object.values(told))}` : s)
+    const frame = Object.keys(told).length ? await frameOf($) : ''
+    const withTold = (s: string) => (Object.keys(told).length ? `${s}\n\n${reportOf(frame, Object.values(told))}` : s)
     if (was.agentId && await stillWorking($, was)) {
       sent = withTold(nextMessage({ text, scope, last }))
       const r = await $.session.send({ to: { agentId: was.agentId }, text: sent } as Any).catch((err: unknown) => ({ isDelivered: false, reason: String((err as Error)?.message || err) }))

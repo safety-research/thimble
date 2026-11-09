@@ -9,7 +9,7 @@ import { SLOTS_FILE, TEXTS, compose, fileOf } from './registry.mjs'
 
 type Engine = EngineInterface
 
-export type PromptName = 'guidance' | 'card-tool' | 'card-check' | 'checker' | 'designer' | 'artifact' | 'labels' | 'labels-off' | 'observer' | 'observer-turn' | 'lens-explain' | 'lens-heads' | 'lens-claims' | 'explain-expand' | 'squeeze' | 'thread' | 'fix-request' | 'fixer'
+export type PromptName = 'guidance' | 'card-tool' | 'card-check' | 'checker' | 'designer' | 'artifact' | 'labels' | 'labels-off' | 'observer' | 'observer-turn' | 'lens-explain' | 'lens-heads' | 'lens-claims' | 'explain-expand' | 'squeeze' | 'thread' | 'fix-request' | 'fixer' | 'notices'
 
 const texts = new Map<string, string>()
 

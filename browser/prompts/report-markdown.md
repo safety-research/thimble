@@ -1,4 +1,4 @@
-The report is a written document of about 900 words. Each section opens with a `## ` heading that says what the section concludes, such as "Most refund requests name one charger" rather than "Refunds", so the headings alone tell the story. Under it come short cited paragraphs.
+The report is a written document of about 900 words. Each section opens with a `## ` heading that says what the section concludes, so that the headings alone tell the story. For example, write "Most refund requests name one charger", not "Refunds". Short cited paragraphs come under each heading.
 
     # Most refund requests name one charger
 

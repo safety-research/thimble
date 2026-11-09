@@ -3,18 +3,19 @@
 // than its frame shows (draw.ts CARD_ROWS, rowsCut), or lines wider than the card, cut at its edge, do not fit. No model
 // takes part in the measure. A version that fits draws at once. One that does not is held (CardMeta.held): its frame
 // draws its title and `drawing…` (client.tsx) in place of the card, and it takes no keys. One model call, the card check
-// (prompts/card-check.md, the criteria of the workbench's card check that a card of the terminal has, with the one for
-// a card that does not fit), reads the analyst's question (for a thread's fork's card, the question asked in that
-// thread: threads/seam.ts threadQuestion), the card's title, columns, first row, text copy and view, by the card guide
-// (tool.ts cardGuide) and the guidance's `## Cards` (guidance/guidance.ts cardsGuidance), and writes the view, and the
-// title, that replace it. tool.ts draws the replacement in the card's place (personVersion), and the card shows when the
-// check ends (shown): as the replacement, whatever its size, its first CARD_ROWS rows and `+N rows` under them when it
-// still does not fit, or as it stands when the check wrote none or it did not draw. A newer version Claude drew since
-// waits for its own check. The card tool's answer says nothing of it: Claude reads what it read before, and reads of the
-// replacement later, with its next card call's answer or as its next turn starts (tool.ts, core/tell.ts tellFor). A card
-// a resumed session finds held draws as it stands (store.ts restoreCards). Where thimble's drawing does not show (a host
-// that runs Claude Code through its SDK, core/host.ts), Cards act as off (settings/features.mjs UNDRAWN): no card is
-// drawn there, and none checked.
+// (prompts/card-check.md, the criteria of the workbench's card check that a card of the terminal has, then the one for
+// a card that does not fit, prompts/card-criteria.md, which the workbench's check of such a card reads too), reads the
+// analyst's question (for a thread's fork's card, the question asked in that thread: threads/seam.ts threadQuestion),
+// the card's title, columns, first row, text copy and view, by the card guide (tool.ts cardGuide) and the guidance's
+// `## Cards` (guidance/guidance.ts cardsGuidance), and writes the view, and the title, that replace it. tool.ts draws
+// the replacement in the card's place (personVersion), and the card shows when the check ends (shown): as the
+// replacement, whatever its size, its first CARD_ROWS rows and `+N rows` under them when it still does not fit, or as
+// it stands when the check wrote none or it did not draw. A newer version Claude drew since waits for its own check.
+// The card tool's answer says nothing of it: Claude reads what it read before, and reads of the replacement later, with
+// its next card call's answer or as its next turn starts (tool.ts, core/tell.ts tellFor). A card a resumed session
+// finds held draws as it stands (store.ts restoreCards). Where thimble's drawing does not show (a host that runs Claude
+// Code through its SDK, core/host.ts), Cards act as off (settings/features.mjs UNDRAWN): no card is drawn there, and
+// none checked.
 import type { EngineInterface } from 'claude-code'
 
 import { modelWhy } from '../core/why.js'

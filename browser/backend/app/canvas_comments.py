@@ -1,28 +1,26 @@
-"""Comments on the canvas: a note beside a card, or beside one step of a plan card, which a check's run over the cards
-leaves (checks.py, the run target CANVAS) or main leaves with add_comment. The analyst reads each beside what it is
-about while its check is on, and Done resolves it, which hides it.
+"""Comments on the canvas: a note beside a card, which a check's run over the cards leaves (checks.py, the run target
+CANVAS) or main leaves with add_comment. The analyst reads each beside its card while its check is on, and Done resolves
+it, which hides it.
 
 The store is `workspaces/<c>/canvas-comments.json` = {comments: [Comment]}, changed under its lock (ledger.update_json).
-A comment has the fields a document's comment has, with `card` and `step` in place of `sentence_id`:
+A comment has the fields a document's comment has, with `card` in place of `sentence_id`:
 
-    {id, card, step, check, run, author, text, details, evidence, fp, ts, status, resolution}
+    {id, card, check, run, author, text, details, evidence, fp, ts, status, resolution}
 
-`step` is the stable id of a plan card's step (notebook.plan_steps, `s<n>` as it was made), named to a model as
-`card:<id>#step-<n>` by its place. `author` is `check` for a run's comment and `claude` for main's. Every comment is a
-short statement, `text`, which the analyst reads first, and optional `details`, which they open on request: `text` has
-its citations flattened for reading, `details` keeps them as chips, and both cite into `evidence`. A leading copy of
-its check's name with a colon is dropped, since a comment shows its check's name. `status` is `open` or `dismissed`
-(report.SETTLED_STATUS) and `resolution` says why: `done` (the analyst's Done) or `superseded` (a later run of its check
-covered its card or step). A comment on a card that is gone is not served.
+`author` is `check` for a run's comment and `claude` for main's. Every comment is a short statement, `text`, which the
+analyst reads first, and optional `details`, which they open on request: `text` has its citations flattened for
+reading, `details` keeps them as chips, and both cite into `evidence`. A leading copy of its check's name with a colon is
+dropped, since a comment shows its check's name. `status` is `open` or `dismissed` (report.SETTLED_STATUS) and
+`resolution` says why: `done` (the analyst's Done) or `superseded` (a later run of its check covered its card). A
+comment on a card that is gone is not served. A comment of thimble 0.10.11 or before on a step of a plan card (`step`)
+stands beside the card, which reads as a note now (notebook._normalize_cell).
 
-The passages of the canvas (passages()) are the cards a check covers, in the tree's order, each followed by its steps:
-the cards of the analyst's groups and the threads' (not the orientation's deck, a document's figures or labels' cards).
-A card is fingerprinted on what a reader of it sees (checkstore.basis, a plan's steps left out), a step on its text,
-what it makes, its status, its note and its details. Each change emits `canvas-comments` on the workspace's stream.
+The passages of the canvas (passages()) are the cards a check covers, in the tree's order: the cards of the analyst's
+groups and the threads' (not the orientation's deck, a document's figures or labels' cards). A card is fingerprinted on
+what a reader of it sees (checkstore.basis). Each change emits `canvas-comments` on the workspace's stream.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import math
 import re
@@ -50,9 +48,7 @@ COVERED_ROLES = ("analyst",)  # notebook.DEFAULT_ROLE: the analyst's groups and 
 SKIPPED_KINDS = ("label",)  # a label's card is the label's review, which its own pane shows
 DETAILS_CHARS = 2_000  # of a comment's details, kept
 WHOLE_AUTHORS = ("analyst", "terminal")  # the analyst's own comments, read whole: never split into statement and details
-# a plan payload's keys of its steps (plans.REMOVED, plans.LAST_EDIT), left out of its card's fp
-PLAN_STEP_KEYS = ("steps", "removed_steps", "last_edit")
-_REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:#step-(\d+))?$")
+_REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)$")
 
 
 def _now() -> str:
@@ -102,37 +98,19 @@ def note_of(cm: dict[str, Any], name: str = "") -> dict[str, str]:
 # --------------------------------------------------------------------------- the cards a check covers
 
 
-def parse_ref(ref: str) -> tuple[str, int | None] | None:
-    """(card id, step number or None) of `card:<id>` or `card:<id>#step-<n>`; None for another ref."""
+def parse_ref(ref: str) -> str | None:
+    """The card id of `card:<id>`; None for another ref."""
     m = _REF_RE.match(str(ref or "").strip().strip("[]").strip())
-    if not m:
-        return None
-    return m.group(1), (int(m.group(2)) if m.group(2) else None)
+    return m.group(1) if m else None
 
 
-def steps_of(cell: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """A plan card's steps in order (notebook.plan_steps), each with its place `n` from 1 and its note on one line; []
-    for any other card."""
-    from . import notebook  # noqa: PLC0415 — notebook imports the kernel machinery
-
-    return [{**s, "n": i, "note": _collapse(s.get("note")), "details": _collapse(s.get("details"))}
-            for i, s in enumerate(notebook.plan_steps(cell), 1)]
-
-
-def step_ref(card: str, n: int | None) -> str:
-    return f"card:{card}" if n is None else f"card:{card}#step-{n}"
-
-
-def _fp(kind: str, keys: list[str]) -> str:
-    return hashlib.sha1("\x1f".join([kind, *keys]).encode("utf-8")).hexdigest()[:16]
+def card_ref(card: str) -> str:
+    return f"card:{card}"
 
 
 def _card_fp(cell: dict[str, Any]) -> str:
     from . import checkstore  # noqa: PLC0415 — checkstore imports the notebook lazily
 
-    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else None
-    if payload is not None and isinstance(payload.get("steps"), list):  # a plan: its steps are passages of their own
-        cell = {**cell, "payload": {k: v for k, v in payload.items() if k not in PLAN_STEP_KEYS}}
     return "c" + checkstore.basis(cell)
 
 
@@ -189,9 +167,8 @@ def _covered_groups(c: str) -> list[tuple[dict, dict]]:
 
 
 def passages(c: str, since: str | None = None) -> list[dict[str, Any]]:
-    """The passages of the canvas a check covers, in the tree's order: each card {ref, kind: card, card, step: None,
-    n: None, fp, changed}, then each of its steps {ref: card:<id>#step-<n>, kind: step, step: its id, n, ...}; with
-    `since`, only the cards that changed at or after it (after), so a turn's end fingerprints only those. Every
+    """The passages of the canvas a check covers, in the tree's order: each card {ref, kind: card, card, fp, changed};
+    with `since`, only the cards that changed at or after it (after), so a turn's end fingerprints only those. Every
     passage carries `locked` (never: the analyst's lock on a card keeps models from changing it, not from reading it),
     `anchor` (the card) and `ids` (its ref), as a document's passages do."""
     out: list[dict[str, Any]] = []
@@ -207,35 +184,27 @@ def passages(c: str, since: str | None = None) -> list[dict[str, Any]]:
             changed = _changed(cell)
             if not after(changed, since):
                 continue
-            base = {"card": cid, "changed": changed, "locked": False, "anchor": cid, "group": str(nb.get("id") or "")}
-            out.append({**base, "ref": step_ref(cid, None), "kind": "card", "step": None, "n": None,
-                        "fp": _card_fp(cell), "ids": [step_ref(cid, None)]})
-            for s in steps_of(cell):
-                ref = step_ref(cid, s["n"])
-                out.append({**base, "ref": ref, "kind": "step", "step": s["id"], "n": s["n"],
-                            "fp": _fp("step", [cid, s["text"], *s["makes"], s["status"], s["note"],
-                                               *([s["details"]] if s["details"] else [])]), "ids": [ref]})
+            out.append({"card": cid, "changed": changed, "locked": False, "anchor": cid, "group": str(nb.get("id") or ""),
+                        "ref": card_ref(cid), "kind": "card", "fp": _card_fp(cell), "ids": [card_ref(cid)]})
     return out
 
 
 def passage_of(c: str, ref: str, ps: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
     """The passage `ref` names among the covered cards, or None."""
-    hit = parse_ref(ref)
-    if hit is None:
+    card = parse_ref(ref)
+    if card is None:
         return None
-    want = step_ref(*hit)
-    return next((p for p in (passages(c) if ps is None else ps) if p["ref"] == want), None)
+    return next((p for p in (passages(c) if ps is None else ps) if p["card"] == card), None)
 
 
-def key_of(p: dict[str, Any]) -> tuple[str, str | None]:
-    """A passage's or a comment's key, which survives a step's move: (card, step id or None)."""
-    return str(p.get("card") or ""), (str(p["step"]) if p.get("step") else None)
+def key_of(p: dict[str, Any]) -> str:
+    """A passage's or a comment's key: its card."""
+    return str(p.get("card") or "")
 
 
 def card_lines(c: str, refs: list[str], ps: list[dict[str, Any]] | None = None) -> str:
     """The cards a canvas run covers, for its task: each card that has a passage in `refs` with its ref, kind and
-    question, its takeaway, and each step of a plan with its status, note and details; a step the run does not cover
-    says it was checked before."""
+    question, and its takeaway."""
     from . import notebook  # noqa: PLC0415
 
     ps = passages(c) if ps is None else ps
@@ -253,14 +222,6 @@ def card_lines(c: str, refs: list[str], ps: list[dict[str, Any]] | None = None) 
         takeaway = _collapse(cite.canon_text(str(cell.get("takeaway") or "")))
         if takeaway:
             lines.append(f"  takeaway: {takeaway}")
-        if follows := (cell.get("payload") or {}).get(notebook.PLAN_FOLLOWS) if kind == notebook.PLAN_KIND else None:
-            lines.append(f"  follows: card:{follows}")
-        for s in steps_of(cell):
-            ref = step_ref(cid, s["n"])
-            seen = "" if ref in want else " · checked before"
-            line = notebook.step_line(s["n"], s).split("] ", 1)[-1]  # the step's text and what it makes
-            lines.append(f"  {ref} · {s['status']}{seen} · {line}" + (f" · {s['note']}" if s["note"] else "")
-                         + (f" · details: {s['details']}" if s["details"] else ""))
     return "\n".join(lines)
 
 
@@ -311,18 +272,12 @@ def _cards(c: str) -> dict[str, dict[str, Any]]:
 
 def _served(cm: dict[str, Any], cards: dict[str, dict[str, Any]], names: dict[str, str]) -> dict[str, Any] | None:
     """A comment as the browser and the tools read it, with its `ref` and its statement (`text`) and `details` as the
-    analyst reads them (note_of, by its check's name in `names`); None when its card, or its step, is gone."""
-    cell = cards.get(str(cm.get("card") or ""))
-    if cell is None:
+    analyst reads them (note_of, by its check's name in `names`); None when its card is gone."""
+    if str(cm.get("card") or "") not in cards:
         return None
-    n = None
-    if cm.get("step"):
-        n = next((s["n"] for s in steps_of(cell) if s["id"] == cm["step"]), None)
-        if n is None:
-            return None
-    kept = {k: v for k, v in cm.items() if k not in ("tag", "title", "body")}
+    kept = {k: v for k, v in cm.items() if k not in ("tag", "title", "body", "step")}
     note = note_of(cm, names.get(str(cm.get("check") or ""), ""))
-    return {**kept, **note, "ref": step_ref(str(cm["card"]), n), "n": n}
+    return {**kept, **note, "ref": card_ref(str(cm["card"]))}
 
 
 def all_comments(c: str) -> list[dict[str, Any]]:
@@ -337,8 +292,8 @@ def all_comments(c: str) -> list[dict[str, Any]]:
 
 
 def open_comments(c: str, card: str | None = None) -> list[dict[str, Any]]:
-    """The open comments whose card (and step) is there, in the order they were left, each with its `ref`; with `card`,
-    that card's alone."""
+    """The open comments whose card is there, in the order they were left, each with its `ref`; with `card`, that
+    card's alone."""
     return [cm for cm in all_comments(c) if (cm.get("status") or "open") == "open" and (card is None or cm["card"] == card)]
 
 
@@ -349,19 +304,19 @@ def _new_id(used: set[str]) -> str:
             return i
 
 
-def add(c: str, *, card: str, step: str | None, text: str, author: str, details: str = "", check: str | None = None,
+def add(c: str, *, card: str, text: str, author: str, details: str = "", check: str | None = None,
         run: str | None = None, evidence: str = "", fp: str = "") -> tuple[dict[str, Any], bool]:
     """Store a comment, its statement `text` and its `details`, or find the same open one (same author, check, run,
-    place and words). Returns (the comment, whether it is new)."""
+    card and words). Returns (the comment, whether it is new)."""
     text, details = _collapse(text), clean_details(details)
 
     def fn(items: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
-        same = next((x for x in items if x.get("card") == card and x.get("step") == step and x.get("author") == author
+        same = next((x for x in items if x.get("card") == card and x.get("author") == author
                      and x.get("check") == check and x.get("run") == run and (x.get("status") or "open") == "open"
                      and _collapse(x.get("text")) == text and clean_details(x.get("details")) == details), None)
         if same is not None:
             return same, False
-        cm = {"id": _new_id({str(x["id"]) for x in items}), "card": card, "step": step, "check": check, "run": run,
+        cm = {"id": _new_id({str(x["id"]) for x in items}), "card": card, "check": check, "run": run,
               "author": author, "text": text, "details": details, "evidence": evidence, "fp": fp, "ts": _now(),
               "status": "open", "resolution": None}
         items.append(cm)
@@ -411,9 +366,9 @@ def reopen(c: str, ids: list[str]) -> list[dict[str, Any]]:
     return done
 
 
-def supersede(c: str, check: str, run: str, keys: set[tuple[str, str | None]]) -> int:
-    """A run of `check` over the cards ended done: its check's earlier open comments on the cards and steps it covered
-    (`keys`, key_of) are superseded. Returns how many."""
+def supersede(c: str, check: str, run: str, keys: set[str]) -> int:
+    """A run of `check` over the cards ended done: its check's earlier open comments on the cards it covered (`keys`,
+    key_of) are superseded. Returns how many."""
 
     def fn(items: list[dict[str, Any]]) -> int:
         n = 0
@@ -454,7 +409,7 @@ def line(c: str, cm: dict[str, Any]) -> str:
 
 
 def lines(c: str, card: str) -> list[str]:
-    """The open comments on one card and its steps, a line each, for read_ref."""
+    """The open comments on one card, a line each, for read_ref."""
     try:
         return [line(c, cm) for cm in open_comments(c, card)]
     except (OSError, ValueError):
@@ -473,7 +428,7 @@ def _ws(c: str) -> None:
 
 @router.get("/ws/{c}/canvas/comments")
 async def list_route(c: str) -> dict[str, Any]:
-    """The open comments on the canvas whose card is there, each with its `ref` (`card:<id>` or `card:<id>#step-<n>`)."""
+    """The open comments on the canvas whose card is there, each with its `ref` (`card:<id>`)."""
     _ws(c)
     return {"comments": open_comments(c)}
 

@@ -1341,17 +1341,21 @@ def _as_after_stop(c: str) -> None:
 
 
 def _thread(sp: Space, meta: dict[str, Any], text: str) -> None:
+    """A side thread's event: a new turn of the thread's fork, or a new fork of main's conversation, whose first
+    message gives the thread's instructions before the event (threads.fork_text)."""
+    from . import threads  # noqa: PLC0415
+
     agent = str(meta.get("agent") or "")
     conv = sp.convs.get(agent) if agent else None
     if conv is None:
         name = str(meta.get("name") or "thread")
+        text = f"{threads.fork_text()}\n\n{text}\n\nthread:{name}"
         agent_id = _agent_id()
         conv = Conv(sp, agent_id, "fork", agent_id=agent_id, agent_type=FORK_TYPE, base=MAIN,
                     transcript=Transcript(sp.sub_path(agent_id), sp.sid, agent_id))
         sp.convs[agent_id] = conv
         conv.transcript.write_meta({"agentType": FORK_TYPE, "isFork": True, "description": f"thread:{name}",
                                     "name": name})
-        text = f"{text}\n\nthread:{name}"
     conv.queue.append(text)
     if not conv.running:
         conv.task = _spawn_task(_agent_loop(conv), f"fork:{sp.c}:{conv.id}")

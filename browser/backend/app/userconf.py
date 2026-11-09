@@ -63,9 +63,10 @@ IGNORED_KEYS: dict[str, tuple[str, ...]] = {
     **{a: ("env", "network", "data") for a in CALLS},
 }
 IGNORED_TOP = ("installs",)  # top-level keys read and ignored
-# the prompt file under prompts/ that an agent's `prompt` replaces
+# the prompt file under prompts/ that an agent's `prompt` replaces; the labels agent's is the label classifier's text,
+# which the terminal plugin reads too (plugin/prompts/labels.md)
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
-                "labels": "labels", "cardCheck": "card-check"}
+                "labels": "plugin:labels", "cardCheck": "card-check"}
 SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
 # `askKey`: the key held with a click to ask about what it points at in the browser (pointer/CmdPointer), "meta" (⌘, or

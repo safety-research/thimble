@@ -14,7 +14,7 @@ import { AGAIN_DESCRIPTION, autoRepair, checkKey, checkOpened, endCheck, launchR
 import { registerMarks } from '../marks/register'
 import { newReply, rowMarks } from '../marks/store'
 import { setOptions } from '../settings/features.mjs'
-import { tempRun } from './stubs'
+import { NOTICES, tempRun } from './stubs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,7 +92,7 @@ function engine(refused: (spawn: Any) => string | null | Promise<string | null>,
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     session: { cwd: async () => '/made-up/data', id: async () => 's-allow', messages: async () => [] },
     fs: {
-      read: async (p: string) => { if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}'; throw new Error(`no file ${p}`) },
+      read: async (p: string) => { if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}'; if (p.endsWith('/prompts/notices.md')) return NOTICES; throw new Error(`no file ${p}`) },
       write: async () => undefined,
       list: async () => [],
       exists: async () => false,

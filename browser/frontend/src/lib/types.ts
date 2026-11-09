@@ -160,7 +160,7 @@ export interface Group {
   session?: string
 }
 
-export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom' | 'plan'
+export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom'
 
 export type MimeBundle = Record<string, any> & { _stream?: 'stdout' | 'stderr'; _out?: number; truncated?: OutputTruncation }
 
@@ -228,36 +228,6 @@ export interface Cell {
   /** set while the card waits for its measure, or does not fit on the analyst's screen and waits for its check
    * (backend card_fit.py): the card shows as one that still runs */
   held?: Record<string, unknown> | null
-}
-
-/** A plan card's step status (backend notebook.PLAN_STATUSES). */
-export type PlanStatus = 'not started' | 'running' | 'done' | 'needs you'
-
-/** One step of a plan card's payload (backend notebook.plan_step_of): its id never changes, `makes` names what it makes,
- * `details` what it shows under it on request, `runs` the Agent calls that do it, `time` a time the agent gave,
- * `started`/`ended` thimble's stamps. */
-export interface PlanStep {
-  id: string
-  text: string
-  makes: string[]
-  status: PlanStatus
-  note: string
-  details: string
-  runs: string[]
-  time: string
-  started: string | null
-  ended: string | null
-}
-
-/** The live row of one run of a plan's step (backend plans.plan_runs): the subagent chat of that name, its state, its
- * latest event and how long it has run. */
-export interface PlanRun {
-  step: number
-  name: string
-  chat: string | null
-  state: string
-  latest: string
-  elapsed: string
 }
 
 export interface CanvasResponse {
@@ -897,15 +867,12 @@ export interface WriteupComment {
   resolution?: 'done' | 'superseded' | string | null
 }
 
-/** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a
- * check's run over the cards left it (`check`), or main did (author `claude`). `ref` is `card:<id>`, or
- * `card:<id>#step-<n>` with `n` the step's place. Only open comments on cards that are there are served. */
+/** A comment beside a card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a check's run over the cards
+ * left it (`check`), or main did (author `claude`). `ref` is `card:<id>`. Only open comments on cards that are there are
+ * served. */
 export interface CanvasComment {
   id: string
   card: string
-  /** the step's stable id; null for a comment on the card */
-  step: string | null
-  n: number | null
   ref: string
   check: string | null
   run: string | null

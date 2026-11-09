@@ -1013,11 +1013,9 @@ export const COMMENT_W = 300
 export const COMMENT_GAP_X = 18
 export const COMMENT_GAP_Y = 8
 export const COMMENT_LIFT = 14
-/** how far above its step's row a comment on a step sits */
-export const COMMENT_STEP_LIFT = 4
 
 /** A comment to place: its card, its height, and where in the card it points (`dy`, plane px below the card's top:
- * COMMENT_LIFT for the card, its step row's offset less COMMENT_STEP_LIFT for a step). */
+ * COMMENT_LIFT). */
 export interface CommentSpot {
   id: string
   card: string
@@ -1052,7 +1050,7 @@ export function rootFrameOf(board: Board, card: string): string | null {
  * right edge), at its card's top plus its `dy`; the comments are stacked in the order of their wanted tops, each pushed
  * by COMMENT_GAP_Y below every comment placed before it that it would share columns with (two frames whose right edges
  * differ by less than COMMENT_W), so none overlap. The `anchor` comment (the open one, or the one the keyboard is on)
- * stands at its wanted top, level with its step, and the comments above it that it would meet move up instead, as
+ * stands at its wanted top, level with its card's top, and the comments above it that it would meet move up instead, as
  * the Report's margin stands its active comment at its passage (report/checkComments stackCards). A comment whose card
  * is not drawn gets no place. Pure.
  */

@@ -157,7 +157,7 @@ export function TypeActions({ ws, slug, name, onDeleted }: { ws: string; slug: s
         ) : (
           <div className="wu-doc-form">
             <p className="wu-doc-warn">
-              Delete {name} and its document? The checks' comments on it go with it.
+              Delete {name} and its document? The comments on it go with it.
             </p>
             <div className="wu-doc-actions">
               <Button size="sm" onClick={() => setSheet(null)}>

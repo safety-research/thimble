@@ -1,10 +1,14 @@
 # Tools
 
-The file has three parts, and the server reads each `## ` section by its name. First comes each tool, its description, which a model reads to choose the tool, and under it the input schema. Then `instructions`, the short text the thimble server gives every session that loads the plugin. Last come the lines thimble adds to a tool's result in one situation, each named by that situation, such as `card-errored`, with each `{name}` in it filled in by the server.
+This file holds the texts of thimble's tools. The server reads each `## ` section by its name.
+
+The tools come first. Each tool's section holds its description, which a model reads to choose the tool, and under it the input schema.
+
+The hints come last: the lines thimble adds to a tool's result in one situation. Each hint is named by its situation, for example `card-errored`. The server fills in each `{name}` in it.
 
 ## read_ref
 
-Read anything thimble can cite, as the analyst sees it, such as a card with its outputs. The analyst may edit a card at any time, so read it again before you rely on it. Read a plain file with Read.
+Read anything thimble can cite, as the analyst sees it. The analyst may edit a card at any time, so read it again before you rely on it. Read a plain file with Read.
 
 ```json
 {
@@ -18,7 +22,7 @@ Read anything thimble can cite, as the analyst sees it, such as a card with its 
 
 ## list_cards
 
-List a group's cards, one line each with its id, kind, question and the start of its takeaway.
+List a group's cards.
 
 ```json
 {
@@ -32,23 +36,21 @@ List a group's cards, one line each with its id, kind, question and the start of
 
 ## add_card
 
-Add a card, with its question and its content in one call. thimble runs the code and returns `card:<id>` and the start of each output. Give its takeaway here, or with `edit_card` once you have read the output.
+Add a card with its question and its content in one call. thimble runs the code and returns `card:<id>` and the start of each output. Give the card's takeaway here, or with `edit_card` after you read the output.
 
 ```json
 {
   "type": "object",
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"], "description": "table, code, diagram, plot and timeline run `code`. A code card shows the code itself, with what it prints under it, and the others show only what the code makes. example quotes `refs`, note shows `text`, custom `html`, plan `steps`. Default code."},
-    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colors left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), violin (value, group), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar, dots or line names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict."},
-    "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card quotes, each under the name of its file and its place. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight a passage of a long record, quoted exactly. Give one item per passage: the passages of one record show in that record, highlighted."},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"], "description": "table, code, diagram, plot and timeline run `code`. A code card shows the code itself, with what it prints under it. The other kinds show only what the code makes. example quotes `refs`, note shows `text`, and custom shows `html`. Default code. Use note for a few sentences that no other kind holds, code when the analyst asks for the code itself, and custom when none of these fit."},
+    "code": {"type": "string", "description": "Python run in the corpus root. Call thimble's functions after import thimble. A table ends in a DataFrame of a few short columns, indexed by what names each row. A plot ends in thimble.chart(kind, df) when a kind fits. Otherwise it ends in an Altair or matplotlib chart. Leave its colors to thimble's theme. A diagram ends in thimble.diagram(nodes, edges), each edge a (source, target, label). A timeline ends in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), violin (value, group), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value). interval=(lo, hi) on bar, dots or line names the columns of each value's low and high ends. fit=\"linear\" or \"smooth\" on scatter adds a trend line. panels=True draws each group in a panel of its own, and label=<label> draws a label's values in its colors. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on. Color them with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, with their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\". An edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict."},
+    "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card quotes. Each item is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight a passage of a long record, quoted exactly. Give one item per passage."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
-    "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show: one question answered on one screen, about 690 px wide and 800 px tall in its card. The card shows its question above the page and its takeaway under it, so the page starts with its content and does not say the answer again. Its frame has thimble's card stylesheet, which gives plain HTML, such as a table, a list or a paragraph, thimble's type and the paper's colors. So write it without colors, borders or fonts of your own, and the analyst reads the data and not the page. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
-    "libs": {"type": "array", "items": {"type": "string"}, "description": "The libraries a custom card's scripts use, loaded before its html: vega, vega-lite and vega-embed, or an npm package as name@version. If a package is not installed, the result gives the command that installs it."},
-    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
-    "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
-    "group": {"type": "string", "description": "The group of a sequence of cards that answer one question together, in order, named by the question. A new title makes a group, and a group's title or id puts the card in it. Leave it out for a single card, but give the `group` of an event that asks for a card."},
-    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
+    "html": {"type": "string", "description": "The page a custom card shows. It answers one question on one screen, about 690 px wide and 800 px tall in its card. The card shows its question above the page and its takeaway under it. So start the page with its content, and do not say the answer again. The page's frame has thimble's card stylesheet. The stylesheet gives thimble's type and the paper's colors to plain HTML. So write the page without colors, borders or fonts of your own. Scripts run, but the network does not. A chart in the page takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
+    "libs": {"type": "array", "items": {"type": "string"}, "description": "The libraries a custom card's scripts use, loaded before its html. Give vega, vega-lite and vega-embed by name, or an npm package as name@version."},
+    "group": {"type": "string", "description": "The group of a sequence of cards that answer one question together, in order. Name the group by the question. A new title makes a group, and a group's title or id puts the card in it. Leave it out for a single card."},
+    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. Mark each claim the card shows as `[words](#)`, as in the chat. Put the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks the takeaway against the card's output. The card shows less than your output. An example card shows only the opening of each record it cites, unless it quotes the passage. A wide table is cut at the card's right edge. A diagram or a timeline cuts or overlaps long labels. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. Write the card's own id as `card:<id>`, and thimble fills it in."}
   },
   "required": ["question"]
 }
@@ -56,7 +58,7 @@ Add a card, with its question and its content in one call. thimble runs the code
 
 ## edit_card
 
-Change a card in place and run it again, rather than adding a second card. It takes the fields of `add_card`, a `takeaway`, which alone sets the card's answer without a run and with a change is checked against the new output, and `after`, which reorders a group.
+Change a card in place and run it again, instead of adding a second card. It takes the fields of `add_card` and `after`. A `takeaway` alone sets the card's answer without a run.
 
 ```json
 {
@@ -64,16 +66,15 @@ Change a card in place and run it again, rather than adding a second card. It ta
   "properties": {
     "card": {"type": "string"},
     "question": {"type": "string"},
-    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"]},
+    "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom"]},
     "code": {"type": "string"},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] } },
     "text": {"type": "string"},
     "html": {"type": "string"},
-    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note, runs or details at any time."},
     "libs": {"type": "array", "items": {"type": "string"} },
-    "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
+    "group": {"type": "string", "description": "The group to move the card to, its title or id."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
-    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right."}
+    "takeaway": {"type": "string"}
   },
   "required": ["card"]
 }
@@ -95,7 +96,7 @@ Remove a copy of a card, or an attempt another card replaced. Fix a wrong card w
 
 ## apply_label
 
-Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a run directory (`unit`). A prompt label over many files takes minutes.
+Define a category and apply it to every unit of a scope. You get the counts per value, and a card where the analyst checks each unit. A prompt label over many files takes minutes. The label card answers a question like any card. So when its counts are final, write its takeaway: what the label found.
 
 ```json
 {
@@ -107,14 +108,14 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     "predicate": {
       "type": "object",
       "properties": {
-        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "A model judges each unit, a regex matches its text, or code defines label(unit) returning (value, confidence), where a unit is a JSONL record as its dict, a text line or a sentence a dict with its words in unit['text'], a row of a database or a CSV file a dict of its columns, a record of a JSON document its value, a PDF page a dict with its page and text, a card a dict with its text, kind, question, takeaway, group and groups, the titles of the frames around it, a whole file a dict with its path, records and data, the whole file parsed or its text, and a run a dict with its paths, records and files, each file whole by its path. A record that saves a whole document again, such as a wiki page's revision, is read by a model or a regex as what it changed from the save before, and by code whole."},
+        "kind": {"type": "string", "enum": ["prompt", "regex", "code"], "description": "prompt: a model judges each unit. regex: a regex matches its text. code: your code defines label(unit), which returns (value, confidence). In label(unit), each unit takes this form. A JSONL record is its dict. A text line or a sentence is a dict with its words in unit['text']. A row of a database or a CSV file is a dict of its columns. A record of a JSON document is its value. A PDF page is a dict with its page and text. A card is a dict with its text, kind, question, takeaway, group and groups (the titles of the frames around it). A whole file is a dict with its path, records and data (the whole file parsed, or its text). A run is a dict with its paths, records and files (each file whole, by its path). Some records save a whole document again, for example a wiki page's revision. A model or a regex reads such a record as what it changed from the save before. Code reads it whole."},
         "text": {"type": "string", "description": "The description, pattern or function."}
       },
       "required": ["kind", "text"]
     },
     "values": {"type": "array", "items": {"type": "string"}, "description": "Positive first. Default yes and no."},
-    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A record of a file is a line of text, a row of a database's table, a page of a PDF, a value of a JSON document or a row of a CSV file. A glob followed by a record's place, such as `runs/*/forge.db#prs` for a table or `results.json#/runs`, keeps the records there."},
-    "unit": {"type": "string", "enum": ["records", "files", "runs"], "description": "For files: records, the default, files for one value per file, or runs for one value per run directory. A label keeps its unit when you apply it again without one. A prompt label reads as much of each file or run as fits its model's context, and the result says how many it read only in part."},
+    "paths": {"type": "array", "items": {"type": "string"}, "description": "Globs, for files. A glob followed by a record's place keeps the records there, for example `runs/*/forge.db#prs` for a table or `results.json#/runs`."},
+    "unit": {"type": "string", "enum": ["records", "files", "runs"], "description": "For files: records (the default), files for one value per file, or runs for one value per run directory. A label keeps its unit when you apply it again without one. A prompt label reads as much of each file or run as fits its model's context."},
     "limit": {"type": "integer", "description": "Units to label, for a trial."},
     "within": {
       "type": "object",
@@ -123,7 +124,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
         "value": {"type": "string", "description": "Default its first."}
       },
       "required": ["label"],
-      "description": "For files: label only the records another label gave this value, such as the few a regex or code label kept before a prompt label reads them."
+      "description": "For files: label only the records that another label gave this value. For example, let a prompt label read only the few records that a regex or code label kept."
     },
     "comment": {"type": "boolean", "description": "A one-line reason per unit."},
     "show": {"type": "boolean", "description": "For files: turn it on in Files and the views as it runs, as show_label does."},
@@ -136,16 +137,16 @@ Define a category, apply it to every unit of a scope, and get the counts per val
 
 ## show_label
 
-Turn a label over files on or off in Files and the views, where it marks the records that have the values it highlights, or give its values colors. It runs nothing, so a label is shown or hidden with it rather than with `apply_label`. The analyst turns labels on and off in Files too, so call it whenever they ask to show or hide one, or to color a value.
+Turn a label over files on or off in Files and the views, or give its values colors. `show_label` runs nothing, so show or hide a label with it, not with `apply_label`.
 
 ```json
 {
   "type": "object",
   "properties": {
     "name": {"type": "string", "description": "The label's name or id."},
-    "on": {"type": "boolean", "description": "Left out, the label stays on or off as it is."},
-    "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while it is on, when not the ones it highlights now."},
-    "colors": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A color for each value named, which every card, view and Files show. A value that had the color takes the one the other leaves."}
+    "on": {"type": "boolean", "description": "Leave it out to keep the label on or off as it is."},
+    "values": {"type": "array", "items": {"type": "string"}, "description": "The values to highlight while the label is on, if not the ones it highlights now."},
+    "colors": {"type": "object", "additionalProperties": {"type": "string", "enum": ["blue", "orange", "green", "sky blue", "olive", "teal", "brown", "navy", "grass green", "cerulean", "chestnut", "cyan", "red", "dark red", "purple", "dark purple", "pink", "dark pink"]}, "description": "A color for each value named."}
   },
   "required": ["name"]
 }
@@ -153,7 +154,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
 
 ## delete_label
 
-Delete a label, with its marks, its card and any filter that uses it. A run of the label stops first. Use it only when the analyst asks for it.
+Delete a label, with its marks, its card and any filter that uses it. Use it only when the analyst asks for it.
 
 ```json
 {
@@ -167,7 +168,7 @@ Delete a label, with its marks, its card and any filter that uses it. A run of t
 
 ## set_filter
 
-Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter, and the others stay.
+Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter. The other parts stay.
 
 ```json
 {
@@ -176,7 +177,7 @@ Filter the cards, the records in Files or the report's sentences by a value of a
     "scope": {"type": "string", "enum": ["canvas", "files", "report"]},
     "label": {"type": "string", "description": "A label's name or id. An empty string drops the label from the filter."},
     "value": {"type": "string", "description": "The label's value to keep. Default its first."},
-    "kinds": {"type": "array", "items": {"type": "string"}, "description": "Card kinds, such as table or plot."},
+    "kinds": {"type": "array", "items": {"type": "string"}, "description": "Card kinds."},
     "groups": {"type": "array", "items": {"type": "string"}, "description": "Groups' titles or ids."},
     "makers": {"type": "array", "items": {"type": "string"}, "description": "Who made the cards, as each card names them, such as main, a thread's name or writer."},
     "checks": {"type": "array", "items": {"type": "string", "enum": ["verified", "unverified", "failed", "not checked"]}, "description": "What the card check found, as each card's check mark shows it."},
@@ -204,7 +205,7 @@ Clear a scope's whole filter, so all its cards, records or sentences show again.
 
 ## set_layout
 
-Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.
+Lay out the browser's main area, right of the chat, as panes. Each pane shows one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together.
 
 ```json
 {
@@ -233,18 +234,18 @@ Open a view in Files. Call it when the analyst asks to see a view.
 
 ## propose_view
 
-Propose a view, a page of the records that the analyst keeps and comes back to, such as a dashboard, which shows them in a form their files hide; or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes.
+Propose a view. A view shows the records in a form that their files hide. Any page the analyst will come back to is a view, whatever they call it, for example a dashboard or a tracker. You can also propose a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it, such as Message Board."},
-    "description": {"type": "string", "description": "What the analyst sees, in one sentence, such as a wiki page with its edit history or a graph of who replies to whom."},
+    "name": {"type": "string", "description": "A short name in Title Case, as its tab shows it."},
+    "description": {"type": "string", "description": "What the analyst sees, in one sentence."},
     "task": {"type": "string", "description": "What the analyst wants to accomplish, in their words, not how."},
-    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records, by pattern rather than one file, such as runs/*/events.jsonl. For a viewer of one file type, the extension's glob, such as **/*.vtt."},
-    "model": {"type": "string", "description": "The model to build it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the dev agent's model in Settings."},
-    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at, only when the analyst names one. Default: the dev agent's effort in Settings."}
+    "claims": {"type": "array", "items": {"type": "string"}, "description": "Globs of every file that holds its records. Give a pattern rather than one file, for example runs/*/events.jsonl. For a viewer of one file type, give the extension's glob, for example **/*.vtt."},
+    "model": {"type": "string", "description": "The model to build it on, for example opus, sonnet or a full model id. Give it only when the analyst names one."},
+    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at. Give it only when the analyst names one."}
   },
   "required": ["name", "description", "task", "claims"]
 }
@@ -267,7 +268,7 @@ Save a whole document as markdown in its type's form. To change one passage, use
 
 ## edit_document
 
-Replace one sentence, paragraph or heading of a written document, insert a passage after it, or delete it. Inserted text that opens with a `## ` heading is a new section after the one the span is in, in the document's markdown. `block_type` alone turns a heading, paragraph or list item into another kind of block, its text kept.
+Replace one sentence, paragraph or heading of a written document, insert a passage after it, or delete it. Inserted text that opens with a `## ` heading is a new section in the document's markdown. It goes after the section that holds the span. `block_type` alone turns a heading, paragraph or list item into another kind of block and keeps its text.
 
 ```json
 {
@@ -285,16 +286,16 @@ Replace one sentence, paragraph or heading of a written document, insert a passa
 
 ## add_comment
 
-Comment on one sentence, paragraph or heading of a written document, or on a card or a step of a plan, a note the analyst reads beside it. The analyst sees `text` first and opens `details` when they want more. In a check's session, comment only on what you are checking.
+Comment on one sentence, paragraph or heading of a written document, or on a card.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step, answer:<turn>#s<n> of a sentence of Claude's answer."},
-    "words": {"type": "string", "description": "On a sentence of Claude's answer, the words of it that the comment is about, exactly as it says them. The chat marks these words, else the whole sentence."},
+    "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, answer:<turn>#s<n> of a sentence of Claude's answer."},
+    "words": {"type": "string", "description": "For a sentence of Claude's answer: the words of it that the comment is about, exactly as it says them."},
     "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
-    "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
+    "details": {"type": "string", "description": "The evidence for the statement, with its citations. Use plain sentences or a few bullets, about 120 words at most."}
   },
   "required": ["ref", "text"]
 }
@@ -308,7 +309,7 @@ Resolve a comment on a document or a card, as the analyst's ✓ beside it does, 
 {
   "type": "object",
   "properties": {
-    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it, or report:<doc>#<id> of a passage or card:<id> of a card, which resolves every open comment on it."},
+    "comment": {"type": "string", "description": "The comment's id, as add_comment's result names it. Or give report:<doc>#<id> of a passage, or card:<id> of a card, to resolve every open comment on it."},
     "reopen": {"type": "boolean"}
   },
   "required": ["comment"]
@@ -347,7 +348,7 @@ Rename a thread in thimble's thread list, when the analyst asks you to.
 
 ## delete_thread
 
-Delete a thread and its chat from the workspace, stopping its session if it runs. Use it only when the analyst asks for it; main cannot be deleted.
+Delete a thread and its chat from the workspace. Use it only when the analyst asks for it. You cannot delete main.
 
 ```json
 {
@@ -361,7 +362,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## screenshot
 
-Get a picture of what the analyst sees in the browser, such as a card as thimble draws it. It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
+Get a picture of what the analyst sees in the browser. It is slow. Use it only when the look matters.
 
 ```json
 {
@@ -376,19 +377,19 @@ Get a picture of what the analyst sees in the browser, such as a card as thimble
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage of a written document.
+Start a writer as a subagent of this session. The writer writes or revises one document from this conversation, the cards and the documents. Call it when the analyst asks for a document or for a change to one. To change one passage of a written document, use `edit_document` yourself.
 
 ```json
 {
   "type": "object",
   "properties": {
     "doc": {"type": "string", "description": "The document's slug, such as report, or a `card` event's `doc`."},
-    "request": {"type": "string", "description": "What the analyst asked for, in their words. Empty for the document as its form asks."},
+    "request": {"type": "string", "description": "What the analyst asked for, in their words. Leave it empty to write the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, such as a `card` event's `after`."},
-    "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document for one the request describes."},
-    "name": {"type": "string", "description": "The new document's name in thimble, such as Case file."},
-    "model": {"type": "string", "description": "The model to run the writer on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the writer's model in Settings."},
-    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run the writer at, only when the analyst names one. Default: the writer's effort in Settings."}
+    "type": {"type": "string", "description": "Only for a new document, which thimble then makes: casefile (one document with a section per case), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document for one the request describes."},
+    "name": {"type": "string", "description": "The new document's name in thimble."},
+    "model": {"type": "string", "description": "The model to run the writer on, for example opus, sonnet or a full model id. Give it only when the analyst names one."},
+    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run the writer at. Give it only when the analyst names one."}
   },
   "required": ["doc"]
 }
@@ -396,16 +397,16 @@ Start a writer, as a subagent of this session, which writes or revises one docum
 
 ## run_check
 
-Run a report check over the written documents or the cards, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
+Run a report check over the written documents or the cards. A check asks one question of every passage. It leaves a comment beside each passage that the question applies to. A new name creates the check, and a known name runs it again. For one note on one passage, use `add_comment`.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, such as Judgment calls, or a new one."},
-    "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. Needed for a new check, and it replaces the instructions of an existing one."},
+    "name": {"type": "string", "description": "The check's name, or a new one."},
+    "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. A new check needs it. For an existing check, it replaces the instructions."},
     "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
-    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents or on the cards alone. A new check then covers that alone. Default what the check covers."}
+    "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents alone or on the cards alone. A new check then covers only that. Default: what the check covers."}
   },
   "required": ["name"]
 }
@@ -413,13 +414,13 @@ Run a report check over the written documents or the cards, a question asked of 
 
 ## stop_check
 
-Turn a report check off, as the switch in the Comments pane does, which hides its tints and comments and stops its runs. Its comments are kept, and `run_check` turns it on again.
+Turn a report check off, as the switch in the Comments pane does. This hides its tints and comments and stops its runs.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, such as Judgment calls."}
+    "name": {"type": "string", "description": "The check's name."}
   },
   "required": ["name"]
 }
@@ -427,7 +428,7 @@ Turn a report check off, as the switch in the Comments pane does, which hides it
 
 ## file_dev_ticket
 
-File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which they ask for with /thimble-fix.
+File a ticket for thimble's developer agent to change a view that it built for this corpus. A change to thimble itself is a fix of the person's thimble. They ask for it with /thimble-fix.
 
 ```json
 {
@@ -444,7 +445,7 @@ File a ticket for thimble's developer agent to change a view it built for this c
 
 ## fix_thimble
 
-Start the fix the person asks for with /thimble-fix. A copy of you changes thimble in the background, in a copy of its code, from their words as they typed them, and the person decides with a click whether to use the fix. `words` names the fix their words change. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, you may tell them that /thimble-fix <what should work differently> asks for a fix.
+Start the fix the person asks for with /thimble-fix. thimble is the person's own tool. So when it misbehaves in this session, you may tell them that /thimble-fix <what should work differently> asks for a fix.
 
 ```json
 {
@@ -458,7 +459,7 @@ Start the fix the person asks for with /thimble-fix. A copy of you changes thimb
 
 ## view_check
 
-Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get a picture of the page as it opens, whose path Read opens.
+Run thimble's checks on the view you build or review, as often as you want.
 
 ```json
 {
@@ -472,7 +473,7 @@ Check the view you build or review, as often as you want: the checks thimble run
 
 ## finish_view
 
-Finish the view you build: thimble runs the checks as the record of your build. When they pass, the view reaches the analyst. When they fail, the result says what failed and which attempt it was.
+Finish the view you build.
 
 ```json
 {
@@ -483,7 +484,7 @@ Finish the view you build: thimble runs the checks as the record of your build. 
 
 ## view_pictures
 
-Take pictures of the view you review, whose paths Read opens. The first call gives the view as it opens; ask for other states in `states`, up to four more.
+Take pictures of the view you review.
 
 ```json
 {
@@ -492,12 +493,12 @@ Take pictures of the view you review, whose paths Read opens. The first call giv
     "states": {
       "type": "array",
       "maxItems": 4,
-      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the color the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
+      "description": "States to see beside the overview. `control`: the view as it opens after clicking `controls` in turn. Name each control by its text as the list of controls gives it, or by an option of a select. `labels`: the view as it opens with a test label on. The test label marks about one record in seven, in the color the analyst's first label takes. `filtered`: the same view filtered to the test label, which should keep only what it marks. `detail`: the place the first citation opens. `open`: the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records. `narrow`: the view as it opens 798 px wide. `wide`: the view as it opens 1528 px wide.",
       "items": {
         "type": "object",
         "properties": {
           "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
-          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text, such as `Color by: State`, `State` and `Approval`, which color by Approval in place of State."},
+          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text. For example, `Color by: State`, `State` and `Approval` color by Approval in place of State."},
           "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
           "why": {"type": "string", "description": "What you want to check in it, in a few words."}
         },
@@ -510,21 +511,21 @@ Take pictures of the view you review, whose paths Read opens. The first call giv
 
 ## finish_review
 
-End your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
+End your review.
 
 ```json
 {
   "type": "object",
   "properties": {
     "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised, one short phrase each."},
-    "left": {"type": "array", "items": {"type": "string"}, "description": "The problems you leave as they are, one short phrase each, with why when the data shows the view is right."}
+    "left": {"type": "array", "items": {"type": "string"}, "description": "The problems you leave as they are, one short phrase each. Say why when the data shows the view is right."}
   }
 }
 ```
 
 ## ticket_checks
 
-Check the change in your ticket's worktree, as often as you want: thimble's checks run over what the worktree changed, in a sandbox of the server's where one can run (where none can, thimble asked the analyst before the ticket started), and say what failed. Nothing is committed.
+Check the change in your ticket's worktree.
 
 ```json
 {
@@ -535,7 +536,7 @@ Check the change in your ticket's worktree, as often as you want: thimble's chec
 
 ## finish_ticket
 
-Finish your ticket: thimble commits every change in the worktree to the ticket's branch and runs the checks as the record of your work. When they pass, thimble asks the analyst whether to apply the change. When they fail, the result says what failed and which attempt it was.
+Finish your ticket.
 
 ```json
 {
@@ -554,15 +555,15 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 
 ## card-tall
 
-card:{cid}'s body draws {height} px tall at the card's width, and about {limit} px of a card's body fit on the analyst's screen with its question and takeaway, so they never see the whole card at once.
+card:{cid}'s body draws {height} px tall at the card's width. About {limit} px of a card's body fit on the analyst's screen with its question and takeaway. So the analyst cannot see the whole card at once.
 
 ## card-wide
 
-card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so the analyst does not see all of it at the card's width.
+card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px. So the analyst does not see all of the page at the card's width.
 
 ## card-replaced
 
-thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours: {what}, with the question “{question}”. Its takeaway reads: {takeaway} It changed the {changed}{why}
+thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours. Its version is {what}, with the question “{question}”. Its takeaway reads: {takeaway} It changed the {changed}{why}
 
 ## kind-mismatch
 
@@ -590,7 +591,7 @@ card:{cid} does not exist.
 
 ## edit_card-data
 
-card:{cid}, the {kind} card, has no code. Pass a new `{field}` or `question`, or add a card whose code computes what it shows.
+card:{cid}, the {kind} card, has no code. Pass a new `{field}` or `question`. Or add a card whose code computes what it shows.
 
 ## edit_card-kind
 
@@ -602,11 +603,11 @@ The quote "{quote}" is not in {ref}. Quote the record's words exactly, or cite t
 
 ## edit_card-check-kept
 
-The card check had rewritten card:{cid}'s {field}, and your call gave back the {field} it replaced, so the check's {field} stays. Read the card, and pass a new {field} to change it.
+The card check had rewritten card:{cid}'s {field}. Your call gave back the {field} that the check replaced, so the check's {field} stays. Read the card, and pass a new {field} to change it.
 
 ## edit_card-check-merged
 
-The card check had rewritten card:{cid}'s {field}, so your change was made to the check's {field}, which the card now shows.
+The card check had rewritten card:{cid}'s {field}. So your change was made to the check's {field}, which the card now shows.
 
 ## edit_card-takeaway-errored
 
@@ -614,11 +615,11 @@ The card errored, so the takeaway was not saved. Fix the code, then give the tak
 
 ## edit_card-same-outputs
 
-The new code ran and gave the same outputs as before the edit, so this edit changed nothing that card:{cid} shows.
+The new code ran and gave the same outputs as before the edit. So this edit changed nothing that card:{cid} shows.
 
 ## edit_card-after
 
-`after` takes another card, card:<id>, or first, to place card:{cid} in a group.
+`after` places card:{cid} in a group. It takes another card, card:<id>, or first.
 
 ## edit_card-after-group
 
@@ -646,19 +647,19 @@ The analyst locked card:{cid}, so it stays as it is. Leave it, or add a new card
 
 ## takeaway-missing
 
-card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two sentences answering its question from the output above.
+card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`: one or two sentences that answer its question from the output above.
 
 ## takeaway-stale
 
-card:{cid} kept its takeaway, written before this run changed its output. Write it again now with `edit_card` and `takeaway` from the output above, before any other call.
+card:{cid} kept its takeaway, which was written before this run changed its output. Write it again now with `edit_card` and `takeaway`, from the output above. Do this before any other call.
 
 ## takeaway-missing-shown
 
-card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`, one or two sentences answering its question from what the card shows.
+card:{cid} has no takeaway. Write it with `edit_card` and `takeaway`: one or two sentences that answer its question from what the card shows.
 
 ## apply_label-rows
 
-Count and cite from the rows in a card's code, since thimble's Python module is there and not in Bash. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value, and thimble.labels("{label}", negatives=True) of every labeled unit.
+Count and cite from the label's rows in a card's code. thimble's Python module is there, not in Bash. thimble.labels("{label}") is a DataFrame (path, line, effective, label, source, verdict, confidence, ref) of the units that got the first value. thimble.labels("{label}", negatives=True) is the same DataFrame of every labeled unit.
 
 ## apply_label-unchanged
 
@@ -670,15 +671,15 @@ The label already held these values from the same predicate over the same units,
 
 ## apply_label-takeaway-stale
 
-The takeaway of its card card:{cid} was written for the run before; write it again with `edit_card` from these counts.
+The takeaway of its card card:{cid} was written for the run before. Write it again with `edit_card` from these counts.
 
 ## apply_label-stale
 
-{cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
+{cards} read this label before it changed. When its counts are final, thimble runs each of them again on the label as it is now. So leave them as they are.
 
 ## show_label-not-files
 
-{label} is a label over {units}, which Files does not show. To show it, filter {where} by one of its values.
+{label} is a label over {units}, which Files does not show. Filter {where} by one of its values to show it.
 
 ## set_filter-set
 
@@ -686,11 +687,11 @@ The {scope} filter is now {filter}.
 
 ## set_filter-kept
 
-It keeps {kept} of the {total} cards, and the analyst sees the rest dimmed.
+It keeps {kept} of the {total} cards. The analyst sees the rest dimmed.
 
 ## set_filter-files
 
-Files shows the label turned on with that value highlighted, and its views keep only the records that take the value, leaving whole the files the label never ran over.
+Files shows the label turned on, with that value highlighted. Its views keep only the records that take the value. They leave whole the files that the label never ran over.
 
 ## set_layout-set
 
@@ -706,7 +707,7 @@ The {scope} filter is cleared.
 
 ## list_cards-filter
 
-The card filter {filter} keeps {kept} of the {total} cards. The analyst sees the cards tagged filtered out dimmed.
+The card filter {filter} keeps {kept} of the {total} cards. The analyst sees the cards tagged `filtered out` dimmed.
 
 ## takeaway-long
 
@@ -714,23 +715,23 @@ The takeaway runs to {words} words. Cut it to 40 at most with `edit_card` and `t
 
 ## takeaway-uncited-example
 
-The takeaway cites none of the records the card shows. Link the words of each claim to the record that shows them, as in `[[posted the answer|{ref}]]`, with `edit_card` and `takeaway`.
+The takeaway cites none of the records the card shows. Link the words of each claim to the record that shows them, as in `[[posted the answer|{ref}]]`. Use `edit_card` and `takeaway`.
 
 ## card-installs
 
-{tool}: this code installs software or downloads files, which card code may not do. Use what is already installed, or tell the analyst what the analysis needs and why.
+{tool}: this code installs software or downloads files. Card code may not do that. Use what is already installed, or tell the analyst what the analysis needs and why.
 
 ## takeaway-reminder
 
-card:{cid}, your last card, still has no takeaway. Write it with `edit_card` and `takeaway`.
+Your last card, card:{cid}, still has no takeaway. Write it with `edit_card` and `takeaway`.
 
 ## not-found-in-outputs
 
-NOT found in this card's outputs, {values}. Cite each where the output shows it, or drop it.
+NOT found in this card's outputs: {values}. Cite each where the output shows it, or drop it.
 
 ## shown-not-linked
 
-Found in this card's outputs but not linked, {values}: more than one place shows each, or it is a small number that could stand for several places. Link each to the place your words mean, as `[[value|card:{cid}#<column>/<row>]]`.
+Found in this card's outputs but not linked: {values}. More than one place shows each of them, or each is a small number that could stand for several places. Link each to the place your words mean, as `[[value|card:{cid}#<column>/<row>]]`.
 
 ## add_card-more
 
@@ -738,7 +739,7 @@ Found in this card's outputs but not linked, {values}: more than one place shows
 
 ## write_document-locked
 
-A change to {blocks} the analyst locked was reverted: {refs}. A locked block stays word for word as the analyst left it, so those changes are not in the document.
+A change to {blocks} that the analyst locked was reverted: {refs}. A locked block stays word for word as the analyst left it.
 
 ## edit_document-locked
 
@@ -750,7 +751,7 @@ Each passage carries its id. Cite or edit a sentence or a heading as report:{slu
 
 ## read_ref-frame
 
-The analyst's frame, the sections they want, the figures they pinned and the points to make. Write a cited passage for each point rather than copying it.
+The analyst's frame: the sections they want, the figures they pinned and the points to make. Write a cited passage for each point. Do not copy the points.
 
 ## read_ref-new
 
@@ -762,15 +763,11 @@ The analyst laid out no frame, so the shape is yours.
 
 ## propose_view-proposed
 
-Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
+Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now. It opens in Files when its checks pass.
 
 ## propose_view-unmatched
 
-No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
-
-## propose_view-deleted
-
-{view} was not proposed: the analyst deleted it, so it is not proposed again.
+No file of the corpus matches {claims}. So the view was not proposed. {near} Propose it again with claims that match files the corpus holds.
 
 ## propose_view-near
 
@@ -778,15 +775,15 @@ The files nearest {claim} are {paths}.
 
 ## propose_view-cannot-build
 
-Proposed the view {view} (view:{slug}), but views cannot be built on this machine, so its build failed at once: {why} Tell the analyst, since only they can install this.
+Proposed the view {view} (view:{slug}). But views cannot be built on this machine, so its build failed at once: {why} Tell the analyst, because only they can install this.
 
 ## view-changing
 
-The dev agent is changing the view {view} (view:{slug}) now. When its checks pass the view has the change, and when they fail it stays as it was.
+The dev agent is changing the view {view} (view:{slug}) now. When its checks pass, the view has the change. When they fail, the view stays as it was.
 
 ## view-no-anchors
 
-The page shows no element whose `data-anchor` names a record (its citation form, such as `<path>#L<n>` or `<db>#<table>/<key>`) or one of its units (`view:{slug}/<key>`), so no label the analyst turns on can show in it. Give each element that shows a record its file ref, and each unit's element its key.
+No element of the page has a `data-anchor` that names a record (its citation form, for example `<path>#L<n>` or `<db>#<table>/<key>`) or a unit of the view (`view:{slug}/<key>`). So no label the analyst turns on can show in the page. Give each element that shows a record its file ref, and each unit's element its key.
 
 ## file_dev_ticket-no-view
 
@@ -794,11 +791,11 @@ No view is named {view}. The views are {views}. File the ticket again with one o
 
 ## file_dev_ticket-cannot-run
 
-Filed {label}, but it cannot run here, so it failed at once: {why} Tell the analyst, since only they can change this.
+Filed {label}. But it cannot run here, so it failed at once: {why} Tell the analyst, because only they can change this.
 
 ## file_dev_ticket-waits
 
-Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
+Filed {label}. {running} runs now, and code tickets run one at a time. So this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
 
 ## file_dev_ticket-start
 
@@ -806,19 +803,19 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-This call filed nothing: a change to thimble itself is a fix of the person's thimble, which they ask for with /thimble-fix <what should work differently>.
+This call filed nothing. A change to thimble itself is a fix of the person's thimble. They ask for it with /thimble-fix <what should work differently>.
 
 ## fix_thimble-new
 
-thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The chat shows its work above your reply, and thimble asks the person to use the fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The chat shows its work above your reply. Once the fix passes thimble's checks, thimble asks the person to use it. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-round
 
-thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The chat shows its work above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The chat shows its work above your reply. Once the changed fix passes thimble's checks, thimble asks the person to use it. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-round-on
 
-thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they use the changed one. The chat shows its work above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The version they have stays until they use the changed one. The chat shows its work above your reply. Once the changed fix passes thimble's checks, thimble asks the person to use it. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-live
 
@@ -830,23 +827,23 @@ thimble started no fix: {why} Tell the person in one short line.
 
 ## view-media-unplayable
 
-The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most MP4, MOV and M4A recordings hold. A player of such a file stays blank or shows an error in the pictures, though the analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is one.
+The browser that takes the pictures for the checks and the review cannot play H.264 video or AAC audio. Most MP4, MOV and M4A recordings hold these. In the pictures, a player of such a file stays blank or shows an error. The analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is a problem of the view.
 
 ## view-purple
 
-The page writes purple colors: {colours}. Purple is thimble's color for agents' work, so if any of them colors a category of the view, such as a speaker or a kind of record, show that category as text or a glyph, or through Color by, instead.
+The page writes purple colors: {colours}. If any of them colors a category of the view, show that category as text, as a glyph or through Color by instead. A category is, for example, a speaker or a kind of record.
 
 ## view-own-parts
 
-The page's styles change how thimble's parts look, or draw chips of their own: {found}. A view looks like the rest of thimble only when it uses thimble's parts as the frame styles them: `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its color), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colors, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
+The page's styles change how thimble's parts look, or draw chips of their own: {found}. The parts are `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its color), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colors, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
 
 ## view-built
 
-The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
+The dev agent built the view {view}, so {claims} now open in it. In it, {forms}.
 
 ## finish-view-pass
 
-The checks passed, and the view is built: the analyst sees it now. Change nothing more, and end with one line saying what you built.
+The checks passed, and the view is built. Change nothing more. End with one line that says what you built.
 
 ## finish-view-fail
 
@@ -858,15 +855,15 @@ Fix what failed, check the view again with `view_check`, then call `finish_view`
 
 ## finish-view-unchanged
 
-The view's files are as they were built, so there is nothing to check, and the view stays as it is.
+The view's files are as they were built. So there is nothing to check, and the view stays as it is.
 
 ## finish-view-stop
 
-No attempt is left, so stop now. Change nothing more, and end with one line saying what still fails; thimble shows the failure to the analyst or starts a new build from it.
+No attempt is left, so stop now. Change nothing more. End with one line that says what still fails.
 
 ## finish-ticket-pass
 
-The checks passed, and the change is committed to the ticket's branch: thimble asks the analyst whether to apply it. Change nothing more, and end with one line saying what you changed.
+The checks passed, and the change is committed to the ticket's branch. Change nothing more. End with one line that says what you changed.
 
 ## finish-ticket-fail
 
@@ -878,11 +875,11 @@ Fix what failed, check again with `ticket_checks`, then call `finish_ticket` aga
 
 ## finish-ticket-stop
 
-No attempt is left, so stop now. Change nothing more, and end with one line saying what still fails; thimble shows the failure to the analyst.
+No attempt is left, so stop now. Change nothing more. End with one line that says what still fails.
 
 ## finish-ticket-empty
 
-The worktree holds no change, so there is nothing to check. Make the change first. When the ticket cannot be done safely, end without `finish_ticket` and say why.
+The worktree holds no change, so there is nothing to check. Make the change first. If the ticket cannot be done safely, end without `finish_ticket` and say why.
 
 ## ticket-checks-empty
 
@@ -890,15 +887,15 @@ The worktree holds no change yet, so there is nothing to check.
 
 ## finish-review-again
 
-The checks passed, and the view as you revised it is what the analyst sees now. Take the pictures again with `view_pictures` and look once more, then call `finish_review`.
+The checks passed. Take the pictures again with `view_pictures` and look once more. Then call `finish_review`.
 
 ## finish-review-done
 
-The checks passed, and the review is done. Change nothing more, and end with one line saying what you revised and what you left.
+The checks passed, and the review is done. Change nothing more. End with one line that says what you revised and what you left.
 
 ## finish-review-restored
 
-The checks failed on your revision, so the view is as it was before your change. Change nothing more, and end with one line saying what you tried.
+The checks failed on your revision, so the view is as it was before your change. Change nothing more. End with one line that says what you tried.
 
 ## view-pictures
 
@@ -916,59 +913,47 @@ no citation resolves, because its `accepts` and `units` are empty
 
 ## view-no-screenshots
 
-Screenshots are unavailable on this machine, so the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers, and take no pictures any other way.
+Screenshots are unavailable on this machine. So the checks did not load the page and took no pictures. Check the page by reading it and what the reader answers. Do not take pictures any other way.
 
 ## view-few-anchors
 
-The reader handed the page {fetched} records, but only {records} shown elements carry a record's citation form, such as `<path>#L<n>`, as their `data-anchor`, so the labels the analyst turns on show on almost nothing in it. Give each element that shows a record its file ref.
+The reader handed the page {fetched} records. But only {records} shown elements carry a record's citation form as their `data-anchor`, for example `<path>#L<n>`. So the labels the analyst turns on show on almost nothing in the page. Give each element that shows a record its file ref.
 
 ## view-marks-missing
 
-In the {state} state, {missing} of the {due} shown records or units the test label marks do not show its mark. thimble draws a mark on the outermost visible element whose `data-anchor` names the record, but not on a canvas: draw records as HTML or SVG elements, or put the `data-anchor` on an element beside the canvas drawing.
+In the {state} state, {missing} of the {due} shown records or units that the test label marks do not show its mark. thimble draws a mark on the outermost visible element whose `data-anchor` names the record. It draws no mark on a canvas. So draw records as HTML or SVG elements, or put the `data-anchor` on an element beside the canvas drawing.
 
 ## view-marks-unseen
 
-In the {state} state, a picture of the page does not show the test label's color on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's color along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's color on it itself, at full strength, such as a dot or a fill in the color `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
+In the {state} state, a picture of the page does not show the test label's color on {unseen} of the {checked} marked records or units in view, for example {refs}. thimble draws a mark as a 3 px bar in the label's color along the left edge of the outermost element whose `data-anchor` names the record. The bar goes inside the element when its left padding is 6 px or more, or when a box that hides overflow would cut a bar outside it. Otherwise the bar goes just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`. It also does not show when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar. So the page must draw the label's color on it itself, at full strength, for example a dot or a fill in the color that `thimble.markOf(ref).bar` gives. Redraw it in `thimble.onMarks`.
 
 ## view-no-label-controls
 
-The page draws no label controls: {why}. thimble draws none above a view, so the page lists the labels `thimble.onLabels` gives in `all`, each with its colors and a switch that calls `thimble.setLabel(id, on)` on the analyst's click, and shows each label that is on in view, such as in a legend, each such element carrying `data-label` with the label's id.
+The page draws no label controls: {why}. thimble draws none above a view. So the page lists the labels that `thimble.onLabels` gives in `all`, each with its colors and a switch. The switch calls `thimble.setLabel(id, on)` on the analyst's click. The page also shows each label that is on in the view, for example in a legend. Each such element carries `data-label` with the label's id.
 
 ## view-labels-by-itself
 
-The page made {made} by itself, on load, on a timer or from its own script: {calls}. thimble refuses a label change outside the analyst's own click or key press in the view, so call these only from a control's click or key handler.
+The page made {made} by itself, on load, on a timer or from its own script: {calls}. thimble refuses a label change that does not come from the analyst's own click or key press in the view. So call these only from a control's click or key handler.
 
 ## view-filter-unkept
 
-Filtered to the test label, the page shows {records} records, and the filter keeps the line that anchors {unkept} of them. That is right for a record the page draws for several lines, one of which the label marks. Otherwise keep only the records for which `thimble.kept(ref)` holds in the reader's answers and fetch again in `thimble.onLabels`, or leave the filtering to thimble by registering no `onLabels`.
+Filtered to the test label, the page shows {records} records. The filter does not keep the line that anchors {unkept} of them. That is right for a record that the page draws for several lines, one of which the label marks. Otherwise, keep only the records for which `thimble.kept(ref)` holds in the reader's answers, and fetch again in `thimble.onLabels`. Or leave the filtering to thimble: register no `onLabels`.
 
 ## view-missing
 
-The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
+The claims expect files that the corpus lacks: {files}. The analyst sees them above the view as missing.
 
 ## view-choice-error
 
-{count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `color.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
-
-## view-term-error
-
-The view's program failed {where}: {what}. It must draw the view with no error, also when a fetch fails or a file is missing.
-
-## view-term-timeout
-
-The view's program did not end its draw {where} within {s} s: {what}. Draw when an answer or an event comes, and do not draw on a timer.
-
-## view-term-overflow
-
-The view's program draws past the panel {where}: {what}. The panel cuts a row at its right edge and drops the rows below its last row. Fit each row in `d.cols` and the rows in `d.left`, with `cut`, `columns` and the list.
+{count} choices of the view's controls gave a script error when chosen: {choices}. Guard what the page reads of a choice that can be null (`rows.by`, `color.by`, `filter.by`). For such a choice, draw the records in one group, or uncolored.
 
 ## view-robust-reader
 
-With {what}, the reader failed: {error}. A real corpus can lack a file or hold a line cut short, so read what is there, and report each line you cannot parse with problems().
+With {what}, the reader failed: {error}. Read what is there, and report each line you cannot parse with problems().
 
 ## view-robust-torn
 
-thimble added a line cut short at {ref}, and problems() does not report it. Report each line the reader cannot parse with problems(), so the analyst sees it above the view.
+thimble added a line cut short at {ref}, and problems() does not report it. Report each line the reader cannot parse with problems().
 
 ## view-robust-page
 
@@ -1008,31 +993,15 @@ its text and graphics span {used} of its {width} px, so the rest of the pane is 
 
 ## view-not-shown
 
-{count} claimed files are neither read to the end by build_index nor listed with a why by hidden(index): {files}. The analyst sees each one above the view as not shown. Read each file whole in build_index, with Python's `open()`, or return it from hidden(index) with its `path` and a `why` that says why the view leaves it out.
+{count} claimed files are neither read to the end by build_index nor listed with a why by hidden(index): {files}. Read each file whole in build_index, with Python's `open()`. Or return it from hidden(index) with its `path` and a `why` that says why the view leaves it out.
 
 ## view-not-claimed
 
-{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not read. If the view is for all of them, claim them and let the analyst choose among the folders.
+{count} files sit in folders beside the ones the view claims: {files}. These folders hold the same files, for example another run's. If the view is for all of them, claim them and let the analyst choose among the folders.
 
 ## view-derived-unlisted
 
-Fields of the records the reader answered hold values that the lines they cite do not, and they are not listed as derived: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in view.json's `records` with its `type` and `"derived": "cleaned"`, or `"computed"` for a value the files do not state, and give it `from` and `how`, each a short plain phrase without semicolons, or return it from the reader's derived(index).
-
-## check-unread
-
-{n} of {total} files were opened by no card and no Read call, {files}.
-
-## check-unused
-
-In {file}, no card names the field `{field}`, filled in {filled} of {sampled} sampled records.
-
-## check-unused-kind
-
-In {file}, no card names `{value}`, a value of `{field}` in {count} of {sampled} sampled records.
-
-## check-none
-
-No check found anything.
+Some fields of the records the reader answered hold values that the lines they cite do not hold. These fields are not listed as derived: {fields}. List each of these fields in view.json's `records` with its `type` and `"derived": "cleaned"`, or `"computed"` for a value the files do not state. Give it `from` and `how`, each a short plain phrase without semicolons. Or return it from the reader's derived(index).
 
 ## ticket-from-thread
 
@@ -1049,19 +1018,19 @@ A writer of {doc} is running already. Tell the analyst so in one line.
 
 ## agent-started
 
-thimble started it, and it runs in the background while the analyst sees it in the chat. End the turn now, with no words and no other call, unless the analyst asked for more in this turn.
+thimble started it. It runs in the background, and the analyst sees it in the chat. End the turn now, with no words and no other call, unless the analyst asked for more in this turn.
 
 ## agent-started-fork
 
-Filed {what}, and thimble started {agent}; the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and {agent} is running.
+Filed {what}, and thimble started {agent}. The analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and {agent} is running.
 
 ## writer-context-file
 
-The workspace as it stands, each part under a heading that says what it holds, is in {path}. Read it whole before you write.
+The workspace as it stands is in {path}. Read it whole before you write.
 
 ## writer-context-files
 
-The workspace as it stands, each part under a heading that says what it holds, is in {n} files, in this order: {paths}. Read each one whole, in that order, before you write.
+The workspace as it stands is in {n} files, in this order: {paths}. Read each file whole, in that order, before you write.
 
 ## start_writing-made
 
@@ -1069,7 +1038,7 @@ Made the new document {title}, report:{doc}.
 
 ## start_writing-no-doc
 
-There is no document {doc}. The documents are {docs}. To make a new one, pass its `type`, one of {types}, and its `name`.
+There is no document {doc}. The documents are {docs}. To make a new one, pass its `type` (one of {types}) and its `name`.
 
 ## run_check-started
 
@@ -1093,11 +1062,11 @@ None of {passages} is a passage of a written document. `read_ref` on a document 
 
 ## check-task-file
 
-Your task is in {path}: the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. Read it whole first.
+Your task is in {path}. Read it whole first.
 
 ## check-task-files
 
-Your task is in {n} files, in this order: {paths}. They hold the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. Read each one whole, in that order, first.
+Your task is in {n} files, in this order: {paths}. Read each one whole, in that order, first.
 
 ## add_comment-no-passage
 
@@ -1109,11 +1078,11 @@ Your task is in {n} files, in this order: {paths}. They hold the check's instruc
 
 ## add_comment-held
 
-Not added: in {ref}, a comment of {check} holds “{words}” already, and an explainer and a heads-up never share words. Give other words, here or in another sentence, or leave it out.
+Not added. In {ref}, a comment of {check} already holds “{words}”. An explainer and a heads-up never share words. Give other words, here or in another sentence, or leave it out.
 
 ## add_comment-no-words
 
-Not added: {ref} does not say “{words}”; it says “{sentence}”. Give `words` exactly as it says them.
+Not added. {ref} does not say “{words}”. It says “{sentence}”. Give `words` exactly as it says them.
 
 ## add_comment-not-check
 
@@ -1129,17 +1098,17 @@ commented on report:{doc}#{sid}, comment {comment}
 
 ## add_comment-no-card
 
-{ref} is no card, or no step of a plan card. A card is card:<id>, and a plan's step card:<id>#step-<n>.
+{ref} is no card. A card is card:<id>.
 
 ## check-canvas
 
-The cards to comment on, each with its ref, kind and question, then its takeaway and a plan's steps. Comment on a card by its ref, or on one step of a plan by card:<id>#step-<n>. `read_ref` on a card gives its code and outputs. The analyst reads all of a card's comments beside it at once, so leave only the few that matter most on any one card.
+The cards to comment on. The analyst reads all of a card's comments beside it at once. So leave only the few comments that matter most on any one card.
 
 {cards}
 
 ## check-replaces
 
-When you finish, your comments replace the open comments this check left before on these passages, listed below. Leave again each one that still holds.
+When you finish, your comments replace the open comments that this check left before on these passages. Leave again each one that still holds.
 
 {comments}
 
@@ -1177,7 +1146,7 @@ The check {check}, which says what to comment on.
 
 ## check-passages
 
-Comment only on these passages. The others were checked before and keep the comments the check left.
+Comment only on these passages.
 
 {passages}
 
@@ -1243,18 +1212,6 @@ None yet.
 
 [The {n} oldest entries are left out here, since the whole conversation is too long.]
 
-## look-keys
-
-(none)
-
-## look-no-cards
-
-No cards in these turns.
-
-## look-read
-
-The session's calls above show what it read.
-
 ## agent-continue-earlier-session
 
 This agent ran in an earlier session of main, {session}, and cannot be continued from this one.
@@ -1269,44 +1226,8 @@ The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Sto
 
 ## main-stopped-note
 
-thimble: the analyst pressed Stop in thimble and ended your turn, and any command that turn was running was stopped too. Leave that work stopped: do not run its calls again or take up its request unless the analyst asks again.
+thimble: the analyst pressed Stop in thimble and ended your turn. Any command that turn was running was stopped too. Leave that work stopped. Do not run its calls again or take up its request unless the analyst asks again.
 
 ## thread-stopped-note
 
-thimble: the analyst pressed Stop in thimble on the side thread {thread}, which stopped its fork `{agent_id}`. Leave it stopped: do not message, continue or restart it unless the analyst asks.
-
-## session-unfinished
-
-Your session ended while agents or workflows you started in the background were still running, and they stopped with it. It has now been resumed. Continue each stopped agent with SendMessage, or start again what cannot be continued, then wait for all their results and use them before you finish.
-
-## session-mode-changed
-
-The analyst changed your permission mode, so your session was paused and has now been resumed with all its work. The call you were making when it paused may have been interrupted before it ran, so make it again if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-mode-stopped
-
-The agents that were running stopped with it: {agents}. Continue each with SendMessage to its id, which keeps what it has done, and run a stopped workflow again from its run with `resumeFromRunId`, then use their results as before.
-
-## session-model-fallback
-
-A safety classifier stopped {model}'s responses in your session, so it has been resumed on {fallback} with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-server-stopped
-
-thimble's server stopped while this session ran, which ended it before its task was done.
-
-## session-restarted
-
-thimble's server restarted while your session ran, which stopped it, and it has now been resumed with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-not-resumed
-
-It could not be resumed: {why}
-
-## session-mode-switching
-
-This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
-
-## digest-more
-
-[{total} lines in all. read_ref {ref} reads the next page.]
+thimble: the analyst pressed Stop in thimble on the side thread {thread}. This stopped its fork `{agent_id}`. Leave it stopped. Do not message, continue or restart it unless the analyst asks.

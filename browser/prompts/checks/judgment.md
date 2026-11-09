@@ -5,4 +5,4 @@ covers: [documents, cards]
 shown: false
 ---
 
-Comment on a sentence only when it presents the writer's judgment or interpretation as if the data showed it, and a reader who took it as fact could reach a wrong conclusion. If you are unsure, leave no comment.
+Comment only on a sentence that presents the writer's judgment or interpretation as if the data showed it. Even then, comment only when a reader who took the sentence as fact could reach a wrong conclusion.

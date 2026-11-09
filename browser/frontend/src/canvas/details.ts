@@ -347,9 +347,9 @@ export interface HistoryRow {
   entry: string | null
 }
 
-/** The fields an edit changed, in the words the panel uses for them: a plan's payload is its steps, a note's its text. */
+/** The fields an edit changed, in the words the panel uses for them: a note's payload is its text. */
 export function fieldWords(kind: string, fields: readonly string[] | undefined): string {
-  const payload = kind === 'plan' ? 'steps' : kind === 'note' ? 'text' : kind === 'example' ? 'records' : kind === 'label' ? 'label' : 'content'
+  const payload = kind === 'note' ? 'text' : kind === 'example' ? 'records' : kind === 'label' ? 'label' : 'content'
   const words: Record<string, string> = { title: 'question', code: 'code', payload, takeaway: 'takeaway', kind: 'kind' }
   return (fields ?? []).map((f) => words[f] ?? f).join(', ')
 }

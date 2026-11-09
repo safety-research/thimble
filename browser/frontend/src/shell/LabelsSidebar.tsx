@@ -23,9 +23,9 @@
 // to where it stands (a card, or the passage in its document) with Apply, which sends it to Claude in the chat, Go to it
 // and Done (CommentsList.tsx). A check's runs name their document when it has runs on several, and the comments in the
 // documents name theirs when more than one document has comments. The analyst's and Claude's own notes, which no check
-// made, are the category Notes. The categories end in "+ New check", which opens the new-check card beside the sidebar
-// (report/Checks.tsx NewCheckCard): Run adds the check, commenting on the documents, and the server turns it on and runs
-// it.
+// made, are the category Notes. The categories end in "+ Ask for comments", which opens the new-check card beside the
+// sidebar (report/Checks.tsx NewCheckCard): Run adds the check, commenting on the documents, and the server turns it on
+// and runs it.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { LabelAsks } from '../chat/LabelAsk'
@@ -485,8 +485,8 @@ function NewLabel() {
 
 // ---- the comment categories
 
-/** "+ New check" at the end of the categories: the new-check card beside the sidebar, whose Run adds the check over the
- * documents, as the Report's Comments pane's + did; the server turns it on and runs it. */
+/** "+ Ask for comments" at the end of the categories: the new-check card beside the sidebar, whose Run adds the check
+ * over the documents, as the Report's Comments pane's + did; the server turns it on and runs it. */
 function NewCheck({ checks }: { checks: Checks }) {
   const btn = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
@@ -495,9 +495,9 @@ function NewCheck({ checks }: { checks: Checks }) {
     <div className="lside-new">
       <button ref={btn} type="button" className="lside-add" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <Icon name="plus" size={13} />
-        New check
+        Ask for comments
       </button>
-      <Popover anchor={btn} open={open} onClose={close} side="left" width={340} label="New check" className="check-card">
+      <Popover anchor={btn} open={open} onClose={close} side="left" width={340} label="Ask for comments" className="check-card">
         {open && (
           <NewCheckCard
             colour={colourVar(freeColour(checks.list))}
@@ -557,7 +557,7 @@ function CategoryRow({ ws, category: c, checks, runs, onOpen }: { ws: string; ca
         <Button variant="icon" size="sm" icon="chevron-right" title="Open" aria-label={`Open ${c.name}`} onClick={onOpen} />
       </div>
       {c.check?.prompt && <p className="lside-question lside-clamp">{c.check.prompt}</p>}
-      {c.key === NOTES && <p className="lside-question">Your notes and Claude's, which no check made.</p>}
+      {c.key === NOTES && <p className="lside-question">Your own notes and Claude's.</p>}
       {categoryShowIn(ws, c)}
       {check && runs.map((r) => <RunNotes key={r.doc} ws={ws} check={check} doc={r.doc} run={r.run} where={r.where} />)}
     </div>
@@ -633,10 +633,10 @@ function CategoryDetail({ ws, category: c, checks, runs, onDone }: { ws: string;
       {c.check && (
         <>
           <h4 className="lside-label">Definition</h4>
-          <TextArea className="lside-ask" value={text} onChange={setText} autoGrow rows={3} aria-label="The check's definition" />
+          <TextArea className="lside-ask" value={text} onChange={setText} autoGrow rows={3} aria-label={`Definition of ${c.name}`} />
           {dirty && (
             <div className="lside-new-acts">
-              <Button variant="primary" size="sm" busy={busy} onClick={save} title={shown ? 'Save, and run the check again where it comments' : 'Save'}>
+              <Button variant="primary" size="sm" busy={busy} onClick={save} title={shown ? 'Save, and run it again where it comments' : 'Save'}>
                 {shown ? 'Save and run' : 'Save'}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setText(prompt)}>

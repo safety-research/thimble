@@ -130,8 +130,8 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, edits: bool
     """Prompt files for a session in `workdir`, rendered and joined by a blank line, with the corpus root and the citation
     forms of the folder's views filled in. Main's append and the shared skill's command both come from here. `edits`:
     whether main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which
-    requests to a host ask the analyst follows the way main reaches Claude (network_words). While the workspace's Label
-    tool is off (ledger.labels_on), each text leaves out what it says of labels (labels_off.py)."""
+    requests to a host ask the analyst follows the way main reaches Claude (network_words). While the workspace's
+    Label tool is off (ledger.labels_on), each text leaves out what it says of labels (labels_off.py)."""
     from . import views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
@@ -226,7 +226,7 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
     elif kind == "written":
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":
-        line = f"a check of the {fields.get('doc') or 'document'} ended"
+        line = f"a comments agent on the {fields.get('doc') or 'document'} ended"
     elif kind == "citations":
         line = "the check of the last reply's citations changed some"
     else:
@@ -249,8 +249,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
     main's terminal shows instead of terminal_line's: at once, or, when the server runs main and main's turn runs, where
     main reads it, and as waiting until then (runtime.deliver). `event_id` is the event's id when the caller recorded it
-    first (fixes.ask keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
-    for (when `check_kind`), or for a message with no text."""
+    first (fixes.ask keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for (when
+    `check_kind`), or for a message with no text."""
     from . import agents, runtime, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()

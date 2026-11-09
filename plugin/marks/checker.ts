@@ -50,8 +50,8 @@
 //                             the same tool's read of one file the person let thimble's checks read this session
 //                             (repairOk), where Claude Code itself would ask and asks nobody
 //   awaitsCheck($, row)       whether a row of main's is in the turn that runs or the one whose check starts now
-//   repairOf($, row, n)       x on a failed citation (tray): what a check of that one mark again needs; for a mark
-//                             whose check did not run, the check itself
+//   repairOf($, row, n, auto) x on a failed citation (tray), or autoRepair (`auto`): what a check of that one mark
+//                             again needs; for a mark whose check did not run, the check itself
 //   launchRepair($, r, hold)  that check's fork, with a request to find the right value and correct the cited words;
 //                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
@@ -128,7 +128,8 @@
 // another never gives this OK.
 //
 // When a reply's last mark settles, main is told what changed (tellText), once; when a repair ends, main is told how
-// that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
+// that one mark ended (repairTellText): who started it, the person (x) or thimble (auto). Their words, and those of a
+// repair's request, are the registry's `notices` text, built by notices.mjs as the workbench builds them.
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
 // checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
@@ -142,14 +143,15 @@ import { failCleared, failLineNow, failNotice, noticeLine, reasonOf } from '../b
 import { labelsDir, rootHere, startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { claudeTempDir, tempDir } from '../core/home'
-import { tellAtNextPrompt } from '../core/tell'
-import { errorWords, fenced } from '../core/text.js'
+import { noticeParts, tellAtNextPrompt } from '../core/tell'
+import { errorWords } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { choiceOf, claudeCites } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
-import { marksIn, plainSentence, sentenceOf } from './message.js'
-import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type OneRead, type Reply, replyKeyOf, replyOf, type Unread } from './store'
+import { marksIn, sentenceOf } from './message.js'
+import { repairRequest, repairTellText, tellText } from './notices.mjs'
+import { counts, editReply, type MarkItem, type MarkStatus, newReply, notRun, type OneRead, type Reply, replyKeyOf, replyOf, type Unread } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -273,61 +275,6 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
   return { ...r, items, settledAt: items.some(m => m.status === 'checking') ? null : now }
 }
 
-/** What main reads with the person's next prompt: each mark the check corrected or flagged, as the person reads it in
- *  the reply (so main uses it from now on and need not say it again), and each note, which the person does not see.
- *  The person sees every failed mark alike (not confirmed); main hears whether the check found it false or only could
- *  not confirm it. The check's own words (its
- *  reason, its note) are quoted, since they may quote the records. */
-const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
-const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
-/** A correction as main reads it: a narrowing keeps the rest of the words in the reply, uncited; a rewrite puts a new
- *  sentence in place of the one main wrote. */
-const fixedLine = (m: MarkItem) => (m.rewrite
-  ? `- the sentence ${q(plainSentence(m.sentence))} is rewritten as ${q(plainSentence(m.rewrite))}, which cites ${q(m.shown)}${why(m)}`
-  : m.narrowed
-    ? `- ${q(m.was ?? m.words)} is narrowed: only ${q(m.shown)} is cited, and the rest reads as your own words${why(m)}`
-    : `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`)
-
-export function tellText(items: MarkItem[]): string {
-  // words the analyst asked about (c, marks/cite.ts): main did not cite them, the analyst asked where they come from
-  // a mark whose check did not run is no finding of the check's
-  const said = items.filter(m => m.status === 'corrected' || (m.status === 'failed' && m.failedBy !== 'none')).map(m => {
-    if (m.status === 'corrected') return fixedLine(m)
-    if (m.failedBy === 'evidence') return `- ${q(m.words)} is flagged as not confirmed${why(m)}`
-    return `- ${q(m.words)} is flagged as wrong${why(m)}`
-  })
-  const notes = notesOf(items).map(n => `- ${q(n)}`)
-  if (!said.length && !notes.length) return ''
-  const told = items.filter(m => m.status === 'corrected' || m.status === 'failed' || m.note)
-  const asked = told.length > 0 && told.every(m => m.asked)
-  const parts = [asked
-    ? 'The analyst asked where words of your reply come from, and thimble checked them against the data. Its words in the blocks below may quote the records.'
-    : 'thimble checked the citations of your last reply against the data. Its words in the blocks below may quote the records.']
-  if (said.length) parts.push(`The analyst sees these changes in the reply:\n${fenced(said.join('\n'))}`)
-  if (notes.length) parts.push(`The check also found these uncited statements false. The analyst does not see these:\n${fenced(notes.join('\n'))}`)
-  parts.push('Use the corrected facts from now on. The analyst has read the changes in the reply, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
-  return parts.join('\n')
-}
-
-/** What main reads with the person's next prompt when a repair ended: how its mark ended, as the person reads it, and
- *  who started it: the person with x, or thimble (`auto`, right after the check failed it). */
-export function repairTellText(items: MarkItem[], auto = false): string {
-  const lines = items.map(m => {
-    if (m.status === 'corrected') return fixedLine(m)
-    if (m.status === 'verified') return `- ${q(m.words)} is verified as written${why(m)}`
-    if (m.status === 'failed' && m.failedBy === 'none') return `- ${q(m.words)} could not be checked${why(m)}`
-    if (m.status === 'failed') return `- ${q(m.words)} is still flagged as ${m.failedBy === 'evidence' ? 'not confirmed' : 'wrong'}${why(m)}`
-    return `- ${q(m.words)} could not be checked again${why(m)}`
-  })
-  const notes = notesOf(items).map(n => `- ${q(n)}`)
-  if (!lines.length) return ''
-  const head = auto ? 'A citation of yours failed its check, so thimble checked it again against the data.' : 'The analyst pressed x (repair) on a citation of yours, and thimble checked it against the data.'
-  const parts = [`${head} Its words in the block below may quote the records.\n${fenced(lines.join('\n'))}`]
-  if (notes.length) parts.push(`The check also found these uncited statements false. The analyst does not see these:\n${fenced(notes.join('\n'))}`)
-  parts.push('The analyst sees the result in the reply. Use it from now on.')
-  return parts.join('\n')
-}
-
 /** A change of the reply's marks; when it settled the last mark this check tells of, main is told what changed: a
  *  reply's check tells of every mark no repair checks, a repair of its own mark. Two forks that end at once edit in
  *  turn (store.ts editReply), so exactly one of them settles the reply. */
@@ -341,7 +288,9 @@ async function edit($: Engine, c: Check, change: (r: Reply) => Reply): Promise<R
   })
   // a side thread's answer: main never read it, so it hears nothing of its check
   if (reply && open && !c.thread && !reply.items.some(counted)) {
-    const text = c.repair ? repairTellText(reply.items.filter(m => mine.has(m.n)), !!c.auto) : tellText(reply.items)
+    // a text thimble could not read was said when the check started (startCheck), as for the checker's
+    const p = await noticeParts($).catch(() => null)
+    const text = !p ? '' : c.repair ? repairTellText(p, reply.items.filter(m => mine.has(m.n)), !!c.auto) : tellText(p, reply.items)
     if (text) await tellAtNextPrompt($, c.repair ? `marks:${c.key}:repair:${c.marks.join(',')}` : `marks:${c.key}`, text)
   }
   return reply
@@ -774,6 +723,7 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
   let template = ''
   try {
     template = await promptText($, 'checker')
+    await noticeParts($) // what main reads at the check's end: read now, so a text thimble cannot read is said now
   } catch (err) {
     await notChecked($, whole, now)
     await sayCannotStart($, { notice: false, text: `thimble could not read its checker text (${await errorWordsOf($, err)}), so the citations are not checked. Reinstall thimble.` })
@@ -926,36 +876,27 @@ export function heldRepair(): RepairHold | null {
   return held
 }
 
-/** The request under the checker's text for a repair: which mark, what the first check found, and the task. The check's
- *  reason is quoted, since it may quote the records. A mark whose check did not run is checked as any reply's is. */
-export function repairRequest(m: MarkItem): string {
-  if (m.failedBy === 'none') return `The analyst pressed x to check citation ${m.n}, whose first check did not run. It may stand in an earlier reply than your last.`
-  const found = m.failedBy === 'evidence' ? 'could not confirm it' : 'found it wrong'
-  return [
-    `The analyst pressed x to repair citation ${m.n}. It may stand in an earlier reply than your last. The first check ${found}${m.reason ? `: ${q(m.reason)}` : '.'}`,
-    'Check it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.',
-    'When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.',
-  ].join('\n')
-}
-
-/** x on citation `n` of `row`: what a check of it again needs (for one whose check did not run, the check); null when
- *  there is nothing to repair (it did not fail, or a check of it runs), or why none can start. */
-export async function repairOf($: Engine, row: string, n: number): Promise<Repair | string | null> {
+/** x on citation `n` of `row`, or autoRepair's repair of it (`auto`): what a check of it again needs (for one whose
+ *  check did not run, the check), with the request that says who asked it (notices.mjs repairRequest); null when there
+ *  is nothing to repair (it did not fail, or a check of it runs), or why none can start. */
+export async function repairOf($: Engine, row: string, n: number, auto = false): Promise<Repair | string | null> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   const m = r?.items.find(x => x.n === n)
   if (!key || !r || !m || m.status !== 'failed' || starting.has(`${key}:${n}`)) return null
   if (Object.values(await running($)).some(c => c.key === key && c.marks.includes(n))) return null
   let template = ''
+  let p: Record<string, string>
   try {
     template = await promptText($, 'checker')
+    p = await noticeParts($)
   } catch (err) {
     return `thimble could not read its checker text (${await errorWordsOf($, err)}). Reinstall thimble.`
   }
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
-  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(m)}` }
+  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
@@ -1061,7 +1002,7 @@ export async function autoRepair($: Engine, agentId: string): Promise<void> {
   for (const n of due.marks) {
     const m = items.find(x => x.n === n)
     if (!m) continue
-    const r = await repairOf($, m.row, n)
+    const r = await repairOf($, m.row, n, true)
     if (r === null) continue
     const why = typeof r === 'string' ? r : await launchRepair($, { ...r, auto: true }, { until: 0, cancelled: false })
     if (why) failNotice($, why, 'marks:repair')

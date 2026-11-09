@@ -55,7 +55,7 @@ export const MODEL_ROWS: readonly { role: string; name: string }[] = [
   { role: 'main', name: 'Main and side threads' },
   { role: 'writer', name: 'Writer' },
   { role: 'dev', name: 'View builds and code tickets' },
-  { role: 'checks', name: 'Checks' },
+  { role: 'checks', name: 'Comments' },
   { role: 'labels', name: 'Labels' },
   { role: 'verify', name: 'Card check' },
   { role: 'suggest', name: 'View proposals' },

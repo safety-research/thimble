@@ -1,6 +1,6 @@
 ## The ticket
 
-Work on {{label}}, {{title}} (source {{source}}). Its worktree is `{{worktree}}`. Your own folder is `{{work}}`.
+Work on {{label}}: {{title}} (source {{source}}). Its worktree is `{{worktree}}`. Your own folder is `{{work}}`.
 
 {{stack}}
 

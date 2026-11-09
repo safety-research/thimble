@@ -837,7 +837,7 @@ def canonical_td_ref(ref: str) -> str:
 # a span written without its cell id, bare or as a value-ref: `[[5|@out0#L3]]`, `[[@out0#L3]]`, `[[12|#count/total]]`,
 # `[[#count/total]]` (the tokens refs._BARE_LEAD refuses); group 1 the display (None for a bare ref), group 2 the span
 _BARE_SPAN_RE = re.compile(r"\[\[(?:([^\[\]|]+)\|)?\s*((?:#|@out\d)[^\[\]|]*?)\s*\]\]")
-# The prompts' own placeholder for a card's id, `card:<id>` (shared.md's citation table and examples), which a model may
+# The prompts' own placeholder for a card's id, `card:<id>` (refs.md's citation table and examples), which a model may
 # copy into the takeaway it gives add_card before the card has an id.
 _ID_PLACEHOLDER_RE = re.compile(r"(\[\[(?:[^\[\]|]*\|)?\s*)(?:card|cell):<id>(?=[#@\]\s|])")
 

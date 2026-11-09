@@ -77,7 +77,7 @@ SEND_TOOL = "SendMessage"
 REPLY_TOOL = "reply_in_thread"
 # what main ends a turn with when it has nothing for the analyst, which no chat shows (module note, the end token)
 END_TOKEN = "(shown in the dashboard)"
-TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
+TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md, thread.md)
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
 # Claude Code's calls that are nothing the analyst reads, so no row in any chat: loading a deferred tool's schema before

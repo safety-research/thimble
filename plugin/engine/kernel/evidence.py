@@ -207,7 +207,8 @@ MAX_RANGE = 50
 # the words the person reads first on a mark whose check did not run or gave no answer (marks/store.ts NOT_RUN)
 NOT_RUN = "The check did not run."
 BLOCK = 1 << 20  # bytes read at a time while counting the lines before a cited one
-LINE_BYTES = 1 << 20  # bytes of a cited line the check reads; a longer line is cut there
+LINE_BYTES = 1 << 24  # bytes of a cited line the check reads; a longer line is cut there
+HAY_MAX = 20000  # characters of a long cited line read around its substring: the passage the words stand in
 SHIFT_MAX = 5  # lines a cited line may be off by and still name the line that holds the words
 OUTPUT_MAX = 20000  # characters of a call's output the evidence keeps, around its first highlight
 LINE_MAX = 600  # characters of a cited line the evidence keeps, around its highlight
@@ -1622,6 +1623,11 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None, 
     rows = [{"n": n, "text": t} for n, t in zip(range(first, last + 1), at(first, last))]
     hay = hay_of(at(a, b))
     problems = [] if holds(str(sub), hay) else [instead(f"line {line} of {file}", str(sub), [t for x in at(a, b) for t, _ in shown_forms(x)])]
+    if not problems and any(len(h) > HAY_MAX for h in hay):
+        # a long line, such as a transcript kept as one line of JSON: the cited words stand where the substring does,
+        # so only the passage around it is read, and a number elsewhere in the line does not show them
+        near = [window(h, [hit], HAY_MAX)[0] if hit else "" for h in hay for hit in [find_loose(str(sub), h) if len(h) > HAY_MAX else [0, 0]]]
+        hay = [h for h in near if h] or hay
     # for the pane: each cited line in the form that holds the substring, cut around it; the lines around cut short
     for r in rows:
         if not (a <= r["n"] <= b):

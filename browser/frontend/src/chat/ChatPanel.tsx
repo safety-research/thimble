@@ -79,7 +79,7 @@ export type ComposerStop =
   | { kind: 'ticket'; ticket: string; label: string }
   | { kind: 'view'; slug: string; review: boolean; label: string }
 
-const STOP_LABELS: Readonly<Record<string, string>> = { writer: 'Stop the writer', check: 'Stop the check' }
+const STOP_LABELS: Readonly<Record<string, string>> = { writer: 'Stop the writer', check: 'Stop the comments agent' }
 export const STOP_MAIN = 'Stop main'
 export const STOP_THREAD = 'Stop the thread'
 
@@ -819,7 +819,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
             {!chat.loading && !chat.error && kind === 'writer' && <SessionView ws={ws} id={current} chat={chat} role="writer" title={curMeta?.title || 'Writer'} running={running} />}
-            {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
+            {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Comments'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
             {!chat.loading && !chat.error && kind === 'fix' && <Rows rows={chat.rows} ws={ws} chat={current} streaming={chat.streaming} />}

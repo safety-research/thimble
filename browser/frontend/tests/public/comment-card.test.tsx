@@ -24,12 +24,12 @@ const IMPORTANT: CommentView = {
   details: '- The pandas build fetches two libraries from GitHub [[2|card:abc123#libs/TOTAL]].\n- Bake them into the image.',
   evidence: ['card:abc123#libs/TOTAL'],
 }
-const ON_STEP: CommentThread = { anchor: 'card:abc123#step-2', passage: 'Plan: build the environment and pilot it', where: 'step 2', surface: 'canvas' }
+const ON_CARD: CommentThread = { anchor: 'card:abc123', passage: 'Does the image build without the web?', surface: 'canvas' }
 
 /** A card whose active state its parent holds, as the margin and the canvas hold it. */
 function Held({ onResolve }: { onResolve: () => Promise<void> }) {
   const [active, setActive] = useState(false)
-  return <CommentCard ws="w" comment={IMPORTANT} look={look} active={active} onActivate={() => setActive(true)} onResolve={onResolve} thread={ON_STEP} />
+  return <CommentCard ws="w" comment={IMPORTANT} look={look} active={active} onActivate={() => setActive(true)} onResolve={onResolve} thread={ON_CARD} />
 }
 const click = (el: Element | null) => act(async () => (el as HTMLElement).click())
 
@@ -54,9 +54,9 @@ test("a comment's question opens a side thread anchored to the comment, and ✓ 
   await settle()
   off()
   expect(made).toHaveLength(1)
-  expect(made[0]).toMatchObject({ anchor: 'card:abc123#step-2', surface: 'canvas', element: 'comment', comment: 'k1', text: 'Which two libraries?' })
+  expect(made[0]).toMatchObject({ anchor: 'card:abc123', surface: 'canvas', element: 'comment', comment: 'k1', text: 'Which two libraries?' })
   // the thread reads the passage and the comment it is about
-  expect(made[0].anchor_text).toContain('Plan: build the environment and pilot it')
+  expect(made[0].anchor_text).toContain('Does the image build without the web?')
   expect(made[0].anchor_text).toContain('Blocking the web also blocks GitHub.')
   expect(opened).toEqual(['t1'])
   await click(el.querySelector('.wu-cm-resolve'))

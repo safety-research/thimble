@@ -24,7 +24,6 @@
                                   bundle's stored `_out`, else its position (cite.output_at; notebook.number_outputs keeps
                                   an output's index across a re-run)
     card:<cell_id>@out<i>#L<n>-L<m>  lines <n> to <m> (inclusive) of that output, the range form files have
-    card:<cell_id>#step-<n>       step <n> (1-based) of a plan card (notebook.plan_steps)
     concept:<concept_id>          a label (resolved by app.concepts)
     concept:<concept_id>/<value>  one value of a label: its count, as the label's card shows it; the value is written as
                                   the card shows it, raw or through cite.encode_label, and parse_ref returns it decoded
@@ -75,7 +74,6 @@ _CELL = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)(?:@(\d+))?$")
 # whitespace, since a model writes a pandas header raw as often as encoded; it stops at the first `/`.
 _CELL_TD = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)#([^/]+)/(.+)$")
 _CELL_LINE = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)@out(\d+)#L(\d+)(?:-L(\d+))?$")  # group 4: the range end, when a range
-_CELL_STEP = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)#step-(\d+)$")  # a plan card's step, numbered from 1
 _CHAT = re.compile(r"^chat:([A-Za-z0-9_-]+)(?:#(\d+))?$")
 _CONCEPT = re.compile(r"^concept:([A-Za-z0-9_-]+)(?:/(.+))?$")
 _REPORT = re.compile(r"^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$")  # a document, one of its paragraphs (p<pid>) or a sentence or heading
@@ -125,8 +123,6 @@ def parse_ref(ref: str) -> dict[str, Any]:
     ref = ref.strip()
     if m := _CELL.match(ref):
         return {"kind": "cell", "cell_id": m[1], "exec": int(m[2]) if m[2] else None}
-    if m := _CELL_STEP.match(ref):
-        return {"kind": "cell", "cell_id": m[1], "exec": None, "step": int(m[2])}
     if (m := _CARD_FILE_LINE.match(ref)) and (line := _file_line(m[1])):
         return line
     if m := _CELL_TD.match(ref):
@@ -201,8 +197,6 @@ def format_ref(p: dict[str, Any]) -> str:
     """Inverse of parse_ref."""
     k = p["kind"]
     if k == "cell":
-        if p.get("step") is not None:
-            return f"card:{p['cell_id']}#step-{p['step']}"
         if p.get("col") is not None and p.get("row") is not None:
             return f"card:{p['cell_id']}#{cite.encode_label(p['col'])}/{cite.encode_label(p['row'])}"
         if p.get("out") is not None and p.get("line") is not None:
@@ -954,8 +948,6 @@ def _cell_excerpt(cell: dict[str, Any]) -> str:
             return _text(payload.get("concept"))
         if kind == "custom":
             return _text(payload.get("html"))
-        if kind == notebook.PLAN_KIND:
-            return "\n".join(notebook.plan_lines(cell))
         return json.dumps(payload.get("dataset"), ensure_ascii=False) if payload.get("dataset") is not None else _text(cell.get("title"))
     parts: list[str] = []
     for bundle in cell.get("outputs") or []:
@@ -1013,16 +1005,7 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
     excerpt = _cell_excerpt(cell)
     # Span refs into the cell's output (cite.py): a td by column/row label, or a line of the i-th output. When the
     # target is gone (the cell was re-run and its output changed) fall back to the whole-cell excerpt and say so.
-    if p.get("step") is not None:
-        steps = notebook.plan_steps(cell)
-        n = p["step"]
-        if not 1 <= n <= len(steps):
-            meta["span_missing"] = True
-        else:
-            line = notebook.step_line(n, steps[n - 1])
-            excerpt = "\n".join([line, *(ln.strip() for ln in notebook.step_extra_lines(steps[n - 1]))])
-            meta["span"] = {"step": n, "id": steps[n - 1]["id"], "text": line}
-    elif p.get("col") is not None and p.get("row") is not None:
+    if p.get("col") is not None and p.get("row") is not None:
         hit = cite.find_td(_td_outputs(ws, cell), p["col"], p["row"])
         if hit is None:
             meta["span_missing"] = True

@@ -175,7 +175,7 @@ def test_repair_checks_a_failed_mark_again_and_main_hears_how_it_ended(_fresh, m
         assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == marks.NOT_FAILED
 
     asyncio.run(go())
-    assert "The analyst pressed x to repair citation 1." in seen[0] and "found it wrong: \"The card shows 104" in seen[0]
+    assert "The analyst pressed Repair on citation 1 to repair it." in seen[0] and "found it wrong: \"The card shows 104" in seen[0]
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "corrected" and m["shown"] == "243 against 104" and m["was"] == "243 against 105", m
     (c, said), = [t for t in _fresh if not t[1].startswith("notice")]

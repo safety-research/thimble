@@ -199,7 +199,7 @@ export function CommentsButton({ ws, checks, comments }: { ws: string; checks: C
         <div className="wu-checks bcomments-pane">
           <div className="wu-checks-head bcomments-head" ref={head}>
             <span className="wu-sec-name">Comments</span>
-            <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
+            <IconButton label="Ask for comments" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
               <Icon name="plus" size={14} />
             </IconButton>
           </div>

@@ -169,11 +169,10 @@ const OWN_TABLES = '.outputs-html table'
 const OWN_BOX = '.bcell-output, .bdetail-artifact'
 
 /** The card a whole card's ref resolved to, which its hover shows (CellPreview): a card that runs code, and a data card
- * with no outputs (a custom card, a note, an example), whose excerpt is its source rather than what it shows; null for
- * a plan, whose excerpt lists its steps (and a step's ref, its step). */
+ * with no outputs (a custom card, a note, an example), whose excerpt is its source rather than what it shows. */
 function cellOf(r: ResolvedRef): Cell | null {
   const rec = r.record
-  if (r.kind !== 'cell' || !rec || typeof rec !== 'object' || typeof rec.id !== 'string' || rec.kind === 'plan') return null
+  if (r.kind !== 'cell' || !rec || typeof rec !== 'object' || typeof rec.id !== 'string') return null
   return rec as Cell
 }
 
@@ -272,9 +271,9 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const icon = folder || named === 'folder' ? 'folder' : refIcon(ref)
   // a standalone citation of a part of a card (a table's cell, an output's lines), or inside a chat reply, a card or
   // report text (GlyphCites), is its glyph alone with its name in the hover; a citation of a whole card is the card's
-  // chip with its name, as the chips that list what a step made are
+  // chip with its name
   const glyphCites = useContext(GlyphCites)
-  const wholeCard = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null && parsed.step == null
+  const wholeCard = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null
   const iconOnly = !asText && !broken && !!cite && !wholeCard && (glyphCites || parsed?.kind === 'cell')
 
   useEffect(() => ensureRefName(ws, ref), [ws, ref])

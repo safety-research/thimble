@@ -83,8 +83,7 @@ function Face(p: CardFaceProps) {
   const failed = cell.status === 'error' && !running
   const check = checkOf(cell)
   const problem = p.onCheckAgain ? checkProblem(check) : ''
-  // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
-  const takeaway = kind === 'plan' || held ? '' : cell.takeaway
+  const takeaway = held ? '' : cell.takeaway
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')

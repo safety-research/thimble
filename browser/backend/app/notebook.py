@@ -254,17 +254,16 @@ DEFAULT_GROUP_KIND = "sequence"
 LOOSE_KIND = "loose"
 LOOSE_TITLE = "Loose cards"
 
-CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan")
+CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom")
 RUNNABLE_KINDS = ("plot", "table", "code", "timeline", "diagram")  # carry code and outputs
-DATA_KINDS = ("example", "note", "label", "custom", "plan")  # carry a payload
+DATA_KINDS = ("example", "note", "label", "custom")  # carry a payload
 DEFAULT_KIND = "code"
 TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
 # while thimble runs a card again because labels it read changed (rerun_on_labels), those label ids; gone when the
 # run ends
 REGENERATING_FOR = "regenerating_for"
 # the payload key per data shape; a diagram or a timeline without code carries a dataset
-PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset",
-                "plan": "steps"}
+PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset"}
 # The canvas layout fields. A group's `pos` {x, y} is on the board for a root group, inside its parent's frame for a
 # nested one; null for the default placement. A cell's `pos` works the same way (on the board for a loose card), with
 # `width` and `height` in px (null: default width, content height) and `starred`.
@@ -325,179 +324,8 @@ def _payload_of(kind: str, raw: Any) -> dict:
         v = str(v or "")
     elif key == "concept":
         v = str(v) if v else None
-    elif key == "steps":
-        v = plan_steps_of(v)
-        p[PLAN_FOLLOWS] = plan_id_of(p.get(PLAN_FOLLOWS))
     p[key] = v
     return p
-
-
-# --- plan cards ---
-#
-# A plan card is a data card whose payload is {steps: [...], follows}: the steps a piece of work takes, which the agent
-# keeps current by replacing them with edit_card (plans.merge_steps), and the id of the plan it is the next phase of. A
-# step is {id, text, makes, status, note, details, runs, time, started, ended}: its id never changes, `makes` names
-# what it makes, `details` what the card shows under the step on request, `runs` the Agent calls that do it
-# (plans.plan_runs), `time` a time the agent states, and `started`/`ended` thimble's stamps of its status changes. A
-# plan has no takeaway.
-
-PLAN_KIND = "plan"
-PLAN_STATUSES = ("not started", "running", "done", "needs you")
-PLAN_NOT_STARTED, PLAN_RUNNING, PLAN_DONE, PLAN_NEEDS_YOU = PLAN_STATUSES
-PLAN_FOLLOWS = "follows"
-STEP_ID_PREFIX = "s"
-STEP_DETAILS_CHARS = 4_000  # of a step's details, kept
-
-
-def _words(v: Any) -> str:
-    return " ".join(str(v or "").split())
-
-
-def _word_list(v: Any) -> list[str]:
-    items = v if isinstance(v, (list, tuple)) else [v] if v else []
-    return [w for w in (_words(x) for x in items) if w]
-
-
-def _stamp(v: Any) -> str | None:
-    """An ISO time as stored, else None."""
-    if not isinstance(v, str) or not v.strip():
-        return None
-    try:
-        datetime.fromisoformat(v.strip())
-    except ValueError:
-        return None
-    return v.strip()
-
-
-def plan_id_of(v: Any) -> str | None:
-    """The card id a plan's `follows` names, given as an id or a card ref; None for anything else."""
-    text = str(v or "").strip().strip("[]")
-    for prefix in ("card:", "cell:"):
-        text = text.removeprefix(prefix)
-    return text if ID_RE.match(text) else None
-
-
-def plan_status_of(v: Any) -> str | None:
-    """A step's status as stored ("running", "needs you", ...), from the word given in any case; None for a word that
-    is not one."""
-    word = _words(v).lower().replace("_", " ").replace("-", " ")
-    return word if word in PLAN_STATUSES else None
-
-
-def step_details_of(v: Any) -> str:
-    """A step's details as kept: its lines without trailing space, no run of blank lines, cut at STEP_DETAILS_CHARS."""
-    lines = [ln.rstrip() for ln in str(v or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    return out if len(out) <= STEP_DETAILS_CHARS else out[:STEP_DETAILS_CHARS].rstrip() + " …"
-
-
-def plan_step_of(raw: Any, sid: str) -> dict:
-    """One step with every field: a dict as given, or a bare string as the step's text."""
-    s = raw if isinstance(raw, dict) else {"text": raw}
-    return {"id": sid, "text": _words(s.get("text")), "makes": _word_list(s.get("makes")),
-            "status": plan_status_of(s.get("status")) or PLAN_NOT_STARTED, "note": str(s.get("note") or "").strip(),
-            "details": step_details_of(s.get("details")), "runs": _word_list(s.get("runs")),
-            "time": _words(s.get("time")), "started": _stamp(s.get("started")), "ended": _stamp(s.get("ended"))}
-
-
-def plan_steps_of(v: Any) -> list[dict]:
-    """A plan's steps as stored: each step whole (plan_step_of), its id kept, or the next free s<n> for a step without
-    one."""
-    items = [x for x in (v if isinstance(v, list) else []) if isinstance(x, (dict, str)) and x]
-    given = [str(x.get("id") or "") if isinstance(x, dict) else "" for x in items]
-    taken = {i for i in given if ID_RE.match(i)}
-    out: list[dict] = []
-    seen: set[str] = set()
-    n = 0
-    for x, sid in zip(items, given):
-        if not ID_RE.match(sid) or sid in seen:
-            n += 1
-            while f"{STEP_ID_PREFIX}{n}" in taken or f"{STEP_ID_PREFIX}{n}" in seen:
-                n += 1
-            sid = f"{STEP_ID_PREFIX}{n}"
-        seen.add(sid)
-        out.append(plan_step_of(x, sid))
-    return out
-
-
-def plan_steps(cell: dict | None) -> list[dict]:
-    """A plan card's steps in order; [] for any other card."""
-    if not cell or cell.get("kind") != PLAN_KIND:
-        return []
-    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
-    return plan_steps_of(payload.get("steps"))
-
-
-def plans_following(ws: Path, cell_id: str) -> list[str]:
-    """The ids of the plans whose `follows` names plan `cell_id`, the next phases of its work, in store order."""
-    out: list[str] = []
-    for _, nb in _stored(ws):
-        for c in nb["cells"]:
-            if c.get("kind") == PLAN_KIND and (c.get("payload") or {}).get(PLAN_FOLLOWS) == cell_id and c.get("id"):
-                out.append(str(c["id"]))
-    return out
-
-
-def duration_words(seconds: float) -> str:
-    """A step's time as the card shows it: 40 s, 12 m, 2 h or 1 h 20 m."""
-    sec = max(0, int(round(seconds)))
-    if sec < 60:
-        return f"{sec} s"
-    if sec < 3600:
-        return f"{sec // 60} m"
-    h, m = divmod(sec // 60, 60)
-    return f"{h} h" if m == 0 else f"{h} h {m} m"
-
-
-def step_time(step: dict, now: datetime | None = None) -> str:
-    """The time a step shows: the time the agent gave, else from its start to its end, or to now while it runs; '' when
-    neither is known."""
-    if step.get("time"):
-        return str(step["time"])
-    try:
-        start = datetime.fromisoformat(str(step.get("started") or ""))
-    except ValueError:
-        return ""
-    end_text = step.get("ended")
-    if end_text:
-        try:
-            end = datetime.fromisoformat(str(end_text))
-        except ValueError:
-            return ""
-    elif step.get("status") == PLAN_RUNNING:
-        end = now or datetime.now(timezone.utc)
-    else:
-        return ""
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-    if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
-    return duration_words((end - start).total_seconds())
-
-
-def step_line(n: int, step: dict, now: datetime | None = None) -> str:
-    """One step on one line, numbered from 1: `2. [running · 40 m] Run the managed condition → runs/managed/`."""
-    t = step_time(step, now)
-    makes = f" → {', '.join(step['makes'])}" if step.get("makes") else ""
-    return f"{n}. [{step['status']}{f' · {t}' if t else ''}] {step['text']}{makes}"
-
-
-def step_extra_lines(step: dict) -> list[str]:
-    """What a model reads under a step's line: its note, its details and its runs, each line indented."""
-    lines = [f"   note: {ln.strip()}" for ln in step["note"].splitlines() if ln.strip()]
-    lines += [f"   details: {ln.strip()}" for ln in step.get("details", "").splitlines() if ln.strip()]
-    if step["runs"]:
-        lines.append(f"   runs: {'; '.join(step['runs'])}")
-    return lines
-
-
-def plan_lines(cell: dict | None, now: datetime | None = None) -> list[str]:
-    """A plan's steps as a model reads them: a line per step (step_line), with its note, details and runs under it."""
-    lines: list[str] = []
-    for n, step in enumerate(plan_steps(cell), 1):
-        lines.append(step_line(n, step, now))
-        lines += step_extra_lines(step)
-    return lines
 
 
 def _id_or_none(v: Any) -> str | None:
@@ -545,14 +373,32 @@ def order_of(v: Any) -> int | None:
     return int(n)
 
 
+def _plan_text(payload: Any) -> str:
+    """The text of the note a plan card of thimble 0.10.11 or before reads as: a numbered line for each of its steps,
+    with its status as it stood."""
+    steps = payload.get("steps") if isinstance(payload, dict) else None
+    lines: list[str] = []
+    for raw in steps if isinstance(steps, list) else []:
+        step = raw if isinstance(raw, dict) else {"text": raw}
+        text, status = (" ".join(str(step.get(k) or "").split()) for k in ("text", "status"))
+        if text:
+            lines.append(f"{len(lines) + 1}. {text}" + (f" ({status})" if status else ""))
+    return "\n".join(lines)
+
+
 def _normalize_cell(c: dict, nb_id: str) -> None:
-    """Give a stored cell the fields every reader expects. An `md` cell reads as a note, one without a kind as code."""
+    """Give a stored cell the fields every reader expects. An `md` cell reads as a note, one without a kind as code. A
+    plan card of thimble 0.10.11 or before reads as a note that lists its steps (_plan_text), without the history of its
+    steps' changes."""
     c.setdefault("notebook", nb_id)
     kind = c.get("kind")
     if kind == "md":
         kind = "note"
         c["kind"] = kind
         c.setdefault("payload", {"text": c.get("text")})
+    if kind == "plan":
+        kind = "note"
+        c.update(kind=kind, payload={"text": _plan_text(c.get("payload"))}, edited=[])
     if kind not in CELL_KINDS:
         kind = DEFAULT_KIND
         c["kind"] = kind
@@ -1379,8 +1225,6 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
         raise HTTPException(400, f"a {kind} card has no code")
     if payload is not None and run:
         raise HTTPException(400, f"a {kind} card has code, not a payload")
-    if kind == PLAN_KIND and (takeaway or "").strip():
-        raise HTTPException(400, "a plan card has no takeaway: its steps say where the work stands")
     before = content_of(cell)
     shown = shown_of(cell)  # the outputs new code replaces once it runs
     if code is not None and code != cell.get("code"):
@@ -1435,17 +1279,17 @@ def change_kind(workspace: str, cell_id: str, kind: str, *, payload: dict, title
     """Make a card one that shows what it holds, of `kind` (an example, a note or a custom card), in place, for
     edit_card: `payload` its content, its code and run gone (RUN_STATE), and its takeaway cleared, since it was written
     for what the card showed (as edit_and_run clears it). One edit, recorded with what it replaced and the outputs it
-    showed (stamp_edit), so Restore and Undo bring the card back as it was. 400 for a label or a plan card, or for
-    another kind; 404 for an unknown cell."""
-    if kind not in DATA_KINDS or kind in ("label", PLAN_KIND):
+    showed (stamp_edit), so Restore and Undo bring the card back as it was. 400 for a label card, or for another kind;
+    404 for an unknown cell."""
+    if kind not in DATA_KINDS or kind == "label":
         raise HTTPException(400, f"a card cannot become a {kind} card")
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
         raise HTTPException(404, f"no such card: {cell_id}")
     nb, cell = hit
-    if cell.get("kind") in ("label", PLAN_KIND):
-        raise HTTPException(400, f"a {cell.get('kind')} card keeps its kind")
+    if cell.get("kind") == "label":
+        raise HTTPException(400, "a label card keeps its kind")
     before, shown = content_of(cell), shown_of(cell)
     for k in RUN_STATE:
         cell.pop(k, None)
@@ -1463,25 +1307,6 @@ def change_kind(workspace: str, cell_id: str, kind: str, *, payload: dict, title
     return cell
 
 
-@_changes
-def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
-    """Drop `key` from a data card's payload and announce the card, with no `edited` stamp: for what the card shows
-    beside its content, such as a plan's marks of its last edit (plans.clear_edit). Whether the payload held it. 404
-    for an unknown cell."""
-    ws = _ws(workspace)
-    hit = _locate(ws, cell_id)
-    if hit is None:
-        raise HTTPException(404, f"no such card: {cell_id}")
-    nb, cell = hit
-    payload = cell.get("payload")
-    if not isinstance(payload, dict) or key not in payload:
-        return False
-    cell["payload"] = {k: v for k, v in payload.items() if k != key}
-    write_notebook(ws, nb)
-    _emit(workspace, cell)
-    return True
-
-
 HELD = "held"  # a card's record while it waits for its measure, or does not fit and waits for its check (card_fit.py)
 MEASURING_HELD = {"measuring": True}  # the record of a card a tool call made or changed until card_fit measured it
 # set by tools.call around an add_card or edit_card that card_fit measures, to the record the card gets (MEASURING_HELD,
@@ -1492,10 +1317,10 @@ MEASURING: contextvars.ContextVar[dict | None] = contextvars.ContextVar("thimble
 
 def _while_measured(cell: dict) -> None:
     """A card whose content a tool call stores while MEASURING is held until card_fit measures it, also one held as a
-    version before it that did not fit, so the end of that version's check does not show this one. Not a label card or
-    a plan, which card_fit does not measure."""
+    version before it that did not fit, so the end of that version's check does not show this one. Not a label card,
+    which card_fit does not measure."""
     rec = MEASURING.get()
-    if rec and cell.get("kind") not in ("label", PLAN_KIND):
+    if rec and cell.get("kind") != "label":
         cell[HELD] = dict(rec)
 
 
@@ -1656,11 +1481,8 @@ def version_of(ws: Path, cell: dict, entry: str) -> dict:
 def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None = None) -> dict:
     """Make card `cell_id` as it stood before its edit `entry` (version_of), as an edit of the analyst's (or `by`): its
     question, kind, code, payload and takeaway, and with its code the outputs and status it showed then, as stored, so
-    it shows them without a run. A plan's steps come back with their ids, statuses and clocks, marked against the steps
-    it has now (plans.restored_payload). The card as stored; unchanged when it is that version already. 404 for an
-    unknown card or version."""
-    from . import plans  # noqa: PLC0415 — plans imports this module
-
+    it shows them without a run. The card as stored; unchanged when it is that version already. 404 for an unknown card
+    or version."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -1672,10 +1494,7 @@ def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None 
         cell["kind"] = v["kind"]
     kind = cell.get("kind", DEFAULT_KIND)
     if isinstance(v.get("payload"), dict):  # a data card, then
-        if kind == PLAN_KIND:
-            new = plans.restored_payload(cell.get("payload"), v["payload"])
-        else:
-            new = _payload_of(kind, v["payload"]) if kind in PAYLOAD_KEYS else copy.deepcopy(v["payload"])
+        new = _payload_of(kind, v["payload"]) if kind in PAYLOAD_KEYS else copy.deepcopy(v["payload"])
         if new != cell.get("payload"):
             cell["payload"] = new
             if kind == "note":
@@ -3696,7 +3515,7 @@ def _edit_code(cell: dict, code: str, *, title: str | None = None, kind: str | N
     if kind is not None and kind not in RUNNABLE_KINDS:
         raise HTTPException(400, f"a {kind} card has no code to run; the runnable kinds are {', '.join(RUNNABLE_KINDS)}")
     new_kind = bool(kind and kind != cell.get("kind"))
-    if (from_data and isinstance(cell.get("payload"), dict) and cell.get("kind") not in ("label", PLAN_KIND)
+    if (from_data and isinstance(cell.get("payload"), dict) and cell.get("kind") != "label"
             and (new_kind or cell.get("kind") in ("diagram", "timeline"))):
         # what the card held goes with its old kind, which its history keeps (stamp_edit)
         cell.pop("payload", None)
@@ -3850,7 +3669,7 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     when the cell has one. `author` is recorded as `takeaway_author` (model, thimble, analyst). A takeaway written over
     another is an edit by `by` (else the tool call's caller, else the author), with what it replaced (stamp_edit); a
     card's first takeaway is part of the card's last change when it follows it closely (_fold_takeaway). False when the
-    cell is gone or is a plan."""
+    cell is gone."""
     text = (text or "").strip()
     if not text:
         return False
@@ -3859,8 +3678,6 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     if hit is None:
         return False
     nb, cell = hit
-    if cell.get("kind") == PLAN_KIND:  # a plan has no takeaway (plan cards, above)
-        return False
     existing = cell.get("takeaway") or ""
     if only_if_empty and existing.strip():
         return True
@@ -3990,7 +3807,7 @@ async def _run_code(
 # routes
 # ----------------------------------------------------------------------------------------------------------
 
-CellKind = Literal["plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan"]
+CellKind = Literal["plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom"]
 GroupKind = Literal["sequence", "split", "grid"]  # the loose group is made by move_cells alone
 Role = Literal["exploration", "finding", "analyst", "figures"]
 
@@ -4246,18 +4063,14 @@ def _edited_route(c: str, cell_id: str, body: CellEdit) -> dict:
 @router.get("/ws/{c}/cells/{cell_id}/versions/{entry}")
 async def card_version_route(c: str, cell_id: str, entry: str) -> dict:
     """The card as it stood before its edit `entry` (version_of), to read: {card, before, by, ts, fields, version}, the
-    version holding the card's id, kind, question, code, payload (a plan's steps without the marks of its last edit,
-    which are about the card now), takeaway, note text, and outputs and status as stored then."""
+    version holding the card's id, kind, question, code, payload, takeaway, note text, and outputs and status as stored
+    then."""
     cell = get_cell(c, cell_id)
     if cell is None:
         raise HTTPException(404, f"no such card: {cell_id}")
     v = version_of(_ws(c), cell, entry)
     e = next(x for x in cell.get("edited") or [] if isinstance(x, dict) and x.get("id") == entry)
     payload = v.get("payload")
-    if isinstance(payload, dict) and v.get("kind") == PLAN_KIND:
-        from . import plans  # noqa: PLC0415
-
-        payload = {k: x for k, x in payload.items() if k != plans.LAST_EDIT}
     text = payload.get("text") if isinstance(payload, dict) and v.get("kind") == "note" else None
     version = {**v, "id": cell_id, "notebook": cell.get("notebook"), "title": v.get("title") or "",
                "takeaway": v.get("takeaway") or "", "payload": payload, "text": text}

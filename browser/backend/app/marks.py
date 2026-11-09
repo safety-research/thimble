@@ -1,5 +1,5 @@
 """Checks in the chat: the claims of main's reply that the analyst would want to check, which main writes as `[words](#)`
-(prompts/shared.md, Citations). They are checked after the reply, as the terminal plugin checks them
+(plugin/prompts/citing.md, Citing claims). They are checked after the reply, as the terminal plugin checks them
 (plugin/marks/checker.ts):
 
 1. At the end of main's turn (session._end_turn), the marks of the turn's texts (marks_of.mjs, with the terminal's
@@ -20,11 +20,13 @@
    (`at`, the time thimble keeps for the check's words, label_versions.keep_time), from the versions thimble kept of
    it, never from the label's files in the workspace (session_cards).
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
-   event, events.QUIET_KINDS), in the terminal's words (tell_text).
+   event, events.QUIET_KINDS), under the frame that heads thimble's reports: the terminal's notices, the same text
+   (plugin/prompts/notices.md) built by the same module (plugin/marks/notices.mjs, through notices_of.mjs).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
-   checker's text with the terminal's repair request, the validator decides, and main hears how it ended. A check that
-   finds a mark wrong or cannot confirm it starts that repair itself, as soon as it ends (_check_share, the terminal's
-   autoRepair); a repair's own end starts none, so a mark that fails again waits for Repair.
+   checker's text with the terminal's repair request (notices.mjs), the validator decides, and main hears how it
+   ended. A check that finds a mark wrong or cannot confirm it starts that repair itself, as soon as it ends
+   (_check_share, the terminal's autoRepair); a repair's own end starts none, so a mark that fails again waits for
+   Repair.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -86,6 +88,7 @@ router = APIRouter()
 
 HERE = Path(__file__).resolve().parent
 MARKS_OF = HERE / "marks_of.mjs"
+NOTICES_OF = HERE / "notices_of.mjs"
 PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose validator this module runs
 CHECKER = "plugin:checker"  # the terminal's checker.md (prompts.py reads a text of the plugin by this name)
 EVIDENCE = PLUGIN / "engine" / "kernel" / "evidence.py"
@@ -378,39 +381,20 @@ def split_marks(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return [s for s in out if s]
 
 
+def notices(payload: dict[str, Any]) -> dict[str, str]:
+    """notices_of.mjs's answer for `payload` (its note): {text, frame}, the words built from plugin/prompts/notices.md
+    with the workbench's words in its slots, as the terminal builds them (plugin/marks/notices.mjs)."""
+    done = subprocess.run(["node", str(NOTICES_OF)], input=json.dumps(payload).encode(), capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.decode(errors="replace").strip()[-300:] or "notices_of.mjs failed")
+    return json.loads(done.stdout.decode())
+
+
 def tell_text(items: list[dict[str, Any]]) -> str:
-    """What main reads with its next event: each mark the check corrected or flagged, as the analyst reads it, and each
-    note, which the analyst does not see (the terminal's tellText). The check's own words are quoted, since they may
-    quote the records."""
-    def q(w: str) -> str:
-        return w if re.match(r"^[\"“]", w) else f"\"{w}\""
-
-    def why(m: dict[str, Any]) -> str:
-        return f" (the check: {q(m['reason'])})" if m.get("reason") else ""
-
-    said = []
-    for m in items:
-        if m["status"] == "corrected":
-            said.append(f"- {q(m.get('was') or m['words'])} is corrected to {q(m['shown'])}{why(m)}")
-        elif m["status"] == "failed" and m.get("failedBy") == "evidence":
-            said.append(f"- {q(m['words'])} is flagged as not confirmed{why(m)}")
-        elif m["status"] == "failed":
-            said.append(f"- {q(m['words'])} is flagged as wrong{why(m)}")
-    notes = [f"- {q(n)}" for n in dict.fromkeys(m["note"] for m in items if m.get("note"))]
-    if not said and not notes:
-        return ""
-    fence = "```"
-    parts = ["thimble checked the citations of your last reply against the data. Its words in the blocks below may quote "
-             "the records."]
-    if said:
-        parts.append("The analyst sees these changes in the reply:\n" + f"{fence}text\n" + "\n".join(said) + f"\n{fence}")
-    if notes:
-        parts.append("The check also found these uncited statements false. The analyst does not see these:\n"
-                     + f"{fence}text\n" + "\n".join(notes) + f"\n{fence}")
-    parts.append("Use the corrected facts from now on. The analyst has read the changes in the reply, so a correction "
-                 "of them in your next reply would tell them twice. A claim the check could not confirm may still be "
-                 "true: when you need it again, check it first.")
-    return "\n".join(parts)
+    """What main reads with its next event: each mark the check corrected (a narrowing and a rewrite each in its own
+    words) or flagged, as the analyst reads it, and each note, which the analyst does not see (the terminal's tellText);
+    '' for nothing to tell."""
+    return notices({"kind": "tell", "items": items})["text"]
 
 
 def _notice(c: str, text: str, details: str | None = None) -> None:
@@ -422,6 +406,12 @@ def _notice(c: str, text: str, details: str | None = None) -> None:
                      details=details)
     except Exception:  # noqa: BLE001 — a notice not posted is no reason to fail the check
         log.exception("%s: the citation check's notice was not posted", c)
+
+
+def _framed(told: dict[str, str]) -> str:
+    """A notice (notices) as main reads it in its `citations` event: under the frame that heads thimble's reports, which
+    says that what it quotes from the records is data, as the terminal's report does (core/tell.ts reportOf)."""
+    return f"{told['frame']}\n\n{told['text']}"
 
 
 def _tell(c: str, text: str) -> None:
@@ -455,8 +445,10 @@ async def _edit(c: str, turn: str, change: Callable[[dict[str, Any]], dict[str, 
         _save(c, reply)
     if reply.get("thread"):
         return reply
-    if tell and was_checked and not any(_checked(m) for m in reply["items"]) and (text := tell_text(reply["items"])):
-        _tell(c, text)
+    if tell and was_checked and not any(_checked(m) for m in reply["items"]):
+        told = await asyncio.to_thread(notices, {"kind": "tell", "items": reply["items"]})
+        if told["text"]:
+            _tell(c, _framed(told))
     return reply
 
 
@@ -755,8 +747,10 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
 
         reply = await _edit(c, turn, change, tell=not request)
         if request and reply and not thread:  # main never read a side thread's answer
-            if text := repair_tell_text([m for m in reply["items"] if m["n"] in mine], auto):
-                _tell(c, text)
+            told = await asyncio.to_thread(notices, {"kind": "repair", "items": [m for m in reply["items"]
+                                                                                  if m["n"] in mine], "auto": auto})
+            if told["text"]:
+                _tell(c, _framed(told))
 
         def judged_takeaway(m: dict[str, Any]) -> dict[str, Any]:
             res = by_n.get(m["n"])
@@ -912,56 +906,21 @@ def _transcript_messages(path: Any) -> list[dict[str, Any]]:
     return out
 
 
-# ---- repair: a failed mark checked again (the terminal's x, marks/checker.ts repairOf, repairRequest, launchRepair)
+# ---- repair: a failed mark checked again (the terminal's x, marks/checker.ts repairOf, launchRepair; the request and
+# what main hears after it, plugin/marks/notices.mjs repairRequest and repairTellText)
 
-def _q(w: str) -> str:
-    return w if re.match(r"^[\"“]", w) else f"\"{w}\""
-
-
-# The terminal's repairRequest (plugin/marks/checker.ts) in its exact words; tests/test_marks.py checks that each
-# stands in checker.ts, so an edit there stops the test until someone looks at it.
-REPAIR_NOT_RUN = "The analyst pressed x to check citation {n}, whose first check did not run. It may stand in an earlier reply than your last."
-REPAIR_FIRST = "The analyst pressed x to repair citation {n}. It may stand in an earlier reply than your last. The first check {found}"
-REPAIR_TASK = (
-    "Check it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
-    "When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.",
-)
-
-
-def repair_request(m: dict[str, Any], n: int) -> str:
-    """What follows the checker's text for a repair of mark `m`, numbered `n` in it: which mark, what the first check
-    found (its reason quoted, since it may quote the records), and the task. A mark whose check did not run (unchecked,
-    or failed by none) is checked as any reply's is."""
-    if m.get("status") == "unchecked" or m.get("failedBy") in (None, "none"):
-        return REPAIR_NOT_RUN.format(n=n)
-    found = "could not confirm it" if m.get("failedBy") == "evidence" else "found it wrong"
-    first = REPAIR_FIRST.format(n=n, found=found) + (f": {_q(m['reason'])}" if m.get("reason") else ".")
-    return "\n".join((first, *REPAIR_TASK))
+def repair_request(m: dict[str, Any], n: int, auto: bool = False) -> str:
+    """What follows the checker's text for a repair of mark `m`, numbered `n` in it (the terminal's repairRequest): who
+    asked, the analyst with Repair or thimble (`auto`, as the check failed it), what the first check found (its reason
+    quoted, since it may quote the records), and the task. A mark whose check did not run (unchecked, or failed by
+    none) is checked as any reply's is."""
+    return notices({"kind": "request", "mark": m, "n": n, "auto": auto})["text"]
 
 
 def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
     """What main reads when a repair ended: how its mark ended, as the analyst reads it, and who started it: the analyst
     with Repair, or thimble (`auto`, as the check failed it) (the terminal's repairTellText)."""
-    def why(m: dict[str, Any]) -> str:
-        return f" (the check: {_q(m['reason'])})" if m.get("reason") else ""
-
-    lines = []
-    for m in items:
-        if m["status"] == "corrected":
-            lines.append(f"- {_q(m.get('was') or m['words'])} is corrected to {_q(m['shown'])}{why(m)}")
-        elif m["status"] == "verified":
-            lines.append(f"- {_q(m['words'])} is verified as written{why(m)}")
-        elif m["status"] == "failed":
-            lines.append(f"- {_q(m['words'])} is still flagged as {'not confirmed' if m.get('failedBy') == 'evidence' else 'wrong'}{why(m)}")
-        else:
-            lines.append(f"- {_q(m['words'])} could not be checked again{why(m)}")
-    if not lines:
-        return ""
-    fence = "```"
-    head = ("A citation of yours failed its check, so thimble checked it again against the data." if auto else
-            "The analyst pressed Repair on a citation of yours, and thimble checked it against the data.")
-    return (f"{head} Its words in the block below may quote the records.\n{fence}text\n" + "\n".join(lines)
-            + f"\n{fence}\nThe analyst sees the result in the reply. Use it from now on.")
+    return notices({"kind": "repair", "items": items, "auto": auto})["text"]
 
 
 REPAIRABLE = ("failed", "unchecked")
@@ -1003,7 +962,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         m = next((x for x in kept.get("items") or [] if x.get("k") == k), None) if kept.get("text") == text else None
         if not m or m.get("status") not in REPAIRABLE:
             return NOT_FAILED
-        request = repair_request(m, 1)
+        request = await asyncio.to_thread(repair_request, m, 1, auto)
         base = {key: v for key, v in m.items() if key not in CLEARED}
         share = {**base, "n": 1, "status": "checking", "shown": m["words"], "card": card,
                  "title": str(cell.get("title") or ""), "takeaway": text}
@@ -1019,7 +978,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         m = next((x for x in (reply or {}).get("items") or [] if x.get("n") == n), None)
         if not m or m.get("status") not in REPAIRABLE:
             return NOT_FAILED
-        request = repair_request(m, int(m["n"]))
+        request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto)
         base = {key: v for key, v in m.items() if key not in CLEARED}
         share = {**base, "status": "checking", "shown": m["words"]}
 

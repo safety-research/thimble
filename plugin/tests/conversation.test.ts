@@ -4,7 +4,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { test } from './kit'
-import { tempRun } from './stubs'
+import { NOTICES, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -26,6 +26,8 @@ function world(on: Any): World {
   on('session.root', () => ({ value: DATA }))
   on('fs.write', (_$: unknown, e: Any) => { w.files[e.path] = e.text; return { value: undefined } })
   on('fs.read', (_$: unknown, e: Any) => {
+    // the text that frames thimble's reports, which the plugin reads as it tells Claude (core/tell.ts)
+    if (e.path.endsWith('/prompts/notices.md')) return { value: NOTICES }
     if (!(e.path in w.files)) throw new Error(`made-up: no file ${e.path}`)
     return { value: w.files[e.path] }
   })

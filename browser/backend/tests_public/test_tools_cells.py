@@ -2,6 +2,7 @@
 as a browser chat running as the analyst."""
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -54,3 +55,21 @@ async def test_add_card_runs_its_code_reports_the_output_and_asks_for_a_takeaway
     err = notebook.get_cell(CORPUS, _cid(await call("add_card", group, question="Errors?", code="raise ValueError('x')")))
     assert err["status"] == "error" and "ValueError" in str(err["outputs"])
     assert (await call("add_card", group, code="print(1)")).is_error
+
+
+async def test_a_plan_card_kept_from_before_reads_as_a_note_of_its_steps(group):
+    """A workspace from thimble 0.10.11 or before may hold plan cards, a kind that is gone: one reads as a note that
+    lists its steps with their statuses, and main reads it as any note."""
+    path = config.workspace_dir(CORPUS) / "notebooks" / f"{group}.json"
+    stored = json.loads(path.read_text())
+    steps = [{"id": "s1", "text": "Mirror the repos", "status": "done"}, {"id": "s2", "text": "Run both conditions",
+                                                                         "status": "running"}]
+    stored["cells"].append({"id": "p1an0001", "kind": "plan", "title": "Plan: build the environment and pilot it",
+                            "takeaway": "", "payload": {"steps": steps, "follows": None},
+                            "edited": [{"id": "e1", "ts": "2026-10-08T12:00:00+00:00", "fields": ["payload"]}]})
+    path.write_text(json.dumps(stored))
+    notebook.clear_cache()
+    cell = notebook.get_cell(CORPUS, "p1an0001")
+    assert cell["kind"] == "note" and cell["edited"] == []
+    assert cell["payload"] == {"text": "1. Mirror the repos (done)\n2. Run both conditions (running)"}
+    assert "1. Mirror the repos (done)" in (await call("read_ref", group, ref="card:p1an0001")).text

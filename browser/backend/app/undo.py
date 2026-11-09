@@ -280,11 +280,11 @@ def _running(c: str, stack: list[dict[str, Any]]) -> set[str]:
 
 
 def session_name(key: str) -> str:
-    """A THIMBLE_SESSION as the analyst reads it: the writer of the report, a check."""
+    """A THIMBLE_SESSION as the analyst reads it: the writer of the report, a check's comments agent."""
     kind, _, rest = str(key).partition(":")
     if kind == "writer":
         return f"the writer of the {rest}" if rest else "the writer"
-    return {"check": "a report check"}.get(kind, f"the session {key}")
+    return {"check": "a comments agent"}.get(kind, f"the session {key}")
 
 
 def _pick(c: str, stack: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:

@@ -73,7 +73,7 @@ test("an agent's pick is saved at once, in thimble's config: its model, its effo
   await settle()
   await pick('Effort for Writer', 'max')
   expect(puts).toEqual([['/api/ws/mini/settings', { models: { writer: { effort: 'max' } } }]])
-  await pick('Model for Checks', 'm:claude-sonnet-5-5')
+  await pick('Model for Comments', 'm:claude-sonnet-5-5')
   await click(row('dev').querySelector('.fast-bolt'))
   await click(row('labels').querySelector('.fast-bolt'))
   expect(puts.slice(1)).toEqual([

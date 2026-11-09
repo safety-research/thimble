@@ -527,8 +527,8 @@ export const TOOL_WORDS: Record<string, string> = {
   set_filter: 'Filter',
   clear_filter: 'Clear filter',
   set_layout: 'Lay out panes',
-  run_check: 'Run check',
-  stop_check: 'Turn check off',
+  run_check: 'Ask for comments',
+  stop_check: 'Turn comments off',
   propose_view: 'Propose view',
   write_document: 'Write document',
   edit_document: 'Edit passage',
@@ -563,8 +563,8 @@ export const TOOL_GROUPS: Record<string, string> = {
   set_filter: 'Filter',
   clear_filter: 'Filter',
   set_layout: 'Layout',
-  run_check: 'Checks',
-  stop_check: 'Checks',
+  run_check: 'Comments',
+  stop_check: 'Comments',
   propose_view: 'Views proposed',
   write_document: 'Report',
   edit_document: 'Report',
@@ -810,9 +810,9 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'delete_label':
       return with_('Deleted label', str(inp.name))
     case 'run_check':
-      return with_('Ran check', str(inp.name))
+      return with_('Asked for comments', str(inp.name))
     case 'stop_check':
-      return with_('Turned off check', str(inp.name))
+      return with_('Turned comments off', str(inp.name))
     case 'propose_view':
       return with_('Proposed view', str(inp.name))
     case 'write_document':

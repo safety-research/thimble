@@ -9,8 +9,7 @@ as the terminal places it (plugin/explain/place.mjs: a heads-up first, and no ex
 of its check (checks._looked). The digests say what the chat's comments of those checks already gave.
 
 The turn's values are the workbench's: the answers named as the terminal names them (plugin/observer/messages.mjs),
-the cards their turns made as the brief lists them (context.py), and a line each for the keys above the analyst's
-prompt and what the session read, which the workbench does not have (prompts/tools.md `look-*`).
+and no coverage, which the workbench does not have, so the turn leaves that section out.
 
     LENS_OF            the checks that are the terminal's lenses, each with its lens
     run(c, lenses, cover) -> {items: [{lens, passage, words, text, details}]} or {error}
@@ -24,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from . import answer_comments, tools
+from . import answer_comments
 
 HERE = Path(__file__).resolve().parent
 LOOK_OF = HERE / "look_of.mjs"
@@ -53,13 +52,12 @@ def _cite(text: str) -> str:
     return _LINK_RE.sub(one, str(text or ""))
 
 
-def _msgs(c: str, answers: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
-    """The answers as the terminal's look names them ({kind, text, turnNo, prompt}), and the cards their turns made."""
+def _msgs(c: str, answers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The answers as the terminal's look names them ({kind, text, turnNo, prompt})."""
     from . import context  # noqa: PLC0415
 
     turns = context._main_turns(c)
-    cards = context._cards_by_id(c) if turns else {}
-    msgs, objects = [], []
+    msgs = []
     for a in answers:
         found = sorted(context._of_answers(turns, [a]))
         i = found[0] if found else None
@@ -70,9 +68,7 @@ def _msgs(c: str, answers: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
         msgs.append({"kind": "answer", "text": "\n\n".join(str(r.get("text") or "") for r in a.get("rows") or []),
                      "turnNo": (i + 1) if i is not None else len(turns), "prompt": {"text": first.body if first else "",
                                                                                       "by": by}})
-        if i is not None:
-            objects += [context._card_line(cards.get(r.split(":", 1)[1]), r, None) for r in context._turn_cards(turns[i])]
-    return msgs, "\n".join(dict.fromkeys(objects)) or tools.hint("look-no-cards")
+    return msgs
 
 
 def _state(c: str, covered: set[str]) -> dict[str, list[str]]:
@@ -100,10 +96,9 @@ async def run(c: str, lenses: list[str], cover: list[dict[str, Any]]) -> dict[st
     answers = [a for a in answer_comments.answers(c) if a["turn"] in turns]
     if not answers:  # none of them is kept any more: nothing to mark
         return {"items": []}
-    msgs, objects = _msgs(c, answers)
+    msgs = _msgs(c, answers)
     state = _state(c, {p["ref"] for p in cover})
-    prompt = (await _node({"prompt": {"lenses": lenses, "msgs": msgs, "row": tools.hint("look-keys"),
-                                      "objects": objects, "coverage": tools.hint("look-read"), "state": state}}))["prompt"]
+    prompt = (await _node({"prompt": {"lenses": lenses, "msgs": msgs, "state": state}}))["prompt"]
     main = marks._main_now(c)
     if isinstance(main, str):
         return {"error": main}

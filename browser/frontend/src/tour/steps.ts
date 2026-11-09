@@ -283,9 +283,9 @@ const holdSide = (section: SideSection) => {
 }
 /** The categories' last row as the sidebar draws it now (LabelsSidebar.tsx NewCheck), which the capture predates. */
 const NEW_CHECK =
-  '<button type="button" class="lside-add"><svg class="icon icon-plus" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New check</button>'
-/** The example sidebar on `section`, laid over the real one while it is open; the comment categories end in + New
- * check, as thimble's do. */
+  '<button type="button" class="lside-add"><svg class="icon icon-plus" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Ask for comments</button>'
+/** The example sidebar on `section`, laid over the real one while it is open; the comment categories end in + Ask for
+ * comments, as thimble's do. */
 const sideExample = (api: Api, section: SideSection) => {
   const wrap = api.snap(section === 'labels' ? 'labelsSide' : 'commentsSide', 'tour-ex-side')
   const aside = wrap.firstElementChild as HTMLElement

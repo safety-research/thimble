@@ -10,7 +10,7 @@ import { setOptions } from '../settings/features.mjs'
 import { marksIn } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
-import { tempRun } from './stubs'
+import { NOTICES, tempRun } from './stubs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,6 +52,7 @@ function engine(validated: Any) {
     fs: {
       read: async (p: string) => {
         if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}\nIN {{CWD}}'
+        if (p.endsWith('/prompts/notices.md')) return NOTICES
         if (files.has(p)) return files.get(p)
         throw new Error(`no file ${p}`)
       },
@@ -128,7 +129,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(told).toContain('"ship it" is flagged as wrong (the check: "no record holds these words")')
   expect(told).toContain('The analyst does not see these')
   expect(told).toContain('- "agent-07 merged none of them alone: agent-02 approved each one."')
-  expect(told).toContain('would tell them twice')
+  expect(told).toContain('The analyst has read the changes in the reply, so do not repeat them.')
   expect(await failLineNow($)).toBe(null)
 })
 
@@ -157,7 +158,7 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   expect(seen.spawned.length).toBe(2)
   expect(seen.spawned[1].description).toBe('checking a citation again (x)')
-  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
+  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x on citation 3 to repair it. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified`. Otherwise, make the citation correct and answer `corrected`. When the value is right but the cited words add your own words, answer `narrowed`.')
   // while it runs the citation spins; the other marks keep their results; no second repair of it starts
   expect(await drawn($)).toContain('"ship it" ⠋')
   expect(await drawn($)).toContain('merged 12 of 40.')
@@ -167,15 +168,17 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(m).toMatchObject({ status: 'corrected', shown: '"ship it now"', was: '"ship it"', repair: true })
   expect(await drawn($)).toContain('"ship it now"')
   const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
-  expect(told['marks:row-1:repair:3']).toContain('The analyst pressed x (repair) on a citation of yours')
+  expect(told['marks:row-1:repair:3']).toContain('The analyst pressed x on a citation of yours')
   expect(told['marks:row-1:repair:3']).toContain('- "ship it" is corrected to "ship it now" (the check: "line 9 holds these words")')
   // the reply's own report stays as its check left it
   expect(told['marks:row-1']).toContain('"ship it" is flagged as wrong')
 })
 
-const REPAIR_3 = 'CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.'
+/** thimble's own request for a repair of citation 3 of REPLY, which the check found wrong, right after that check: what
+ *  the repair's fork reads under the checker's text. It says thimble asked, where x's says the analyst pressed x. */
+const AUTO_3 = 'CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nthimble asks you to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified`. Otherwise, make the citation correct and answer `corrected`. When the value is right but the cited words add your own words, answer `narrowed`.'
 
-test("a check that fails a citation repairs it at once, with x's request: it spins as for x, and the repair's answer replaces it", async () => {
+test("a check that fails a citation repairs it at once, with a request that says thimble asked: it spins as for x, and the repair's answer replaces it", async () => {
   let runs = 0
   const repaired = { parsed: true, results: [{ n: 3, status: 'corrected', shown: '"ship it now"', was: '"ship it"', reason: 'line 9 holds these words' }] }
   const { $, seen } = engine(() => ({ exitCode: 0, stdout: JSON.stringify(runs++ ? repaired : VALIDATED), stderr: '' }))
@@ -183,11 +186,11 @@ test("a check that fails a citation repairs it at once, with x's request: it spi
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
   expect((await rowMarks($, 'row-1'))!.items[2]!.status).toBe('failed')
-  // the hook around endCheck's: the failed citation's repair starts, one fork, x's request word for word
+  // the hook around endCheck's: the failed citation's repair starts, one fork, whose request says thimble asked
   await autoRepair($, FORK)
   expect(seen.spawned.length).toBe(2)
   expect(seen.spawned[1].description).toBe('checking a citation again (x)')
-  expect(seen.spawned[1].prompt).toBe(REPAIR_3)
+  expect(seen.spawned[1].prompt).toBe(AUTO_3)
   expect((await rowMarks($, 'row-1'))!.items[2]).toMatchObject({ status: 'checking', repair: true })
   expect(await drawn($)).toContain('"ship it" ⠋')
   expect(await drawn($)).toContain('merged 12 of 40.')

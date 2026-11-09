@@ -3,9 +3,9 @@
 // node.mjs textOf) and code, and what its reply places on the answer's words, as the terminal places it
 // (plugin/explain/place.mjs). Pure but for reading the texts.
 //
-//   stdin   {"prompt": {lenses, msgs, row, objects, coverage, state}}  the lenses ("explain", "heads") of the look, the
-//           answers it reads (observer/messages.mjs), the values of the turn's template, the digests' state
-//           ({glossed, headsGiven})
+//   stdin   {"prompt": {lenses, msgs, state}}                          the lenses ("explain", "heads") of the look, the
+//           answers it reads (observer/messages.mjs), the digests' state ({glossed, headsGiven}). The workbench has no
+//           coverage, so the turn leaves that section out
 //   stdout  {"prompt": "<the frame with the lenses, then the turn>"}
 //   stdin   {"place": {lenses, rows: [{row, text}], reply, state}}     the answers' texts, the fork's reply
 //   stdout  {"items": [{row, kind, start, end, term, body, here, title, bullets}]}  each explainer and the heads-up, on
@@ -19,10 +19,10 @@ import { textOf } from '../../../plugin/prompts/node.mjs'
 
 const MODE = 'browser'  // whose words the texts' slots take (plugin/prompts/slots.json)
 
-async function prompt({ lenses, msgs, row, objects, coverage, state }) {
+async function prompt({ lenses, msgs, state }) {
   const parts = await Promise.all(LENSES.filter(l => lenses.includes(l.name)).map(async lens => ({ lens, text: await textOf(lens.feature, MODE) })))
   const system = composeSystem(await textOf('observer', MODE), parts)
-  const vals = { MESSAGES: messagesText(msgs), ROW: row, SHOWN: '', OBJECTS: objects, COVERAGE: coverage, SKELETON: skeletonOf(parts.map(p => p.lens)) }
+  const vals = { MESSAGES: messagesText(msgs), SHOWN: '', COVERAGE: '', SKELETON: skeletonOf(parts.map(p => p.lens)) }
   return `${system.text}\n\n${composeTurn(await textOf('observer-turn', MODE), vals, parts, state).text}`
 }
 

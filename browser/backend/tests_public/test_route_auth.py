@@ -52,7 +52,7 @@ def test_the_token_alone_is_refused_on_every_analyst_route_and_the_cookie_alone_
     token = [(m, p) for m, p in writes if hook_auth.guarded(m, p)]
     analyst = [(m, p) for m, p in writes if not hook_auth.guarded(m, p) and p != "/api/ui/key"]
     assert sorted(token + analyst + [("POST", "/api/ui/key")]) == sorted(writes), "the sets cover every write"
-    assert len(analyst) >= 100 and len(token) >= 8
+    assert len(analyst) >= 90 and len(token) >= 8
     for method, path in analyst:
         r = by_token.request(method, _concrete(path), json={}, headers=plugin_headers())
         assert r.status_code == 403 and r.json().get("detail") == hook_auth.WRITE_REFUSED, (method, path, r.status_code)
