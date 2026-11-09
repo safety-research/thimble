@@ -12,17 +12,15 @@ https://github.com/user-attachments/assets/878ed146-fc7c-486a-8f41-ac14b24c5068
 
 ## Features
 
-![thimble's bar above Claude Code's prompt: j k card keys, v visualize, s simplify, \] show heads up, c cite, e explain, a ask, t 1 thread](docs/assets/thimble-bar.png)
+![thimble's bar above Claude Code's prompt: v visualize, s simplify, c cite, e explain, a ask, t 1 thread](docs/assets/thimble-bar.png)
 
 Press a key at an empty prompt, or click it:
 
 - **`v` visualize**: an interactive card of the last answer
 - **`s` simplify**: a shorter, plainer version of the last answer
-- **`]` show**: the explainers and heads-ups thimble adds to each answer
 - **`c` cite**: a second Claude checks the selected words against your files
-- **`e` explain**: a short explainer of the selected words
-- **`a` ask**: a side thread about the selected words or part of a card
-- **`l` labels**: records sorted into categories, which you can open and correct
+- **`e` explain**: a short explainer of the selected words; thimble also adds explainers and heads-ups to each answer
+- **`a` ask**: a side thread about the selected words or part of a card; `t` lists them
 
 ## Installation
 
