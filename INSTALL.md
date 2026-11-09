@@ -8,8 +8,8 @@ One script installs both, or the plugin alone, in `~/.thimble`.
 - **macOS or Linux**, with **git** and **curl**. On Windows, **WSL 2**: see [Windows](#windows) below.
 - **Node.js 22.18 or later** (the workbench alone runs on 22.12 or later) and **Python 3.10 or later** (`python3`, or
   the Python that `THIMBLE_PYTHON` names). Check with `node --version` and `python3 --version`.
-- **Claude Code 2.1.314 or later**. Check with `claude --version`. `claude update` updates it, unless a package manager
-  installed it: then that package manager does (`brew upgrade claude-code`,
+- **Claude Code 2.1.307 or later**; the tour needs 2.1.314 or later. Check with `claude --version`. `claude update`
+  updates it, unless a package manager installed it: then that package manager does (`brew upgrade claude-code`,
   `npm install -g @anthropic-ai/claude-code@latest`, or your system's), and the install names the one for yours.
 - For the workbench: **[uv](https://docs.astral.sh/uv/) 0.8 or later**, **npm** (it comes with Node.js), and about
   2 GB of disk.
@@ -148,7 +148,7 @@ Run `thimble doctor` in a shell: it checks each part thimble needs, and gives th
 
 The install:
 
-- **Claude Code is older than 2.1.314, and `claude update` says updates are disabled.** A package manager installed
+- **Claude Code is older than 2.1.307, and `claude update` says updates are disabled.** A package manager installed
   Claude Code (Homebrew, npm, or your system's packages, such as an AUR or Nix package), and it updates it: the
   install names the command for yours. On a machine that an organization manages, whoever manages it updates Claude
   Code. Then start a new `claude` session: one that was open keeps its version.

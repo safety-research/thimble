@@ -60,12 +60,20 @@ jobs:
     strategy:
       fail-fast: false  # each Node says for itself whether it works
       matrix:
-        # 22.18 itself, the plugin's minimum (setup-node's 22 would be the newest 22)
-        node: ['22.18', 24, 26]
+        # 22.18 itself, the plugin's minimum (setup-node's 22 would be the newest 22), with Claude Code's minimum; the
+        # newer Nodes with 2.1.314, the first Claude Code that places the tour's rows ($.ui.place), so the hooks tests
+        # that answer them run there (on an older one they check nothing: plugin/tests/kit.ts)
+        include:
+          - node: '22.18'
+            claude: 2.1.307
+          - node: 24
+            claude: 2.1.314
+          - node: 26
+            claude: 2.1.314
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      CLAUDE_CODE_VERSION: 2.1.314
+      CLAUDE_CODE_VERSION: ${{ matrix.claude }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
