@@ -50,8 +50,8 @@ const ROWS = SWITCHES as Switch[]
 /** A row's name as drawn: two cells in for a setting under another, its key after it. */
 const nameWidth = (s: Switch) => (s.under ? 2 : 0) + textWidth(s.title) + (s.letter ? 1 + textWidth(s.letter) : 0)
 /** Where the choices start: after the widest name, of every row (so they stand where they stood when a row shows or
- *  hides), and three cells. */
-const NAME = Math.max(...ROWS.map(nameWidth)) + 3
+ *  hides), and two cells. The docked pane is 89 cells wide at most, which leaves 70 for a line under the choices. */
+const NAME = Math.max(...ROWS.map(nameWidth)) + 2
 
 /** A feature's choices as the pane offers them with `values` (Verifier effort: the levels of the model Verifier model
  *  names): its modes, or on and off; with no values, every mode it has. */
