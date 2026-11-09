@@ -1,6 +1,7 @@
 """Checks in the chat: the claims of main's reply that the analyst would want to check, which main writes as `[words](#)`
-(plugin/prompts/citing.md, Citing claims). They are checked after the reply, as the terminal plugin checks them
-(plugin/marks/checker.ts):
+(plugin/prompts/citing.md, Citing claims). A card's value that main cites in the older form,
+`[[4 of 24|card:<id>@out0#L2]]`, reaches the chat as a mark too (cite.chat_form, session.visible). They are checked
+after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
 
 1. At the end of main's turn (session._end_turn), the marks of the turn's texts (marks_of.mjs, with the terminal's
    plugin/marks/message.js) are kept, all `checking`, under the turn id that main's `done` record names; the page draws

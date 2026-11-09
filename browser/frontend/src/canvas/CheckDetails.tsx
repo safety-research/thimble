@@ -39,7 +39,7 @@ export function CheckDetails({ cell }: { cell: Cell }) {
               {before.title != null && <span className="bdetail-check-q">{before.title}</span>}
               {before.takeaway != null && (
                 <span className="chat-text">
-                  <ChatMarkdown text={before.takeaway || '—'} />
+                  <ChatMarkdown text={before.takeaway || '—'} linked />
                 </span>
               )}
             </div>

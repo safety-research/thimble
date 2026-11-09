@@ -87,7 +87,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
                 {cell.takeaway ? (
                   <div className="bfocus-take">
                     <div className={'chat-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
+                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} linked />
                     </div>
                   </div>
                 ) : null}

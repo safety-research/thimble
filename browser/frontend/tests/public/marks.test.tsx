@@ -45,6 +45,21 @@ test('each mark draws as its check says, verified or failed, and a click opens i
   expect(document.querySelector('.mark-pop .mark-pop-why')?.textContent).toBe('Not confirmed: no call printed it.')
 })
 
+test("a card's value cited in the older form draws as verified only in a takeaway, whose link pass checked it", async () => {
+  const looks = (el: HTMLElement) => [...el.querySelectorAll('.mark')].map((m) => [m.getAttribute('data-mark-look'), m.textContent])
+  // bc03: a reply cited line 2 of a card's output as 6 of 24, where the line says 4 of 24, and no check read it. Its
+  // label says so over the place it names
+  const reply = await mount(<ChatMarkdown text="Config B failed [[6 of 24|card:efd46173@out0#L2]] task runs." />)
+  expect(looks(reply)).toEqual([['pending', '6 of 24']])
+  await open(reply.querySelector<HTMLElement>('.mark-words')!)
+  expect(document.querySelector('.mark-pop > .mark-pop-state')?.textContent?.trim()).toBe('not checked yet')
+  expect(document.querySelector('.mark-pop .mark-ev .refchip-pop-chip')).not.toBeNull()
+  unmountAll()
+  // a takeaway's link pass keeps such a citation only where its place shows the value (backend cite.resolve)
+  const takeaway = await mount(<ChatMarkdown text="Config B failed [[4 of 24|card:efd46173@out0#L2]] task runs." linked />)
+  expect(looks(takeaway)).toEqual([['verified', '4 of 24']])
+})
+
 test("the check's repairs: a corrected mark shows its new words and what it was, and a failed one is repaired from its label", async () => {
   const checks = [
     item(0, '2.5 to 3.7', { status: 'corrected', shown: '0.5 to 1.7', was: '2.5 to 3.7', sentence: 'Opus took [2.5 to 3.7] hours on [40] runs.', rewrite: 'Opus took [0.5 to 1.7] hours, over [40] runs.' }),

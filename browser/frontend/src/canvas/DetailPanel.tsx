@@ -259,7 +259,7 @@ export function DetailPanel({ cell, cite = null, history = 0, onClose }: { cell:
                 >
                   {cell.takeaway?.trim() ? (
                     <GlyphCites.Provider value={true}>
-                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
+                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} linked />
                     </GlyphCites.Provider>
                   ) : (
                     <span className="bdetail-take-empty">Add a takeaway</span>
@@ -412,7 +412,7 @@ function VersionView({ ws, cell, entry, byName, onBack, onRestored }: { ws: stri
                 <div className="bdetail-take-text chat-text">
                   {v.takeaway?.trim() ? (
                     <GlyphCites.Provider value={true}>
-                      <ChatMarkdown text={v.takeaway} />
+                      <ChatMarkdown text={v.takeaway} linked />
                     </GlyphCites.Provider>
                   ) : (
                     <span className="bdetail-take-empty">No takeaway</span>

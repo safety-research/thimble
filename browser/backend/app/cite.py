@@ -941,6 +941,102 @@ def to_links(text: str) -> str:
     return _SPAN_RE.sub(one, text)
 
 
+# A citation as the chat's page reads one (frontend chat/markdown.tsx BRACKET_SRC): `[[ref]]` or `[[value|ref]]`, which
+# may hold one level of brackets.
+_CHAT_SPAN_RE = re.compile(r"\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]")
+# Where code stands in markdown, as the marks find it (plugin/marks/message.js codeRanges): a fenced block, and an
+# inline code span, which is read on a copy with each fenced block blanked.
+_FENCED_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1\2[`~]*[ \t]*(?=\n|$)|(?![\s\S]))", re.M)
+_CODE_SPAN_RE = re.compile(r"(`+)([^`\n]|[^`\n][\s\S]*?[^`\n])\1(?!`)")
+
+
+def chat_form(text: str) -> str:
+    """`text` with its citations in the chat's form: each Markdown link to a ref as its citation (from_links), then each
+    citation of a value a card shows as a mark on the value (value_marks)."""
+    return value_marks(from_links(text))
+
+
+def value_marks(text: str) -> str:
+    """`text` with each citation of a value at a place of a card, `[[4 of 24|card:<id>@out0#L2]]` or
+    `[[352|card:<id>#outcome/approved]]`, written as a mark on the value, `[4 of 24](#)`. In the chat a claim's citation
+    is a mark, and the citation check reads only marks (marks.py), so a value cited in the older form would stand
+    unchecked. A citation inside a mark's words leaves its value, which the mark cites. One in code, or one whose value
+    holds a bracket, stays as written. Idempotent."""
+    if "[[" not in text:
+        return text
+    from . import refs  # noqa: PLC0415 — refs imports this module
+
+    code = _code_ranges(text)
+    marks = _mark_spans(text, code)
+    out: list[str] = []
+    at = 0
+    for m in _CHAT_SPAN_RE.finditer(text):
+        value, bar, ref = m.group(1).partition("|")
+        # a bar escaped in a table row leaves its backslash on the value, as the page reads it (lib/refs splitValueRef)
+        value = re.sub(r"\\$", "", value.strip()).strip()
+        if not bar or not value or "[" in value or "]" in value or any(a <= m.start() < b for a, b in code):
+            continue
+        try:
+            place = refs.parse_ref(ref)
+        except ValueError:
+            continue
+        if place.get("kind") != "cell" or ("col" not in place and "line" not in place):
+            continue
+        inside = any(a < m.start() and m.end() <= b for a, b in marks)
+        out.append(text[at:m.start()] + (value if inside else f"[{value}](#)"))
+        at = m.end()
+    return "".join(out) + text[at:]
+
+
+def _code_ranges(s: str) -> list[tuple[int, int]]:
+    """Where code stands in `s`, as [start, end) ranges in order (plugin/marks/message.js codeRanges)."""
+    out = [(m.start(), m.end()) for m in _FENCED_RE.finditer(s)]
+    blanked, at = [], 0
+    for a, b in out:
+        blanked.append(s[at:a] + " " * (b - a))
+        at = b
+    blanked.append(s[at:])
+    out += [(m.start(), m.end()) for m in _CODE_SPAN_RE.finditer("".join(blanked))]
+    return sorted(out)
+
+
+def _mark_spans(s: str, code: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Where each mark, `[words](#)`, stands in `s`, as [start, end) ranges in order, found as the marks find them
+    (plugin/marks/message.js marksIn): a `[` outside code, the `]` that balances it on its line, read past code and
+    escapes, then `(#)` at once."""
+    def code_at(i: int) -> tuple[int, int] | None:
+        return next((r for r in code if r[0] <= i < r[1]), None)
+
+    out: list[tuple[int, int]] = []
+    i = s.find("[")
+    while i >= 0:
+        if c := code_at(i):
+            i = s.find("[", c[1])
+            continue
+        depth, close, j = 0, -1, i
+        while j < len(s) and s[j] != "\n":
+            if c := code_at(j):
+                j = c[1]
+                continue
+            if s[j] == "\\":
+                j += 2
+                continue
+            if s[j] == "[":
+                depth += 1
+            elif s[j] == "]":
+                depth -= 1
+                if depth == 0:
+                    close = j
+                    break
+            j += 1
+        if close > i + 1 and s.startswith("(#)", close + 1):
+            out.append((i, close + 4))
+            i = s.find("[", close + 4)
+        else:
+            i = s.find("[", i + 1)
+    return out
+
+
 def prose(text: str) -> str:
     """`text` with its citations read as prose: a value-ref as its display, a bare ref as nothing."""
     return _prose(text)
