@@ -81,7 +81,7 @@ quietly() {
 # compile them
 if [ ! -f "$root/backend/.venv/thimble-compiled" ]; then
   echo "thimble-browser: compiling the server's packages, once..."
-  if quietly uv sync --project "$root/backend" --frozen --no-dev --no-install-project --extra dev --compile-bytecode
+  if quietly uv sync --project "$root/backend" --python ">=3.12,<3.15" --frozen --no-dev --no-install-project --extra dev --compile-bytecode
   then
     : > "$root/backend/.venv/thimble-compiled"
   else

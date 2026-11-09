@@ -1020,8 +1020,10 @@ def sandbox_argv(fid: int | str, path_extra: list[str] | None = None, net: bool 
     hidden = ["/"] if linux else ["/Users", "/Volumes", "/private/tmp", "/private/var/tmp", "/private/var/folders",
                                    str(Path.home()), str(thimble_home())]
     rules = {
+        # Unix sockets (a test's socketpair, Node's IPC): on Linux any, inside the sandbox's own network; on macOS,
+        # which shares the computer's, those in the copy and its temp folder
         "network": {"allowedDomains": list(REGISTRIES) if net else [], "deniedDomains": [],
-                    **({"allowAllUnixSockets": True} if linux else {})},
+                    **({"allowAllUnixSockets": True} if linux else {"allowUnixSockets": [str(wt), str(tmp)]})},
         "filesystem": {"denyRead": [lit(p) for p in dict.fromkeys(hidden)],
                        "allowRead": [lit(p) for p in dict.fromkeys(x for x in shown if x and x != "/")],
                        "allowWrite": [lit(str(wt)), lit(str(tmp))], "denyWrite": []},
@@ -3099,14 +3101,20 @@ def browser_on_live() -> dict[str, Any]:
     return {"browser": "ready", "browser_dir": str(b), "browser_did": did, **({"chromium": chromium} if chromium else {})}
 
 
+# The Pythons the server's locked packages have builds for on macOS and Linux (pandas, matplotlib and others have none
+# for 3.15 yet): uv uses one it finds, or downloads one, rather than a newer Python it would have to build them for.
+# thimble-browser names the same.
+BROWSER_PYTHON = ">=3.12,<3.15"
+
+
 def browser_packages(b: Path, part: str, env: dict[str, str]) -> None:
     """The workbench's packages of `part` in the browser folder `b`: the server's Python packages (uv sync, with the
     test extras, so that thimble's dev agent can run the server's tests, and compiled to bytecode, which a kernel never
     writes, so a kernel's start does not compile pandas and ipykernel again; COMPILED then says so), or the page's and
     its sandbox runtime's (npm ci)."""
     if part == "backend":
-        run(["uv", "sync", "--project", str(b / part), "--frozen", "--no-dev", "--no-install-project",
-             "--extra", "dev", "--compile-bytecode"], env=env, timeout=1800)
+        run(["uv", "sync", "--project", str(b / part), "--python", BROWSER_PYTHON, "--frozen", "--no-dev",
+             "--no-install-project", "--extra", "dev", "--compile-bytecode"], env=env, timeout=1800)
         (b / part / ".venv" / COMPILED).touch()
     else:
         run(["npm", "--prefix", str(b / part), "ci", "--no-audit", "--no-fund"], env=env, timeout=1800)

@@ -531,7 +531,7 @@ def test_the_workbench_s_server_packages_are_compiled_once_also_where_an_older_i
         (b / part / lock).write_text(f"made-up {lock}\n")
     # as an install by thimble 0.10.12 left them: stamped with their lock files, and not compiled
     FX.write_json(FX.home() / "browser.json", {lock: FX._sha_of(b / part / lock) for part, lock, _ in FX.BROWSER_LOCKS})
-    sync = f"sync --project {b / 'backend'} --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
+    sync = f"sync --project {b / 'backend'} --python >=3.12,<3.15 --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
 
     def syncs() -> int:
         return tools.read_text().splitlines().count(sync)

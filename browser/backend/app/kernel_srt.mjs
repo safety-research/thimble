@@ -31,6 +31,9 @@ process.on('SIGINT', () => {});
 const cwd = process.cwd();
 const srtDir = resolve(srtArg);
 process.chdir(dirname(fileURLToPath(import.meta.url)));
+// On macOS srt hands the command TMPDIR=$CLAUDE_CODE_TMPDIR, else /tmp/claude, which the kernel's rules deny
+// (kernel_wrap.SRT_NO_WRITE), so the command keeps the TMPDIR it was started with.
+if (process.env.TMPDIR && !process.env.CLAUDE_CODE_TMPDIR) process.env.CLAUDE_CODE_TMPDIR = process.env.TMPDIR;
 
 let wrapped;
 let SandboxManager;
