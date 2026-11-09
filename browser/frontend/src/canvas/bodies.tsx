@@ -31,7 +31,6 @@ import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
-import { ThimbleTag } from '../files/LabelsHelp'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -294,12 +293,6 @@ export const asksQuestion = (title: string | undefined, name: string): boolean =
   return !!t && t !== name.trim().toLowerCase()
 }
 
-/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels): thimble's
- * logo in grey, then Label, and on hover what a label is (files/LabelsHelp ThimbleTag). */
-export function LabelKindTag() {
-  return <ThimbleTag>Label</ThimbleTag>
-}
-
 /** What a label card's label row says after the label's name (details labelIdentity): what kind of classifier gave its
  * values, in plain words (a code or regex rule over the data, or a model's prompt), how many units it ran over, the
  * label it ran within and where, in one quiet line; the hover gives the whole line, every file pattern whole. */
@@ -438,9 +431,9 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
   )
 }
 
-/** A label card's head when the card has no question of its own: the Label tag, the square (the label's colour for a
- * label over files, else ink) and the label's name in mono, then what the label row says of it (LabelMeta). `detail`
- * is the card's own copy of the label, else the board's list's. */
+/** A label card's head when the card has no question of its own: the square (the label's color for a label over
+ * files, else ink) and the label's name in mono, then what the label row says of it (LabelMeta). `detail` is the
+ * card's own copy of the label, else the board's list's. */
 export function LabelHead({ conceptId, detail }: { conceptId: string; detail?: Concept | null }) {
   const ctx = useContext(CanvasContext)
   const k = detail ?? ctx.concepts.get(conceptId)
@@ -448,7 +441,6 @@ export function LabelHead({ conceptId, detail }: { conceptId: string; detail?: C
   return (
     <span className="bcell-label-head">
       <span className="bcell-label-name">
-        <LabelKindTag />
         {files && isMultiClass(classesOf(k)) ? (
           <Icon name="label" size={11} className="bcell-label-tag" style={{ color: mainColour(k) }} />
         ) : (

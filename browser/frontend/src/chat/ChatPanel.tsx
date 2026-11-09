@@ -64,7 +64,7 @@ import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
 import { fixWords, notStartedToast, pageText } from './fix'
-import { FixPage, FixWorking } from './FixStrip'
+import { FixPage } from './FixStrip'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -704,9 +704,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     if (fixing !== null || target.to === 'fix') {
       // `/thimble-fix <words>` goes to main, which reads it with the person's fixes beside it and starts the fix (a round
       // of one of theirs, or a new one) or first asks one short question, as in the terminal (backend fixes.ask). The fix
-      // runs in the background as main's subagent, in a thread of its own (fixes.fixer_chat); main's chat shows the
-      // message, the fixer's card where main started it, main's line, and how the fix ended once it did. Typed in a
-      // fix's thread, the words are a round of that fix
+      // runs in the background in a thread of its own (fixes.fixer_chat); main's chat shows the message, the fixer's
+      // line where main started it, as a side thread's (Rows), main's line, and how the fix ended once it did. Typed in
+      // a fix's thread, the words are a round of that fix
       const inFix = target.to === 'fix'
       track('ui-click', { target: inFix ? `fix:${target.fix}` : 'fix:ask' })
       if (!inFix) {
@@ -838,7 +838,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           </div>
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
-          <FixWorking />
           <Composer
             model={mainChip ? mainModelNow : null}
             models={mainChip ? modelChoices(mainKept, mainModelNow) : undefined}

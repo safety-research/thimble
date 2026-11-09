@@ -7,7 +7,7 @@
 // heads-up on a citation's words before the citation; a card where it is drawn: on the line of a reply that places it,
 // under an answer by v, or at Claude's call), and open the tray on the one reached; a press on a citation or an
 // explainer opens it too. The marked words draw in focus (the
-// answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the mark it
+// answer view asks trayFocus). At rest, while the newest answer shows marks, the bar names ] and the mark it
 // opens (`] show explainer` for the answer's first mark, `] next citation` for a later one; on a narrow bar
 // `] explainer`, then `]` alone): while one of the answer's marks is not opened, the first such, its verb in
 // thimble's color; once the person opened each, the first mark, its verb drawn as the bar's other keys' words. The
@@ -67,7 +67,7 @@ import type { BarItem } from '../bar/bar'
 import { spinNow } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
-import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
+import { latestAnswer, messageOf, partOf, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
@@ -490,14 +490,12 @@ async function reveal($: Engine, at: { row: string; card?: string }): Promise<vo
   else await quietly($.ui.scroll({ to: { requestId: at.row }, block: 'nearest' }))
 }
 
-/** Open the tray on a mark (a press on it, ] and [): its answer becomes the one the keys act on. */
+/** Open the tray on a mark (a press on it, ] and [). */
 export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}): Promise<void> {
   // a citation that waits to be checked until it is opened (Citations auto cite, or words asked about with c) starts
   // its check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
   await setTray($, open(f) as Tray)
-  const t = await turnOfRow($, f.row)
-  if (t?.answer) await pickAnswer($, t.answer)
   await told($, f)
   await quietly(markSeen($, f))
   if (o.reveal) await reveal($, f)
@@ -545,20 +543,18 @@ async function standOn($: Engine, row: string, card: string): Promise<void> {
   await setTray($, null)
   await setFocus($, card)
   await writeStand($, { row, card })
-  const t = await turnOfRow($, row)
-  if (t?.answer) await pickAnswer($, t.answer)
   await reveal($, { row, card })
 }
 
-/** ] and [: the next mark or card in reading order, and the one before. From rest, the answer the keys act on (else
- *  the newest answer's): ] the first of its marks the person has not opened, else its first mark (restNext), [ its last
- *  stop (restStop). At the newest reply's last stop, ] stays. */
+/** ] and [: the next mark or card in reading order, and the one before. From rest, the newest answer's: ] the first of
+ *  its marks the person has not opened, else its first mark (restNext), [ its last stop (restStop). At the newest
+ *  reply's last stop, ] stays. */
 export async function stepMark($: Engine, dir: number): Promise<void> {
   const { list, at } = await stepPlace($)
   let next: Stop | null = null
   if (at >= 0) { next = stepFrom(list, at, dir) as Stop | null; if (!next) return }
   else {
-    const row = await actingRow($)
+    const row = await latestAnswer($)
     const turn = row ? await turnOfRow($, row) : null
     const here = list.filter(p => (turn ? turn.rows.includes(p.row) : p.row === row))
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
@@ -694,14 +690,14 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   return tray ? steps(false) : restItem($)
 }
 
-/** At rest, while the answer the keys act on shows marks: ] and the mark it opens from rest (restNext), a press too:
+/** At rest, while the newest answer shows marks: ] and the mark it opens from rest (restNext), a press too:
  *  `] show explainer` for the answer's first mark, `] next citation` for a later one, the words that name the mark in
  *  its own look (markedAs), so the bar shows what each look is while the answer has marks. The rest of its words in
  *  thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar its words give
  *  way after coverage's file counts: the verb first (`] explainer`), and after the busy step's words the mark's name
  *  (`]` alone) (bar/bar.tsx). */
 async function restItem($: Engine): Promise<BarItem[]> {
-  const row = await actingRow($)
+  const row = await latestAnswer($)
   const marks = row ? await answerMarks($, row) : []
   if (!marks.length) return []
   const seen = await seenNow($)

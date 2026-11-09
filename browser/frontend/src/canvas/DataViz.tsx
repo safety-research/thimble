@@ -948,19 +948,22 @@ export function Diagram({ dataset, fitWidth }: { dataset: GraphDataset; fitWidth
 // ---- a custom card: html in a sandboxed iframe sized to its content ----
 
 export const SIZE_MESSAGE = 'thimble:size'
-// the body's height, and whether the page lays out wider than its frame (`wide`), which the frame cuts at its edge
-// (cardBridge); the height takes in a sideways scroll bar's room where a page still shows one. `width` is the page's
-// laid-out width and `frame` the frame's, which a page wider than its frame tells its author (onWide). `inner` is the
-// content the page's own scroll boxes hold past their height (the outermost boxes' summed), and `innerWide` the most
-// one holds past its width: content the analyst scrolls to read as surely as a page past the frame
-const SIZER = `<script>(function(){var b=document.body,d=document.documentElement;function k(){var y=0,x=0,o=[],a=b.getElementsByTagName('*');for(var i=0;i<a.length;i++){var e=a[i];if(o.some(function(p){return p.contains(e)}))continue;var t=getComputedStyle(e),v=/auto|scroll/.test(t.overflowY)&&e.scrollHeight>e.clientHeight+1,h=/auto|scroll/.test(t.overflowX)&&e.scrollWidth>e.clientWidth+1;if(v||h){o.push(e);if(v)y+=e.scrollHeight-e.clientHeight;if(h)x=Math.max(x,e.scrollWidth-e.clientWidth)}}return[y,x]}function s(){var c=getComputedStyle(b),w=d.scrollWidth>d.clientWidth+1,n=k();parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:b.offsetHeight+parseFloat(c.marginTop)+parseFloat(c.marginBottom)+(w?Math.max(0,innerHeight-d.clientHeight):0),wide:w,width:d.scrollWidth,frame:d.clientWidth,inner:n[0],innerWide:n[1]},'*')}addEventListener('load',s);if(window.ResizeObserver){var o=new ResizeObserver(s);o.observe(b);o.observe(d)}s()})()</script>`
+// the page's height, and whether the page lays out wider than its frame (`wide`), which the frame cuts at its edge
+// (cardBridge). The height is the html element's box with its margins. That box holds the body's margins. It also
+// holds a top margin of the page's first element or a bottom margin of its last, which runs past the body's edge and
+// joins the body's margin. The body's box with its margins counts where it is taller, as in a page that sets the html
+// element's height. The height takes in a sideways scroll bar's room where a page still shows one. `width` is the
+// page's laid-out width and `frame` the frame's, which a page wider than its frame tells its author (onWide). `inner`
+// is the content the page's own scroll boxes hold past their height (the outermost boxes' summed), and `innerWide` the
+// most one holds past its width: content the analyst scrolls to read as surely as a page past the frame
+const SIZER = `<script>(function(){var b=document.body,d=document.documentElement;function k(){var y=0,x=0,o=[],a=b.getElementsByTagName('*');for(var i=0;i<a.length;i++){var e=a[i];if(o.some(function(p){return p.contains(e)}))continue;var t=getComputedStyle(e),v=/auto|scroll/.test(t.overflowY)&&e.scrollHeight>e.clientHeight+1,h=/auto|scroll/.test(t.overflowX)&&e.scrollWidth>e.clientWidth+1;if(v||h){o.push(e);if(v)y+=e.scrollHeight-e.clientHeight;if(h)x=Math.max(x,e.scrollWidth-e.clientWidth)}}return[y,x]}function m(e){var c=getComputedStyle(e);return parseFloat(c.marginTop)+parseFloat(c.marginBottom)}function s(){var w=d.scrollWidth>d.clientWidth+1,n=k();parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:Math.max(d.getBoundingClientRect().height+m(d),b.offsetHeight+m(b))+(w?Math.max(0,innerHeight-d.clientHeight):0),wide:w,width:d.scrollWidth,frame:d.clientWidth,inner:n[0],innerWide:n[1]},'*')}addEventListener('load',s);if(window.ResizeObserver){var o=new ResizeObserver(s);o.observe(b);o.observe(d)}s()})()</script>`
 export const CUSTOM_MIN_H = 40
 /** The most of a card's body the canvas shows at rest, px: about one laptop screen with the card's question and
  * takeaway. A body drawn taller shows this much and Show all, and its author is told (backend card_size). */
 export const CARD_BODY_MAX = 800
 export const CUSTOM_MAX_H = CARD_BODY_MAX
 
-/** The html with a script that reports the body's height to the parent frame, before `</body>` when there is one. */
+/** The html with a script that reports the page's height to the parent frame, before `</body>` when there is one. */
 export function withSizer(html: string): string {
   const at = html.search(/<\/body\s*>/i)
   return at >= 0 ? html.slice(0, at) + SIZER + html.slice(at) : html + SIZER

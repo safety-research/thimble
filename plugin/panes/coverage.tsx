@@ -4,7 +4,8 @@
 // draws them with Claude Code's own elements and keeps the view.
 //
 // Each tree row is a Button (its key `dir:<folder>` or `file:<path>`): a click or ↵ on it opens a folder one level,
-// or closes it, and picks a file. j k move the selection, and the focus with it, so ↵ acts on the row selected. The
+// or closes it, and picks a file. j k move the selection, and the focus with it, so ↵ acts on the row selected. Each
+// move gives the pane the keyboard back (core/pane.ts paneTakesKeys), so its keys act in it after a click too. The
 // three shades are theme colors, so the pane reads on a dark and a light terminal: read into Claude's context in the
 // citations' color (`merged`), computed over or searched in `inactive`, untouched in `subtle`.
 //
@@ -13,7 +14,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { countsNow, lastCoverage } from '../bar/counts'
 import { quiet } from '../core/askcell.js'
-import { closePane, PANE_ID } from '../core/pane'
+import { closePane, PANE_ID, paneTakesKeys } from '../core/pane'
 import { featureOn } from '../settings/features.mjs'
 import { rowsUnder } from '../threads/seam'
 import { coverageView, pressView, stepView } from './coverage-view.mjs'
@@ -51,8 +52,9 @@ export async function drawCoverage($: EngineInterface, e: Any, args: unknown, el
   const dims = { W, H: H - (failed ? 2 : 0), under }
   const v = coverageView(cov, view, dims)
   const focus = (key: string | null | undefined) => (key ? $.ui.focus({ requestId: PANE_ID, key }).catch(() => undefined) : undefined)
-  const go = async (next: View) => { await $.state.set(VIEW, next); await focus(next.sel) }
-  const press = (key: string) => () => $.state.set(VIEW, pressView(cov, view, key, dims))
+  // the keyboard, then the ring on the row selected (the row's autoFocus places it when the pane takes the keyboard)
+  const go = async (next: View) => { await $.state.set(VIEW, next); await paneTakesKeys($); await focus(next.sel) }
+  const press = (key: string) => async () => { await $.state.set(VIEW, pressView(cov, view, key, dims)); await paneTakesKeys($) }
   const step = (d: number) => () => go(stepView(cov, view, d, dims))
 
   const runs = (rs: Run[], sel = false) => rs.map((r, i) => Text({ key: `r${i}`, ...(r.tone ? TONE[r.tone] : {}),

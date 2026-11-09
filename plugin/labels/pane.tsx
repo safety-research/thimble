@@ -14,7 +14,8 @@
 //
 //   openLabels($, args)   opens the pane and gives it the keyboard (the bar's l, a click on its label count): all
 //                         the labels, or one label
-//   showLabels($, args)   what the pane shows next, as the person moves in it
+//   showLabels($, args)   what the pane shows next, as the person moves in it; the pane takes the keyboard back, so
+//                         its keys act in it after a click too
 //   colorOf(values, v)    a value's color in the theme drawn now (labels/use.ts colors the label rows with it)
 //   labelEdit($, args)    the field the pane's arguments edit in the input bar, or null (threads/pane.tsx)
 //
@@ -114,7 +115,8 @@ export async function openLabels($: Engine, args: LabelsArgs = {}): Promise<bool
 export async function showLabels($: Engine, args: LabelsArgs): Promise<void> {
   // only what names the view, no empty fields
   const clean = Object.fromEntries(Object.entries(args).filter(([, v]) => v != null && v !== false)) as LabelsArgs
-  await openPane($, 'labels', clean, titleOf(clean))
+  // the keyboard too: Claude Code stops a click at the Button it lands on, so a click alone does not give it back
+  await openPane($, 'labels', clean, titleOf(clean), { focus: true })
 }
 
 // ------------------------------------------------------------------------------------------------ drawing

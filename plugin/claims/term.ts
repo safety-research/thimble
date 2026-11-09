@@ -18,7 +18,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
+import { latestAnswer, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
 import { narrowNotice, openPane } from '../core/pane'
@@ -233,7 +233,7 @@ export async function findEnd($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the bar and w
 
-/** w on the bar: `w 11 claims`, in the lit color when a claim of the answer the keys act on was corrected. */
+/** w on the bar: `w 11 claims`, in the lit color when a claim of the newest answer was corrected. */
 /** Whether the bar's count is bold now: for a moment after the count went up. */
 export async function claimsBright($: Engine): Promise<boolean> {
   const at = (await $.state.get(BRIGHT)).value
@@ -246,9 +246,9 @@ export async function claimsBarWords($: Engine): Promise<string> {
   return words
 }
 
-/** Whether the bar's count is lit: a claim of the answer the keys act on was corrected. */
+/** Whether the bar's count is lit: a claim of the newest answer was corrected. */
 export async function claimsLit($: Engine): Promise<boolean> {
-  const row = await actingRow($)
+  const row = await latestAnswer($)
   const lit = row ? await partOf<ClaimsPart>($, row, 'claims') : null
   return !!lit?.note
 }

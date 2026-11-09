@@ -3,8 +3,9 @@ of a JSON document, a PDF's pages and a database's rows each have a ref, and a c
 reads it.
 
 The corpus is invented: orders.csv has three orders after its header, the first with a two-line note; runs.json holds
-two runs in an array under `runs` beside its metadata; report.pdf is a three-page safety review whose second page is
-about crew rest; forge.db is the mini corpus's database (prs 7101, 7114, 7123, 7138, 7152)."""
+two runs in an array under `runs` beside its metadata; chats.json holds a chat's three messages in an object keyed by
+their ids, beside its one system block, as a chat transcript can; report.pdf is a three-page safety review whose second
+page is about crew rest; forge.db is the mini corpus's database (prs 7101, 7114, 7123, 7138, 7152)."""
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +33,11 @@ PAGES = ["Section 1. Overview of the harbor line", "Section 2. Crew rest. Averag
 CSV = 'id,customer,note\n1,ana,"refund asked\nafter two days"\n2,ben,charger works\n\n3,cy,"refund, again"\n'
 RUNS = {"meta": {"n": 2}, "runs": [{"id": "r1", "outcome": "refund given"}, {"id": "r2", "outcome": "no refund"}],
         "tags": ["a", "b"]}
+CHATS = {"agent": "u1", "system": [{"type": "text", "text": "You keep the shop app running."}],
+         "messages": {"m1": {"id": "m1", "role": "user", "content": [{"type": "text", "text": "Can I get a refund?"}]},
+                      "m2": {"id": "m2", "role": "assistant", "content": [{"type": "text", "text": "The order shipped today."}]},
+                      "m3": {"id": "m3", "role": "user", "content": [{"type": "text", "text": "Then refund the shipping."}]}},
+         "conversations": {"c1": ["m1", "m2", "m3"]}}
 
 
 def _write(root: Path) -> Path:
@@ -39,6 +45,7 @@ def _write(root: Path) -> Path:
     (root / "manifest.json").write_text(json.dumps({"name": CORPUS}))
     (root / "orders.csv").write_text(CSV)
     (root / "runs.json").write_text(json.dumps(RUNS, indent=2))
+    (root / "chats.json").write_text(json.dumps(CHATS, indent=2))
     (root / "notes.jsonl").write_text(json.dumps({"text": "refund please"}) + "\n" + json.dumps({"text": "thanks"}) + "\n")
     (root / "blob.bin").write_bytes(b"\x00\x01\x02" * 10)
     (root / "report.pdf").write_bytes(tiny_pdf(PAGES))
@@ -88,6 +95,30 @@ def test_each_reader_splits_its_file_into_records_named_by_refs(corpus):
     assert prs[1]["record"]["state"] == "merged" and "title: Quote the style name" in prs[1]["text"]
     assert [r["ref"] for r in _all(corpus, "notes.jsonl")] == ["notes.jsonl#L1", "notes.jsonl#L2"]
     assert _all(corpus, "blob.bin") == [] and records.reader_of(corpus / "blob.bin", "blob.bin") is None
+
+
+def test_a_place_that_stores_its_records_by_id_reads_one_record_per_entry(corpus):
+    # the document's own records leave the messages out, since they are an object keyed by id and not a list
+    assert [r["ref"] for r in _all(corpus, "chats.json")] == ["chats.json#/system/0"]
+    path = corpus / "chats.json"
+    messages = [("chats.json#/messages/m1", 10, 19), ("chats.json#/messages/m2", 20, 29), ("chats.json#/messages/m3", 30, 39)]
+    for under in ("/messages", "/messages/*"):  # the place, or each entry of it as the terminal names them
+        rows = _all(corpus, "chats.json", under=under)
+        assert [(r["ref"], r["line"], r["end_line"]) for r in rows] == messages, under
+        assert rows[1]["record"]["role"] == "assistant" and "shipped today" in rows[1]["text"]
+        assert records.count(path, "chats.json", under) == 3
+        assert [r["ref"] for r in records.records_at(path, "chats.json", [2, 9], under=under)] == ["chats.json#/messages/m2"]
+    assert [(r["ref"], r["line"]) for r in _all(corpus, "chats.json", under="/messages/*/content")] == [
+        ("chats.json#/messages/m1/content/0", 14), ("chats.json#/messages/m2/content/0", 24),
+        ("chats.json#/messages/m3/content/0", 34)]
+    assert [r["ref"] for r in _all(corpus, "chats.json", under="/conversations")] == ["chats.json#/conversations/c1"]
+    assert [r["record"] for r in _all(corpus, "chats.json", under="/agent")] == ["u1"]
+    assert _all(corpus, "chats.json", under="/nothing") == []
+    # a record at such a place opens at its own lines, as a citation of it does, and so does a value inside a record
+    one = records.read(path, "chats.json", "/messages/m2")
+    assert (one["ref"], one["line"], one["end_line"], one["record"]["id"]) == ("chats.json#/messages/m2", 20, 29, "m2")
+    inner = records.read(corpus / "runs.json", "runs.json", "/runs/1/outcome")
+    assert (inner["record"], inner["n"], inner["line"], inner["end_line"]) == ("no refund", 2, 12, 12)
 
 
 # --------------------------------------------------------------------------- labels
@@ -146,3 +177,14 @@ async def test_a_code_label_gets_each_record_as_its_reader_reads_it(api, corpus,
     rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
     assert {r["ref"]: r.get("line") for r in rows if r.get("ref", "").startswith("orders.csv")} == {
         "orders.csv#row=1": 2, "orders.csv#row=2": 4, "orders.csv#row=3": 6}
+
+
+async def test_a_label_over_messages_stored_by_id_labels_each_message(api, corpus, workspaces_tmp):
+    k = await _label(api, name="asks for a refund", kind="regex", spec="(?i)refund")
+    s = await _apply(api, k, ["chats.json#/messages"])
+    assert s["status"] == "done" and s["total"] == 3 and s["failed"] == 0, s
+    assert await _values(workspaces_tmp / CORPUS, k) == {
+        "chats.json#/messages/m1": "refund", "chats.json#/messages/m2": "no", "chats.json#/messages/m3": "refund"}
+    rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
+    assert {r["ref"]: r.get("line") for r in rows} == {
+        "chats.json#/messages/m1": 10, "chats.json#/messages/m2": 20, "chats.json#/messages/m3": 30}

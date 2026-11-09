@@ -1,7 +1,8 @@
 // Labels in a session (labels/): the `label` line Claude's command wrote in the change feed starts a --prompt label's
 // model reads beside the session, the bar's busy line names the label while they run, and Claude hears the counts with
 // the next prompt; the labels pane shows a table per label, opens a value and its examples, and a number key checks
-// one. The kernel and the model are stand-ins; all data is made up. `claude plugin test plugin`.
+// one; its keys act at the empty prompt also after the prompt box held text. The kernel and the model are stand-ins;
+// all data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
@@ -184,4 +185,93 @@ test('the labels pane: a table per label; n opens the first value, j picks its f
   expect(d.rows.some(r => /^ {2}no +▅+ +2 +67%$/.test(r))).toBe(true)
   // Claude hears the label's checks with the next prompt
   expect(Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value)).toEqual(['The analyst checked records of the label sorry in the labels pane. It now holds 1 check: 0 agree with the label and 1 changed a value: chat.jsonl#L1 (the label gave yes, the analyst says no). The checks count in place of the label\'s values; `thimble label sorry` prints the counts now.'])
+})
+
+// ---- the pane's keys at the prompt, through the whole hooks module
+
+const PROMPT_HEAD = { ...HEAD, kind: 'prompt', rule: 'The message apologizes.' }
+const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Labels', isFocused: false, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never
+/** An edit of the prompt box by the person: `inputText` in place of [start, end) of the box `text`. */
+const edit = (text: string, start: number, end: number, inputText: string, key: string) => ({ origin: { kind: 'composer' }, key: { key }, text, cursor: end, start, end, inputText }) as never
+
+/** A session with an answer over a made-up folder with one prompt label, whose `thimble` answers as the kernel would.
+ *  `opens`: each pane the plugin opened. */
+async function labelsSession($: Any, on: Any) {
+  mock.env(on, { THIMBLE_HOME: '/made-up/th', HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp', THIMBLE_ROOT: '/made-up/data' })
+  const clock = mock.clock(on, { now: 0 })
+  const opens: Any[] = []
+  on('session.id', () => ({ value: 's-label-keys' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('session.messages', () => ({ value: [] }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
+  on('env.set', () => ({ value: {} }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'thimble-settings' } }))
+  on('ui.open', (_$: unknown, e: { id: string }) => { opens.push(e); return { value: { isPlaced: true } } })
+  on('ui.panes', () => ({ value: opens.map(e => ({ id: e.id, title: e.id })) }))
+  // a key no hook takes is typed into the box, as Claude Code types it
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  on('process.run', (_$: unknown, e: { argv: string[] }) => {
+    const a = e.argv.slice(1)
+    const folders = tempRun(e.argv)
+    if (folders) return { value: { ...folders, isStdoutTruncated: false, isStderrTruncated: false } }
+    const l1 = { ref: 'chat.jsonl#L1', i: 0, value: 'yes', by: 'claude-made-up', words: "I'm sorry, I broke the build.", meta: 'wren' }
+    const l3 = { ref: 'chat.jsonl#L3', i: 1, value: 'yes', by: 'claude-made-up', words: 'Apologies for the noise.', meta: 'moss' }
+    const out = a[0] !== 'label' ? '' : JSON.stringify(a.includes('--records') ? { label: PROMPT_HEAD, value: a[3], at: 0, total: 2, records: [l1, l3] } : [PROMPT_HEAD])
+    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  on('prompt.submit', (_$: unknown, e: { text: string }) => ({ text: e.text }))
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.prompt.submit({ text: 'Which messages apologize?', origin: { kind: 'composer' } } as never)
+  await $.turn.start({ text: 'Which messages apologize?', turnId: 't1' } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two messages apologize.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two messages apologize.', durationMs: 10, isAborted: false } as never)
+  await clock.advance(100)
+  const type = async (e: Any) => ((await $.prompt.edit(e)) as Any).text as string
+  return { clock, opens, type }
+}
+
+// Claude Code hands a pane its keys only while the pane holds the keyboard, and moves the keyboard to the prompt box
+// once a letter goes in (or a click lands outside the pane). So the pane's keys reach thimble's key hook at the empty
+// prompt (core/pane.ts paneKey): last while nothing was typed, so a key thimble takes there keeps it; first once the
+// person deleted the words they typed, as before the words went in
+test("the labels pane's keys at the empty prompt: last while nothing was typed (e explains, as the bar's e does), first after the person deleted the words they typed (e edits the prompt); a press in the pane asks for the keyboard", async ($, on) => {
+  const s = await labelsSession($, on)
+  expect(await s.type(edit('', 0, 0, 'l', 'l'))).toBe('')
+  await s.clock.advance(400)
+  expect(s.opens.at(-1)).toMatchObject({ id: 'thimble', title: 'Labels', focus: true })
+  const pane = await $.ui.mount(PANE)
+  // n opens the first value: the press asks for the keyboard, since Claude Code stops a click at the Button it lands on
+  const before = s.opens.length
+  await pane.press({ key: 'key-n' })
+  expect(s.opens.slice(before)).toEqual([expect.objectContaining({ id: 'thimble', title: 'Label sorry', focus: true })])
+  expect(await pane.find({ key: 'key-e' })).toBeDefined()
+
+  // nothing typed: e goes to the explainers, which take e at the empty prompt; the pane's e is not pressed
+  expect(await s.type(edit('', 0, 0, 'e', 'e'))).toBe('')
+  await s.clock.advance(400)
+  expect(await pane.find({ key: 'key-esc' })).toBeUndefined()
+  // a key no one else takes is the pane's: j picks the first example once no letter followed it
+  expect(await s.type(edit('', 0, 0, 'j', 'j'))).toBe('')
+  await s.clock.advance(400)
+  expect(await pane.find({ type: 'Text', text: /chat\.jsonl:1/ })).toBeDefined()
+
+  // a letter goes into the box, and the person deletes it: now e is the pane's, and puts the prompt in the input bar
+  expect(await s.type(edit('', 0, 0, 'x', 'x'))).toBe('x')
+  expect(await s.type(edit('x', 0, 1, '', 'backspace'))).toBe('')
+  expect(await s.type(edit('', 0, 0, 'e', 'e'))).toBe('')
+  await s.clock.advance(400)
+  expect(await pane.find({ key: 'key-esc' })).toBeDefined()
+  expect(s.opens.at(-1)).toMatchObject({ id: 'thimble', focus: true })
+  await pane.unmount()
 })

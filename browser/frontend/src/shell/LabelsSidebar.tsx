@@ -6,8 +6,8 @@
 // at once.
 //
 // A label's row: its color, name, question and values with their counts, and for a label over files its switch, which
-// turns it on or off in Files. A label over cards or report sentences has no switch, since nothing paints its values on
-// the cards or in the report yet. A row opens its detail in the sidebar: the label's definition (a model label's
+// turns it on or off in Files. A label over report sentences has no switch, since nothing paints its values in the
+// report yet. A row opens its detail in the sidebar: the label's definition (a model label's
 // question, editable; a regex or code shown as it is, the code's first lines with the rest a click away), its values
 // with bars, what it reads and how it was made (regex, code, or read by Claude), with Edit, the records it found, each
 // a click away, with "N more", and Run again, Color Files by it and Turn off (a label over files), and Delete. The
@@ -59,12 +59,6 @@ export const NOTES = '@notes'
 
 /** The labels the sidebar lists: every label but a trial run on a few records. */
 export const listedLabels = (concepts: ReadonlyMap<string, Concept>): Concept[] => [...concepts.values()].filter((k) => !k.trial)
-
-/** The surface a label shows on, by what it labels: records and files in Files, cards on the canvas, sentences in the
- * report. Pure. */
-export function labelSurface(k: Pick<Concept, 'unit'>): 'files' | 'cards' | 'report' {
-  return k.unit === 'cell' ? 'cards' : k.unit === 'span' ? 'report' : 'files'
-}
 
 /** A comment category: a check, or the notes no check made, with its open comments. */
 export interface Category {
@@ -355,7 +349,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
       <Values k={k} bars />
       <h4 className="lside-label">Reads</h4>
       <p className="lside-reads">
-        <span className="mono">{k.glob || (files ? 'the files' : labelSurface(k) === 'cards' ? 'the cards' : 'the report')}</span>
+        <span className="mono">{k.glob || (files ? 'the files' : 'the report')}</span>
         {` · one value per ${unitWord(k.unit, 1)} · ${how}`}
         <button
           ref={edit}

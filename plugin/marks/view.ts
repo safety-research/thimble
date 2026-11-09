@@ -40,8 +40,7 @@
 // wraps to) puts its full fill (`hoverBg`) behind all of it and underlines it, as thimble's other presses are
 // underlined under the pointer (core/askcell.js quiet), never Claude Code's inverse. While the tray shows a mark
 // (`focus`), it is drawn bold on its tint, and a span bold on its full fill, so the open one is easy to find. `dim`
-// draws the words dim (a rewrite of them runs), and `lead` stands in place of the reply's ● (▸: the answer the person
-// picked for the keys).
+// draws the words dim (a rewrite of them runs).
 //
 // Where side threads can be asked about its passages (`passages`), each row of blocks is a passage (a heading's, its
 // whole section), and its margin cell asks about it (core/askcell.js): a purple ? while the pointer is over the row, a
@@ -91,8 +90,6 @@ export type MessageOpts = {
   focus?: number | null
   /** the words drawn dim */
   dim?: boolean
-  /** what stands in place of the ● of the reply's first block */
-  lead?: string | null
   /** false: no margin cell before each row (a reply drawn inside a frame, such as the tray's, starts at the frame's
    *  left, as its title does) */
   gutter?: boolean
@@ -417,25 +414,22 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   const bs = blocks(o.text)
   const w = Math.max(20, o.cols)
   const rows: Any[] = []
-  let dot = o.first || !!o.lead
+  let dot = o.first
   let k = 0
   // a row's passage (its blocks i to j; a heading's, its whole section), when side threads can be asked about them
   const passageOf = (i: number, j: number): Passage => {
     const words = bs[i].type === 'heading' ? sectionOf(o.text, bs, i) : o.text.slice(bs[i].start, bs[j].end)
     return { text: words, label: passageLabel(words) }
   }
-  // the reply's ● (or its lead) stands beside its first words: a card placed before them draws beside none. `scope`:
-  // the row's hover group in a plain reply, which the pointer anywhere over the row lights
+  // the reply's ● stands beside its first words: a card placed before them draws beside none. `scope`: the row's hover
+  // group in a plain reply, which the pointer anywhere over the row lights
   const push = (content: Any[], gap: boolean, p: Passage, card = false, scope?: string) => {
     const key = `${o.key}-b${k++}`
     const wait = card && hasWords
-    const lead = dot && !wait && o.lead
     const glyph = dot && !wait ? '●' : ' '
-    const cell = lead
-      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: accent(), bold: true, children: o.lead })] })
-      : o.passages
-        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
-        : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
+    const cell = o.passages
+      ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
+      : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
     if (o.rule) {
       // the gap above the row stands inside it, so the rule runs through it
       const top = gap || !rows.length ? 1 : 0

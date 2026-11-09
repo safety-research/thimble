@@ -515,8 +515,7 @@ def ticket_problem() -> str:
 
 
 def tickets_run_here(c: str | None = None) -> bool:
-    """Whether code tickets run here, so the module registers `thimble:dev-ticket` (subagents.Type.when) and the
-    browser offers to file one."""
+    """Whether code tickets run here, so the module registers `thimble:dev-ticket` (subagents.Type.when)."""
     return not ticket_problem()
 
 
@@ -4205,8 +4204,9 @@ def _clicked(request: Request) -> None:
 
 @router.post("/dev/tickets", status_code=202)
 async def post_ticket(body: NewTicket, request: Request) -> dict[str, Any]:
-    """A ticket the analyst files in the browser (Report a problem's File a code ticket): a click, which starts its
-    agent through main's module once nothing else runs."""
+    """Report a problem's Fix it with /thimble-fix, a click: a fix of the person's thimble wherever fixes work, which
+    is the only place the browser offers it (GET /fixes); else a code ticket, whose agent starts through main's module
+    once nothing else runs."""
     await _on_first_request()
     _clicked(request)
     from . import fixes  # noqa: PLC0415
@@ -4373,7 +4373,7 @@ async def status() -> dict[str, Any]:
     la = last_apply()
     return {
         "running": running,
-        "tickets": ticket_problem(),  # '' where code tickets run, so the browser offers to file one
+        "tickets": ticket_problem(),  # '' where code tickets run
         "current": {"id": rt["id"], "n": rt.get("n"), "title": rt["title"], "workspace": rt.get("workspace"),
                     "ts_start": run.ts_start} if running and run and rt else None,
         "queued": sum(1 for t in _read() if t.get("status") == "queued"),

@@ -24,6 +24,7 @@ import { isDropped, useProposals } from '../lib/proposals'
 import { parseRef } from '../lib/refs'
 import { revealAnchor, teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
+import type { ChatMeta } from '../lib/types'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
 import { AnswerCommentPop } from './AnswerComment'
@@ -180,6 +181,12 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
     for (const r of shown) if (r.kind === 'chip' && r.chip === 'fix' && r.ref) out.set(r.ref, r.index)
     return out
   }, [shown])
+  // the newest line of each fix's chat, which shows that its fix works (FixLine)
+  const lastLine = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const r of shown) if (r.kind === 'agent' && r.role === 'fixer') out.set(r.chat, r.index)
+    return out
+  }, [shown])
   const answers = useAnswerComments(ws, chat === 'main' && !nested)
   const [opened, setOpened] = useState<string | null>(null)
   const [asked, setAsked] = useState<AnswerAsk | null>(() => (chat === 'main' && !nested ? askedAnswer() : null))
@@ -268,9 +275,9 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
           case 'agent':
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStarted(r)} chips={<ThreadChip id={r.chat} />} />
-            // a fix of the person's thimble: main's subagent, which runs in the background in its own thread (backend
-            // fixes.fixer_chat); a round of the fix is the card of that run alone
-            if (r.role === 'fixer') return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} run={r.run ?? 0} thread />
+            // a fix of the person's thimble, which runs in the background in a thread of its own (backend
+            // fixes.fixer_chat): a side thread's line
+            if (r.role === 'fixer') return <FixLine key={r.index} chat={r.chat} newest={lastLine.get(r.chat) === r.index} />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -317,6 +324,23 @@ export const ACCESS_KIND = 'claude-access'
 export function devStarted(r: { view?: string; title?: string | null }): string {
   // the agent row's `view`; a row an earlier build wrote names a view build only by its title
   return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
+}
+
+/** Main's line for a fixer that started (a new fix, or a round of one), before its thread's chip. */
+export const FIX_STARTED = 'Fix started in'
+
+/** Whether a fix's line in main shows its fix at work: its chat's newest line (`newest`), while that chat runs, which
+ * it does while the fixer works and while the kernel checks its change (backend fixes._checking). Pure. */
+export function fixWorks(meta: Pick<ChatMeta, 'status' | 'running'> | null | undefined, newest: boolean): boolean {
+  return newest && !!meta && (meta.status === 'running' || !!meta.running)
+}
+
+/** A fixer in main, as a side thread is there: one line with its thread's chip, and the spinner while its fix works
+ * (fixWorks). */
+function FixLine({ chat, newest }: { chat: string; newest: boolean }) {
+  const { metas } = useContext(ThreadsContext)
+  const works = fixWorks(metas?.get(chat), newest)
+  return <Note className="chat-agent-note" data-chat={chat} data-running={works || undefined} spin={works} text={FIX_STARTED} chips={<ThreadChip id={chat} />} />
 }
 
 /** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`

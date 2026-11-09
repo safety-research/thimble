@@ -1,6 +1,6 @@
 // The Labels pane at the bottom of the Files sidebar (the whole sidebar beside a view, with the button that hides it,
 // and beside a view built without label controls the offer to add them, ViewSide AddLabelControls):
-// every label over files with its colour, then the labels over canvas cards and report sentences. A label over files
+// every label over files with its color, then the labels over report sentences. A label over files
 // shows its mark (LabelMark), filled while it is on; a click on the mark turns it on or off. A click on the name turns
 // it on, focuses it, or turns the focused label off. An on label with more than two values lists them, and a click on
 // one toggles its highlight. Under each name, the status of its last or running apply. A label over files has a palette
@@ -151,7 +151,7 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
             onClick={() => teleport(`concept:${k.id}`)}
             style={{ '--c': mainColour(k) } as CSSProperties}
           >
-            <Icon name={k.unit === 'cell' ? 'canvas' : 'report'} size={12} className="files-label-over" />
+            <Icon name="report" size={12} className="files-label-over" />
             <span className="files-label-name">{k.name}</span>
           </button>
         )}

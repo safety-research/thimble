@@ -12,7 +12,7 @@
 // (or of the collapsed frame that card is folded in), as does a thread's frame about a loose card. Empty thread groups
 // are not drawn. `View` is the plane's pan and zoom.
 import { isUnread, type SeenMap } from '../chat/seen'
-import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
+import type { CanvasResponse, Cell, ChatMeta, Filters, Group, LabelScope, Pos } from '../lib/types'
 
 // ---- the frame's metrics ----
 
@@ -994,23 +994,11 @@ export function unreadAnchors(chats: readonly ChatMeta[], seen: SeenMap): Set<st
   return out
 }
 
-/** The set of card ids a label's rows name (`card:<id>` or `cell:<id>`, with or without a suffix). */
-export function filterSet(rows: readonly Pick<LabelRow, 'ref'>[]): Set<string> {
-  const out = new Set<string>()
-  for (const r of rows) {
-    const id = anchorCellId(r.ref)
-    if (id && (r.ref.startsWith('card:') || r.ref.startsWith('cell:'))) out.add(id)
-  }
-  return out
-}
-
 /** The filter scope a label's unit implies. */
-export function scopeForUnit(unit: string | undefined): FilterScope | null {
+export function scopeForUnit(unit: string | undefined): LabelScope | null {
   switch (unit) {
     case 'record':
       return 'files'
-    case 'cell':
-      return 'canvas'
     case 'span':
       return 'report'
     default:
@@ -1019,7 +1007,7 @@ export function scopeForUnit(unit: string | undefined): FilterScope | null {
 }
 
 /** Whether `filters[scope]` is exactly this concept and value. */
-export const filterIs = (filters: Filters | null | undefined, scope: FilterScope, concept: string, value: string): boolean => filters?.[scope]?.concept === concept && filters?.[scope]?.value === value
+export const filterIs = (filters: Filters | null | undefined, scope: LabelScope, concept: string, value: string): boolean => filters?.[scope]?.concept === concept && filters?.[scope]?.value === value
 
 /** The thread a card came from: its chat, and its name as the card's foot shows it. */
 export interface CellThread {
