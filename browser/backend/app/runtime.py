@@ -488,15 +488,16 @@ class Space:
         return self.dir / self.sid / "subagents" / f"agent-{agent_id}.jsonl"
 
     def attach(self) -> None:
-        """Main is the mirror's session, with the effort it runs at while the composer chose none (spec_of), for the
-        composer's chip."""
+        """Main is the mirror's session, with the effort it runs at while the composer chose none (spec_of) and the
+        model, effort and fast mode the settings keep for it (models.main), for the composer's chip."""
         from . import cc_settings, session  # noqa: PLC0415
 
         lv = session.current(self.c)
         if lv is None or lv.sid != self.sid:
-            model = str(_main_choice(self.ws).get("model") or MAIN_MODEL)
+            choice = _main_choice(self.ws)
+            model = str(choice.get("model") or MAIN_MODEL)
             session.attach(self.c, self.sid, str(self.corpus), transcript_path=str(self.main_path),
-                           effort=cc_settings.session_effort(self.corpus, model))
+                           effort=cc_settings.session_effort(self.corpus, model), choice=choice)
 
     def live(self) -> Any:
         from . import session  # noqa: PLC0415

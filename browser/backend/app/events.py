@@ -505,9 +505,10 @@ MODEL_ID = re.compile(r"claude-[a-z0-9][a-z0-9.-]{1,62}")  # a model id as the A
 
 def _choose(c: str, choice: dict[str, Any]) -> None:
     """The composer's choice for main, kept in the workspace's settings as models.main and applied at main's next
-    launch (cli.launch_args); on main's `attached` too, as effort_choice and fast_choice, for the chip to show. A model
-    chosen sets there the effort main runs at on it while the composer chose none (cc_settings.session_effort)."""
-    from . import agents, cc_settings, ledger  # noqa: PLC0415
+    launch (cli.launch_args); on main's `attached` too, as model_choice, effort_choice and fast_choice (session.chosen),
+    for the chip to show at once. A model chosen sets there the effort main runs at on it while the composer chose none
+    (cc_settings.session_effort)."""
+    from . import agents, cc_settings, ledger, session  # noqa: PLC0415
 
     try:
         corpus = config.corpus_dir(c)
@@ -516,7 +517,7 @@ def _choose(c: str, choice: dict[str, Any]) -> None:
     ledger.put_settings(c, {config.MODELS_KEY: {"main": choice}})
     meta = agents.ensure_main(c)
     if meta.get("attached"):
-        fresh = {f"{k}_choice": v for k, v in choice.items()}
+        fresh = session.chosen(choice)
         if "model" in choice:
             fresh["settings_effort"] = cc_settings.session_effort(corpus, choice["model"])
         meta["attached"] = {**meta["attached"], **fresh}
@@ -541,11 +542,12 @@ async def effort_route(c: str, body: MainChoice) -> dict[str, Any]:
 @router.put("/ws/{c}/session/model")
 async def model_route(c: str, body: MainChoice) -> dict[str, Any]:
     """The composer's model menu: the model main's next turn runs on (_choose; runtime.Space.spec_of reads it at each
-    turn). 400 for what is no model id."""
+    turn). A model without fast mode turns fast mode off, as Claude Code's /model does, so fast mode comes back on only
+    from the bolt, never with a model picked again. 400 for what is no model id."""
     model = config.base_model(str(body.model or "")).lower()
     if not MODEL_ID.fullmatch(model):
         raise HTTPException(400, "choose a model by its id, such as claude-opus-5-5")
-    _choose(c, {"model": model})
+    _choose(c, {"model": model, **({} if config.has_fast_mode(model) else {"fast": False})})
     return {"model": model}
 
 
