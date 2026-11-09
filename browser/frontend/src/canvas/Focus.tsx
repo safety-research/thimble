@@ -1,7 +1,9 @@
 // Focus mode: one card at full size over the board, the cards of its frame listed at the left. ↑ and ↓ step through
-// them, Escape goes back to the board. The composer under the card asks about it in the thread that made it; a card an
-// agent made is asked about in a new thread on the card.
-import { useContext, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+// them, Escape goes back to the board, from the composer too. The composer under the card asks about it in the thread
+// that made it; a card an agent made is asked about in a new thread on the card. What is typed in the composer stays
+// with the card when focus mode closes, as the chat keeps each thread's draft (FocusMode).
+import { useContext, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { withDraft } from '../chat/Composer'
 import { ChatMarkdown } from '../chat/markdown'
 import { takeawayChecks } from '../marks/marks'
 import { Button } from '../components/Button'
@@ -26,20 +28,37 @@ export interface FocusProps {
   list: Cell[]
   /** its frame's name */
   frame: string
+  /** what is typed in the composer about this card, which FocusMode keeps */
+  draft: string
+  onDraft: (text: string) => void
   onPick: (id: string) => void
   onClose: () => void
   /** a new thread on the card with this first message (the ⌘-click's route) */
   onAskNew: (cellId: string, text: string) => void
 }
 
-export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusProps) {
+export type FocusModeProps = Omit<FocusProps, 'cell' | 'draft' | 'onDraft'> & {
+  /** the card in focus, or null for none */
+  cell: Cell | null
+}
+
+/** Focus mode on `cell`, or nothing while no card is in focus. The board draws it the whole time, so it keeps what is
+ * typed in the composer about each card after focus mode closes, until it is sent. A reload drops it. The drafts live
+ * here, not in the board, so typing redraws only focus mode. */
+export function FocusMode({ cell, ...rest }: FocusModeProps) {
+  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
+  if (!cell) return null
+  const id = cell.id
+  return <Focus {...rest} cell={cell} draft={drafts[id] ?? ''} onDraft={(text) => setDrafts((d) => withDraft(d, id, text))} />
+}
+
+export function Focus({ cell, list, frame, draft, onDraft, onPick, onClose, onAskNew }: FocusProps) {
   const ctx = useContext(CanvasContext)
   const kind = kindOf(cell)
   const payload = (cell.payload ?? {}) as Record<string, unknown>
   const concept = kind === 'label' ? String(payload.concept ?? '') : ''
   const label = useConceptDetail(ctx.ws, concept || null)
   const thread = ctx.threadOf(cell)
-  const [draft, setDraft] = useState('')
   const [asked, setAsked] = useState<{ id: string; text: string } | null>(null)
   const i = list.findIndex((c) => c.id === cell.id)
   // the room the composer takes at the bottom of the stage, which the card's scroll area stops above
@@ -59,11 +78,19 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
     const text = draft.trim()
     if (!text) return
     track('chat-open', { target: `cell:${cell.id}`, detail: { via: 'focus-composer', chat: thread.chatId } })
-    setDraft('')
+    onDraft('')
     setAsked({ id: cell.id, text })
     // the message names the card, so the thread knows which one it is about
     if (thread.chatId && thread.writable) bus.emit('openChat', { chatId: thread.chatId, send: `[[card:${cell.id}]] ${text}` })
     else onAskNew(cell.id, text)
+  }
+  // Escape in the composer goes back to the board. The board does not act on keys typed in a field, so the composer
+  // takes this one itself. It marks the key taken, so a part of the page that also closes on Escape, such as the
+  // Labels sidebar, stays open.
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Escape' || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    onClose()
   }
   return (
     <div className="bfocus" onMouseDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
@@ -104,7 +131,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
               Asked in <span className="bfocus-asked-thread">{thread.writable ? thread.name : 'a new thread'}</span>: “{asked.text}”
             </div>
           )}
-          <ComposerFrame className="bfocus-bar" value={draft} onChange={setDraft} onSubmit={send} placeholder="Ask about this card…" rows={1} maxHeight={120} model={<span className="bfocus-thread">{thread.writable ? thread.name : 'new thread'}</span>} data-anchor="ui:focus-composer" />
+          <ComposerFrame className="bfocus-bar" value={draft} onChange={onDraft} onSubmit={send} onKeyDown={onKey} placeholder="Ask about this card…" rows={1} maxHeight={120} model={<span className="bfocus-thread">{thread.writable ? thread.name : 'new thread'}</span>} data-anchor="ui:focus-composer" />
         </div>
       </div>
       <Button variant="icon" size="md" icon="x" title="Back to the board" aria-label="Back to the board" className="bfocus-close" onClick={onClose} />
