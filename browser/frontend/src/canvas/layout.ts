@@ -7,9 +7,10 @@
 // of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
 // its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
 // no card of its own shows its title alone, with no box under it. Root frames and loose cards sit at their `pos`, or in
-// one column in the order they were made. What a thread made and no one has placed, a loose card or a frame of its
-// cards, stands right of the card the thread is about (or of the collapsed frame that card is folded in), as does a
-// thread's frame about a loose card. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+// one column in the order they were made, which goes down past what sits at its `pos` and so covers none of it. What a
+// thread made and no one has placed, a loose card or a frame of its cards, stands right of the card the thread is about
+// (or of the collapsed frame that card is folded in), as does a thread's frame about a loose card. Empty thread groups
+// are not drawn. `View` is the plane's pan and zoom.
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
 
@@ -364,7 +365,9 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   }
   // the root column: the root frames and the loose cards in the order they were made, so a frame made after a loose
   // card stands below it. The loose cards keep their stored order among themselves, each frame going before the first
-  // of them made after it (with no stamps to go by, the frames first); what the analyst placed stays at its `pos`.
+  // of them made after it (with no stamps to go by, the frames first). What the analyst placed stays at its `pos`, and
+  // the column goes around it: a card or frame of the column that would cover it moves down past it, and the column
+  // after it moves down too.
   const column: Kid[] = []
   const frames = roots.filter((g) => !g.beside)
   let fi = 0
@@ -375,22 +378,41 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     column.push({ t: 'c', it: c })
   }
   while (fi < frames.length) column.push({ t: 'g', it: frames[fi++] })
+  // what is placed, a frame with its title's room above it
+  const fixed: Rect[] = []
+  for (const k of column) {
+    const p = k.it.pos
+    if (!p) continue
+    if (k.t === 'g') {
+      place(k.it, p.x, p.y, 0)
+      const s = size.get(k.it.id)!
+      fixed.push({ x: p.x, y: p.y - TITLE, w: s.w, h: s.h + TITLE })
+    } else {
+      const r = { x: p.x, y: p.y, w: k.it.w, h: cellHeight(k.it, heights) }
+      rects.set(k.it.id, r)
+      fixed.push(r)
+    }
+  }
   let topY = ROOT_Y
   let cardFoot = -Infinity // the foot of the column's last loose card: a frame's title needs ROOT_GAP under it
   for (const k of column) {
     if (k.t === 'g') {
-      const p = k.it.pos ?? { x: ROOT_X, y: Math.max(topY, cardFoot + ROOT_GAP) }
-      place(k.it, p.x, p.y, 0)
-      topY = Math.max(topY, p.y + size.get(k.it.id)!.h + ROOT_GAP)
+      const s = size.get(k.it.id)!
+      let y = k.it.pos?.y
+      if (y == null) {
+        y = clearBelow({ x: ROOT_X, y: Math.max(topY, cardFoot + ROOT_GAP) - TITLE, w: s.w, h: s.h + TITLE }, fixed) + TITLE
+        place(k.it, ROOT_X, y, 0)
+      }
+      topY = Math.max(topY, y + s.h + ROOT_GAP)
       continue
     }
     const c = k.it
-    const p = c.pos ?? { x: ROOT_X, y: topY }
-    const h = cellHeight(c, heights)
-    rects.set(c.id, { x: p.x, y: p.y, w: c.w, h })
     if (c.pos) continue
-    topY += h + GAP
-    cardFoot = p.y + h
+    const h = cellHeight(c, heights)
+    const y = clearBelow({ x: ROOT_X, y: topY, w: c.w, h }, fixed)
+    rects.set(c.id, { x: ROOT_X, y, w: c.w, h })
+    topY = y + h + GAP
+    cardFoot = y + h
   }
   // what stands beside a card at the root, a thread's frame or a loose card a thread made: right of the card and of the
   // frames around it, its top (a frame's title) level with the card's top, and moved down past what it would cover, so
@@ -606,9 +628,8 @@ function coverable(board: Board, lay: Layout, id: string, keep: (k: string, r: R
   return out
 }
 
-/** how far down clearPos moves a card to see what moves with its frames */
+/** how far down clearPos moves a card, and groupPos a new frame, to see the board as it stands without it */
 const FAR = 100_000
-const sameRect = (a: Rect | undefined, b: Rect | undefined): boolean => !!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
 
 /**
  * Where the card `id`, placed free in `data`, stands so that it covers nothing: at its own `pos`, or straight below it
@@ -618,20 +639,53 @@ export function clearPos(data: CanvasResponse, id: string, open: ReadonlySet<str
   const start = boardOf(data).cellById.get(id)?.pos ?? null
   if (!start) return start
   const placed = (y: number) => patchCellLocal(data, id, { pos: { x: start.x, y } })
-  // what stands after the card's frames moves down as they grow, so the card never covers it: only what stays where it
-  // is with the card far down counts
-  const far = layoutBoard(boardOf(placed(start.y + FAR)), open, heights).rects
+  // what stands after the card's frames moves down as they grow, and the board's column moves down past a card placed
+  // on it: the card counts what it would cover where that stands with the card far down
+  const far = boardOf(placed(start.y + FAR))
+  const others = coverable(far, layoutBoard(far, open, heights), id, () => true)
   let y = start.y
   for (let i = 0; i < 4; i++) {
-    const board = boardOf(placed(y))
-    const lay = layoutBoard(board, open, heights)
-    const r = lay.rects.get(id)
+    const r = layoutBoard(boardOf(placed(y)), open, heights).rects.get(id)
     if (!r) break
-    const to = clearBelow(r, coverable(board, lay, id, (k, o) => sameRect(o, far.get(k))))
+    const to = clearBelow(r, others)
     if (to <= r.y) break
     y = Math.round(y + to - r.y)
   }
   return { x: start.x, y }
+}
+
+/** the id a new frame has in groupPos */
+const NEW_FRAME = '__new'
+
+/**
+ * Where a new frame at the root that holds the cards `ids` stands (its `pos`): around them where they are drawn, so
+ * they keep their place; or, when it or its title row would cover what stays where it is (what is placed on the board,
+ * and what the board's column holds above the cards), straight below at the first place clear of it. The column below
+ * the cards moves down past the frame (layoutBoard), so no other card ends up under it. Null when no card is drawn.
+ * Pure.
+ */
+export function groupPos(data: CanvasResponse, ids: readonly string[], open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos | null {
+  const now = layoutBoard(boardOf(data), open, heights).rects
+  const box = extentOf(ids.flatMap((id) => now.get(id) ?? []))
+  if (!box) return null
+  const at = { x: Math.round(box.x - PAD), y: Math.round(box.y - HEAD) }
+  // the board with the frame made far down, the cards in it; the frame is made after every card, as the route makes it
+  const frame: Group = { id: NEW_FRAME, title: '', parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst', ts: '9999-12-31T23:59:59Z', pos: { x: at.x, y: at.y + FAR } }
+  const board = boardOf(moveLocal({ ...data, groups: [...data.groups, frame] }, ids, NEW_FRAME, undefined, null))
+  const lay = layoutBoard(board, new Set([...open, NEW_FRAME]), heights)
+  const made = lay.rects.get(NEW_FRAME)
+  if (!made) return at
+  // what stays where it is, a frame with its title's room above it (a thread's work beside a card moves out of the way)
+  const stays: Rect[] = []
+  const keep = (it: BoardGroup | BoardCell, isFrame: boolean) => {
+    const r = lay.rects.get(it.id)
+    if (it.parent || it.beside || !r || (!it.pos && r.y >= box.y)) return
+    stays.push(isFrame ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r)
+  }
+  for (const g of board.groups) if (g.id !== NEW_FRAME) keep(g, true)
+  for (const c of board.cells) keep(c, false)
+  const top = clearBelow({ x: at.x, y: at.y - TITLE, w: made.w, h: made.h + TITLE }, stays)
+  return { x: at.x, y: Math.round(top + TITLE) }
 }
 
 /** Where a card dropped free at `pos` in `group` (null: loose, on the board) stands: there, or moved down clear of what
