@@ -79,6 +79,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { clicksReach } from '../bar/intro'
+import { failNotice, reasonOf } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { holdAnswers, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import type { Span } from '../core/answerview'
@@ -324,9 +325,9 @@ export async function tourCites($: Engine, row: string | null | undefined): Prom
   return !!a && !!b && a.turnId === b.turnId
 }
 
-/** A row placed at the transcript's end. A failure leaves the tour without it. */
-async function place($: Engine, id: string): Promise<void> {
-  try { await $.ui.place({ id }) } catch { /* the tour goes on without the row */ }
+/** A row placed at the transcript's end: null once placed, else the error. A failure leaves the tour without it. */
+async function place($: Engine, id: string): Promise<unknown> {
+  try { await $.ui.place({ id }); return null } catch (err) { return err ?? 'no reason given' }
 }
 
 /** The tour's changes, one at a time. */
@@ -364,7 +365,10 @@ export function placeIntro($: Engine): Promise<void> {
     const k = t.k + 1
     const intro = `tour-intro-${k}`
     await save($, { ...t, k, intro })
-    await place($, intro)
+    // the intro is the tour's first row: a Claude Code older than 2.1.314 cannot place it (kernel/doctor.py
+    // CLAUDE_CODE_MIN), and an update of thimble does not check Claude Code, so the line says why, with the fix
+    const err = await place($, intro)
+    if (err) failNotice($, `The tour could not draw its intro (${reasonOf(err)}). It needs Claude Code 2.1.314 or later: update it (claude update), then type /thimble:tour again.`)
   })
 }
 
