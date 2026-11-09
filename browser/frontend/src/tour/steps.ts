@@ -787,8 +787,8 @@ const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undef
  * Workload Identity Federation or the Claude Code sign-in. */
 const SAID = {
   chat: [
-    'Your chat with Claude',
-    'Ask Claude anything about the files here. Claude cites the numbers it states, and a second Claude checks each one against your files.',
+    'Your Claude Code session',
+    'Ask Claude anything here. Claude cites its claims and a second agent verifies them.',
   ],
   ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
 }
@@ -807,7 +807,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
       title: SAID.chat[0],
       body: SAID.chat[1],
-      after: 'Hover over a time to see its source.',
+      after: 'Hover over a time to see its citation.',
       chips: onAnswerChip('chatChecked'),
       // the citations are checked and each holds; the pointer rests on the last one and its source shows
       demo: async (api) => {
