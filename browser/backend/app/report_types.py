@@ -5,8 +5,9 @@ prompts/report-markdown.md and custom types live under workspaces/<c>/report-typ
 generations under <slug>/.
 
 No model runs here. The writer (write_session.py) reads a type's form with read_ref("type:<name>") and saves with
-write_document (a whole document in markdown) or edit_document (one passage). Each save runs the citation check
-(report.verify_and_tag); the report checks (checks.py) hear every `report` record through _emit."""
+write_document (a whole document in markdown) or edit_document (one passage). One writer run makes one generation,
+whether it saves whole or edits passages (versions.py). Each save runs the citation check (report.verify_and_tag); the
+report checks (checks.py) hear every `report` record through _emit."""
 from __future__ import annotations
 
 import asyncio
@@ -1979,6 +1980,30 @@ def writer_run(ctx: Any) -> str | None:
     return f"{run.chat}:{run.k}" if run is not None else None
 
 
+def open_run_draft(ctx: Any, slug: str) -> None:
+    """A writer run's first edit_document call, before its edit lands: the document as it stands becomes the next
+    generation, the run's, as the run's first whole save would (tool_write_document). The run's edits then change its
+    own draft, and History keeps the draft before it. A later call of the same run, or any other caller's call,
+    changes nothing."""
+    from . import revise_diff, versions  # noqa: PLC0415
+
+    run_key = writer_run(ctx)
+    inv = investigation.MAIN
+    cur = read_doc(ctx.c, inv, slug) if run_key else None
+    if cur is None or cur.get("writer_run") == run_key:
+        return
+    pending = write_pending(ctx.c, slug) or {}
+    doc = {k: copy.deepcopy(v) for k, v in cur.items() if k not in RESTORE_DROPS}
+    doc.update(generation=max(int(cur.get("generation") or 1), 1) + 1, writer_run=run_key, revision=1,
+               generated_at=_now(), written_by=ctx.cell_author)
+    if instruction := revise_diff.typed_instruction(pending.get("request")):
+        doc["instructions"] = instruction
+    doc["snapshot"] = revise_diff.snapshot(ctx.c, inv, doc)
+    store(ctx.c, inv, slug, doc)
+    versions.record(ctx.c, inv, slug, cur, doc, source=ctx.cell_author, instructions=pending.get("request"),
+                    run=pending.get("event"))
+
+
 async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
     """The `write_document` tool: a whole document in its form's markdown saved as the type's new generation, or, for a
     later
@@ -2383,7 +2408,8 @@ def delete_passage(c: str, slug: str, uid: str, *, inv_id: str = investigation.M
 async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
     """The `edit_document` tool: replace a passage (replace_passage), insert after it (insert_passage, insert_unit),
     change a block's type, or delete the passage. A passage in a locked block is refused with
-    `## edit_document-locked`; a locked block any edit still reached is put back (hold_locks)."""
+    `## edit_document-locked`; a locked block any edit still reached is put back (hold_locks). A writer run's edits
+    land in the run's own draft (open_run_draft)."""
     from . import agents, tools  # noqa: PLC0415
 
     span = str(args.get("span") or "").strip().strip("[]").strip()
@@ -2412,6 +2438,7 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
 
             telemetry.note(ctx.c, "lock-refused", held, actor="model", detail={"tool": "edit_document"})
             return tools.err(tools.hint("edit_document-locked", ref=held) or f"edit_document: {held} is locked")
+        open_run_draft(ctx, slug)
         if args.get("delete"):
             out = delete_passage(ctx.c, slug, uid, actor=ctx.cell_author)
             chip, line = "deleted a passage", f"deleted [[{span}]]"
@@ -2936,7 +2963,8 @@ async def revision_route(c: str, inv_id: str, slug: str, n: int, i: int) -> dict
     return versions.revision_of(c, inv_id, slug, n, i, _load(c, inv_id, slug))
 
 
-# what a restored draft leaves behind of the writer run that wrote it: it is the analyst's draft now
+# what ties a draft to the writer run that wrote it. A restored draft drops it, since the draft is the analyst's now,
+# and so does the draft a writer run's first edit opens (open_run_draft), which is that run's.
 RESTORE_DROPS = ("frame", "writer_run", "revision", "what_changed", "instructions", "lock_reverts", "generation_failed")
 
 
