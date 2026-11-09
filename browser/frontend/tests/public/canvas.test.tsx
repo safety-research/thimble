@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 // The canvas (src/canvas/Canvas.tsx, layout.ts), over a stand-in server that answers its routes: a card Claude draws
 // shows its question and that it runs while the card check holds it, then its content and takeaway in the same place;
-// Card in the bar makes a loose card where the analyst is looking, clear of what is drawn; and a card dropped on others
-// moves down to the first place where it covers none.
+// Card in the bar makes a loose card where the analyst is looking, clear of what is drawn; a card dropped on others
+// moves down to the first place where it covers none; Ctrl+G frames the selected cards where they stand, and moves no
+// other card under the frame; and the board's column goes around what the analyst placed.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { Canvas } from '../../src/canvas/Canvas.tsx'
-import { boardOf, CARD_W, GAP, HEAD, layoutBoard, moveLocal, overlaps, PAD, placeFree, ROOT_Y, toPlane, UNMEASURED_H, type Rect, type View } from '../../src/canvas/layout.ts'
+import { boardOf, CARD_W, GAP, HEAD, layoutBoard, moveLocal, overlaps, PAD, placeFree, ROOT_X, ROOT_Y, TITLE, toPlane, UNMEASURED_H, type Rect, type View } from '../../src/canvas/layout.ts'
 import { api } from '../../src/lib/api.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import type { CanvasResponse, Cell, Group, Pos } from '../../src/lib/types.ts'
@@ -37,6 +38,15 @@ beforeEach(() => {
         data = { ...data, cells: [...data.cells, made] }
         return json(made)
       }
+      if (u.endsWith('/notebooks')) {
+        const made = group('new', { title: String(body.title), parent: (body.parent as string) ?? null, pos: (body.pos as Pos) ?? null, order: (body.order as number) ?? null, ts: '2026-10-22T11:00:00Z' })
+        data = { ...data, groups: [...data.groups, made] }
+        return json(made)
+      }
+      if (u.endsWith('/cells/move')) {
+        data = moveLocal(data, body.cells as string[], (body.group as string) ?? null, 'after' in body ? (body.after as string | null) : undefined, (body.pos as Pos) ?? null)
+        return json([])
+      }
     }
     return json(u.endsWith('/canvas') ? data : u.includes('/chats') ? [] : {})
   })
@@ -51,6 +61,43 @@ const drawn = (el: HTMLElement) =>
   Object.fromEntries(
     [...el.querySelectorAll<HTMLElement>('.bcell')].map((b) => [b.querySelector('[data-cell]')!.getAttribute('data-cell')!, { at: [b.style.left, b.style.top], text: b.textContent ?? '', running: !!b.querySelector('.bcell-run') }]),
   )
+
+/** Each card's box and each frame's box as drawn, a frame's with the room of its title above it. The page measures no
+ * card under jsdom, so a card with no height of its own is UNMEASURED_H tall. */
+const boxes = (el: HTMLElement): { cards: Record<string, Rect>; frames: Record<string, Rect> } => {
+  const px = (v: string) => parseFloat(v)
+  const cards = Object.fromEntries(
+    [...el.querySelectorAll<HTMLElement>('.bcell')].map((b) => [b.querySelector('[data-cell]')!.getAttribute('data-cell')!, { x: px(b.style.left), y: px(b.style.top), w: px(b.style.width), h: b.style.height ? px(b.style.height) : UNMEASURED_H }]),
+  )
+  const frames = Object.fromEntries([...el.querySelectorAll<HTMLElement>('.frame')].map((f) => [f.dataset.group!, { x: px(f.style.left), y: px(f.style.top) - TITLE, w: px(f.style.width), h: px(f.style.height) + TITLE }]))
+  return { cards, frames }
+}
+
+/** A press on each card in turn, the later ones with Shift, which selects them all. */
+const pick = async (el: HTMLElement, ids: string[]) => {
+  for (const [i, id] of ids.entries()) {
+    const face = el.querySelector<HTMLElement>(`[data-cell="${id}"]`)!
+    await act(async () => {
+      face.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, shiftKey: i > 0 }))
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+    })
+  }
+}
+
+/** Ctrl+G, and the routes it calls and the reload after them settled. */
+const groupKey = async () => {
+  await act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', ctrlKey: true, bubbles: true, cancelable: true })))
+  for (let i = 0; i < 6; i++) await settle()
+}
+
+/** The pairs of drawn boxes that overlap: two cards, or a card and a frame it is not in. */
+const covered = (b: ReturnType<typeof boxes>, inFrame: Record<string, string[]>): string[] => {
+  const out: string[] = []
+  const cards = Object.entries(b.cards)
+  for (const [i, [k, r]] of cards.entries()) for (const [k2, r2] of cards.slice(i + 1)) if (overlaps(r, r2)) out.push(`${k} ${k2}`)
+  for (const [f, r] of Object.entries(b.frames)) for (const [k, c] of cards) if (!(inFrame[f] ?? []).includes(k) && overlaps(r, c)) out.push(`${f} ${k}`)
+  return out
+}
 
 test('a card Claude draws shows its question while the card check holds it, then its content and takeaway in the same place', async () => {
   const card = (extra: Partial<Cell>) => note('c1', 'l1', { created_by: 'terminal', title: 'Which runs failed?', payload: { text: 'Every one of the 56 runs, one per line.' }, takeaway: '14 of the 56 runs failed.', ...extra } as Partial<Cell>)
@@ -137,4 +184,68 @@ test('a card dropped on another moves straight down past every card it would cov
   expect(pos).toEqual({ x: PAD + 100, y: top(2) + H + GAP - ROOT_Y })
   const rects = layoutBoard(boardOf(moveLocal(board, ['x'], 'g', undefined, pos)), open, heights).rects
   for (const other of ['a', 'b', 'c']) expect(overlaps(rects.get('x') as Rect, rects.get(other) as Rect), other).toBe(false)
+})
+
+test('Ctrl+G frames two cards where they stand, and the card below them stays below the frame, not under it', async () => {
+  // three loose cards in the board's column, the top two selected
+  data = { groups: [group('l1', { kind: 'loose' })], cells: [note('a', 'l1'), note('b', 'l1'), note('c', 'l1')] }
+  const el = await mount(<Canvas ws="ws" active={true} />)
+  await settle()
+  const before = boxes(el)
+  await pick(el, ['a', 'b'])
+  await groupKey()
+  const after = boxes(el)
+  expect(Object.keys(after.frames)).toEqual(['new'])
+  // the two cards keep their place in the frame
+  expect(after.cards.a).toEqual(before.cards.a)
+  expect(after.cards.b).toEqual(before.cards.b)
+  // the third card stays in its column, below the frame, moved down at most by the gap it keeps from the frame
+  const frame = after.frames.new
+  expect(after.cards.c.x).toBe(before.cards.c.x)
+  expect(after.cards.c.y).toBeGreaterThanOrEqual(frame.y + frame.h)
+  expect(after.cards.c.y).toBeLessThanOrEqual(before.cards.c.y + GAP)
+  expect(covered(after, { new: ['a', 'b'] })).toEqual([])
+})
+
+test('Ctrl+G on two cards in the middle of the column moves no other card under the frame, and its title clears the card above', async () => {
+  // four loose cards in the board's column and a card the analyst placed just below it; the middle two selected
+  const below = { x: ROOT_X, y: ROOT_Y + 4 * (UNMEASURED_H + GAP) }
+  data = { groups: [group('l1', { kind: 'loose' })], cells: [note('a', 'l1'), note('b', 'l1'), note('c', 'l1'), note('d', 'l1'), note('x', 'l1', { pos: below })] }
+  const el = await mount(<Canvas ws="ws" active={true} />)
+  await settle()
+  const before = boxes(el)
+  await pick(el, ['b', 'c'])
+  await groupKey()
+  const after = boxes(el)
+  // the card above and the placed card stay where they are
+  expect(after.cards.a).toEqual(before.cards.a)
+  expect(after.cards.x).toEqual(before.cards.x)
+  // the frame's title row is clear of the card above, and the card after them in the column stands below the frame
+  const frame = after.frames.new
+  expect(frame.y).toBeGreaterThanOrEqual(after.cards.a.y + after.cards.a.h)
+  expect(after.cards.d.y).toBeGreaterThanOrEqual(frame.y + frame.h)
+  expect(covered(after, { new: ['b', 'c'] })).toEqual([])
+})
+
+test("the board's column goes around a card the analyst placed: a card made after it stands below it, not under it", () => {
+  // two loose cards in the column, a card placed just below them, and a card made later, which joins the column
+  const placed = { x: ROOT_X, y: ROOT_Y + 2 * (UNMEASURED_H + GAP) }
+  const board: CanvasResponse = {
+    groups: [group('l1', { kind: 'loose' })],
+    cells: [note('a', 'l1'), note('b', 'l1'), note('x', 'l1', { pos: placed }), note('c', 'l1', { ts: '2026-10-22T10:05:00Z' })],
+  }
+  const rects = layoutBoard(boardOf(board), new Set(), {}).rects
+  expect(rects.get('x')).toMatchObject(placed)
+  expect(overlaps(rects.get('c') as Rect, rects.get('x') as Rect)).toBe(false)
+  expect((rects.get('c') as Rect).y).toBe(placed.y + UNMEASURED_H + GAP)
+})
+
+test("a loose card dropped on the board's column moves down past the cards it would cover, and the column stays", () => {
+  const top = (i: number) => ROOT_Y + i * (UNMEASURED_H + GAP)
+  const board: CanvasResponse = { groups: [group('l1', { kind: 'loose' })], cells: [note('a', 'l1'), note('b', 'l1'), note('c', 'l1'), note('x', 'l1', { pos: { x: 3000, y: 3000 } })] }
+  // dropped over b: it goes below c, the column's last card
+  const pos = placeFree(board, 'x', null, { x: ROOT_X, y: top(1) + 10 }, new Set(), {})
+  expect(pos).toEqual({ x: ROOT_X, y: top(3) })
+  const rects = layoutBoard(boardOf(moveLocal(board, ['x'], null, undefined, pos)), new Set(), {}).rects
+  for (const [i, k] of ['a', 'b', 'c'].entries()) expect((rects.get(k) as Rect).y, k).toBe(top(i))
 })
