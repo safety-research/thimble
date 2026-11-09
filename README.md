@@ -3,12 +3,14 @@
 **thimble is a Claude Code plugin for making sense of large volumes of agent outputs.** It gives Claude tools to cite, visualize and label your data, and gives you an interface to understand and verify Claude's work faster.
 
 > [!CAUTION]
-> - **thimble is a research prototype.** Expect bugs and rough edges.
+> - **thimble is a research prototype.**
 > - **thimble is not an official Anthropic product.**
 
 For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
 
-https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
+https://github.com/user-attachments/assets/878ed146-fc7c-486a-8f41-ac14b24c5068
+
+
 
 ## Features
 
