@@ -1,16 +1,13 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
-// what it says and what it brings; and what the welcome before them says. Every example is the tour's own
-// (examples.json, captured from real thimble markup: a live page, and thimble's own components for the marks, comments,
-// Labels sidebar and Color by menu; all but the views step's are marked Example); a step that asks the analyst to act
-// acts only on that example, so nothing reaches the server.
-import { placeBeside } from '../components/Menu'
+// what it says and what it brings; and what the welcome before them says. Every example is the tour's own, marked
+// Example but for the views step's. Most are captured from real thimble markup (examples.json: a live page, and
+// thimble's own components for the marks and comments); a step that asks the analyst to act acts only on that example,
+// so nothing reaches the server. The Files and Labels steps show thimble's own Files pane and Labels sidebar over the
+// tour's example folder (src/example), whose requests are answered inside its frame.
 import { askKeyLabel, isMacPlatform } from '../lib/platform'
 import { TIP_DELAY_MS } from '../components/Tooltip'
-import { fitChips } from '../files/ColorBy'
-import { shownIn } from '../files/Reader'
-import { TRACK_LANES } from '../files/Ruler'
-import { frameOf } from '../files/Tracks'
-import { setMarkup, type Api, type Example, type Step } from './engine'
+import { PANES_KEY, type Box, type ExamplePanes } from '../example/panes'
+import { setMarkup, type Api, type Example, type Rect, type Step } from './engine'
 import reportFigs from './report-figs.json'
 
 const canvasPanel = '[data-panel="canvas"].shell-panel'
@@ -100,12 +97,11 @@ const chatContent = (api: Api) => {
   return { x: C.x, y: C.y, width: C.width, height: Math.min(C.y + C.height, F.y + F.height + 14) - C.y }
 }
 
-// ---------- Files: the file browser. The File browser stays on through the Files steps (Files, Labels, Views): a view
-// the analyst left open is closed for them, and opened again once the tour moves to another step or ends. The Files
-// and Labels steps share one example, an agent's transcript (txExample): plain in Files, colored by a label in Labels.
+// ---------- Files: the File browser stays on for the Views step, whose example lies over the Files body: a view the
+// analyst left open is closed for it, and opened again once the tour moves to another step or ends.
 const viewTabs = (bar: Element | null) => [...(bar?.querySelectorAll<HTMLElement>('.seg-opt') ?? [])]
 let held: { el: HTMLElement; anchor: string | null } | null = null
-const holdsBrowser = (s: Step | undefined) => !!s?.example && [txExample, viewsExample].includes(s.example)
+const holdsBrowser = (s: Step | undefined) => !!s?.example && s.example === viewsExample
 /** The File browser on for the step. */
 const holdBrowser = (api: Api) => {
   const tabs = viewTabs(api.q('.files-views'))
@@ -116,8 +112,9 @@ const holdBrowser = (api: Api) => {
     browser.click()
   }
 }
-/** A Files step's leave, whether or not its example was drawn: the view opens again unless the next step is a Files
- * step too. The engine moves to the next step right after a step's leave, so that step is known a microtask later. */
+/** The Views step's leave, whether or not its example was drawn: the view opens again unless the next step holds the
+ * File browser too. The engine moves to the next step right after a step's leave, so that step is known a microtask
+ * later. */
 const releaseBrowser = (api: Api) =>
   queueMicrotask(() => {
     if (holdsBrowser(api.step()) || !held) return
@@ -150,24 +147,6 @@ const statusExample = (api: Api, meta: string) => {
     // the strip's glass over the ground of the panel beneath it, as thimble draws it
     const ground = api.groundOf(el.parentElement)
     Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px`, background: ground, borderRadius: getComputedStyle(el).borderRadius })
-  }
-  return { wrap, layout }
-}
-
-// the file browser's tree as the example folder has it (captured, agent-05.jsonl open), over thimble's own, which lists
-// the analyst's files
-const treeExample = (api: Api) => {
-  const real = () => api.q('[data-panel="files"] .files-side')
-  const wrap = api.snap('filesTree', 'tour-ex-tree')
-  const side = wrap.firstElementChild as HTMLElement
-  Object.assign(side.style, { width: '100%', height: '100%' })
-  const layout = () => {
-    const el = real()
-    const T = api.rectOf(el)
-    // a narrow Files panel hides thimble's tree, and the example's with it
-    wrap.style.display = T ? '' : 'none'
-    if (!T || !el) return
-    Object.assign(wrap.style, { left: `${T.x}px`, top: `${T.y}px`, width: `${T.width}px`, height: `${T.height}px`, background: api.groundOf(el) })
   }
   return { wrap, layout }
 }
@@ -266,8 +245,8 @@ const cardExample = (api: Api): Example => {
 
 // ---------- the right sidebar (shell/LabelsSidebar.tsx), which the top bar's Labels and Comments buttons open, each on
 // its own section. A step about it opens the real one on its section with that button, so the panes make room for it
-// as they do for the analyst, and lays its example (examples.json, captured) over it; the step's end puts the sidebar
-// back as the analyst had it.
+// as they do for the analyst, and lays its example over it: the Report step's captured one (examples.json), the Labels
+// step the example panes' own (panesExample). The step's end puts the sidebar back as the analyst had it.
 type SideSection = 'labels' | 'comments'
 const realSide = () => [...document.querySelectorAll<HTMLElement>('aside.lside')].find((e) => !e.closest('.tour-root')) ?? null
 const sideButton = (section: string) => document.querySelector<HTMLElement>(`.shell-side-btn[data-side="${section}"]`)
@@ -308,250 +287,108 @@ const sideExample = (api: Api, section: SideSection) => {
   return { wrap, aside, layout }
 }
 
-// ---------- Files and Labels: one agent's transcript in the Transcript mode, captured colored by one label of a few
-// values: what each step does (reads code, changes code, runs tests, talks to other agents; other, in no color). The
-// Files step shows it plain, as with Color by Off. In the Labels step Color by picks the label: each record's bar and
-// its row take its value's color, resting on a record names its label and value, as thimble's own hover does (`tips`),
-// and the strip beside the transcript shows the colors down the whole file; then the Labels sidebar that lists the
-// label opens over the real one. What thimble fits to the window (Color by's chips, the strip's thumb) the step fits as
-// thimble does.
+// ---------- Files and Labels: thimble's own Files pane and Labels sidebar over the tour's example folder, three made-up
+// agents fixing a tea shop's checkout (src/example), in a frame laid over the page's own Files pane and, while it is
+// open on its labels, the page's own Labels sidebar. The analyst uses them as in a workspace: every click, scroll, menu
+// and mode works, on the example's files and its label "what the step does", and the frame answers its requests
+// itself. The page's own sidebar opens and closes with the example's (the top bar's Labels button, the example's ×, a
+// label's name in Files), so the panes make room for it as they do for the analyst; until the frame draws, each pane's
+// place shows the pane's plain paper, never the analyst's files. Once the tour leaves these steps, the sidebar is as the
+// analyst had it.
 
-/** the transcript's lines (agent-05.jsonl, as the Labels sidebar counts its records), which its strip stands for, the
- * records the Transcript mode hides included */
-const TX_LINES = 76
-/** the line the transcript opens at, where the agent claims a pull request on the board the agents share, reads the
- * code, runs the tests and changes the code: every value's color within its first ten records, so on screen in a short
- * window too */
-const TX_OPEN = 16
-/** the values whose records the demo rests on, the first two of these with a record on screen, each its first there, in
- * the order they stand */
-const TIP_DEMO = ['what the step does: runs tests', 'what the step does: talks to other agents', 'what the step does: changes code']
+/** The box of `r` inside `outer`, in the frame's px. */
+const inside = (r: Rect, outer: Rect): Box => ({ x: r.x - outer.x, y: r.y - outer.y, width: r.width, height: r.height })
+/** `el` laid over `r`, or hidden without it. */
+const lay = (el: HTMLElement, r: Rect | null) => {
+  el.style.display = r ? '' : 'none'
+  if (r) Object.assign(el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+}
+/** The real sidebar is open on its labels. */
+const labelsOpen = () => realSide()?.dataset.section === 'labels'
 
-/** The label's lane on the example transcript's strip, drawn from the records it shows as thimble's strip draws a label
- * (files/Tracks.tsx paintLane): one lane on its stripe (TRACK_LANES), and on it a mark over each run of records whose
- * bar is in one color. The lane is a grid of a row per line of the file's `total`, and a mark spans its records' rows in
- * their bars' color, so the strip spans the track at any height, with no gap between two marks that meet, and shows the
- * records' colors in either theme. */
-function drawStrip(reader: HTMLElement, total: number): void {
-  const track = reader.querySelector('.track-over')
-  if (!track) return
-  const runs: { from: number; to: number; color: string }[] = []
-  for (const rec of reader.querySelectorAll<HTMLElement>('.reader-record[data-line]')) {
-    const line = Number(rec.dataset.line)
-    const color = rec.querySelector<HTMLElement>('.reader-bands > .reader-band')?.style.background ?? ''
-    if (!color) continue
-    const last = runs[runs.length - 1]
-    if (last && last.to === line - 1 && last.color === color) last.to = line
-    else runs.push({ from: line, to: line, color })
+const panesExample = (api: Api): Example => {
+  // the sidebar as the analyst had it, which the tour puts back once it leaves these steps
+  const was = realSide()?.dataset.section ?? null
+  // each pane's paper, as the page draws the Files pane and the sidebar
+  const paper = (background: string) => {
+    const d = document.createElement('div')
+    d.className = 'tour-ex-paper'
+    Object.assign(d.style, { background, borderRadius: 'var(--radius-pane)' })
+    return d
   }
-  const { lane: width, inset } = TRACK_LANES
-  const lane = document.createElement('div')
-  lane.className = 'tour-strip-lane'
-  Object.assign(lane.style, { position: 'absolute', top: '0', bottom: '0', left: `${inset}px`, width: `${width}px`, display: 'grid', gridTemplateRows: `repeat(${total}, minmax(0, 1fr))`, background: 'rgba(var(--ink-rgb), 0.035)' })
-  for (const r of runs) {
-    const mark = document.createElement('div')
-    Object.assign(mark.style, { gridRow: `${r.from} / ${r.to + 1}`, background: r.color })
-    lane.append(mark)
+  const filesPaper = paper('var(--bg-panel)'),
+    sidePaper = paper('var(--surface-card)')
+  const frame = document.createElement('iframe')
+  frame.className = 'tour-ex-panes'
+  frame.title = 'Files (example)'
+  frame.src = `${import.meta.env.BASE_URL}example.html`
+  Object.assign(frame.style, { border: '0', background: 'transparent' })
+  api.ex.append(filesPaper, sidePaper, frame)
+  /** The page's own sidebar on its labels (open) or as the analyst had it. */
+  const side = (open: boolean) => {
+    if (open !== labelsOpen()) sideButton('labels')?.click()
   }
-  track.prepend(lane)
-}
-
-/** The example reader's badge, centered in the first free room of its rows wide enough for it: its bar's, between its
- * tabs and its first control, as the report's badge sits in its bar's empty middle; else, in a narrow Files panel, the
- * transcript's top row's, left of its chips. */
-function placeTag(rd: HTMLElement, tag: HTMLElement): void {
-  const box = (sel: string) => rd.querySelector(sel)?.getBoundingClientRect() ?? null
-  const bar = box('.reader-bar'),
-    tabs = box('.reader-bar > .reader-tabs-wrap > .reader-tabs'),
-    find = box('.reader-bar > .reader-find-open'),
-    row = box('.reader-viewbar'),
-    chip = box('.reader-viewbar > *')
-  const rooms: { y: number; h: number; from: number; to: number }[] = []
-  if (bar && tabs && find) rooms.push({ y: bar.top, h: bar.height, from: tabs.right, to: find.left })
-  // the row's padding and the gap before its chips (files.css .reader-viewbar)
-  if (row) rooms.push({ y: row.top, h: row.height, from: row.left + 14, to: chip ? chip.left - 10 : row.right - 14 })
-  const w = tag.offsetWidth,
-    h = tag.offsetHeight
-  const room = rooms.find((r) => r.to - r.from >= w + 16) ?? rooms[rooms.length - 1]
-  if (!room || !w) return
-  const R = rd.getBoundingClientRect()
-  const left = `${Math.round((room.from + room.to - w) / 2 - R.left)}px`,
-    top = `${Math.round(room.y + (room.h - h) / 2 - R.top)}px`
-  if (tag.style.left !== left || tag.style.top !== top) Object.assign(tag.style, { left, top, right: 'auto' })
-}
-
-/** The colors of the example transcript (`reader`, as captured, colored), which `plain` takes off as Color by Off does
- * and `color` puts back: the records' bars, tints and names, the strip's lane, and Color by's value, label icon and chips. */
-function txColors(reader: HTMLElement) {
-  const colorBy = reader.querySelector<HTMLElement>('.colorby')
-  const name = colorBy?.querySelector('.colorby-trigger b')
-  const said = name?.textContent ?? ''
-  const icon = colorBy?.querySelector('.colorby-trigger .colorby-name-ico')
-  const parts = [...(colorBy?.querySelectorAll<HTMLElement>(':scope > .colorby-chips') ?? [])]
-  const lane = reader.querySelector<HTMLElement>('.tour-strip-lane')
-  const track = lane?.parentElement
-  const records = [...reader.querySelectorAll<HTMLElement>('.reader-record')].map((el) => ({
-    el,
-    cls: ['has-cb', 'has-cb-tint'].filter((c) => el.classList.contains(c)),
-    attrs: ['style', 'data-tip', 'aria-description'].map((a) => [a, el.getAttribute(a)] as const),
-    bands: el.querySelector(':scope > .reader-bands'),
-  }))
-  return {
-    plain() {
-      if (name) name.textContent = 'Off'
-      icon?.remove()
-      parts.forEach((e) => e.remove())
-      lane?.remove()
-      for (const r of records) {
-        r.el.classList.remove(...r.cls)
-        for (const [a] of r.attrs) r.el.removeAttribute(a)
-        r.bands?.remove()
-      }
-    },
-    color() {
-      if (name) name.textContent = said
-      if (icon) name?.before(icon)
-      colorBy?.append(...parts)
-      if (lane && track) track.prepend(lane)
-      for (const r of records) {
-        r.el.classList.add(...r.cls)
-        for (const [a, v] of r.attrs) if (v != null) r.el.setAttribute(a, v)
-        if (r.bands) r.el.prepend(r.bands)
-      }
-    },
+  const putBack = () => {
+    const now = realSide()?.dataset.section ?? null
+    if (now !== was) sideButton(was ?? now ?? 'labels')?.click()
   }
-}
-
-/** Color by's menu as it opens under `trigger` (files/ColorBy.tsx, captured with Color by Off and the label among the
- * file's labels), the demo's: it goes with the demo. */
-function openColorMenu(api: Api, trigger: HTMLElement): HTMLElement {
-  const menu = api.snap('colorByMenu').firstElementChild as HTMLElement
-  menu.dataset.demo = '1'
-  menu.style.width = '300px'
-  api.fx.append(menu)
-  const t = trigger.getBoundingClientRect()
-  const at = placeBeside(t, menu.offsetWidth, menu.offsetHeight, innerWidth, innerHeight, 'start')
-  Object.assign(menu.style, { left: `${at.left}px`, top: `${at.top}px` })
-  trigger.setAttribute('aria-expanded', 'true')
-  return menu
-}
-/** The label checked in Color by's menu, and Off no longer, as the menu draws a checked label. */
-function checkLabel(menu: HTMLElement): void {
-  const off = menu.querySelector('[data-by="off"]'),
-    row = menu.querySelector('[data-by^="l:"]'),
-    box = row?.querySelector('.colorby-box')
-  const tick = off?.querySelector('.colorby-tick svg')
-  off?.classList.remove('checked')
-  off?.setAttribute('aria-checked', 'false')
-  row?.classList.add('checked')
-  row?.setAttribute('aria-checked', 'true')
-  box?.classList.add('on')
-  if (box && tick) {
-    tick.setAttribute('width', '10')
-    tick.setAttribute('height', '10')
-    box.append(tick)
+  let panes: ExamplePanes | null = null
+  /** The panes in the frame, once its page has drawn them. */
+  const connect = (): ExamplePanes | null => {
+    if (panes) return panes
+    try {
+      panes = ((frame.contentWindow as unknown as Record<string, ExamplePanes | undefined> | null)?.[PANES_KEY] ?? null) as ExamplePanes | null
+    } catch {
+      panes = null
+    }
+    panes?.listen({
+      // the analyst's own press, key or wheel in the panes ends a demo that plays
+      input: () => api.stopDemo(),
+      escape: () => api.end(),
+      side,
+    })
+    return panes
   }
-}
-
-const txExample = (api: Api): Example => {
-  const realReader = () => api.q('[data-panel="files"] .reader')
-  const rd = api.snap('txReader', 'tour-ex-reader')
-  const reader = rd.firstElementChild as HTMLElement
-  reader.querySelectorAll('.reader-tab:not(.active)').forEach((t) => t.remove())
-  drawStrip(reader, TX_LINES)
-  const colors = txColors(reader)
-  colors.plain()
-  Object.assign(rd.style, { display: 'flex', flexDirection: 'column', background: api.groundOf(realReader() || api.q(filesPanel)) })
-  Object.assign(reader.style, { flex: '1', minHeight: '0', overflow: 'hidden' })
-  const tag = api.tag(rd)
-  // the Color by row's value chips, which fit the row as thimble's do
-  const chips = reader.querySelector<HTMLElement>('.colorby-chips'),
-    more = chips?.querySelector<HTMLElement>('.colorby-more')
-  let fitAt = ''
-  holdBrowser(api)
-  const side = sideExample(api, 'labels')
-  let putBack: (() => void) | null = null
-  const status = statusExample(api, 'agent-05.jsonl · Transcript')
-  const tree = treeExample(api)
-  api.ex.append(tree.wrap, rd, status.wrap)
   const els = {
-    reader: rd,
-    trigger: reader.querySelector<HTMLElement>('.colorby .colorby-trigger'),
+    frame,
+    /** the sidebar's place while the example's is open, which the Labels step points at */
     labels: null as HTMLElement | null,
-    status: status.wrap,
-    colored: false,
     /** the step on screen, read outside a demo's api, which ends with the demo */
     step: () => api.step(),
-    /** colored by the label, Color by's menu closed */
+    panes: connect,
+    /** the panes' part `name` and its box on the page */
+    part: (name: Parameters<ExamplePanes['part']>[0]) => {
+      const el = connect()?.part(name) ?? null
+      const F = api.rectOf(frame)
+      const r = el?.getBoundingClientRect()
+      return el && F && r && r.width ? { el, at: { x: F.x + r.left + r.width / 2, y: F.y + r.top + r.height / 2 } } : null
+    },
+    /** colored by the label, the sidebar open on it */
     color: () => {
-      if (!els.colored) colors.color()
-      els.colored = true
-      els.trigger?.setAttribute('aria-expanded', 'false')
-      fitAt = ''
+      connect()?.color()
+      side(true)
     },
-    /** the Labels sidebar open on its section, the example over it */
-    showSide: () => {
-      if (!putBack) putBack = holdSide('labels')
-      if (!side.wrap.isConnected) api.ex.append(side.wrap)
-      els.labels = side.wrap
-    },
-    /** as the Files step shows it: plain, no sidebar */
+    /** as the Files step shows the transcript: the label off, the sidebar as the analyst had it */
     plain: () => {
-      if (els.colored) colors.plain()
-      els.colored = false
-      els.trigger?.setAttribute('aria-expanded', 'false')
-      putBack?.()
-      putBack = null
-      side.wrap.remove()
-      els.labels = null
+      connect()?.plain()
+      putBack()
     },
   }
-  // the transcript opens at TX_OPEN and stays there while the panel's size changes, until anything else scrolls it
-  let pinned = true,
-    setTo: number | null = null
   const layout = () => {
-    status.layout()
-    tree.layout()
-    if (els.labels && !side.layout()) return false
-    let r = api.rectOf(realReader())
-    if (!r) {
-      const p = api.rectOf(api.q(filesPanel)),
-        sd = api.rectOf(api.q('.files-side'))
-      // in a narrow Files panel thimble hides its sidebar: the transcript then takes the whole panel
-      if (p && sd) r = { x: sd.x + sd.width, y: sd.y, width: p.x + p.width - sd.x - sd.width, height: sd.height }
-      else if (p) r = { x: p.x, y: p.y, width: p.width, height: p.height }
-    }
-    if (!r) return false
-    Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
-    const fit = `${reader.clientWidth}|${document.fonts?.status}`
-    if (els.colored && chips && more && reader.clientWidth && fit !== fitAt) {
-      fitChips(chips, more, more.querySelector<HTMLElement>('.btn-label > span'))
-      fitAt = fit
-    }
-    placeTag(rd, tag)
-    const sc = rd.querySelector<HTMLElement>('.reader-body')
-    if (!sc || !sc.clientHeight) return
-    if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
-    if (pinned) {
-      // its record just under the bar that stays at the transcript's top
-      const row = rd.querySelector(`.reader-record[data-line="${TX_OPEN}"]`),
-        bar = rd.querySelector('.reader-viewbar')
-      if (row) {
-        sc.scrollTop += row.getBoundingClientRect().top - (bar ? bar.getBoundingClientRect().bottom : sc.getBoundingClientRect().top)
-        setTo = sc.scrollTop
-      }
-    }
-    // the strip's thumb frames the lines on screen, as thimble's does (Reader shownIn)
-    const track = rd.querySelector<HTMLElement>('.track-over'),
-      thumb = rd.querySelector<HTMLElement>('.track-frame-over'),
-      shown = shownIn(sc, TX_LINES)
-    if (track && thumb && shown) {
-      const f = frameOf(shown, track.clientHeight)
-      const at = `translateY(${f.top}px)`
-      if (thumb.style.transform !== at || thumb.style.height !== `${f.height}px`) Object.assign(thumb.style, { height: `${f.height}px`, transform: at })
-    }
+    const F = api.rectOf(api.q(filesPanel))
+    const S = labelsOpen() ? api.rectOf(realSide()) : null
+    lay(filesPaper, F)
+    lay(sidePaper, S)
+    els.labels = S ? sidePaper : null
+    if (!F) return false
+    const U = api.unionOf([F, S])!
+    lay(frame, U)
+    const p = connect()
+    if (!p) return false
+    p.place(inside(F, U), S && inside(S, U))
+    return p.ready()
   }
-  return { els, layout, cleanup: () => els.plain() }
+  return { els, layout, cleanup: putBack }
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
@@ -854,29 +691,25 @@ export function tourSteps(key: string, chat = true): Step[] {
       leave: (api) => api.closeSource(),
     },
     {
-      tab: 'files', example: txExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
-      scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
-      scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
+      // the Files pane, and the Labels sidebar while the example's is open
+      tab: 'files', example: panesExample, anchor: (api) => [filesPanel, api.els.labels], place: 'left', align: 'start', pad: 0, radius: 12,
+      interact: (api) => api.els.frame ?? null,
       title: 'Files',
       body: 'The file browser lists the folder’s files. thimble provides custom views for agent transcripts.',
     },
     {
-      tab: 'files', example: txExample, place: 'left', align: 'end', pad: 0, radius: 12,
-      // the Files panel, the sidebar once open, and the button that opens it
+      tab: 'files', example: panesExample, place: 'left', align: 'end', pad: 0, radius: 12,
+      // the Files pane, the sidebar once open, and the button that opens it, which takes a click
       anchor: (api) => [filesPanel, api.els.labels, sideButton('labels')],
-      scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
-      scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
-      // resting on a record names its label and value, as thimble's own hover does
-      tips: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
+      interact: (api) => api.els.frame ?? null,
+      allow: () => sideButton('labels'),
       title: 'Labels',
       body: 'A label is a classifier Claude defines with a regex, code or a prompt. The file browser can color records by a label.',
       // back to Files, the transcript is plain again
-      leave: (api) => {
-        api.els.plain?.()
-        releaseBrowser(api)
-      },
-      // Color by picks the label and the records take its colors; the Labels button opens the sidebar that lists it, and
-      // the demo ends there. A demo stopped early leaves the step as it ends: colored, the sidebar open
+      leave: (api) => api.els.plain?.(),
+      // from the transcript as the Files step shows it, Color by picks the label and the records take its colors; the
+      // Labels button opens the sidebar that lists it, and the demo ends there. A demo stopped early leaves the step as
+      // it ends: colored, the sidebar open
       demo: async (api) => {
         const els = api.els,
           me = api.step()
@@ -884,38 +717,38 @@ export function tourSteps(key: string, chat = true): Step[] {
           const q = api.rectOf(el)
           return q && { x: q.x + q.width / 2, y: q.y + q.height / 2 }
         }
+        type Part = { el: HTMLElement; at: { x: number; y: number } } | null
+        const part = (name: 'color-by' | 'color-by-label'): Part => els.part(name)
         try {
-          const trigger = els.trigger as HTMLElement | null
-          const t = center(trigger)
-          if (!trigger || !t) return
-          api.cursor.show(t.x + 220, t.y + 170)
+          els.panes()?.reset()
+          await api.sleep(500)
+          const t = part('color-by')
+          if (!t) return
+          api.cursor.show(t.at.x + 220, t.at.y + 170)
           await api.sleep(450)
-          await api.cursor.move(() => center(trigger), undefined, 900)
+          await api.cursor.move(() => part('color-by')?.at ?? null, undefined, 900)
           await api.sleep(250)
           await api.cursor.click()
-          const menu = openColorMenu(api, trigger)
+          part('color-by')?.el.click()
           await api.sleep(800)
-          const row = menu.querySelector('[data-by^="l:"] .menu-item-label')
-          await api.cursor.move(() => center(row), undefined, 800)
+          if (!part('color-by-label')) return
+          await api.cursor.move(() => part('color-by-label')?.at ?? null, undefined, 800)
           await api.sleep(250)
           await api.cursor.click()
-          checkLabel(menu)
-          els.color()
+          part('color-by-label')?.el.click()
           await api.sleep(1100)
-          menu.remove()
+          // the menu and the label's editor beside it close, as Escape closes them
+          await els.panes()?.close()
           // Labels, at the top
           const btn = sideButton('labels')
           await api.cursor.move(() => center(btn), undefined, 900)
           await api.sleep(250)
           await api.cursor.click()
-          els.showSide()
+          els.color()
           await api.sleep(600)
           api.cursor.hide()
         } finally {
-          if (els.step() === me) {
-            els.color()
-            els.showSide()
-          }
+          if (els.step() === me) els.color()
         }
       },
     },

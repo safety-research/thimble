@@ -88,6 +88,7 @@ export default defineConfig({
     // the terminal plugin's modules the page reads as they are (src/marks: plugin/marks/message.js): one copy for both
     fs: { allow: ['.', '../../plugin'] },
   },
-  // render.html is the card harness's page (src/render.tsx, backend/app/render.py): shipped beside the app in dist
-  build: { rollupOptions: { input: { main: 'index.html', render: 'render.html' } } },
+  // render.html is the card harness's page (src/render.tsx, backend/app/render.py), and example.html the product tour's
+  // example panes (src/example, which src/tour/steps.ts frames): each shipped beside the app in dist
+  build: { rollupOptions: { input: { main: 'index.html', render: 'render.html', example: 'example.html' } } },
 })
