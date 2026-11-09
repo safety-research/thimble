@@ -58,7 +58,7 @@ test("Simplify's words on citing come only while Claude cites; in manual and off
   // squeeze.md has the principle on citations that CITING names, and it is the one line that shows a citation
   assert.equal(system.split('\n').filter(l => l.startsWith(CITING)).length, 1)
   assert.doesNotMatch(squeezeText(system, false), /\]\(#\)/)
-  // while Claude cites (auto cite + verify, auto cite): the principle, and each new number cited
+  // while Claude cites (auto + verify, auto): the principle, and each new number cited
   const auto = request(rec, { system, cards: [card] })
   assert.ok(auto.system[0].text.includes(system.split('\n').find(l => l.startsWith(CITING))))
   assert.match(auto.system[0].text, /a card or a card's rows, and cite each new number\.\*\*/)

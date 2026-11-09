@@ -1,8 +1,8 @@
 // models.js: the Claude models thimble's own calls name ($.model.complete takes Claude Code's aliases), each with its
 // full name, the id Anthropic's first-party API knows it by (a request a turn.step hook names takes an id, not an
-// alias: marks/register.ts, the setting Checker), the effort levels Claude Code offers for it (the setting Checker's
-// Effort), and its list price in dollars per million tokens, input and output (Anthropic's first-party API rates). The
-// one place to change when an alias moves to a new model or a price changes. Pure: no `$`.
+// alias: marks/register.ts, the setting Verifier model), the effort levels Claude Code offers for it (the setting
+// Verifier effort), and its list price in dollars per million tokens, input and output (Anthropic's first-party API
+// rates). The one place to change when an alias moves to a new model or a price changes. Pure: no `$`.
 //
 //   ALIASES                        the aliases, from the fastest model to the strongest
 //   EFFORTS                        every effort level, from the least to the most, as Claude Code names them
@@ -10,7 +10,8 @@
 //   modelById(id)                  -> the model a request names by its id (a context window's suffix, `[1m]`, aside),
 //                                     or null
 //   shownName(alias)               -> the model's name as Claude Code shows it (`Haiku 5.5`), or the alias itself
-//   modelNamed(name)               -> the model by that name (`Haiku 5.5`: the setting Checker saves it so), or null
+//   modelNamed(name)               -> the model by that name (`Haiku 5.5`: the setting Verifier model saves it so),
+//                                     or null
 //   dollars(alias, input, output)  -> the list price of `input` and `output` tokens, or null
 //   aboutDollars(x)                -> a rough price in words: 'about $4', 'about $0.30', 'under $0.01'
 //   firstParty(flags)              -> whether Claude Code reaches Claude through Anthropic's first-party API, which

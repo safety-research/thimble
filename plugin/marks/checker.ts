@@ -65,12 +65,12 @@
 //   errorWordsOf($, x, n)     the words of an error or a refusal a line quotes (bar/notice.ts reasonOf), each path of
 //                             this machine in them named as the validator names a cited file (core/text.js errorWords)
 //
-// The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
-// Claude's marks after each reply; `auto cite`, a reply's marks wait `deferred` (drawn as the reply's own cited words),
-// and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual` (the default),
+// The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto + verify`,
+// Claude's marks after each reply; `auto`, a reply's marks wait `deferred` (drawn as the reply's own cited words), and
+// opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual` (the default),
 // Claude makes none; `off`, none. In every mode but off, words the person selects and asks about (c, marks/cite.ts)
 // wait `deferred` until the tray opens them, as one Claude made. A reply its caller names (`checks`: the answer of the
-// tour's cite step, tour/tour.ts tourCites) is checked after it in `auto cite` too, as in `auto cite + verify`.
+// tour's cite step, tour/tour.ts tourCites) is checked after it in `auto` too, as in `auto + verify`.
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). A check
@@ -694,7 +694,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const reply = noted.filter(r => r.text.trim())
   if (!reply.length || !claudeCites()) return await done()
   // a reply checked now in every mode that cites: the answer of the tour's cite step
-  const later = choiceOf('citations') !== 'auto cite + verify' && !(checks && (await checks(reply[reply.length - 1]!.row)))
+  const later = choiceOf('citations') !== 'auto + verify' && !(checks && (await checks(reply[reply.length - 1]!.row)))
   const items = itemsOf(reply, later)
   if (!items.length) return await done()
   const now = Number(await $.clock.now())
@@ -844,7 +844,7 @@ async function startAgain($: Engine, a: Again, hold: RepairHold): Promise<void> 
  *  thread's turn.complete hook, as startCheck. */
 export async function checkAnswer($: Engine, a: { row: string; text: string; turnId: string; agentId: string; about: string; reason: string }): Promise<void> {
   if (!claudeCites() || (await replyOf($, a.row))) return
-  const later = choiceOf('citations') !== 'auto cite + verify'
+  const later = choiceOf('citations') !== 'auto + verify'
   const items = itemsOf([{ row: a.row, text: a.text }], later)
   if (!items.length) return
   const now = Number(await $.clock.now())
@@ -939,7 +939,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
   }
 }
 
-/** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto cite`, or words the person asked about with c): its check,
+/** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto`, or words the person asked about with c): its check,
  *  one fork for it alone, as a reply's check is made. Call it inside the hook of the press or key that opened it (the
  *  spawn is its first call). Nothing for a citation that is checked, or whose check runs; for a failed one, while a
  *  refusal no OK answers stands, its line again (sayRefusing). */

@@ -31,7 +31,7 @@
 //             thimble puts CITE_QUESTION in the prompt box when the box is empty (askCite), and the step says to press
 //             Enter; where the box did not take it, the step names the question in bold for the person to type. That
 //             turn is a normal turn: Claude cites its numbers as the setting Citations asks, and the checker checks
-//             them as the turn ends, in `auto cite` too (tourCites, marks/checker.ts startCheck), so the person
+//             them as the turn ends, in `auto` too (tourCites, marks/checker.ts startCheck), so the person
 //             watches them turn while they are checked and land checked. Claude that restates the sample answer often
 //             cites the wrong 7 again, and the check corrects it; Claude that reads the file writes 4, and the check
 //             verifies it. The step row moves under that answer as under any reply (turnEnded) and says that the
@@ -49,7 +49,7 @@
 // Citations come last, and the tour introduces them: by then the person knows the answer, so they ask Claude for one
 // that cites its numbers, or in manual cite the wrong number themselves, and watch thimble check them. The step that
 // waits is the first one not done whose feature is on: e needs a selection, which only a click reaches (bar/intro.ts
-// clicksReach); cite needs Claude's citations (Citations auto cite + verify or auto cite: settings/features.mjs
+// clicksReach); cite needs Claude's citations (Citations auto + verify or auto: settings/features.mjs
 // claudeCites), or in manual a selection, as e. Where no cite step can run, the intro does not say that a number is
 // wrong, since nothing checks it. Claude Code's types ask no hook of $.prompt.fill, as they do of the moves of a row:
 // it answers isFilled false only under a dialog or where no box is drawn. So the box is filled when the step starts,
@@ -236,7 +236,7 @@ export function stepDone(s: Step, missed: boolean, checked: Checked | null = nul
 }
 
 /** Whether a step's feature is on now. Step e needs a selection, which only a click reaches. Step cite, which
- *  introduces citations, needs Claude's (Citations auto cite + verify or auto cite), or in manual a selection, as e,
+ *  introduces citations, needs Claude's (Citations auto + verify or auto), or in manual a selection, as e,
  *  since the person cites the words with c; with Citations off there is none. */
 function stepOn(s: Step, clicks: boolean): boolean {
   if (s === 'answer') return true

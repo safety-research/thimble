@@ -6,7 +6,7 @@
 // they shimmer in the sample answer, a band that moves at each tick of its own and stops with the step. The sample
 // answer has no citations. As the cite step starts, thimble puts its question in an empty prompt box (else the step
 // names it); the person sends it, Claude's answer cites its numbers, the checker checks them as the turn ends (in
-// auto cite too), and once every citation has its result the step is done, with what the check did, and the view goes
+// auto too), and once every citation has its result the step is done, with what the check did, and the view goes
 // to the step row; an answer that cites nothing ends the step too. With Citations manual, Claude cites nothing: the cite
 // step names the wrong number, which shimmers until the person cites it with c, puts nothing in the prompt box, and is
 // done once the person's citation has its result; where no click reaches thimble, or with Citations off, there is no
@@ -216,7 +216,7 @@ test('the shimmer is the words in thimble\'s color with a brighter band that ent
 })
 
 test('as the cite step starts, thimble puts its question in an empty prompt box, and the step says to press Enter; a box with words in it, or one that takes nothing, keeps them, and the step names the question to type', async () => {
-  setOptions({ citations: 'auto cite + verify' })
+  setOptions({ citations: 'auto + verify' })
   noteViewport({ isFullscreen: true })
   const cite = (t: Any) => textOf(stepRowEl(els, t, true, 100))
   const a = fake()
@@ -256,7 +256,7 @@ test('as the cite step starts, thimble puts its question in an empty prompt box,
 })
 
 test('the cite step is done once each citation of its answer has its result, none waiting or checked, or once that answer\'s turn ended with none; DONE_MS later the view goes to the step row', async () => {
-  setOptions({ citations: 'auto cite + verify' })
+  setOptions({ citations: 'auto + verify' })
   noteViewport({ isFullscreen: true })
   const { $, timers, tick } = fake()
   const scrolls: Any[] = []
@@ -420,8 +420,8 @@ function checking() {
   return { $, spawned, timers }
 }
 
-test("the cite step's answer is checked as its turn ends, with Citations auto cite too: the wrong number it repeats lands corrected, and the step is done with what the check did; another answer's citations wait to be opened", async () => {
-  setOptions({ citations: 'auto cite', cards: 'off', explain: 'off', squeezeAnswers: false })
+test("the cite step's answer is checked as its turn ends, with Citations auto too: the wrong number it repeats lands corrected, and the step is done with what the check did; another answer's citations wait to be opened", async () => {
+  setOptions({ citations: 'auto', cards: 'off', explain: 'off', squeezeAnswers: false })
   noteViewport({ isFullscreen: true })
   try {
     const { $, spawned } = checking()
@@ -431,7 +431,7 @@ test("the cite step's answer is checked as its turn ends, with Citations auto ci
     await $.state.set({ plugin: 'thimble', key: 'tour' }, { ...(await tourNow($)), sample: 'row-sample' })
     await tourDid($, 'answer')
     expect((await tourNow($))?.at).toBe('cite')
-    // an answer of another turn's: with auto cite its citations wait to be opened
+    // an answer of another turn's: with auto its citations wait to be opened
     await noteRow($, 'row-other', 'There were [36 orders](#).')
     await startCheck($, { turnId: 't2', reason: 'answer' }, row => tourCites($, row))
     expect(spawned).toEqual([])
@@ -461,7 +461,7 @@ test("the cite step's answer is checked as its turn ends, with Citations auto ci
 })
 
 test('the plugin reloads while the cite step\'s check runs, and its fork is gone: each citation gives up, which is its result, and the step is done', async () => {
-  setOptions({ citations: 'auto cite + verify', cards: 'off', explain: 'off', squeezeAnswers: false })
+  setOptions({ citations: 'auto + verify', cards: 'off', explain: 'off', squeezeAnswers: false })
   noteViewport({ isFullscreen: true })
   try {
     const { $ } = checking()
@@ -497,7 +497,7 @@ const nodes = (n: Any, out: Any[] = []): Any[] => {
 }
 
 test('the step row counts the steps it shows, names the words of e in bold and its keys in color, introduces citations last, and counts what the check did', () => {
-  setOptions({ citations: 'auto cite + verify' })
+  setOptions({ citations: 'auto + verify' })
   const at = (step: Any, done: Any[], o: Partial<TourState> = {}): TourState => ({ at: step, done, missed: [], startedAt: 0, k: 1, intro: null, sample: 'row-sample', moved: null, ...o })
   const row = (t: TourState, clicks = true) => stepRowEl(els, t, clicks, 100)
   // e waits: its words bold, in the default color; its key in thimble's color; the line itself not bold
@@ -723,7 +723,7 @@ function citesIn(drawn: Any): number {
   }
   return new Set(all(drawn).filter(n => n.type === 'Button' && /^citation \d/.test(String(n.props?.label ?? ''))).map(n => n.props.label)).size
 }
-const CITE_ONLY = { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'auto cite + verify' } }
+const CITE_ONLY = { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'auto + verify' } }
 const drawnAnswer = ($: Any, id: string, text: string) => $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: id, viewport: { columns: 100, rows: 60, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
 
 test('in a session: the sample answer cites nothing and starts no check; the cite step puts its question in the prompt box; Claude\'s answer to it is checked as the turn ends, and the step row moves under it', CITE_ONLY, async ($, on) => {
@@ -750,7 +750,7 @@ test('in a session: the sample answer cites nothing and starts no check; the cit
   expect(await t.row('tour-step-2')).toContain('› thimble is checking each number Claude cited against the data.')
 })
 
-test('in a session: with Citations auto cite, the cite step\'s answer is checked as its turn ends too', { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'auto cite' } }, async ($, on) => {
+test('in a session: with Citations auto, the cite step\'s answer is checked as its turn ends too', { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'auto' } }, async ($, on) => {
   noteViewport({ isFullscreen: true })
   const t = await session($, on)
   await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
@@ -759,7 +759,7 @@ test('in a session: with Citations auto cite, the cite step\'s answer is checked
   await t.ask(CITE_QUESTION)
   await t.turn('t2', CITE_QUESTION, CITED)
   expect(t.spawns.map(e => e.description)).toEqual(['checking citations'])
-  // a later answer is no answer of the step's: its citations wait to be opened, as with auto cite
+  // a later answer is no answer of the step's: its citations wait to be opened, as with auto
   await t.ask('And the late ones?')
   await t.turn('t3', 'And the late ones?', '[6 orders](#) arrived late.')
   expect(t.spawns.length).toBe(1)

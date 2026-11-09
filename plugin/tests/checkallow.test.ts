@@ -169,7 +169,7 @@ async function checkThatReads($: Any, call: Any, read: Any): Promise<void> {
 }
 
 test("a check that could not read a file, which Claude Code refused asking nobody: each citation it leaves failed names the file, none is repaired by itself, and x's OK for it makes thimble answer allow on its checks' reads of that file, and of nothing else", async () => {
-  setOptions({ citations: 'auto cite + verify' })
+  setOptions({ citations: 'auto + verify' })
   try {
     const { $, spawned } = engine(() => null, FIRST_THREE)
     const call = hooksOn($)
@@ -260,7 +260,7 @@ const DONT_ASK_LINE = "Claude Code's don't ask mode refused thimble's check of c
 const settle = () => new Promise(r => setTimeout(r, 5))
 
 test("where don't ask mode refuses the check's Python and not its fork, the citations the check could not judge wait, not checked, and none is repaired by itself; one line says what refused it and offers g, which gives the OK and starts their check again, whose Python thimble then answers allow; a later reply's check runs with no line", async () => {
-  setOptions({ citations: 'auto cite + verify' })
+  setOptions({ citations: 'auto + verify' })
   try {
     // the validator: the check could not confirm marks 1 and 2, found 3 wrong, and verified 4 and 5
     const { $, spawned } = engine(() => null, marks => marks.map(m => (m.n <= 2
@@ -314,13 +314,13 @@ test("where don't ask mode refuses the check's Python and not its fork, the cita
 /** The validator's results: the check could confirm none of the marks. */
 const NONE_CONFIRMED = (marks: Any[]) => marks.map(m => ({ n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: 'No output shows it.' }))
 
-test("the answer of the tour's cite step is checked after its turn in auto cite too; where don't ask mode refuses that check's Python, its citations wait, and g checks them again", async () => {
-  setOptions({ citations: 'auto cite' })
+test("the answer of the tour's cite step is checked after its turn in auto too; where don't ask mode refuses that check's Python, its citations wait, and g checks them again", async () => {
+  setOptions({ citations: 'auto' })
   try {
     const { $, spawned } = engine(() => null, NONE_CONFIRMED)
     const call = hooksOn($)
     const statuses = async (row: string) => (await rowMarks($, row))!.items.map(m => m.status)
-    // the tour names the answer of its cite step (tour/tour.ts tourCites); a reply it does not name waits, as in auto cite
+    // the tour names the answer of its cite step (tour/tour.ts tourCites); a reply it does not name waits, as in auto
     const cites = async (row: string) => row === 'row-2'
     await noteRow($, 'row-1', REPLY)
     await startCheck($, { turnId: 't-1', reason: 'answer' }, cites)
@@ -346,8 +346,8 @@ test("the answer of the tour's cite step is checked after its turn in auto cite 
   }
 })
 
-test("a citation opened in auto cite, whose check's Python don't ask mode refused: it waits, and g checks it again with the words its prompt ended with, since it may stand in an earlier reply than the last", async () => {
-  setOptions({ citations: 'auto cite' })
+test("a citation opened in auto, whose check's Python don't ask mode refused: it waits, and g checks it again with the words its prompt ended with, since it may stand in an earlier reply than the last", async () => {
+  setOptions({ citations: 'auto' })
   try {
     const { $, spawned } = engine(() => null, NONE_CONFIRMED)
     const call = hooksOn($)

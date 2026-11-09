@@ -27,7 +27,7 @@ function all(n: Any, out: Any[] = []): Any[] {
   return out
 }
 // these tests read the citations Claude wrote, as the auto modes draw them
-const CITES = { options: { citations: 'auto cite + verify' } }
+const CITES = { options: { citations: 'auto + verify' } }
 
 const TEXT = 'Of the runs, [12 of 40](#) failed on the p95 check.'
 const view = { columns: 100, rows: 40, isFullscreen: true }

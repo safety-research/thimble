@@ -64,7 +64,7 @@ async function thimbleText($: Any, w: World): Promise<string> {
   return carried[0]
 }
 
-test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", { options: { citations: 'auto cite' } }, async ($, on) => {
+test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", { options: { citations: 'auto' } }, async ($, on) => {
   const w = world(on)
   expect(await thimbleText($, w)).toBe(GUIDANCE.trim())
   expect(await ask($, w, 'And why?')).toEqual([])
@@ -75,7 +75,7 @@ test("the first prompt carries guidance.md's text beside it, the next prompts do
   expect(await ask($, w, 'Show me one.')).toEqual([])
 })
 
-test('only the newest copy counts: an older copy holds the text (Cards on demand), a newer one says cards are off, so with Cards auto the next prompt carries the text again, once', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('only the newest copy counts: an older copy holds the text (Cards on demand), a newer one says cards are off, so with Cards auto the next prompt carries the text again, once', { options: { citations: 'auto' } }, async ($, on) => {
   const w = world(on)
   const asked = (text: string, context: string) => ({ role: 'user', content: [{ type: 'text', text }, { type: 'text', text: `<system-reminder>\nprompt.submit hook additional context: ${context}\n</system-reminder>` }] })
   const answer = { role: 'assistant', content: [{ type: 'text', text: 'A made-up answer.' }] }
