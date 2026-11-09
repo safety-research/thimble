@@ -94,7 +94,7 @@ async function ask($: Any, w: Any): Promise<string> {
 /** The checks of citations thimble started: its forks by their description, as a host lists them. */
 const checks = (w: Any) => w.spawns.filter((s: Any) => s.description === 'checking citations')
 
-test("in an SDK host's session, Citations and Cards act as off: the guidance has no Citing claims or Cards section and its examples' citations read as plain words, no card tool is registered, and no check starts after a reply", { options: { citations: 'auto cite + verify', cards: 'auto' } }, async ($, on) => {
+test("in an SDK host's session, Citations and Cards act as off: the guidance has no Citing claims or Cards section and its examples' citations read as plain words, no card tool is registered, and no check starts after a reply", { options: { citations: 'auto + verify', cards: 'auto' } }, async ($, on) => {
   const w = await session($, on, SDK)
   expect(w.tools).not.toContain('card')
   const guidance = await ask($, w)

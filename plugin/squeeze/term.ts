@@ -288,7 +288,7 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const answer: Answer | null = await answerCards($, rec).catch(() => null)
   const req = request(probe, {
     system, toolkit: answer?.guide ?? '', question, keep, terms: terms.slice(0, 8), cards: answer?.cards ?? [], asked: read.asked,
-    // Simplify's words on citing, while Claude cites its own claims (Citations auto cite + verify, or auto cite); in
+    // Simplify's words on citing, while Claude cites its own claims (Citations auto + verify, or auto); in
     // manual and off, a version keeps the analyst's citations, which the request names
     cites: claudeCites(),
     // a request that shows the cards asks for more thought: whether a card changes, and its view, if one does

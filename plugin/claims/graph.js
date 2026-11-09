@@ -490,7 +490,7 @@ function layOf(claims, groups, edges, W, h, cols) {
 // tray's header and the evidence pane say it): the sign and word, its tone. Two outcomes: verified (`✓ verified`; one
 // the check corrected `✓ corrected`, or `✓ repaired` after x, with what it was under it), and failed (the check could
 // not confirm it, or did not run); and the states before an outcome: checking, and `? not checked` for one that waits
-// until the person opens it (the setting Citations, auto cite or manual), which x checks. A drawing here has no turning
+// until the person opens it (the setting Citations, auto or manual), which x checks. A drawing here has no turning
 // glyph, so checking stands alone. A citation no longer in the session says so
 const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
 const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)

@@ -316,7 +316,7 @@ export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
 export const isSimplify = rec => isCatchUp(rec) && rec.catchup.kind === 'simplify'
 
 /** How squeeze.md's principle on citations starts: what a citation is, and that a version keeps each one on its words.
- *  While Claude cites its claims (Citations auto cite + verify, or auto cite), the text has it. In manual and off,
+ *  While Claude cites its claims (Citations auto + verify, or auto), the text has it. In manual and off,
  *  Claude cites nothing on its own, and the principle is left out, as main's Citing claims is (guidance/guidance.ts):
  *  with it, a version of an answer that cites nothing cited words of its own, most often the answer's main numbers and
  *  the terms of its explainers. The request names the analyst's citations instead (ASKED_HEAD). */

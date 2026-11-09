@@ -47,7 +47,7 @@ const NO_VERDICT_OUTSIDE = `${NO_VERDICT} Outside auto mode, thimble can check t
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
 const view = { columns: 100, rows: 40, isFullscreen: true }
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} }, viewport: view } as never
-const OPTIONS = { options: { citations: 'auto cite + verify', cards: false, labels: false, coverage: false }, timeoutMs: 30000 }
+const OPTIONS = { options: { citations: 'auto + verify', cards: false, labels: false, coverage: false }, timeoutMs: 30000 }
 /** A key at the empty prompt, as Claude Code's composer sends it. */
 const key = (k: string, text = '') => ({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: text.length, start: text.length, end: text.length, inputText: k }) as never
 

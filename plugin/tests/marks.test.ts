@@ -18,9 +18,9 @@ import { test } from './kit'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-// these tests check each reply's citations after the reply (Citations: auto cite + verify); the tests of the other modes
+// these tests check each reply's citations after the reply (Citations: auto + verify); the tests of the other modes
 // set their own
-setOptions({ citations: 'auto cite + verify' })
+setOptions({ citations: 'auto + verify' })
 
 const FORK = 'a0f0e0d0c0b0a0901'
 const REPLY = 'Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it"](#).'

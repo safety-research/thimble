@@ -1,6 +1,6 @@
-// The model the checker of the citations runs on (the setting Checker, marks/register.ts): each request of a checker
-// fork's turn names the model the setting names, by its id (core/models.js); main's requests and another fork's never
-// change. All data is made up. `claude plugin test plugin`.
+// The model the checker of the citations runs on (the setting Verifier model, marks/register.ts): each request of a
+// checker fork's turn names the model the setting names, by its id (core/models.js); main's requests and another
+// fork's never change. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { spawnFork } from '../core/forks'
@@ -46,7 +46,7 @@ async function setup() {
   return { sent, checker, designer }
 }
 
-test("with Checker Haiku 5.5, each request of the checker's turn names Haiku's id; main's and the designer's keep their model", async () => {
+test("with Verifier model Haiku 5.5, each request of the checker's turn names Haiku's id; main's and the designer's keep their model", async () => {
   const { sent, checker, designer } = await setup()
   setOptions({ checkerModel: 'Haiku 5.5' })
   try {

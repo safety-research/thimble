@@ -11,17 +11,40 @@
   "userConfig": {
     "minimal": {
       "type": "boolean",
-      "title": "Minimal",
-      "description": "In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Simplify, Catch-up, Claims, Labels and Coverage are off.",
+      "title": "Minimal mode",
+      "description": "Plain answers; cards only when you ask; the rest off.",
       "default": false
+    },
+    "cards": {
+      "type": "string",
+      "title": "Cards",
+      "description": "auto: Claude draws charts and tables of your data. on demand: Claude draws a card only when you ask for one. Press v for the last answer. off: no cards.",
+      "options": [
+        "auto",
+        "on demand",
+        "off"
+      ],
+      "default": "auto"
+    },
+    "squeezeAnswers": {
+      "type": "boolean",
+      "title": "Simplify",
+      "description": "A shorter, plainer version of the last answer.",
+      "default": true
+    },
+    "catchUp": {
+      "type": "boolean",
+      "title": "Catch-up",
+      "description": "One note on the replies that came in while you were away.",
+      "default": true
     },
     "citations": {
       "type": "string",
       "title": "Citations",
-      "description": "auto cite + verify: Claude cites what each answer rests on, and a second Claude verifies each citation after each answer. auto cite: Claude cites, and a citation is verified when you open it, which spends fewer tokens. manual: select words and press c to cite them. off: no citations.",
+      "description": "auto + verify: Claude cites what each answer rests on. The verifier checks every citation after each answer. auto: Claude cites what each answer rests on. The verifier checks a citation when you open it. manual: select words and press c. The verifier checks them against your files. off: no citations.",
       "options": [
-        "auto cite + verify",
-        "auto cite",
+        "auto + verify",
+        "auto",
         "manual",
         "off"
       ],
@@ -29,8 +52,8 @@
     },
     "checkerModel": {
       "type": "string",
-      "title": "Checker",
-      "description": "The model of the second Claude that checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.1: that model, which reads the conversation without the cache of the conversation's model.",
+      "title": "Verifier model",
+      "description": "The model of the verifier, which checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.1: that model, which reads the conversation without the cache of the conversation's model.",
       "options": [
         "same as Claude",
         "Haiku 5.5",
@@ -42,8 +65,8 @@
     },
     "checkerEffort": {
       "type": "string",
-      "title": "Effort",
-      "description": "How hard the second Claude that checks citations thinks. same as Claude: the effort of the conversation. low, medium, high, xhigh or max: that effort, of the levels Claude Code offers for the model Checker names.",
+      "title": "Verifier effort",
+      "description": "How hard the verifier thinks. same as Claude: the effort of the conversation. low, medium, high, xhigh or max: that effort, of the levels Claude Code offers for the verifier's model.",
       "options": [
         "same as Claude",
         "low",
@@ -54,33 +77,10 @@
       ],
       "default": "same as Claude"
     },
-    "cards": {
-      "type": "string",
-      "title": "Cards",
-      "description": "auto: Claude draws charts and tables as cards in its answers. on demand: Claude draws a card only when you ask for one. Press v to visualize the last answer. off: no cards.",
-      "options": [
-        "auto",
-        "on demand",
-        "off"
-      ],
-      "default": "auto"
-    },
-    "squeezeAnswers": {
-      "type": "boolean",
-      "title": "Simplify",
-      "description": "Press s for a shorter, plainer version of the last answer, below it. Under it, press 1 for shorter, 2 for longer, 3 to explain more, 4 to assume more, or 0 to hide it. One call each time you ask.",
-      "default": true
-    },
-    "catchUp": {
-      "type": "boolean",
-      "title": "Catch-up",
-      "description": "Press b to sum up the replies that came in while you were away, in one short note. Press 0 to see the replies again. One call each time you ask.",
-      "default": true
-    },
     "explain": {
       "type": "string",
       "title": "Explainers",
-      "description": "auto: terms you may not know get a short explainer after each answer, a small part of the call after it; ] opens each one. Select words and press e for one. on demand: select words and press e for a short explainer. off: no explainers.",
+      "description": "auto: short notes on terms you may not know. on demand: select words and press e for a short note. off: no explainers.",
       "options": [
         "auto",
         "on demand",
@@ -91,17 +91,23 @@
     "details": {
       "type": "string",
       "title": "Heads-ups",
-      "description": "auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. off: no heads-ups.",
+      "description": "auto: notes on details that may mislead. off: no heads-ups.",
       "options": [
         "auto",
         "off"
       ],
       "default": "auto"
     },
+    "labels": {
+      "type": "boolean",
+      "title": "Labels",
+      "description": "The labels Claude made, with their values and records. off: no Labels pane, and Claude makes no labels.",
+      "default": true
+    },
     "claimsMode": {
       "type": "string",
       "title": "Claims",
-      "description": "Press w to see the conversation's claims. auto: thimble pulls them out of each answer in the background, which uses tokens. on demand: only when you press f in the pane. off: no Claims pane.",
+      "description": "auto: everything the session concluded. on demand: everything the session concluded, when you press f in the pane. off: no Claims pane.",
       "options": [
         "auto",
         "on demand",
@@ -109,16 +115,10 @@
       ],
       "default": "off"
     },
-    "labels": {
-      "type": "boolean",
-      "title": "Labels",
-      "description": "Press l to see the labels Claude made, with their values and records. No model call. off: no Labels pane, and Claude makes no labels.",
-      "default": true
-    },
     "coverage": {
       "type": "boolean",
       "title": "Coverage",
-      "description": "Press r to see which files Claude has read, by folder. No model call: thimble counts the files after each turn.",
+      "description": "Which files Claude has read.",
       "default": false
     }
   }

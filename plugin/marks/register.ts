@@ -21,7 +21,7 @@
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
 //                    Claude Code refused is noted as it ends (checker.ts readEnded), and so is its Python that don't
 //                    ask mode refused (checker.ts pythonEnded)
-//   turn.step        the checker's requests: the model and the effort the setting Checker names
+//   turn.step        the checker's requests: the model and the effort that Verifier model and Verifier effort name
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
@@ -222,10 +222,11 @@ export const registerMarks: Register = on => {
     return no ? { deny: no } : next(e)
   })
 
-  // the checker's requests on the model the setting Checker names, at the effort its Effort names (settings/features.mjs
-  // checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its spawn takes no other, so
-  // each request of a checker's turn names them. Unset, the requests go as they are; so do they on Bedrock, Vertex or
-  // Foundry, which do not take the first-party ids Checker names (settings/term.ts firstPartyApi), whatever it holds
+  // the checker's requests on the model the setting Verifier model names, at the effort Verifier effort names
+  // (settings/features.mjs checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its
+  // spawn takes no other, so each request of a checker's turn names them. Unset, the requests go as they are; so do
+  // they on Bedrock, Vertex or Foundry, which do not take the first-party ids Verifier model names (settings/term.ts
+  // firstPartyApi), whatever it holds
   on('turn.step', { agentId: /./ }, async function* ($, e, next) {
     const checker = forkOf(e.agentId)?.kind === 'checker'
     const model = checker ? checkerModel() : null

@@ -95,7 +95,7 @@ export const registerBar: Register = on => {
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
     try {
-      await $.command.register({ name: 'thimble-settings', description: "thimble's settings: citations and their checker, cards, rewrites, comments and panes", immediate: true })
+      await $.command.register({ name: 'thimble-settings', description: "thimble's settings: cards, simplify, catch-up, citations and their verifier, explainers, heads-ups and panes", immediate: true })
     } catch {
       // a click on `thimble` in the bar still opens them
     }

@@ -9,7 +9,7 @@
 // key does nothing; a letter right after a choice undoes it, and a click on a choice does what its key does; there is
 // no + choice and no /rewrite; a simpler version kept before very short was added keeps its levels; with Citations
 // manual, the words the analyst cited with c are citations of the original a simpler version is written from, and a
-// version that keeps them shows no warning; with Citations auto cite, a version that changes a cited value says so.
+// version that keeps them shows no warning; with Citations auto, a version that changes a cited value says so.
 // All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
@@ -115,7 +115,7 @@ const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key chang
 const SHORT = 'The build failed on [3 of 12](#) runs: the cache key changed.'
 const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · 0 hide'
 
-test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 hides it with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 hides it with no call', { options: { citations: 'auto' } }, async ($, on) => {
   const t = await setup($, on, [SHORT, 'The build failed on [3 of 12](#) runs, because the cache key changed when the lockfile moved, in more words.'])
   await t.turn('t1', LONG)
   expect(await t.bar()).toContain('s simplify')
@@ -186,7 +186,7 @@ function simplifyWords(n: Any): Any {
   return null
 }
 
-test('s simplify stands right after v visualize; pressed, it stays on the bar, lit, while the first version is on its way, and goes once that version shows with its row', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('s simplify stands right after v visualize; pressed, it stays on the bar, lit, while the first version is on its way, and goes once that version shows with its row', { options: { citations: 'auto' } }, async ($, on) => {
   let give: (text: string) => void = () => {}
   const t = await setup($, on, [new Promise<string>(r => { give = r })])
   await t.turn('t1', LONG)
@@ -464,7 +464,7 @@ test("with Citations manual, the words the analyst cited with c are citations of
   expect(host).not.toContain('! this version')
 })
 
-test("with Citations auto cite, Simplify keeps its words on citing, each new number cited, and a version that changes a value the original cites says so under it", { options: { citations: 'auto cite' } }, async ($, on) => {
+test("with Citations auto, Simplify keeps its words on citing, each new number cited, and a version that changes a value the original cites says so under it", { options: { citations: 'auto' } }, async ($, on) => {
   const cited = 'The nightly build failed on [26 runs](#) over 36 nights. The cache key changed when the lockfile moved, so every run fetched again.'
   const t = await setup($, on, ['The build failed on [36 runs](#), because the cache key changed.'])
   await t.turn('t1', cited)

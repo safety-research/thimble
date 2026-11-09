@@ -492,7 +492,7 @@ async function reveal($: Engine, at: { row: string; card?: string }): Promise<vo
 
 /** Open the tray on a mark (a press on it, ] and [). */
 export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}): Promise<void> {
-  // a citation that waits to be checked until it is opened (Citations auto cite, or words asked about with c) starts
+  // a citation that waits to be checked until it is opened (Citations auto, or words asked about with c) starts
   // its check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
   await setTray($, open(f) as Tray)
