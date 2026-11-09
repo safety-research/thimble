@@ -4,6 +4,7 @@
 // Labels sidebar and Color by menu; all but the views step's are marked Example); a step that asks the analyst to act
 // acts only on that example, so nothing reaches the server.
 import { placeBeside } from '../components/Menu'
+import { askKeyLabel, isMacPlatform } from '../lib/platform'
 import { TIP_DELAY_MS } from '../components/Tooltip'
 import { fitChips } from '../files/ColorBy'
 import { shownIn } from '../files/Reader'
@@ -19,7 +20,7 @@ const chatSel = '.chat[data-panel="chat"]'
 
 // ---------- the chat: an example exchange in main's chat. The answer's three times are citations, drawn as
 // marks/Mark.tsx draws them (examples.json, drawn by that component): first checking, then
-// checked, the last one failed with its ×, and the line under the answer that counts it. On the next step Explainers'
+// checked, each one confirmed, so no line under the answer counts any. On the next step Explainers'
 // comment tints "UK time" (chatExplained), and its comment card opens beside the chat (chatComment).
 const QUESTION = 'When did payments 4.12.0 go out, and was it still live when INC-312 opened?'
 const chatHtml = `<div class="chat-flow" style="min-height:0">
@@ -38,9 +39,6 @@ const showAnswer = (api: Api, state: AnswerState, flow = api.els.flow as HTMLEle
   const text = reply.querySelector<HTMLElement>('.chat-text')!
   text.replaceChildren(...api.snap(state).childNodes)
   text.querySelectorAll('.mark').forEach((m, k) => m.setAttribute('data-tour-ref', `chat:${k}`))
-  reply.querySelector('.marks-foot')?.remove()
-  // the line under the answer once its check settled: how many citations it could not confirm
-  if (state !== 'chatChecking') reply.append(...api.snap('chatFoot').childNodes)
 }
 /** The answer's citations, in order. */
 const answerMarks = (api: Api) => [...((api.els.flow as HTMLElement | undefined)?.querySelectorAll<HTMLElement>('.chat-assistant .mark') ?? [])]
@@ -152,6 +150,24 @@ const statusExample = (api: Api, meta: string) => {
     // the strip's glass over the ground of the panel beneath it, as thimble draws it
     const ground = api.groundOf(el.parentElement)
     Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px`, background: ground, borderRadius: getComputedStyle(el).borderRadius })
+  }
+  return { wrap, layout }
+}
+
+// the file browser's tree as the example folder has it (captured, agent-05.jsonl open), over thimble's own, which lists
+// the analyst's files
+const treeExample = (api: Api) => {
+  const real = () => api.q('[data-panel="files"] .files-side')
+  const wrap = api.snap('filesTree', 'tour-ex-tree')
+  const side = wrap.firstElementChild as HTMLElement
+  Object.assign(side.style, { width: '100%', height: '100%' })
+  const layout = () => {
+    const el = real()
+    const T = api.rectOf(el)
+    // a narrow Files panel hides thimble's tree, and the example's with it
+    wrap.style.display = T ? '' : 'none'
+    if (!T || !el) return
+    Object.assign(wrap.style, { left: `${T.x}px`, top: `${T.y}px`, width: `${T.width}px`, height: `${T.height}px`, background: api.groundOf(el) })
   }
   return { wrap, layout }
 }
@@ -365,12 +381,13 @@ function placeTag(rd: HTMLElement, tag: HTMLElement): void {
 }
 
 /** The colors of the example transcript (`reader`, as captured, colored), which `plain` takes off as Color by Off does
- * and `color` puts back: the records' bars, tints and names, the strip's lane, and Color by's value, source and chips. */
+ * and `color` puts back: the records' bars, tints and names, the strip's lane, and Color by's value, label icon and chips. */
 function txColors(reader: HTMLElement) {
   const colorBy = reader.querySelector<HTMLElement>('.colorby')
   const name = colorBy?.querySelector('.colorby-trigger b')
   const said = name?.textContent ?? ''
-  const parts = [...(colorBy?.querySelectorAll<HTMLElement>(':scope > .colorby-src, :scope > .colorby-chips') ?? [])]
+  const icon = colorBy?.querySelector('.colorby-trigger .colorby-name-ico')
+  const parts = [...(colorBy?.querySelectorAll<HTMLElement>(':scope > .colorby-chips') ?? [])]
   const lane = reader.querySelector<HTMLElement>('.tour-strip-lane')
   const track = lane?.parentElement
   const records = [...reader.querySelectorAll<HTMLElement>('.reader-record')].map((el) => ({
@@ -382,6 +399,7 @@ function txColors(reader: HTMLElement) {
   return {
     plain() {
       if (name) name.textContent = 'Off'
+      icon?.remove()
       parts.forEach((e) => e.remove())
       lane?.remove()
       for (const r of records) {
@@ -392,6 +410,7 @@ function txColors(reader: HTMLElement) {
     },
     color() {
       if (name) name.textContent = said
+      if (icon) name?.before(icon)
       colorBy?.append(...parts)
       if (lane && track) track.prepend(lane)
       for (const r of records) {
@@ -453,7 +472,8 @@ const txExample = (api: Api): Example => {
   const side = sideExample(api, 'labels')
   let putBack: (() => void) | null = null
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
-  api.ex.append(rd, status.wrap)
+  const tree = treeExample(api)
+  api.ex.append(tree.wrap, rd, status.wrap)
   const els = {
     reader: rd,
     trigger: reader.querySelector<HTMLElement>('.colorby .colorby-trigger'),
@@ -491,6 +511,7 @@ const txExample = (api: Api): Example => {
     setTo: number | null = null
   const layout = () => {
     status.layout()
+    tree.layout()
     if (els.labels && !side.layout()) return false
     let r = api.rectOf(realReader())
     if (!r) {
@@ -531,45 +552,6 @@ const txExample = (api: Api): Example => {
     }
   }
   return { els, layout, cleanup: () => els.plain() }
-}
-
-/** The pointer, already shown, rests on the bar of the first record of two values on screen in turn, and each record's
- * label and value show, as thimble's own hover shows them; then it moves off. */
-async function restOnRecords(api: Api): Promise<void> {
-  const body = api.els.reader?.querySelector('.reader-body') as HTMLElement | undefined
-  const B = body && api.rectOf(body)
-  if (!body || !B) return
-  // the first record of each value whose head is on screen, below the bar that stays at the transcript's top
-  const from = api.rectOf(body.querySelector('.reader-viewbar'))
-  const top = from ? from.y + from.height : B.y
-  // its name, under the pointer, stays inside the transcript
-  const room = 72
-  const rows = TIP_DEMO.map((tip) =>
-    [...body.querySelectorAll<HTMLElement>('.reader-record[data-tip]')].find((r) => {
-      const q = r.getBoundingClientRect()
-      return r.dataset.tip === tip && q.top >= top && q.top + room <= B.y + B.height
-    }),
-  )
-    .filter((r): r is HTMLElement => !!r)
-    .slice(0, 2)
-    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
-  const barOf = (row: HTMLElement) => {
-    const q = api.rectOf(row)
-    return q && { x: q.x + 2, y: q.y + Math.min(14, q.height / 2) }
-  }
-  for (const [k, row] of rows.entries()) {
-    api.fx.querySelectorAll('.tip[data-demo]').forEach((t) => t.remove())
-    await api.cursor.move(() => barOf(row), undefined, k ? 650 : 900)
-    // the first name waits its moment; the next, a moment after, shows at once, as thimble's own do
-    if (!k) await api.sleep(TIP_DELAY_MS)
-    const p = barOf(row)
-    if (p) api.showTip(row, p.x, p.y)
-    await api.sleep(2000)
-  }
-  api.fx.querySelectorAll('.tip[data-demo]').forEach((t) => t.remove())
-  const c = api.cursor.pos
-  await api.cursor.move(c.x + 260, c.y - 90, 600)
-  api.cursor.hide()
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
@@ -787,8 +769,8 @@ const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undef
  * Workload Identity Federation or the Claude Code sign-in. */
 const SAID = {
   chat: [
-    'Your chat with Claude',
-    'Ask Claude anything about the files here. Claude cites the numbers it states, and a second Claude checks each one against your files. A red × marks one it could not confirm.',
+    'Your Claude Code session',
+    'Ask Claude anything here. Claude cites its claims and a second agent verifies them.',
   ],
   ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
 }
@@ -802,14 +784,16 @@ export function welcomeTexts(): string[] {
 /** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat
  * column folded (`chat` false) the steps about the chat are left out. */
 export function tourSteps(key: string, chat = true): Step[] {
+  // the shortcuts' key, ⌘ (Ctrl off a Mac), whichever key Settings picks for asking
+  const modKey = askKeyLabel(isMacPlatform(), 'meta')
   const steps: Step[] = [
     {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
       title: SAID.chat[0],
       body: SAID.chat[1],
-      after: 'Hover over a time to see its source.',
+      after: 'Hover over a time to see its citation.',
       chips: onAnswerChip('chatChecked'),
-      // the citations are checked, the last one fails, and the pointer rests on it: its label says why
+      // the citations are checked and each holds; the pointer rests on the last one and its source shows
       demo: async (api) => {
         api.closeSource()
         showAnswer(api, 'chatChecking')
@@ -842,7 +826,7 @@ export function tourSteps(key: string, chat = true): Step[] {
         return [chatContent(api), ...(card ? [card] : [])]
       },
       title: 'Explainers',
-      body: 'Checks also read Claude’s answers. Explainers tints words you may need explained. Click a tint to read its comment.',
+      body: 'Explainers tints words you may need explained. Click a tint to read its comment.',
       chips: onAnswerChip('chatExplained'),
       // the explainer's tint comes on the answer, and a click on it opens its comment, which stays open
       demo: async (api) => {
@@ -873,7 +857,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
       title: 'Files',
-      body: 'The file browser lists the folder’s files. Click one to read it. A transcript shows each step of an agent.',
+      body: 'The file browser lists the folder’s files. thimble provides custom views for agent transcripts.',
     },
     {
       tab: 'files', example: txExample, place: 'left', align: 'end', pad: 0, radius: 12,
@@ -884,15 +868,14 @@ export function tourSteps(key: string, chat = true): Step[] {
       // resting on a record names its label and value, as thimble's own hover does
       tips: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       title: 'Labels',
-      body: 'A label sorts records into values, by a rule or by Claude’s reading. Color by colors the records by one. Labels, at the top, lists them. Open one to see its records and correct them.',
+      body: 'A label is a classifier Claude defines with a regex, code or a prompt. The file browser can color records by a label.',
       // back to Files, the transcript is plain again
       leave: (api) => {
         api.els.plain?.()
         releaseBrowser(api)
       },
-      // Color by picks the label and the records take its colors; the Labels button opens the sidebar that lists it;
-      // then the pointer rests on a record's bar and its label and value show, then on a record of another value. A
-      // demo stopped early leaves the step as it ends: colored, the sidebar open
+      // Color by picks the label and the records take its colors; the Labels button opens the sidebar that lists it, and
+      // the demo ends there. A demo stopped early leaves the step as it ends: colored, the sidebar open
       demo: async (api) => {
         const els = api.els,
           me = api.step()
@@ -925,8 +908,8 @@ export function tourSteps(key: string, chat = true): Step[] {
           await api.sleep(250)
           await api.cursor.click()
           els.showSide()
-          await api.sleep(1200)
-          await restOnRecords(api)
+          await api.sleep(600)
+          api.cursor.hide()
         } finally {
           if (els.step() === me) {
             els.color()
@@ -939,49 +922,20 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Views',
-      body: 'thimble proposes views built for your own files. This one, on the tour’s example data, is a Timeline of every event.',
+      body: 'thimble proposes views built for your own files. This one is a Timeline of every event.',
     },
     {
       tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,
       anchor: (api) => api.els.card,
       title: 'Cards on the Canvas',
-      body: 'Cards help make agents’ work visible, and thimble checks each one. Hover over an underlined value to see its source.',
-      // the analyst's own hover on a value shows its source, as the demo does
-      chips: (api, chip) => {
-        api.stopDemo()
-        api.showSource(chip)
-      },
-      // twice: a pointer rests on the card's 08:04 and its source shows
-      demo: async (api) => {
-        for (let k = 0; k < 2; k++) {
-          const card = api.els.card as HTMLElement
-          const chip = [...card.querySelectorAll('.mark')].find((c) => c.textContent?.trim() === '08:04') || card.querySelector('.mark')
-          const c = chip && api.rectOf(chip)
-          if (!chip || !c) return
-          api.cursor.show(c.x + c.width / 2 + 170, c.y - 90)
-          await api.sleep(450)
-          // the pointer follows the value while it glides, should the card move meanwhile
-          await api.cursor.move(() => {
-            const r = api.rectOf(chip)
-            return r && { x: r.x + r.width / 2, y: r.y + r.height * 0.6 }
-          }, undefined, 950)
-          await api.sleep(300)
-          const src = api.showSource(chip, { demo: true })
-          await api.sleep(2600)
-          await api.cursor.move(c.x + c.width / 2 + 220, c.y - 120, 600)
-          src?.remove()
-          api.cursor.hide()
-          await api.sleep(900)
-        }
-      },
+      body: 'Cards help make agents’ work visible.',
     },
     {
-      tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6, try: true, gateNext: true,
+      tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6, try: true,
       anchor: (api) => api.els.card,
       advanceOn: (api) => api.realBox(),
       title: `${key}-click to ask`,
       body: `Hold <span class="kbd">${key}</span> and click on anything in thimble to chat about it.`,
-      after: 'Now try it yourself: Next unlocks once you have.',
       // once the demo is over, a cue on the card points at an entry to try it on
       cue: (api) => {
         const card = api.els.card as HTMLElement | undefined
@@ -1081,79 +1035,18 @@ export function tourSteps(key: string, chat = true): Step[] {
     {
       // the whole Report surface: its bar (with Export), the cards, and the page
       tab: 'report', example: reportExample, anchor: reportPanel, place: 'left', align: 'start', pad: 0, radius: 12,
-      title: 'The Report',
-      body: 'Your report, with cards as its figures. Write it yourself or ask Claude to revise it. Export it when it is done.',
+      title: 'Report',
+      body: `Write the report yourself or ask Claude to write it. Drag in cards or <span class="kbd">${modKey}+Enter</span> to request one.`,
+      note: 'Reopen this tour with /tour in the chat.',
       scroll: (api) => api.els.page ?? null,
-      // the check is made on the next step: until then the report shows none of its comments, and no Comments sidebar
+      // the report from its top, with none of its comments and no Comments sidebar
       demo: async (api) => {
         api.els.hideSide?.()
         api.els.hideChecks?.()
-      },
-    },
-    {
-      // the Report, the Comments sidebar beside it and the button that opens it
-      tab: 'report', example: reportExample, place: 'left', align: 'start', pad: 0, radius: 12,
-      anchor: (api) => [reportPanel, ...(api.els.side ? [api.els.side, sideButton('comments')] : [])],
-      title: 'Checks',
-      body: 'Checks read Claude’s answers, the cards and the report, and comment on what they find. Comments, at the top, lists the checks and their comments. Press + New check there to add one: say what to look for, in a line.',
-      note: 'Reopen this tour with /tour in the chat.',
-      scroll: (api) => api.els.page ?? null,
-      leave: (api) => api.els.hideSide?.(),
-      // the Comments sidebar opens beside the Report, and its + New check opens a new check, which is named and
-      // described; it runs, its comments sit beside the passages they are about, and it is listed with its comments
-      demo: async (api) => {
-        if (api.els.checksShown) return api.els.showSide()
-        api.els.hideChecks()
-        api.els.showSide()
-        await api.sleep(700)
-        const side = api.els.side as HTMLElement | null
-        const plus = side?.querySelector<HTMLElement>('.lside-add') ?? null
-        const p = api.rectOf(plus)
-        if (!plus || !p) return
-        api.cursor.show(p.x - 180, p.y - 140)
-        await api.sleep(500)
-        await api.cursor.move(p.x + p.width / 2, p.y + p.height / 2, 900)
-        await api.sleep(250)
-        await api.cursor.click()
-        const card = api.snap('checkCard').firstElementChild as HTMLElement
-        card.dataset.demo = '1'
-        card.classList.add('tour-in')
-        api.fx.append(card)
-        // beside the sidebar, at its left, as thimble opens it
-        const aside = api.rectOf(side)
-        const left = (aside ? aside.x : p.x) - card.offsetWidth - 10
-        Object.assign(card.style, { position: 'absolute', left: `${Math.max(12, left)}px`, top: `${Math.max(12, Math.min(innerHeight - card.offsetHeight - 12, p.y - 70))}px` })
-        const name = card.querySelector('input'),
-          text = card.querySelector('textarea'),
-          runBtn = [...card.querySelectorAll('button')].find((b) => /Run/.test(b.textContent ?? ''))
-        await api.sleep(400)
-        if (name) await api.type(name, 'Alternative explanations', 45)
+        const page = api.els.page as HTMLElement | null
+        page?.scrollTo({ top: 0 })
         await api.sleep(300)
-        if (text) await api.type(text, 'Where the report names a cause, look for another explanation the records support.', 30)
-        runBtn?.removeAttribute('disabled')
-        const b = api.rectOf(runBtn)
-        await api.sleep(400)
-        if (b) {
-          await api.cursor.move(b.x + b.width / 2, b.y + b.height / 2, 700)
-          await api.sleep(200)
-          await api.cursor.click()
-        }
-        card.remove()
-        api.cursor.hide()
-        // the check is on: thimble stands the margin at once, empty until the comments come
-        api.els.showMargin()
-        await api.sleep(700)
-        // the check is in the sidebar and its comments appear beside their passages, and stay; then the page goes to the
-        // first
-        api.els.showChecks()
-        const row = api.els.sideRow as HTMLElement | null | undefined
-        if (row) {
-          row.classList.add('anchor-flash')
-          window.setTimeout(() => row.classList.remove('anchor-flash'), 1600)
-        }
-        await api.sleep(1300)
-        scrollTo(api, inReport(api, '.wu-cm'), 220)
-        await api.sleep(1500)
+        page?.scrollTo({ top: 0 })
       },
     },
   ]

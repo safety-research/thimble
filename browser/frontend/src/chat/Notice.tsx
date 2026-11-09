@@ -209,7 +209,7 @@ export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; curre
 }
 
 /** The notices this page made (lib/notices showPageNotice), on the start page, which has no workspace and no chat: a
- * link's sign-in code that was used or expired. */
+ * link whose sign-in key isn't valid anymore. */
 export function PageNoticeStrip() {
   const notices = usePageNotices()
   if (!notices.length) return null

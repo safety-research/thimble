@@ -17,8 +17,8 @@ export function workspaceLabel(row: Pick<WorkspaceRow, 'name' | 'label' | 'folde
   return row.label || row.folder || row.name
 }
 
-/** Where a row of the start page goes: the page at `pathname` with its workspace. It carries no sign-in code: a code
- * works once, and the start page has spent it. Pure. */
+/** Where a row of the start page goes: the page at `pathname` with its workspace. It carries no sign-in key: the start
+ * page signed this browser in already. Pure. */
 export function workspaceHref(row: Pick<WorkspaceRow, 'name'>, pathname = '/'): string {
   return `${pathname}?${new URLSearchParams({ ws: row.name }).toString()}`
 }

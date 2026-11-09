@@ -79,6 +79,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { clicksReach } from '../bar/intro'
+import { failNotice, reasonOf } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { holdAnswers, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import type { Span } from '../core/answerview'
@@ -294,6 +295,24 @@ export async function tourSample($: Engine, row: string | null | undefined): Pro
   return (await tourNow($))?.at === 'answer'
 }
 
+/** Whether `row` is an answer of the tour: its sample answer (tourSample), or its cite step's answer, also after the
+ *  tour ends (while the cite step waits for it, the answer of the turn that ends now). The look leaves both alone
+ *  (observer/observer.ts): the tour shows each feature at its own step, and a heads-up or an explainer of the look
+ *  would cover the cite step's citations. */
+export async function tourAnswer($: Engine, row: string | null | undefined): Promise<boolean> {
+  if (!row) return false
+  if (await tourSample($, row)) return true
+  const t = await stateNow($)
+  if (t?.at === 'cite' && !t.cited) return true
+  for (const x of [t, ...(await pastNow($))]) {
+    if (!x?.cited) continue
+    if (x.cited === row) return true
+    const [a, b] = [await turnOfRow($, row), await turnOfRow($, x.cited)]
+    if (a && b && a.turnId === b.turnId) return true
+  }
+  return false
+}
+
 /** Whether `row` is the answer of the cite step: the cite step waits, and the row is the answer it checks, or a row
  *  of that answer's turn (the checker names a reply by its last row: marks/checker.ts startCheck). Its citations are
  *  checked as its turn ends, in every mode that cites. */
@@ -306,9 +325,9 @@ export async function tourCites($: Engine, row: string | null | undefined): Prom
   return !!a && !!b && a.turnId === b.turnId
 }
 
-/** A row placed at the transcript's end. A failure leaves the tour without it. */
-async function place($: Engine, id: string): Promise<void> {
-  try { await $.ui.place({ id }) } catch { /* the tour goes on without the row */ }
+/** A row placed at the transcript's end: null once placed, else the error. A failure leaves the tour without it. */
+async function place($: Engine, id: string): Promise<unknown> {
+  try { await $.ui.place({ id }); return null } catch (err) { return err ?? 'no reason given' }
 }
 
 /** The tour's changes, one at a time. */
@@ -346,7 +365,10 @@ export function placeIntro($: Engine): Promise<void> {
     const k = t.k + 1
     const intro = `tour-intro-${k}`
     await save($, { ...t, k, intro })
-    await place($, intro)
+    // the intro is the tour's first row: a Claude Code older than 2.1.314 cannot place it (kernel/doctor.py
+    // CLAUDE_CODE_MIN), and an update of thimble does not check Claude Code, so the line says why, with the fix
+    const err = await place($, intro)
+    if (err) failNotice($, `The tour could not draw its intro (${reasonOf(err)}). It needs Claude Code 2.1.314 or later: update it (claude update), then type /thimble:tour again.`)
   })
 }
 

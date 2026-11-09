@@ -105,6 +105,16 @@ test('each step done moves the tour to the next step that is on and not done; th
   expect((await tourNow(c.$))?.missed).toEqual(['v'])
 })
 
+test('on a Claude Code too old to place the tour\'s rows, the line says why its intro is missing, with the fix', async () => {
+  setOptions({})
+  noteViewport({ isFullscreen: true })
+  const { $ } = fake()
+  delete $.ui.place
+  await tourStart($)
+  await placeIntro($)
+  expect((await failLineNow($))?.text).toContain('It needs Claude Code 2.1.314 or later: update it (claude update)')
+})
+
 test('where no click reaches thimble the selection step is left out; a feature that is off is left out', async () => {
   setOptions({})
   noteViewport({ isFullscreen: false })

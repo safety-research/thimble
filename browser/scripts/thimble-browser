@@ -12,6 +12,7 @@
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
+#   thimble-browser --unpair              sign every browser out and change the sign-in link
 #   thimble-browser --setup --how claude-code | --how api-key | --how wif --wif-file F   the same, without asking
 #
 # The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
@@ -43,7 +44,8 @@ while [ $# -gt 0 ]; do
     --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
     --setup) setup=1; shift; setup_args=("$@"); break ;;
-    -h | --help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --unpair) setup=unpair; shift ;;
+    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac
@@ -61,6 +63,9 @@ py="$root/backend/.venv/bin/python"
 
 if [ "$setup" = 1 ]; then
   cd "$root/backend" && exec "$py" -m app.claude_access setup ${setup_args[@]+"${setup_args[@]}"}
+fi
+if [ "$setup" = unpair ]; then
+  cd "$root/backend" && exec "$py" -m app.cli unpair
 fi
 
 # quietly CMD...: runs CMD, and shows what it printed only when it fails (as scripts/install.sh does)
