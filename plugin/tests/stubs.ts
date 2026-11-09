@@ -11,6 +11,9 @@ const STUBS: Record<string, string> = {
   observer: 'OBSERVER\n{{LENSES}}',
   'observer-turn': 'TURN {{MESSAGES}}{{SHOWN}}\nREAD {{COVERAGE}}\nGIVEN {{DIGEST}}{{RULES}}\nREPLY {{SKELETON}}',
   'fix-request': 'REQUEST {{WORDS}}',
+  // the principle on citations (squeeze/chips.mjs CITING) and the slot of each new number cited, which a simpler
+  // version's request keeps or leaves out with the mode of Citations
+  squeeze: 'PROMPT squeeze\n- **Keep every citation on the words it cites.**\n- **Take every number{{CITE_NEW}}.**',
 }
 
 /** The stub text of a registry path (`…/prompts/<text>.md`), or undefined for any other path. */

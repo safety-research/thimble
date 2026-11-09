@@ -16,7 +16,7 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, resetExplain, type ExplainPart } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { trayBar, trayKey, trayNow } from '../tray/tray'
-import { readText, withAsked } from '../marks/message.js'
+import { citedText, readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeBar, citeKey, citeWords } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
@@ -265,8 +265,10 @@ test('with Citations manual, c makes the selected words a citation of their answ
     const item = (await rowMarks(s.$, 't1-row'))!.items[0]!
     expect(item).toMatchObject({ n: 1, row: 't1-row', words: '41 of the 44 failures', asked: true, sentence: expect.stringContaining('[41 of the 44 failures]') })
     expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
-    // the answer reads the words as a citation; squeeze and the claims read them as plain words
+    // the answer reads the words as a citation, and so does the original a simpler version keeps the citations of;
+    // the claims read them as plain words
     expect(withAsked(plain, [item]).text).toContain('out: [41 of the 44 failures](#) came')
+    expect(citedText(plain, [item])).toMatchObject({ text: plain.replace('**41 of the 44** failures', '[41 of the 44 failures](#)'), asked: ['41 of the 44 failures'] })
     expect(readText(plain, [item])).toBe(plain.replace('**41 of the 44** failures', '41 of the 44 failures'))
     // once cited, the same selection no longer waits: c is typed and the bar does not name it until words are
     // selected anew

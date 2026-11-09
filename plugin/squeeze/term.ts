@@ -38,11 +38,11 @@ import { keptDir } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { modelWhy } from '../core/why.js'
 import type { ExplainPart } from '../explain/seam'
-import { readText } from '../marks/message.js'
+import { citedText } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { lookAtCatchUp } from '../observer/observer'
 import { promptText } from '../prompts/prompts'
-import { featureOn } from '../settings/features.mjs'
+import { claudeCites, featureOn } from '../settings/features.mjs'
 import { tracked } from '../telemetry/telemetry'
 import { tourDid } from '../tour/tour'
 import { trayOffRow } from '../tray/seam'
@@ -234,25 +234,30 @@ async function done($: Engine, id: string, gen: number): Promise<void> {
   await noteSettled($, id)
 }
 
-/** A message's words as the person reads them: each sentence a check rewrote in place of Claude's, and each corrected
- *  citation's words in place of its own (as marks/register.ts draws them), so a rewrite starts from the corrected
- *  values and never sees the wrong ones beside them. */
-async function asRead($: Engine, row: string, text: string): Promise<string> {
+/** An original: its text, and the words the analyst cited in it with c (marks/cite.ts). */
+type Original = { text: string; asked: string[] }
+
+/** A message's words as the person reads them: each sentence a check rewrote in place of Claude's, each corrected
+ *  citation's words in place of its own, and the words the analyst cited with c as citations (as marks/register.ts
+ *  draws them), so a rewrite starts from the corrected values, never sees the wrong ones beside them, and keeps the
+ *  analyst's citations as the original's. */
+async function asRead($: Engine, row: string, text: string): Promise<Original> {
   const items = (await rowMarks($, row))?.items ?? []
-  if (!items.some(it => it.status === 'corrected')) return text
-  return readText(text, items)
+  if (!items.some(it => it.status === 'corrected' || it.asked)) return { text, asked: [] }
+  const read = citedText(text, items)
+  return { text: read.text, asked: read.asked }
 }
 
 /** The original a record's rewrite starts from: its message as the person reads it (asRead), or, for a catch-up, each
  *  of its messages so, one after another. */
-async function originalOf($: Engine, rec: Rec): Promise<string> {
+async function originalOf($: Engine, rec: Rec): Promise<Original> {
   if (!rec.catchup) return asRead($, rec.row, rec.text)
-  const texts: string[] = []
+  const read: Original[] = []
   for (const r of rec.catchup.rows) {
     const m = await messageOf($, r)
-    if (m?.text?.trim()) texts.push(await asRead($, r, m.text))
+    if (m?.text?.trim()) read.push(await asRead($, r, m.text))
   }
-  return texts.length ? catchUpText(texts) : rec.text
+  return read.length ? { text: catchUpText(read.map(o => o.text)), asked: read.flatMap(o => o.asked) } : { text: rec.text, asked: [] }
 }
 
 /** One call for a change; its result shows only while no later change came (`gen`, the change's number). */
@@ -260,8 +265,10 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const rec = await recOf($, id)
   if (!rec) return
   const s = (rec.squeeze ?? {}) as Any
-  // the original as the person reads it: the citations the check corrected stand corrected in it
-  const original = await originalOf($, rec).catch(() => rec.text)
+  // the original as the person reads it: the citations the check corrected stand corrected in it, and the words the
+  // analyst cited with c are citations of it, which the request names
+  const read = await originalOf($, rec).catch((): Original => ({ text: rec.text, asked: [] }))
+  const original = read.text
   const probe: Rec = { ...rec, text: original, squeeze: { ...s, at: want.at, scale: SCALE } }
   const stale = () => latest.get(id) !== gen
   const simple = isSimplify(rec)
@@ -280,7 +287,10 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // the answer's cards, which a version may place, change or leave out
   const answer: Answer | null = await answerCards($, rec).catch(() => null)
   const req = request(probe, {
-    system, toolkit: answer?.guide ?? '', question, keep, terms: terms.slice(0, 8), cards: answer?.cards ?? [],
+    system, toolkit: answer?.guide ?? '', question, keep, terms: terms.slice(0, 8), cards: answer?.cards ?? [], asked: read.asked,
+    // Simplify's words on citing, while Claude cites its own claims (Citations auto cite + verify, or auto cite); in
+    // manual and off, a version keeps the analyst's citations, which the request names
+    cites: claudeCites(),
     // a request that shows the cards asks for more thought: whether a card changes, and its view, if one does
     // (settings.json cardsEffort; at low effort the model kept every card as it was)
     model: String(cfg.model || DEFAULTS.model), effort: String((answer && cfg.cardsEffort) || cfg.effort || DEFAULTS.effort),
@@ -342,7 +352,7 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   await settled($, id, next, { written: true })
   await log($, {
     row: id, ok: true, ms, model: req.model, effort: req.effort, prompt: 'squeeze', usage: (r as Any).usage, key: keyWords, problems: checked.problems,
-    rows: rowsOf(placed.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
+    rows: rowsOf(placed.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}), ...(read.asked.length ? { cited: read.asked.length } : {}),
     ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}),
     ...(terms.length ? { terms: terms.length } : {}), ...(placed.left.length ? { card_lines_left_out: placed.left } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(simple ? { simplify: true } : rec.catchup ? { catchup: rec.catchup.replies } : {}),
     ...(answer ? { cards: answer.cards.length, asked: reply.cards.map((c: Any) => `${c.op} ${c.id}`), did: (cards?.did ?? []).map((d: Any) => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}),

@@ -165,6 +165,7 @@ export const TEXTS = {
     about: 'a simpler version of an answer, rewritten at the levels the person picked under it, or a catch-up of the replies they missed',
     terminal: 'squeeze/term.ts',
     use: 'one model call per choice under the simpler version',
+    fills: ['CITE_NEW'],
   },
   thread: {
     about: "a side thread's instructions",

@@ -8,7 +8,7 @@ An answer is a message and its cards. A line of the message that holds only a ca
 - **When the text gets shorter, ask whether each card still adds value.** A card shows the evidence for what the text says. A card that shows only a detail the text no longer gives can go.
 - **When the text gets longer, ask whether to make a card richer or to add one.** A breakdown that the text now explains, for example one group against another, is faster to see in a card than to read.
 - **Keep every citation on the words it cites, written exactly as in the original.** A citation is a Markdown link to `#`, for example `[6,543 saves](#)`. thimble checked each citation against the data. A citation on the same words keeps its check.
-- **Take every number from the original, a card or a card's rows, and cite each new number.** You cannot run code. So a number you compute yourself, for example a share, a difference or a sum, has nothing behind it that the analyst can check, and it may be wrong.
+- **Take every number from the original, a card or a card's rows{{CITE_NEW}}.** You cannot run code. So a number you compute yourself, for example a share, a difference or a sum, has nothing behind it that the analyst can check, and it may be wrong.
 
 ## Your reply
 
