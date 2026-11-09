@@ -34,11 +34,13 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* 2px at each end: the picked or focused option's ring (components.css .seg-opt) lies outside its box, where the bar's
+   overflow would cut it */
 .files-views.is-compact {
   flex: 1 1 0;
-  min-width: calc(2 * var(--control-sm) + 4px);
+  min-width: calc(2 * var(--control-sm) + 8px);
   height: var(--control-sm);
-  padding: 0;
+  padding: 0 2px;
   border-bottom: 0;
   overflow: hidden;
 }

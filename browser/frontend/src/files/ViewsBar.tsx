@@ -214,8 +214,11 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
       const kids = [...row.children] as HTMLElement[]
       const tail = kids.pop()!
       const more = kids.pop()!
-      const gap = parseFloat(getComputedStyle(bar).columnGap) || 0
-      const next = fitViews({ widths: kids.map((k) => k.offsetWidth), room: bar.clientWidth, gap, tail: tail.offsetWidth, more: more.offsetWidth, active })
+      const style = getComputedStyle(bar)
+      const gap = parseFloat(style.columnGap) || 0
+      // the room inside the bar's padding (files.css .files-views.is-compact)
+      const room = bar.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
+      const next = fitViews({ widths: kids.map((k) => k.offsetWidth), room, gap, tail: tail.offsetWidth, more: more.offsetWidth, active })
       setFit((cur) => (cur && cur.length === next.length && cur.every((v, i) => v === next[i]) ? cur : next))
     }
     measure()
