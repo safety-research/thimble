@@ -71,32 +71,6 @@
 .tour-selecting ::selection {
   background: var(--accent-wash);
 }
-.tour-ex-report .wu-cm {
-  transition: opacity 400ms ease-out;
-}
-/* the example report's badge in the empty middle of its bar, which never scrolls, kept at least as wide as the badge */
-.tour-ex-report .wu-bar-spacer {
-  display: flex;
-  flex: 1 0 auto;
-  align-items: center;
-  justify-content: center;
-  padding: 0 8px;
-}
-.tour-ex-report .wu-bar-spacer > .tour-tag {
-  position: static;
-}
-.tour-checks-hidden .wu-cm {
-  opacity: 0;
-  visibility: hidden;
-}
-.tour-checks-hidden .wu-flag,
-.tour-checks-hidden .wu-flag * {
-  background: transparent !important;
-  box-shadow: none !important;
-}
-.tour-checks-hidden img.reader-ruler-marks {
-  visibility: hidden;
-}
 /* each example a layer of its own, so that what it holds in layers (a transcript's sticky top row) stays under the
    block, the demo's pointer and the popover */
 .tour-host > *,

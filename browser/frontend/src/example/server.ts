@@ -1,17 +1,20 @@
 // The tour's example workspace, in memory: what thimble's server answers about the example folder, for the example
 // panes (./main.tsx). The folder is made up: three Claude Code agents fix a bug in a tea shop's checkout. ./data.json
-// holds its files and what the server answered about them once (every page, key and event of each file), and the label
-// "what the step does" with its rows. The routes here answer from it, as the server would.
+// holds its files and what the server answered about them once (every page, key and event of each file), the label
+// "what the step does" with its rows, and the report main wrote about the folder (./report.ts). The routes here answer
+// from it, as the server would.
 //
 // What the person changes in the panes is kept here for the frame's life: a label turned on or off, recolored or
-// redefined, a record's value marked, a filter set, the Label tool switched. Each change is told to the panes on the
-// frame's own bus, as the server's stream tells a workspace. What needs Claude (running a label, defining a new one,
-// building a view) is refused with a line that says so. No request goes further than this module, but for the Timeline
-// mode's page, which `timelinePage` gives.
+// redefined, a record's value marked, a filter set, the Label tool switched, a check turned on or off, and what
+// ./report.ts keeps of the report. Each change is told to the panes on the frame's own bus, as the server's stream
+// tells a workspace. What needs Claude (running a label, defining a new one, building a view, a check's run, a thread)
+// is refused with a line that says so. No request goes further than this module, but for the Timeline mode's page,
+// which `timelinePage` gives.
 import { bus } from '../lib/bus'
 import { apiPath } from '../lib/browserKey'
-import type { ConceptDetail, Filters, FolderListing, LabelRowText, SourceEvents, SourceKey, SourceKeys, SourcePage, SourceRecord } from '../lib/types'
+import type { Check, ConceptDetail, Filters, FolderListing, LabelRowText, SourceEvents, SourceKey, SourceKeys, SourcePage, SourceRecord } from '../lib/types'
 import raw from './data.json'
+import { createReport, type ReportData } from './report'
 
 /** A long per-bin array of data.json, coded as [value, count] pairs. */
 type Runs = [number, number][]
@@ -31,9 +34,9 @@ interface Data {
   rows: (LabelRowText & { source: string; ts: string })[]
   coverage: Record<string, unknown>
   settings: Record<string, unknown>
-  checks: unknown[]
+  checks: Check[]
   answerComments: unknown
-  types: unknown
+  report: ReportData
 }
 const DATA = raw as unknown as Data
 
@@ -199,6 +202,9 @@ export function createServer(opts: { timelinePage?: () => Promise<string> } = {}
   }
   reset()
   const id = DATA.concept.id
+  // the checks, each on or off, and the report with its drafts, comments and cards, as the frame changes them
+  const checks: Check[] = clone(DATA.checks)
+  const report = createReport(DATA.report, NEEDS_CLAUDE)
 
   const valueOf = (r: Data['rows'][number]) => r.analyst ?? r.label
   /** The label as the routes give it, its counts read from its rows now. */
@@ -313,8 +319,11 @@ export function createServer(opts: { timelinePage?: () => Promise<string> } = {}
       }
       case 'source/speakers':
         return json({ names: {} })
-      case 'ref':
-        return resolve(q.get('ref') ?? '')
+      case 'ref': {
+        // a ref the report cites, and a card, as the server resolved it; any other record from its file's page
+        const ref = q.get('ref') ?? ''
+        return Object.prototype.hasOwnProperty.call(DATA.report.refs, ref) ? json(DATA.report.refs[ref]) : resolve(ref)
+      }
     }
     if (rest.startsWith('download/')) {
       const p = decodeURIComponent(rest.slice('download/'.length))
@@ -324,6 +333,8 @@ export function createServer(opts: { timelinePage?: () => Promise<string> } = {}
   }
 
   async function workspace(method: string, rest: string, q: URLSearchParams, body: Record<string, unknown>): Promise<Response> {
+    const ofReport = report.answer(method, rest, body)
+    if (ofReport) return ofReport
     const conceptPath = new RegExp(`^concepts/${id}(/.*)?$`).exec(rest)
     if (conceptPath && gone) return refused(404, `no label ${id}`)
     if (method === 'GET') {
@@ -379,11 +390,9 @@ export function createServer(opts: { timelinePage?: () => Promise<string> } = {}
         case 'settings':
           return json(settings)
         case 'checks':
-          return json(DATA.checks)
+          return json(checks)
         case 'answer-comments':
           return json(DATA.answerComments)
-        case 'investigations/main/types':
-          return json(DATA.types)
         case 'views':
         case 'views/proposals':
         case 'label-asks':
@@ -485,8 +494,19 @@ export function createServer(opts: { timelinePage?: () => Promise<string> } = {}
       return json(settings)
     }
     if (method === 'POST' && rest === 'views/suggest') return json({ slug: null })
-    // a new label, a run, a label drafted from words, a view, a message to Claude: each needs Claude
-    if (method !== 'GET' && (rest === 'concepts' || rest === 'concepts/draft' || rest === 'events' || rest.startsWith('views') || conceptPath?.[1] === '/apply'))
+    // a check turned on or off, as its switch does; one that has not commented on the report yet would run on it then,
+    // which needs Claude
+    const checkPath = /^checks\/([^/]+)$/.exec(rest)
+    const check = checkPath && checks.find((c) => c.id === decodeURIComponent(checkPath[1]))
+    if (method === 'PATCH' && check && typeof body.shown === 'boolean' && Object.keys(body).length === 1 && (!body.shown || check.runs?.report?.status === 'done')) {
+      check.shown = body.shown
+      bus.emit('wsEvent', { type: 'checks', id: check.id } as never)
+      bus.emit('checks', { id: check.id })
+      return json(check)
+    }
+    // a new label, a run, a label drafted from words, a view, a message to Claude, a thread, a new check or a check's run
+    // or new prompt: each needs Claude
+    if (method !== 'GET' && (rest === 'concepts' || rest === 'concepts/draft' || rest === 'events' || rest.startsWith('views') || conceptPath?.[1] === '/apply' || rest === 'chats' || rest === 'checks' || check || rest.startsWith('checks/')))
       return refused(403, NEEDS_CLAUDE)
     return refused(404, `not in the tour's example: ${method} ${rest}`)
   }

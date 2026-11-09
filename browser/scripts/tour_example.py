@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """tour_example.py: writes the product tour's example data, frontend/src/example/data.json, which the tour's example
-panes answer from in its Files and Labels steps (frontend/src/example).
+panes answer from in its Files, Labels and Report steps (frontend/src/example).
 
 The example folder, fernhill-checkout, is made up here: three Claude Code agents fix a bug in the checkout of Fernhill
 Tea, the made-up online tea shop of thimble's terminal tour. Every name, message, number and line of code is made up,
@@ -18,6 +18,11 @@ answer the panes read about a file (folder listings, pages, keys, events), and t
 the label routes with the classifier standing in for Claude, so no model is called: each record gets its value from
 VALUES. Times, ids and folder stamps of the run are the example's own, so nothing names the machine it ran on.
 
+Then the report the Report step shows, made the same way: two cards (cards) with the tables their code would draw, the
+report in two drafts (DRAFTS) saved as main saves a document (write_document, with the server's citation check), and
+one comment each of the checks that are on, Heads up and Explainers, saved as a run of the check saves it (COMMENTS).
+The answers the Report reads about them are kept: the document, its drafts, the cards, the refs it cites.
+
 Usage, with the server's venv:  browser/backend/.venv/bin/python browser/scripts/tour_example.py
 """
 from __future__ import annotations
@@ -29,6 +34,7 @@ import re
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 BROWSER = Path(__file__).resolve().parents[1]
@@ -352,6 +358,119 @@ the fee.
 """
 
 
+# --------------------------------------------------------------------------- the report
+
+FEE_CODE = '''\
+import pandas as pd
+
+tin, fee, discount = 48.00, 6.00, 0.10
+pd.DataFrame(
+    {"Before the fix": [tin, fee, -(tin + fee) * discount, (tin + fee) * (1 - discount)],
+     "After the fix": [tin, fee, -tin * discount, tin * (1 - discount) + fee]},
+    index=["Tin of tea", "Gift box fee", "Member discount (10%)", "Total"],
+)'''
+
+TEAM_CODE = '''\
+import json
+import pandas as pd
+
+rows = []
+for n in (1, 2, 3):
+    records = [json.loads(line) for line in open(f"agents/agent-{n}.jsonl")]
+    start, end = pd.Timestamp(records[0]["timestamp"]), pd.Timestamp(records[-1]["timestamp"])
+    rows.append({"agent": f"agent-{n}", "minutes": round((end - start).total_seconds() / 60, 1),
+                 "turns": records[-1]["num_turns"], "cost (USD)": records[-1]["total_cost_usd"]})
+pd.DataFrame(rows).set_index("agent")'''
+
+
+def cards(files: dict[str, str]) -> list[dict]:
+    """The two cards main made for the report, each {title, code, frame, takeaway}: what a member pays for a tin in a
+    gift box before and after the fix, and how long each agent worked, read from the transcripts as its code reads
+    them."""
+    team = []
+    for n in (1, 2, 3):
+        recs = [json.loads(line) for line in files[f"agents/agent-{n}.jsonl"].splitlines()]
+        start, end = (datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00")) for r in (recs[0], recs[-1]))
+        team.append([f"agent-{n}", round((end - start).total_seconds() / 60, 1), recs[-1]["num_turns"], recs[-1]["total_cost_usd"]])
+    return [
+        {"title": "What does a member pay for a 48.00 tin in a gift box?", "code": FEE_CODE,
+         "frame": {"columns": ["index", "Before the fix", "After the fix"], "index": "index",
+                   "rows": [["Tin of tea", 48.0, 48.0], ["Gift box fee", 6.0, 6.0], ["Member discount (10%)", -5.4, -4.8],
+                            ["Total", 48.6, 49.2]]},
+         "takeaway": "Before the fix a member paid 48.60 for the tin in a gift box. Now a member pays 49.20, since the "
+                     "6.00 fee is no longer discounted."},
+        {"title": "How long did each agent work, and in how many turns?", "code": TEAM_CODE,
+         "frame": {"columns": ["agent", "minutes", "turns", "cost (USD)"], "index": "agent", "rows": team},
+         "takeaway": f"agent-1 worked longest, {team[0][1]} minutes in {team[0][2]} turns. agent-2 wrote its test in "
+                     f"{team[1][1]} minutes."},
+    ]
+
+
+# The report's two drafts, as main writes them (write_document), each at its time of the example's morning;
+# {fee} is the first card's id. The second draft's closing "What changed" is its row's summary in History.
+DRAFTS = [
+    ("09:40:12", """\
+# How three agents fixed the gift box total
+
+## What went wrong
+
+Customers said the checkout charged the wrong total for orders with a gift box. Reading the checkout, agent-1 found \
+that it added the 6.00 gift box fee before it took the 10% member discount off [[agents/agent-1.jsonl#L8]].
+
+## The fix
+
+In shop/checkout.py, agent-1 moved the fee after the discount [[shop/checkout.py#L12]]. With the change, the \
+checkout's tests pass ([[8 passed|agents/agent-1.jsonl#L16]]).
+"""),
+    ("09:52:40", """\
+# How three agents fixed the gift box total
+
+## What went wrong
+
+Customers said the checkout charged the wrong total for orders with a gift box. Reading the checkout, agent-1 found \
+that it added the 6.00 gift box fee before it took the 10% member discount off, so members also got 10% off the fee \
+[[agents/agent-1.jsonl#L8]]. A test that agent-2 wrote for such an order failed as it should: a member paid \
+[[48.60|agents/agent-2.jsonl#L14]] for a 48.00 tin in a gift box, where the right total is 49.20.
+
+## The fix
+
+In shop/checkout.py, agent-1 moved the fee after the discount [[shop/checkout.py#L12]]. With the change, the \
+checkout's tests pass ([[8 passed|agents/agent-1.jsonl#L16]]), and agent-3 approved it after a run of every test \
+([[22 passed|agents/agent-3.jsonl#L14]]).
+
+![A member now pays 49.20 for a 48.00 tin in a gift box: the fee is no longer discounted.](card:{fee})
+
+## What is still open
+
+Before it approved the change, agent-3 asked whether the fee is taxed [[board.jsonl#L5]]. The answer from agent-1 \
+was that the fee is taxed with the order, as before [[agents/agent-1.jsonl#L23]]. But the tax rate in the code the \
+agents read is [[0.0|agents/agent-1.jsonl#L22]], so no test checks the tax on the fee.
+
+## What changed
+
+- Added agent-2's test and agent-3's review.
+- Added a figure of what a member pays before and after the fix.
+- Added what is still open about the tax on the fee.
+"""),
+]
+
+# One comment of each check that is on, as a run of the check makes it after the second draft (add_comment): the check,
+# the start of the sentence it is on, its statement, its details, the run's summary, and when the run starts and ends.
+COMMENTS = [
+    ("heads-up", "With the change",
+     "agent-3's approval rests on the test run: it read the diff and shop/tax.py, but not agent-2's test, the only "
+     "test of a member's order with a gift box.",
+     "agent-3 read the diff [[agents/agent-3.jsonl#L8]] and shop/tax.py [[agents/agent-3.jsonl#L10]], then ran every "
+     "test. agent-2 added the test to tests/test_checkout.py [[agents/agent-2.jsonl#L10]].",
+     "One heads-up, on agent-3's review.", ("09:53:02", "09:54:10")),
+    ("explainers", "Reading the checkout",
+     "member discount: the 10% that members of Fernhill Tea get off an order (MEMBER_DISCOUNT in shop/prices.py).",
+     "The bug took it off the gift box fee as well [[agents/agent-1.jsonl#L8]]. agent-1 read its value in "
+     "shop/prices.py [[agents/agent-1.jsonl#L10]].",
+     "One explainer, of the member discount.", ("09:53:03", "09:53:48")),
+]
+
+
 def build() -> tuple[dict[str, str], dict[str, list[str]]]:
     """The folder's files by path, and the label's value of each record of each transcript."""
     files: dict[str, str] = {"README.md": README, "shop/checkout.py": CHECKOUT_AFTER}
@@ -389,6 +508,111 @@ def runs(xs: list) -> list:
     return out
 
 
+def fixed_ids() -> None:
+    """The server's new ids (secrets.token_hex: cards, groups, documents, comments, runs) made from the folder's name and
+    a count, so each run makes the same ones."""
+    import secrets
+
+    count = [0]
+
+    def token_hex(n: int = 16) -> str:
+        count[0] += 1
+        return hashlib.sha256(f"{NAME}:id:{count[0]}".encode()).hexdigest()[: 2 * n]
+
+    secrets.token_hex = token_hex
+
+
+def report(client, get, files: dict[str, str]) -> dict:
+    """The report of the Report step, made in the workspace the label was made in (module note), and the answers the
+    Report reads about it: {doc, history, versions, canvas, names, presets, refs}. Its times are the example's own
+    morning, after the label's run."""
+    import asyncio
+    import secrets
+
+    from app import checks, frames, investigation, notebook, report_types, tools
+
+    clock = [f"{DAY}T09:40:00+00:00"]
+    for mod in list(sys.modules.values()):
+        if getattr(mod, "__name__", "").startswith("app.") and callable(getattr(mod, "_now", None)):
+            mod._now = lambda: clock[0]
+
+    def at(hms: str) -> None:
+        clock[0] = f"{DAY}T{hms}+00:00"
+
+    def ok(res) -> None:
+        assert not getattr(res, "is_error", False), res
+
+    c, ws = f"/corpora/{NAME}", f"/ws/{NAME}"
+    # the cards, each with the table its code draws (no kernel runs here)
+    at("09:47:05")
+    made: list[str] = []
+    for card in cards(files):
+        r = client.post(f"/api{ws}/cells", json={"kind": "table", "title": card["title"], "code": card["code"],
+                                                  "created_by": tools.TERMINAL})
+        assert r.status_code == 200, r.text
+        cell = r.json()
+        frame = frames.normalize(card["frame"])
+        nb = notebook.load_notebook(NAME, cell["notebook"])
+        for x in nb["cells"]:
+            if x["id"] == cell["id"]:
+                x.update(outputs=[frames.bundle(frame)], exec_count=len(made) + 1, status="ok", takeaway=card["takeaway"],
+                         takeaway_author=tools.TERMINAL)
+        notebook.save_notebook(NAME, nb)
+        made.append(cell["id"])
+
+    # the drafts, saved as main's session saves a document; the citation check finds every cited value in its record
+    session = tools.Ctx(c=NAME, actor=tools.ANALYST)
+    for hms, text in DRAFTS:
+        at(hms)
+        ok(asyncio.run(report_types.tool_write_document(session, {"doc": "report", "text": text.replace("{fee}", made[0])})))
+    doc = report_types.read_doc(NAME, investigation.MAIN, "report")
+    flagged = [x["text"] for x in report_types.all_sentences(doc) if "unverified" in (x.get("tags") or [])]
+    assert not flagged, f"the citation check did not find these values: {flagged}"
+
+    # the comments, each saved by a run of its check over the whole report, which ends done
+    for cid, starts, text, details, summary, (begin, end) in COMMENTS:
+        at(begin)
+        check = checks.read(NAME, cid)
+        cover = checks.to_cover(check, "report", doc, None, True)
+        rec = {"run": secrets.token_hex(4), "status": "running", "chat": "", "started": clock[0], "ended": None,
+               "covered": [p["ref"] for p in cover], "fps": [p["fp"] for p in cover], "seen": [], "comments": 0,
+               "summary": "", "stale": 0, "notify": None, "agent_id": None, "refused": None}
+        check.setdefault("runs", {})["report"] = rec
+        checks.save(NAME, check)
+        act = checks._Active(NAME, cid, "report", rec["run"], False, rec["covered"], rec["fps"])
+        checks._active[(NAME, cid, "report")] = act
+        sid = next(x["id"] for x in report_types.all_sentences(doc) if x["text"].startswith(starts))
+
+        async def comment() -> None:
+            ok(await checks.tool_add_comment(tools.Ctx(c=NAME, actor="check", session=checks.session_key(cid, "report")),
+                                             {"ref": f"report:report#{sid}", "text": text, "details": details}))
+            at(end)
+            checks._finish(act, "done", summary)
+
+        asyncio.run(comment())
+        doc = report_types.read_doc(NAME, investigation.MAIN, "report")
+
+    # what the page reads, each document without its `snapshot`, the fingerprints of the cards a later write compares
+    def lean(d: dict) -> dict:
+        return {k: v for k, v in d.items() if k != "snapshot"}
+
+    path = f"{ws}/investigations/main/types/report"
+    out = {"doc": lean(get(path)), "history": get(f"{path}/versions"), "canvas": get(f"{ws}/canvas"),
+           "names": get(f"{ws}/cells/names"), "presets": get(f"{ws}/report-types/presets")}
+    out["versions"] = {str(v["n"]): lean(get(f"{path}/versions/{v['n']}")) for v in out["history"]["versions"] if v["available"]}
+    # every ref the drafts and the comments cite, and every card, as the server resolves it, without `context`, the
+    # records around a record, which the page does not read
+    cited: list[str] = []
+    for d in [out["doc"], *out["versions"].values()]:
+        for x in report_types.all_sentences(d):
+            cited += [r for r in x.get("refs") or [] if r not in cited]
+    for cm in out["doc"].get("comments") or []:
+        cited += [r for r in str(cm.get("evidence") or "").split() if r not in cited]
+    cited += [f"card:{x['id']}" for x in out["canvas"]["cells"]]
+    out["refs"] = {ref: {k: v for k, v in get(f"{c}/ref", ref=ref).items() if k != "context"} for ref in cited}
+    return out
+
+
 def capture() -> dict:
     from fastapi.testclient import TestClient
 
@@ -399,6 +623,7 @@ def capture() -> dict:
     # the requests come from this process alone: no browser's sign-in to prove
     hook_auth.write_guarded = lambda method, path: False
     hook_auth.read_guarded = lambda method, path: False
+    fixed_ids()
     files, values = build()
     root = TMP / "folders" / NAME
     for rel, text in files.items():
@@ -450,9 +675,10 @@ def capture() -> dict:
     out["rows"] = [{**row, "source": source[row["ref"]], "ts": WHEN} for row in get(f"{ws}/concepts/{kid}/rows", text=1, limit=500)["rows"]]
     out["coverage"] = get(f"{ws}/concepts/{kid}/coverage")
     out["settings"] = get(f"{ws}/settings")
-    out["checks"] = get(f"{ws}/checks")
     out["answerComments"] = get(f"{ws}/answer-comments")
-    out["types"] = get(f"{ws}/investigations/main/types")
+    out["report"] = report(client, get, files)
+    # the checks as they stand once the report is commented, each with its run on it
+    out["checks"] = get(f"{ws}/checks")
     return {**out, "_ids": (kid, detail.get("run", {}).get("run_id"))}
 
 
