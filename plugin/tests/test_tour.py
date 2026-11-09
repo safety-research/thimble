@@ -5,6 +5,7 @@ All data is made up."""
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -86,3 +87,8 @@ def test_the_sample_is_small_made_up_data_with_the_numbers_the_tours_answer_stat
     for stated in ("refunded 7 orders", "6 orders", "36 orders", "$1,872", "$52", "14 of the 36"):
         assert stated in skill
     assert "](#)" not in skill
+    # with Citations manual the tour's cite step names the wrong number's words (tour/tour.ts CITE_WORDS), which the
+    # person finds in the answer and cites with c
+    tour_ts = (Path(TR.SAMPLE).parents[1] / "tour" / "tour.ts").read_text()
+    words = re.search(r"export const CITE_WORDS = '([^']+)'", tour_ts).group(1)
+    assert words in skill and "7" in words

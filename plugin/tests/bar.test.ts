@@ -1,5 +1,6 @@
 // The bar above the prompt, through the whole hooks module: after an answer it names v, coverage and the labels, and r
-// opens the coverage pane drawn from `thimble coverage --json`. All data is made up. `claude plugin test plugin`.
+// opens the coverage pane drawn from `thimble coverage --json` (Coverage and Claims, off by default, turned on here).
+// All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { test } from './kit'
@@ -68,7 +69,7 @@ function world(on: Any, coverage: string) {
   return { clock, opens }
 }
 
-test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', async ($, on) => {
+test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', { options: { coverage: true } }, async ($, on) => {
   const w = world(on, JSON.stringify(COVERAGE))
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
@@ -118,7 +119,7 @@ function byKey(n: Any, key: string): Any {
 
 // A bar too narrow for one row: the counts give way so that it keeps one row. Where it takes a second row anyway, for
 // the right's items, they come back on that row when they fit there, and stay gone where they would take one more row
-test("a bar that takes a second row for the right's items anyway gives the counts that gave way their room on it; where they would take one more row, they stay gone", async ($, on) => {
+test("a bar that takes a second row for the right's items anyway gives the counts that gave way their room on it; where they would take one more row, they stay gone", { options: { coverage: true, claimsMode: 'auto' } }, async ($, on) => {
   const w = world(on, JSON.stringify(COVERAGE))
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   // the look at the answer has not answered: the bar names w for the claims it will find

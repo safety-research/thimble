@@ -7,7 +7,10 @@
 // answer has no citations. As the cite step starts, thimble puts its question in an empty prompt box (else the step
 // names it); the person sends it, Claude's answer cites its numbers, the checker checks them as the turn ends (in
 // auto cite too), and once every citation has its result the step is done, with what the check did, and the view goes
-// to the step row; an answer that cites nothing ends the step too. After the sample answer and before the cite step,
+// to the step row; an answer that cites nothing ends the step too. With Citations manual, Claude cites nothing: the cite
+// step names the wrong number, which shimmers until the person cites it with c, puts nothing in the prompt box, and is
+// done once the person's citation has its result; where no click reaches thimble, or with Citations off, there is no
+// cite step, and the intro says no number is wrong. After the sample answer and before the cite step,
 // the replies to the person's own prompts answer nothing, so s acts on the sample answer, and the step row is placed
 // under the reply; a fork's end moves nothing. After an install inside Claude Code, the person's /reload-plugins runs
 // /thimble:tour once in that session, soon after the install only. All data is made up. `claude plugin test plugin`.
@@ -21,7 +24,7 @@ import { setOptions } from '../settings/features.mjs'
 import { accent } from '../core/theme'
 import { endCheck, noteRow, resumeChecks, startCheck } from '../marks/checker'
 import { rowMarks } from '../marks/store'
-import { checkedWords, CITE_QUESTION, CLOSE_MS, CLOSED, DONE_MS, E_WORDS, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourChecked, tourCites, tourDid, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
+import { checkedWords, CITE_QUESTION, CITE_WORDS, CLOSE_MS, CLOSED, DONE_MS, E_WORDS, introEl, NEXT_MS, placeIntro, SHIMMER_MS, shimmerSpans, stepRowEl, tourAnswer, tourChecked, tourCited, tourCites, tourDid, tourMissed, tourNow, tourRuns, tourSpans, tourStart, turnTour, type TourState } from '../tour/tour'
 import { test } from './kit'
 import { NOTICES, promptStub, tempRun } from './stubs'
 
@@ -130,13 +133,21 @@ test('where no click reaches thimble the selection step is left out; a feature t
   const c = fake()
   await tourStart(c.$)
   expect(await walk(c.$, ['answer', 'e', 's'])).toEqual(['e', 's', 'cite'])
-  // the cite step introduces Claude's citations: with Citations manual or off, Claude cites nothing, and it is left out
-  for (const citations of ['manual', 'off']) {
-    setOptions({ citations })
-    const d = fake()
-    await tourStart(d.$)
-    expect(await walk(d.$, ['answer', 'e', 'v', 's'])).toEqual(['e', 'v', 's', 'end'])
-  }
+  // the cite step introduces citations: with Citations off there is none; in manual the person cites the wrong number
+  // with c, which needs a selection, so where no click reaches thimble it is left out, as e
+  setOptions({ citations: 'off' })
+  const d = fake()
+  await tourStart(d.$)
+  expect(await walk(d.$, ['answer', 'e', 'v', 's'])).toEqual(['e', 'v', 's', 'end'])
+  setOptions({ citations: 'manual' })
+  const m = fake()
+  await tourStart(m.$)
+  expect(await walk(m.$, ['answer', 'e', 'v', 's'])).toEqual(['e', 'v', 's', 'cite'])
+  noteViewport({ isFullscreen: false })
+  const n = fake()
+  await tourStart(n.$)
+  expect(await walk(n.$, ['answer', 'v', 's'])).toEqual(['v', 's', 'end'])
+  noteViewport({ isFullscreen: true })
   setOptions({})
 })
 
@@ -205,7 +216,7 @@ test('the shimmer is the words in thimble\'s color with a brighter band that ent
 })
 
 test('as the cite step starts, thimble puts its question in an empty prompt box, and the step says to press Enter; a box with words in it, or one that takes nothing, keeps them, and the step names the question to type', async () => {
-  setOptions({})
+  setOptions({ citations: 'auto cite + verify' })
   noteViewport({ isFullscreen: true })
   const cite = (t: Any) => textOf(stepRowEl(els, t, true, 100))
   const a = fake()
@@ -233,17 +244,19 @@ test('as the cite step starts, thimble puts its question in an empty prompt box,
   await tourStart(c.$)
   await walk(c.$, ['answer', 'e', 'v', 's'])
   expect(cite(await tourNow(c.$))).toContain(`type ${CITE_QUESTION} and press Enter.`)
-  // with Citations manual there is no cite step, and the box stays empty
+  // with Citations manual the person cites the wrong number with c: the box stays empty, and the step names the words
   setOptions({ citations: 'manual' })
   const d = fake()
   await tourStart(d.$)
   await walk(d.$, ['answer', 'e', 'v', 's'])
+  expect((await tourNow(d.$))?.at).toBe('cite')
   expect(d.fills).toEqual([])
+  expect(cite(await tourNow(d.$))).toContain(`› Last, citations: highlight ${CITE_WORDS} in the answer above, then press c. thimble checks it against the data.`)
   setOptions({})
 })
 
 test('the cite step is done once each citation of its answer has its result, none waiting or checked, or once that answer\'s turn ended with none; DONE_MS later the view goes to the step row', async () => {
-  setOptions({})
+  setOptions({ citations: 'auto cite + verify' })
   noteViewport({ isFullscreen: true })
   const { $, timers, tick } = fake()
   const scrolls: Any[] = []
@@ -297,6 +310,71 @@ test('the cite step is done once each citation of its answer has its result, non
   const done = parsed(await b.$.state.get({ plugin: 'thimble', key: 'tour' }))
   expect(done.at).toBe('end')
   expect(textOf(stepRowEl(els, done, true, 100))).toContain('✓ Claude cited no numbers this time.')
+})
+
+test("with Citations manual the cite step names the wrong number for c: nothing goes in the prompt box, the words shimmer until c cites them, no turn's answer is the step's, and the step counts the person's words once each has its result", async () => {
+  setOptions({ citations: 'manual', cards: 'off', explain: 'off', squeezeAnswers: false })
+  noteViewport({ isFullscreen: true })
+  try {
+    const { $, fills, timers, tick } = fake()
+    const text = 'Customers placed 36 orders in March 2026. The shop refunded 7 orders. Most of the refunded orders arrived on time.'
+    const words = (s: Any[]) => s.map(x => text.slice(x.start, x.end)).join('')
+    const row = async () => textOf(stepRowEl(els, (await tourNow($))!, true, 100))
+    await tourStart($)
+    await $.state.set({ plugin: 'thimble', key: 'tourSample' }, 'row-sample')
+    await tourDid($, 'answer')
+    expect((await tourNow($))?.at).toBe('cite')
+    expect((await tourNow($))?.manual).toBe(true)
+    expect(fills).toEqual([])
+    expect(await row()).toContain(`› Last, citations: highlight ${CITE_WORDS} in the answer above, then press c. thimble checks it against the data.`)
+    expect(nodes(stepRowEl(els, (await tourNow($))!, true, 100)).find(n => n.type === 'Text' && n.props?.children === CITE_WORDS)?.props).toMatchObject({ bold: true })
+    // its words shimmer in the sample answer, as e's do, on a tick of their own
+    const spans = await tourSpans($, 'row-sample', text)
+    expect(words(spans)).toBe(CITE_WORDS)
+    expect(spans.every(x => x.id.startsWith('tour-cite-') && x.label === 'the words step cite names')).toBe(true)
+    expect(timers.map(x => x.ms)).toEqual([SHIMMER_MS])
+    // a reply to the person's own prompt meanwhile is no answer of the step's, and its turn's end ends nothing
+    expect(await tourAnswer($, 'row-other')).toBe(false)
+    await tourChecked($, true)
+    expect((await tourNow($))?.at).toBe('cite')
+    // c cites words of the sample answer: the step counts that answer, and says the words are being checked
+    const item = (n: number, status: string, o: Any = {}) => ({ n, row: 'row-sample', words: CITE_WORDS, start: 0, end: 1, sentence: '', status, shown: CITE_WORDS, asked: true, ...o })
+    const reply = async (items: Any[]) => {
+      await $.state.set({ plugin: 'thimble', key: 'marks', id: 'row-sample' }, { key: 'row-sample', turnId: 't1', rows: ['row-sample'], startedAt: 0, settledAt: null, items })
+      await $.state.set({ plugin: 'thimble', key: 'marksRow', id: 'row-sample' }, 'row-sample')
+    }
+    await reply([item(1, 'checking')])
+    await tourCited($, 'row-sample')
+    expect((await tourNow($))?.cited).toBe('row-sample')
+    expect(await row()).toContain('› thimble is checking the words you cited against the data.')
+    // the shimmer goes, and its tick asks for no more waits
+    expect(await tourSpans($, 'row-sample', text)).toEqual([])
+    await tick()
+    expect(timers).toEqual([])
+    // no turn's end checks an answer for the step, and c again counts no other answer
+    expect(await tourCites($, 'row-sample')).toBe(false)
+    await tourCited($, 'row-other')
+    expect((await tourNow($))?.cited).toBe('row-sample')
+    await tourChecked($, true)
+    expect((await tourNow($))?.at).toBe('cite')
+    // its check ends: the person's words alone count, here corrected, named with what they were
+    await reply([item(1, 'corrected', { was: CITE_WORDS, shown: 'refunded 4 orders' }), { ...item(2, 'verified'), asked: undefined }])
+    await tourChecked($)
+    expect(await tourRuns($)).toBe(false)
+    const done = parsed(await $.state.get({ plugin: 'thimble', key: 'tour' }))
+    expect(done.checked).toEqual({ n: 1, corrected: 1, failed: 0, fix: { was: CITE_WORDS, now: 'refunded 4 orders' } })
+    expect(textOf(stepRowEl(els, done, true, 100))).toContain(`✓ thimble checked 1 number and corrected 1: ${CITE_WORDS} → refunded 4 orders.`)
+    // a check that ended before c's words reached the tour: the step is done as they do
+    const b = fake()
+    await tourStart(b.$)
+    await tourDid(b.$, 'answer')
+    await b.$.state.set({ plugin: 'thimble', key: 'marks', id: 'row-sample' }, { key: 'row-sample', turnId: 't1', rows: ['row-sample'], startedAt: 0, settledAt: null, items: [item(1, 'verified')] })
+    await b.$.state.set({ plugin: 'thimble', key: 'marksRow', id: 'row-sample' }, 'row-sample')
+    await tourCited(b.$, 'row-sample')
+    expect(parsed(await b.$.state.get({ plugin: 'thimble', key: 'tour' })).checked).toEqual({ n: 1, corrected: 0, failed: 0 })
+  } finally {
+    setOptions({})
+  }
 })
 
 /** A made-up engine for a check's run: versioned state, the checker's text, forks that start, and a validator that
@@ -419,7 +497,7 @@ const nodes = (n: Any, out: Any[] = []): Any[] => {
 }
 
 test('the step row counts the steps it shows, names the words of e in bold and its keys in color, introduces citations last, and counts what the check did', () => {
-  setOptions({})
+  setOptions({ citations: 'auto cite + verify' })
   const at = (step: Any, done: Any[], o: Partial<TourState> = {}): TourState => ({ at: step, done, missed: [], startedAt: 0, k: 1, intro: null, sample: 'row-sample', moved: null, ...o })
   const row = (t: TourState, clicks = true) => stepRowEl(els, t, clicks, 100)
   // e waits: its words bold, in the default color; its key in thimble's color; the line itself not bold
@@ -454,6 +532,14 @@ test('the step row counts the steps it shows, names the words of e in bold and i
   const missed = textOf(row(at('s', ['answer', 'e', 'v'], { missed: ['v'] })))
   expect(missed).toContain('thimble tour · 3 of 4')
   expect(missed).toContain('✓ v drew no card this time.')
+})
+
+test('the intro says a number is wrong on purpose only where a cite step can check it', () => {
+  expect(textOf(introEl(els, 100, true))).toContain("it explains words, draws cards, simplifies, and checks numbers.")
+  expect(textOf(introEl(els, 100, true))).toContain('One number in it is wrong on purpose.')
+  expect(textOf(introEl(els, 100, false))).toContain("it explains words, draws cards and simplifies.")
+  expect(textOf(introEl(els, 100, false))).toContain('Below, Claude writes an answer about the made-up orders of a tea shop.')
+  expect(textOf(introEl(els, 100, false))).not.toContain('wrong')
 })
 
 test('what the check did, in words', () => {
@@ -576,7 +662,9 @@ test("in a session: thimble draws the intro and the step row under the sample an
   const tour = () => $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
   await tour()
   expect(t.placed).toEqual(['tour-intro-1'])
-  expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
+  // with Citations off no step checks a number, so the intro says none is wrong
+  expect(await t.row('tour-intro-1')).toContain('Below, Claude writes an answer about the made-up orders of a tea shop.')
+  expect(await t.row('tour-intro-1')).not.toContain('wrong on purpose')
   await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
   // Cards, Explainers and Citations are off: the one step is s. The sample answer draws the row at its end
   expect(t.placed).toEqual(['tour-intro-1'])
@@ -609,7 +697,7 @@ test("in a session: thimble draws the intro and the step row under the sample an
   await t.clock.advance(20_000)
   await tour()
   expect(t.placed).toEqual(['tour-intro-1', 'tour-step-2', 'tour-intro-3'])
-  expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
+  expect(await t.row('tour-intro-1')).toContain('Below, Claude writes an answer about the made-up orders of a tea shop.')
   expect(await t.row('tour-step-2')).toBe(CLOSED)
 })
 
@@ -689,6 +777,32 @@ test("in a session: Claude's answer to the cite step's question cites nothing: t
   expect(end).toContain('thimble tour · done')
   expect(end).toContain('✓ Claude cited no numbers this time.')
   expect(end).toContain('The tour is over.')
+})
+
+test("in a session: with Citations manual the intro says a number is wrong; the cite step names its words and puts nothing in the prompt box; a reply to the person's own prompt is no answer of the step's; c on the words starts their check, and the step row says so", { options: { cards: 'off', explain: 'off', squeezeAnswers: false, citations: 'manual' } }, async ($, on) => {
+  noteViewport({ isFullscreen: true })
+  const selected: Any[] = []
+  on('ui.selection', () => ({ value: selected.at(-1) }) as never)
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  const t = await session($, on)
+  await $.prompt.submit({ text: '/thimble:tour', command: { name: 'thimble:tour', args: '' }, origin: { kind: 'composer' } } as never)
+  expect(await t.row('tour-intro-1')).toContain('One number in it is wrong on purpose.')
+  await t.turn('t1', '<command-name>/thimble:tour</command-name>', SAMPLE)
+  const first = textOf(await drawnAnswer($, 'row-t1', SAMPLE))
+  expect(first).toContain('thimble tour · 1 of 1')
+  expect(first).toContain(`Last, citations: highlight ${CITE_WORDS} in the answer above, then press c. thimble checks it against the data.`)
+  expect(t.fills).toEqual([])
+  // the person's own question: its reply is no answer of the step's, so nothing is checked and the step still waits
+  await t.ask('Which region ordered the most?')
+  await t.turn('t2', 'Which region ordered the most?', 'The North, with 14 of the 36 orders.')
+  expect(t.spawns).toEqual([])
+  expect(await t.row('tour-step-2')).toContain(`highlight ${CITE_WORDS} in the answer above, then press c.`)
+  // c on the words: a citation of the sample answer, whose check starts as the tray opens it; the step row says so
+  selected.push({ text: CITE_WORDS, requestId: 'row-t1' })
+  await t.press('c')
+  await t.clock.advance(100)
+  expect(t.spawns.map(e => e.description)).toEqual(['checking a citation'])
+  expect(await t.row('tour-step-2')).toContain('› thimble is checking the words you cited against the data.')
 })
 
 test("the person's /reload-plugins soon after an install in this session runs /thimble:tour once; a later one, or another session's, does not", async ($, on) => {
