@@ -10,7 +10,7 @@ import { FixPage, FixResult } from '../../src/chat/FixStrip.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const row = (over: Partial<FixRow> = {}): FixRow => ({ id: 3, title: 'Card says how many rows', state: 'on', phase: null, kind: 'fixed', said: 'Card says how many rows is on', words: "make this card's title say how many rows", summary: "The card's title ends with its row count.", files: 2, tests: 'passed', error: null, created: 100, at: 1, ...over })
+const row = (over: Partial<FixRow> = {}): FixRow => ({ id: 3, title: 'Card says how many rows', state: 'on', phase: null, kind: 'fixed', said: 'Card says how many rows is on', words: "make this card's title say how many rows", summary: "The card's title ends with its row count.", files: 2, tests: 'passed', error: null, at: 1, ...over })
 const SAID = 'thimble fixed: Card says how many rows · tests pass'
 const ready = (over: Partial<FixRow> = {}) => row({ state: 'ready', kind: 'ready', said: SAID, ...over })
 

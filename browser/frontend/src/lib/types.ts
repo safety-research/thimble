@@ -56,7 +56,7 @@ export type ChatRecord =
   | { type: 'marks'; ts?: string; turn: string; items: import('../marks/marks').MarkItem[] }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
-  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
+  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 

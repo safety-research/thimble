@@ -725,7 +725,7 @@ def main_mode(c: str) -> str | None:
 
 def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
     """After a restart, or when a session followed before is attached again: the session's subagent chats and threads'
-    forks
+    forks, and the forks the server started for a chat of its own (_restore_own),
     are picked up where their files are, finished ones as done so _scan_subs matches them to their chats. Each file
     is
     read on from its kept place first, before main's transcript; a file with no kept place starts at its start when
@@ -758,6 +758,7 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
                 sub.workflow = True
                 sub.workflow_dir = _workflow_dir(lv, meta["workflow_dir"])
             lv.subs.append(sub)
+        _restore_own(lv, meta)
     if not lv.subs:
         return
     _scan_subs(lv, replay=False, places=kept)
@@ -1644,17 +1645,45 @@ def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
 
 
 _own: dict[tuple[str, str], tuple[str, str]] = {}  # (workspace, agent id) → (chat, role) of a fork follow() names
+OWN_FORKS = "forks"  # in a chat's meta: the agent ids of the forks follow() names for it, oldest first
 
 
 def follow(c: str, agent_id: str, chat: str, role: str) -> None:
     """A fork the server started for a chat of its own (a fix's fixer, fixes.fixer_chat): the mirror reads its
-    transcript into that chat whenever it finds the file, never into main's, and shows none of its prompts."""
+    transcript into that chat whenever it finds the file, never into main's, and shows none of its prompts. The chat's
+    meta keeps the fork's id (OWN_FORKS), so the next server knows the file too (_restore_own)."""
     _own[(c, agent_id)] = (chat, role)
+    try:
+        agents.change_meta(c, chat, lambda m: m.update({OWN_FORKS: [*(a for a in _forks(m) if a != agent_id),
+                                                                   agent_id]}))
+    except Exception:  # noqa: BLE001 — this server follows the fork all the same
+        log.warning("%s: chat %s does not keep its fork %s", c, chat, agent_id, exc_info=True)
     lv = _live.get(c)
     if lv is None or _sub_by(lv, agent_id=agent_id) is not None:
         return
     lv.subs.append(_own_sub(lv, agent_id))
     lv.wake.set()
+
+
+def _forks(meta: dict) -> list[str]:
+    """The agent ids a chat's meta keeps of the forks follow() named for it (OWN_FORKS)."""
+    got = meta.get(OWN_FORKS)
+    return [a for a in got if isinstance(a, str) and a] if isinstance(got, list) else []
+
+
+def _restore_own(lv: Live, meta: dict) -> None:
+    """After a restart: the file of each fork the server started for the chat (OWN_FORKS) goes to that chat. Without
+    this, the new server, which knows no fork it did not start, took the file for a subagent of main's: a new agent chat
+    whose card in main ran on for good. A fork is still at work only when this server started it and the chat says it
+    runs."""
+    for aid in _forks(meta):
+        if _sub_by(lv, agent_id=aid) is not None:
+            continue
+        mine = (lv.c, aid) in _own
+        _own[(lv.c, aid)] = (str(meta["id"]), str(meta.get("role") or ""))
+        sub = _own_sub(lv, aid)
+        sub.done = not (mine and aid == meta.get("agent_id") and meta.get("status") == "running")
+        lv.subs.append(sub)
 
 
 def _own_sub(lv: Live, agent_id: str) -> Sub:
