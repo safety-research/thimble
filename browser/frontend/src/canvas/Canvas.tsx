@@ -43,12 +43,10 @@ import {
   DEFAULT_VIEW,
   DOUBLE_MS,
   FOLD_H,
-  HEAD,
   MINIMAP,
   MIN_FRAME_H,
   MIN_FRAME_W,
   OPEN_MARGIN,
-  PAD,
   TITLE,
   activeFrame,
   boardOf,
@@ -70,6 +68,7 @@ import {
   frameAt,
   framesAbove,
   freeSpot,
+  groupPos,
   insertionAt,
   isWithin,
   kidsOf,
@@ -923,7 +922,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }
 
   const groupSelection = async () => {
-    if (!board || !lay || !data) return
+    if (!board || !data) return
     const picked = board.cells.filter((c) => sel.includes(c.id))
     if (picked.length < 2) return
     const parent = picked.every((c) => c.parent === picked[0].parent) ? picked[0].parent : null
@@ -937,8 +936,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         const first = flow.findIndex((id) => sel.includes(id))
         made = await canvasApi.createGroup(ws, { title, parent, order: first < 0 ? null : first })
       } else {
-        const box = extentOf(picked.map((c) => lay.rects.get(c.id)!).filter(Boolean))!
-        made = await canvasApi.createGroup(ws, { title, pos: { x: Math.round(box.x - PAD), y: Math.round(box.y - HEAD) } })
+        // around them where they stand, clear of what stays where it is; the column below them moves down past it
+        made = await canvasApi.createGroup(ws, { title, pos: groupPos(data, picked.map((c) => c.id), open, heights) })
       }
       await canvasApi.move(ws, { cells: picked.map((c) => c.id), group: made.id })
       setSel([])
