@@ -2,6 +2,20 @@
 
 Bug reports, suggestions and pull requests are welcome.
 
+## Send a fix from your own copy
+
+You do not need a checkout to change thimble. In a Claude Code session with thimble on:
+
+1. Type `/thimble-fix <what should work differently>`. A copy of Claude changes your own copy of thimble in the
+   background, and you press a key to use the fix or not.
+2. In a shell, `thimble fixes` lists your fixes with their numbers.
+3. `thimble file pr N` opens a pull request with fix N's code from your GitHub account. It needs
+   [gh](https://cli.github.com/), signed in with `gh auth login`, and it shows the title, the text and the files and
+   asks before it sends anything. `thimble file issue N` gives a link that posts the fix as an issue instead.
+
+Both take your names, paths and the names of your data out of the text first. The rest of this guide is for working
+in a checkout.
+
 ## Set up a checkout
 
 You need what [INSTALL.md](INSTALL.md) lists for both products, with Node.js 22.18 or later, and a Python 3.10 or later
