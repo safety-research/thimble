@@ -1,6 +1,6 @@
 {
   "name": "thimble",
-  "description": "thimble for Claude Code: select words in a reply and press c to cite them (a second Claude finds and checks their source), or set Citations to have Claude cite each claim you would check; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v visualizes the last answer as a card. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s writes a shorter, plainer version of a reply below it, and b catches up on several; after each reply an observer explains terms you may not know and points out important details; w lists the session's claims; t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read. Minimal gives plain answers in fullscreen, whose marks show under the pointer, and draws cards only when you ask.",
+  "description": "Interactive cards of your data, citations a second Claude checks against your files, and explainers and heads-ups on each answer.",
   "author": {
     "name": "Matthew Joerke"
   },
