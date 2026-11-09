@@ -19,7 +19,7 @@ const chatSel = '.chat[data-panel="chat"]'
 
 // ---------- the chat: an example exchange in main's chat. The answer's three times are citations, drawn as
 // marks/Mark.tsx draws them (examples.json, drawn by that component): first checking, then
-// checked, the last one failed with its ×, and the line under the answer that counts it. On the next step Explainers'
+// checked, each one confirmed, so no line under the answer counts any. On the next step Explainers'
 // comment tints "UK time" (chatExplained), and its comment card opens beside the chat (chatComment).
 const QUESTION = 'When did payments 4.12.0 go out, and was it still live when INC-312 opened?'
 const chatHtml = `<div class="chat-flow" style="min-height:0">
@@ -38,9 +38,6 @@ const showAnswer = (api: Api, state: AnswerState, flow = api.els.flow as HTMLEle
   const text = reply.querySelector<HTMLElement>('.chat-text')!
   text.replaceChildren(...api.snap(state).childNodes)
   text.querySelectorAll('.mark').forEach((m, k) => m.setAttribute('data-tour-ref', `chat:${k}`))
-  reply.querySelector('.marks-foot')?.remove()
-  // the line under the answer once its check settled: how many citations it could not confirm
-  if (state !== 'chatChecking') reply.append(...api.snap('chatFoot').childNodes)
 }
 /** The answer's citations, in order. */
 const answerMarks = (api: Api) => [...((api.els.flow as HTMLElement | undefined)?.querySelectorAll<HTMLElement>('.chat-assistant .mark') ?? [])]
@@ -365,12 +362,13 @@ function placeTag(rd: HTMLElement, tag: HTMLElement): void {
 }
 
 /** The colors of the example transcript (`reader`, as captured, colored), which `plain` takes off as Color by Off does
- * and `color` puts back: the records' bars, tints and names, the strip's lane, and Color by's value, source and chips. */
+ * and `color` puts back: the records' bars, tints and names, the strip's lane, and Color by's value, label icon and chips. */
 function txColors(reader: HTMLElement) {
   const colorBy = reader.querySelector<HTMLElement>('.colorby')
   const name = colorBy?.querySelector('.colorby-trigger b')
   const said = name?.textContent ?? ''
-  const parts = [...(colorBy?.querySelectorAll<HTMLElement>(':scope > .colorby-src, :scope > .colorby-chips') ?? [])]
+  const icon = colorBy?.querySelector('.colorby-trigger .colorby-name-ico')
+  const parts = [...(colorBy?.querySelectorAll<HTMLElement>(':scope > .colorby-chips') ?? [])]
   const lane = reader.querySelector<HTMLElement>('.tour-strip-lane')
   const track = lane?.parentElement
   const records = [...reader.querySelectorAll<HTMLElement>('.reader-record')].map((el) => ({
@@ -382,6 +380,7 @@ function txColors(reader: HTMLElement) {
   return {
     plain() {
       if (name) name.textContent = 'Off'
+      icon?.remove()
       parts.forEach((e) => e.remove())
       lane?.remove()
       for (const r of records) {
@@ -392,6 +391,7 @@ function txColors(reader: HTMLElement) {
     },
     color() {
       if (name) name.textContent = said
+      if (icon) name?.before(icon)
       colorBy?.append(...parts)
       if (lane && track) track.prepend(lane)
       for (const r of records) {
@@ -788,7 +788,7 @@ const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undef
 const SAID = {
   chat: [
     'Your chat with Claude',
-    'Ask Claude anything about the files here. Claude cites the numbers it states, and a second Claude checks each one against your files. A red × marks one it could not confirm.',
+    'Ask Claude anything about the files here. Claude cites the numbers it states, and a second Claude checks each one against your files.',
   ],
   ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
 }
@@ -809,7 +809,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       body: SAID.chat[1],
       after: 'Hover over a time to see its source.',
       chips: onAnswerChip('chatChecked'),
-      // the citations are checked, the last one fails, and the pointer rests on it: its label says why
+      // the citations are checked and each holds; the pointer rests on the last one and its source shows
       demo: async (api) => {
         api.closeSource()
         showAnswer(api, 'chatChecking')

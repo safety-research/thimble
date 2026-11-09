@@ -1801,10 +1801,16 @@
 .colorby-caret {
   color: var(--text-tertiary);
 }
-/* where the first choice's values come from, beside the trigger: your data's chip or thimble's (ColorBy SourceChip) */
-.colorby-src {
+/* the first choice's name in the button, a label's after the label icon; where its values come from on hover
+   (ColorBy ChoiceName) */
+.colorby-name {
   display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.colorby-name-ico {
   flex: none;
+  color: var(--text-secondary);
 }
 /* "+N": the choices past the first, a lane of the tracks each */
 .colorby-plus {
