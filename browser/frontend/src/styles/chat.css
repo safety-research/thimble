@@ -2270,8 +2270,8 @@ button.view-chip-values[aria-expanded='true'] {
 .label-ask-meta { color: var(--text-tertiary, var(--text-secondary)); font: var(--type-ui-sm); }
 .lside-detail .label-ask { margin: 4px 0 8px; box-shadow: none; }
 /* -------- a check's comment on a passage of Claude's answer (chat/answerComments.ts): the passage tinted in its check's
-   color as the report tints a commented passage (report.css .wu-flag), 16%, and 30% while its comment is open beside it
-   -------- */
+   color as the report tints a commented passage (report.css .wu-flag), faint at rest (16%), and full (30%) under the
+   pointer and while its comment is open beside it, as the terminal draws an explainer or a heads-up -------- */
 .chat-text mark.answer-tint {
   color: inherit;
   background: color-mix(in oklab, var(--tint) 16%, transparent);
@@ -2281,6 +2281,7 @@ button.view-chip-values[aria-expanded='true'] {
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
+.chat-text mark.answer-tint:hover,
 .chat-text mark.answer-tint-open {
   background: color-mix(in oklab, var(--tint) 30%, transparent);
 }

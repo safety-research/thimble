@@ -24,7 +24,8 @@
 //   glossesOf(list, text, skip)         -> the look's explainers as a part keeps them, those whose term the text holds
 //   headsOf(item, text)                 -> the look's heads-up as a part keeps it (one at most), or null
 //   mergeLook(msgs, out, memory, shown) -> what one look adds to each message's part, and the terms it explained
-//   markColors(theme)                   -> the explainers' and heads-ups' highlights, a fill per theme, and their frames' keys
+//   markColors(theme)                   -> the explainers' and heads-ups' highlights, a faint and a full fill per theme, and
+//                                          their frames' keys
 //   citeLinks(text)                     -> its links to a file's lines as citations, so the tray draws them as the answer's
 //   filePlaces(text)                    -> the file places its links point to
 import { codeRanges, marksIn } from '../marks/message.js'
@@ -395,17 +396,18 @@ export function mergeLook(msgs, out, memory, shown = () => true) {
 }
 
 /** The explainers' and heads-ups' colors. Each is a highlight, as a highlighter pen marks words: a fill behind the
- *  words, teal for an explainer (`glossBg`) and orange for a heads-up (`headsBg`), with the words in the theme's own text
- *  color, so they read on it. A background takes no theme key, so each theme has its own shade: light fills under the
- *  light theme's dark text, deep ones under the dark theme's light text. The one the tray shows is bold on a stronger
- *  shade (`glossFocus`, `headsFocus`). A citation is underlined in the text's color, a purple tint on hover
- *  (marks/view.ts citeLook), and a failed citation red with ×, so a highlight never reads as a citation. Inside a
- *  citation's words, which keep the citation's underline, the fill shows behind them in place of the citation's tint.
- *  `gloss` and `heads` are the theme keys of their frames in the tray. */
+ *  words, teal for an explainer and orange for a heads-up, with the words in the theme's own text color, so they read
+ *  on it. At rest each stands on a faint fill (`glossFaint`, `headsFaint`: the full fill blended halfway to the theme's
+ *  background). The pointer over it puts the full fill behind it (`glossBg`, `headsBg`), and the one the tray shows is
+ *  bold on the full fill (explain/seam.ts markLook). A background takes no theme key, so each theme has its own shades:
+ *  light fills under the light theme's dark text, deep ones under the dark theme's light text. A citation is underlined
+ *  in the text's color, a purple tint on hover (marks/view.ts citeLook), and a failed citation red with ×, so a
+ *  highlight never reads as a citation. Inside a citation's words, which keep the citation's underline, the fill shows
+ *  behind them in place of the citation's tint. `gloss` and `heads` are the theme keys of their frames in the tray. */
 export function markColors(theme) {
   const fill = theme === 'light'
-    ? { glossBg: '#c4eee6', headsBg: '#ffe0b8', glossFocus: '#8edccf', headsFocus: '#ffc98a' }
-    : { glossBg: '#1e4d47', headsBg: '#5c3a17', glossFocus: '#2b7068', headsFocus: '#80521f' }
+    ? { glossBg: '#c4eee6', headsBg: '#ffe0b8', glossFaint: '#e2f6f2', headsFaint: '#ffefdb' }
+    : { glossBg: '#1e4d47', headsBg: '#5c3a17', glossFaint: '#19302d', headsFaint: '#382715' }
   return { gloss: 'planMode', heads: 'claude', ...fill }
 }
 
