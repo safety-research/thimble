@@ -318,6 +318,19 @@ export async function tourData($: Engine): Promise<string | null> {
   return `${$.plugin.root.replace(/\/+$/, '')}/tour/sample`
 }
 
+/** The file of the tour's sample data, as the sample answer names it (skills/tour/SKILL.md). */
+export const TOUR_DATA = 'orders.csv'
+
+/** The files that the explainer of words in `row` reads from the tour's sample data (explain/expand.ts): TOUR_DATA
+ *  when `row` is the sample answer of a tour of this session, else none. Claude wrote that answer without reading the
+ *  file, so the conversation holds none of its lines. The explainer's writer cannot read a file itself, so it reads
+ *  only the lines it is given. The path is the one the answer names, which expand.ts reads in tour/sample (readRoots),
+ *  as it reads the links of the tour's answers. */
+export async function tourFiles($: Engine, row: string): Promise<string[]> {
+  if ((await $.state.get(SAMPLE)).value === row) return [TOUR_DATA]
+  return [await stateNow($), ...(await pastNow($))].some(t => t?.sample === row) ? [TOUR_DATA] : []
+}
+
 /** Whether `row` is the tour's sample answer: the row kept when step 0 was done, or, while step 0 waits, the answer of
  *  the turn that ends now. */
 export async function tourSample($: Engine, row: string | null | undefined): Promise<boolean> {

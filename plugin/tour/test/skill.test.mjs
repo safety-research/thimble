@@ -1,7 +1,8 @@
 // The tour's skill (skills/tour/SKILL.md): it is named tour, the person may start it as /thimble:tour, and it holds
 // the sample answer alone, step 0, which states its numbers with no citation and holds none of the tour's own words:
 // thimble draws the steps itself (tour/tour.ts), and its last step asks Claude for an answer that cites them. It holds
-// the words step e names, and the number wrong on purpose. It names the sample by the plugin's folder.
+// the words step e names, and the number wrong on purpose. It names the sample by the plugin's folder, and the answer
+// names the file that the explainer of its words reads.
 //   node --test plugin/tour/test/skill.test.mjs
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -32,4 +33,7 @@ test('the skill is tour, the person may start it, and it holds the sample answer
   // Claude Code fills in the plugin's folder, wherever it is installed
   assert.ok(text.includes('${CLAUDE_PLUGIN_ROOT}/tour/sample/orders.csv'))
   assert.ok(existsSync(join(ROOT, 'tour', 'sample', 'orders.csv')))
+  // the answer names the file that the explainer of its words reads (tour.ts TOUR_DATA)
+  const data = /TOUR_DATA = '([^']+)'/.exec(readFileSync(join(ROOT, 'tour', 'tour.ts'), 'utf8'))?.[1]
+  assert.ok(data && answer.includes(`(\`${data}\`)`) && existsSync(join(ROOT, 'tour', 'sample', data)))
 })
