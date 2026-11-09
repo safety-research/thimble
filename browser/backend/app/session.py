@@ -1333,9 +1333,10 @@ def handback_report(body: str) -> str:
 def visible(text: str) -> str:
     """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
     token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY,
-    and with the citations written as Markdown links for the terminal in their chat form (cite.from_links)."""
+    and with its citations in their chat form (cite.chat_form): those written as Markdown links for the terminal, and
+    a card's value cited in the older form as a mark, which the citation check reads (marks.turn_ended)."""
     m = END_RE.search(text)
-    text = cite.from_links(text[: m.start()].rstrip() if m else text)
+    text = cite.chat_form(text[: m.start()].rstrip() if m else text)
     if TERMINAL_ONLY not in text:
         return text
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()

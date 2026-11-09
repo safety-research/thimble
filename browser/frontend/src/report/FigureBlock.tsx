@@ -358,7 +358,7 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
               onClick={editable ? (e) => !(e.target as Element).closest(CITATION) && setEditing({ at: { x: e.clientX, y: e.clientY } }) : undefined}
               onKeyDown={editable ? (e) => e.key === 'Enter' && (e.preventDefault(), setEditing({ at: null })) : undefined}
             >
-              {take && <ChatMarkdown text={take} checks={cell && take === takeaway ? takeawayChecks(cell) : undefined} among={cell ? exampleRefs(cell) : undefined} />}
+              {take && <ChatMarkdown text={take} checks={cell && take === takeaway ? takeawayChecks(cell) : undefined} among={cell ? exampleRefs(cell) : undefined} linked={!!cell && take === takeaway} />}
             </div>
           )}
         </div>

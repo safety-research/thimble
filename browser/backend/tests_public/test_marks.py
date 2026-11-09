@@ -186,6 +186,43 @@ def _wait_all():
     return asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
 
 
+def test_a_card_s_value_cited_in_the_older_form_is_checked_and_a_wrong_value_fails(_fresh, monkeypatch):
+    """bc03: main cited a card's value in the older form, `[[6 of 24|card:<id>@out0#L2]]`, where line 2 of the card's
+    output says 4 of 24. The chat writes it as a mark (session.visible), so the turn's check reads it as any other. The
+    validator reads the card's line and fails the wrong value, which the check claimed was verified, and the repair that
+    starts then corrects it to the line's words."""
+    cid = _seed_card("", [{"text/plain": "config A: 10 of 24 task runs failed\nconfig B: 4 of 24 task runs failed\n"}])
+    place = f"card:{cid}@out0#L2"
+    reply = session.visible(f"Config B failed [[6 of 24|{place}]] task runs.")
+    assert reply == "Config B failed [6 of 24](#) task runs."
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        found = ({"status": "verified", "correction": None, "reason": "line 2 says so"} if len(seen) == 1 else
+                 {"status": "corrected", "correction": {"words": "4 of 24"}, "reason": "line 2 says 4 of 24"})
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": place}, **found}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    monkeypatch.setattr(marks, "run_fork", fork)
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+
+    async def go():
+        marks.turn_ended(CORPUS, main, turn, [reply], "cut-1")
+        while rest := [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]:
+            await asyncio.gather(*rest)
+
+    asyncio.run(go())
+    assert "1. [6 of 24] in: Config B failed [6 of 24] task runs." in seen[0]
+    looks = [r["items"][0]["status"] for r in _log() if r["type"] == "marks" and r["turn"] == turn]
+    changes = [s for i, s in enumerate(looks) if not i or s != looks[i - 1]]
+    assert changes == ["checking", "failed", "checking", "corrected"], looks
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert (m["shown"], m["was"]) == ("4 of 24", "6 of 24"), m
+
+
 def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monkeypatch):
     """B11's folder is the labels' definitions alone: a reply's stored marks and main's chat, which hold the reply's own
     words, stay outside the folder this session works in, as a quote and as code, by their paths, by a path through

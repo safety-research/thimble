@@ -124,8 +124,9 @@ export function rehypeRefChips() {
 }
 
 /** An old citation of a value a card shows, `[[value|card:<id>#<col>/<row>]]` or `[[value|card:<id>@out<i>#L<n>]]`,
- * as a mark the check verified with that place as its evidence (failed when the link pass found it broken), so it
- * reads and opens as a mark does; null for any other ref. Pure. */
+ * as a takeaway draws it: a mark the check verified with that place as its evidence, or failed when the link pass found
+ * it broken; null for any other ref. A takeaway's link pass keeps such a citation only where the place shows the value
+ * (backend cite.resolve). Pure. */
 export function cardCitationMark(ref: string, value: string, broken?: string | null): MarkItem | null {
   const p = parseRef(ref)
   if (p?.kind !== 'cell' || !((p.col != null && p.row != null) || (p.out != null && p.line != null))) return null
@@ -137,13 +138,20 @@ export function cardCitationMark(ref: string, value: string, broken?: string | n
   }
 }
 
+/** Whether a check read the text's old citations of a card's values (cardCitationMark). A takeaway's link pass reads
+ * them (ChatMarkdown `linked`). No check reads them in any other text, so there they draw as not checked yet, never
+ * as verified, their label the place they name (Mark `unchecked`). Main's chat writes them as marks, which its check
+ * reads (backend cite.chat_form). */
+const LinkedCites = createContext(false)
+
 function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   const ctx = useContext(ChipContext)
+  const linked = useContext(LinkedCites)
   const ref = (props as Record<string, unknown>)['data-ref']
   const value = (props as Record<string, unknown>)['data-value']
   if (typeof ref === 'string' && typeof value === 'string') {
     const item = cardCitationMark(ref, value, ctx.broken.has(ref) ? (ctx.why?.get(ref) ?? '') : null)
-    if (item) return <Mark k={-1} item={item} anchor={ctx.anchor}>{shownValue(value)}</Mark>
+    if (item) return <Mark k={-1} item={item} unchecked={!linked} anchor={ctx.anchor}>{shownValue(value)}</Mark>
   }
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
@@ -338,10 +346,11 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
  * `checks`: what the check found of each of its marks, by their order in the text. `marks`: the passages the checks
- * commented on, tinted (rehypeAnswerMarks). A bare citation in it is its target's glyph alone, its name in the hover,
+ * commented on, tinted (rehypeAnswerMarks). `linked`: the text is a card's takeaway, whose link pass checked its old
+ * citations of a card's values (LinkedCites). A bare citation in it is its target's glyph alone, its name in the hover,
  * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). Its file chips are told
  * apart from each other and from `among`, the records shown with it (an example card's, under its takeaway). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks, among }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[]; among?: readonly unknown[] }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks, among, linked = false }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[]; among?: readonly unknown[]; linked?: boolean }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
   // once checked, the text reads as the check left it: its rewritten sentences and corrected words in place
@@ -353,20 +362,22 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks
   const marked = withMarkHrefs(read.text)
   return (
     <MarkItems.Provider value={{ items: read.checks, streaming: !!streaming }}>
-      <GlyphCites.Provider value={true}>
-        <ShownTogether.Provider value={together}>
-          {!chunked && !streaming ? (
-            <MarkdownBlock text={marked} marks={marks} />
-          ) : (
-            splitMarkdownBlocks(marked).map((chunk, i) => (
-              <Fragment key={i}>
-                {i > 0 && '\n'}
-                <MarkdownBlock text={chunk} marks={marks} />
-              </Fragment>
-            ))
-          )}
-        </ShownTogether.Provider>
-      </GlyphCites.Provider>
+      <LinkedCites.Provider value={linked}>
+        <GlyphCites.Provider value={true}>
+          <ShownTogether.Provider value={together}>
+            {!chunked && !streaming ? (
+              <MarkdownBlock text={marked} marks={marks} />
+            ) : (
+              splitMarkdownBlocks(marked).map((chunk, i) => (
+                <Fragment key={i}>
+                  {i > 0 && '\n'}
+                  <MarkdownBlock text={chunk} marks={marks} />
+                </Fragment>
+              ))
+            )}
+          </ShownTogether.Provider>
+        </GlyphCites.Provider>
+      </LinkedCites.Provider>
     </MarkItems.Provider>
   )
 })

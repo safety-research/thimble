@@ -143,7 +143,7 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
+            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} linked />
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>

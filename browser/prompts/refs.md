@@ -22,5 +22,5 @@ The rows below, if any, come from this corpus's viewers. Cite a view across the 
 
 - In the chat, link each card as `[[card:<id>]]`. The link shows the card's name, and a click opens the card. Put the link at the end of the sentence that states what the card shows, never on a line of its own.
 - Cite even when you are not sure of the exact ref. A later check repairs broken refs.
-- A link shows its words where it stands, so put it on the words or the value it supports. Write "[[352|card:<id>#outcome/approved]] of the 410 refund requests were approved". Do not write "352 of the 410 refund requests were approved [[352|card:<id>#outcome/approved]]", which reads "approved 352.".
+- A link shows its words where it stands, so put it on the words or the value it supports. In a document, write "[[352|card:<id>#outcome/approved]] of the 410 refund requests were approved". Do not write "352 of the 410 refund requests were approved [[352|card:<id>#outcome/approved]]", which reads "approved 352.".
 - In prose, name a card by its question and a record by what it shows.
