@@ -349,13 +349,13 @@ export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolea
 }
 
 /** The look of the words that name a kind of mark (`] show explainer`, `] next citation`), on the bar and in the tray's
- *  header: the mark's own look at rest, as the reply draws it (an explainer's teal fill and a heads-up's orange one,
- *  explain/place.mjs markColors; a citation's underline, marks/view.ts citeLook), so the words that name a mark show
- *  what it looks like. A card has none. In the theme set the drawing read last (themeNow). */
+ *  header: the mark's own look at rest, as the reply draws it (an explainer's faint teal fill and a heads-up's faint
+ *  orange one, explain/place.mjs markColors; a citation's underline, marks/view.ts citeLook), so the words that name a
+ *  mark show what it looks like. A card has none. In the theme set the drawing read last (themeNow). */
 function kindLook(kind: string | null | undefined): Record<string, unknown> | null {
   const c = markColors(themeLast())
-  if (kind === 'explain') return { backgroundColor: c.glossBg }
-  if (kind === 'heads') return { backgroundColor: c.headsBg }
+  if (kind === 'explain') return { backgroundColor: c.glossFaint }
+  if (kind === 'heads') return { backgroundColor: c.headsFaint }
   if (kind === 'citation') return { underline: true }
   return null
 }
@@ -1074,13 +1074,13 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   }
   const tone = TONES[f.kind]
   // the title is the marked words, drawn as the reply draws the open mark (marks/view.ts markEl) but not underlined: bold
-  // on its tint, a failed citation's in red; an explainer's or a heads-up's words on their stronger fill. A click on them
+  // on its tint, a failed citation's in red; an explainer's or a heads-up's words on their full fill. A click on them
   // closes the tray, as a second click on the open mark in the reply does
   const fills = markColors(themeLast())
   const cite = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`) : f.kind === 'place' ? wordsLook('unchecked', `tray:${f.row}:${f.id}`) : null
   const look: Any = cite
     ? { ...(cite.color ? { color: cite.color } : {}), hover: cite.hover, bold: true, backgroundColor: cite.hover.backgroundColor }
-    : { bold: true, backgroundColor: f.kind === 'heads' ? fills.headsFocus : fills.glossFocus }
+    : { bold: true, backgroundColor: f.kind === 'heads' ? fills.headsBg : fills.glossBg }
   const about = aboutOf(f, await infoOf($, f))
   // a citation's status: the turning glyph beside `checking` turns with the one after its words in the reply
   const spin = status?.sign === 'spin' ? await spinNow($) : ''

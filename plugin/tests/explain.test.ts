@@ -1,5 +1,5 @@
 // The explainers and heads-ups (explain/): after the observer's look, each stands on its words in the answer as a
-// press, in the theme's teal and orange; e explains the words selected in an answer, and with Citations manual, c makes
+// press, on a faint version of the theme's teal and orange, and on the full one while the tray shows it; e explains the words selected in an answer, and with Citations manual, c makes
 // them a citation. While the tour waits for its selection step, the explainer shown is that step done. Until the tour's
 // cite step, an explainer's links are words and c cites nothing. After a tour, a link to its orders.csv opens the
 // plugin's copy of the file.
@@ -15,7 +15,7 @@ import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, resetExplain, type ExplainPart } from '../explain/seam'
 import { placeLines } from '../explain/expand'
-import { trayKey, trayNow } from '../tray/tray'
+import { trayBar, trayKey, trayNow } from '../tray/tray'
 import { readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeBar, citeKey, citeWords } from '../marks/cite'
@@ -112,7 +112,7 @@ const LOOK = reply({
   heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['[The log covers one office](logs/upload.log).'] },
 })
 
-test("after a look, the answer's explainer and heads-up stand on their words in the theme's teal and orange, and the digest knows them", async () => {
+test("after a look, the answer's explainer and heads-up stand on their words on a faint teal and orange, bold on the full fill only while the tray shows one, and the digest knows them", async () => {
   setOptions({})
   const s = setup([LOOK])
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
@@ -120,12 +120,31 @@ test("after a look, the answer's explainer and heads-up stand on their words in 
   expect(part!.order).toEqual(['h1', 'g1'])
   expect(part!.items.g1).toMatchObject({ term: 'retry budget', body: 'How many times the client tries again.' })
   expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network' })
-  const spans = await spansFor(s.$, 't1-row', ANSWER, [{ start: 57, end: 75, words: '41 of the 44' }])
+  const marks = [{ start: 57, end: 75, words: '41 of the 44' }]
+  const looks = async () => (await spansFor(s.$, 't1-row', ANSWER, marks)).map(x => x.look)
+  const spans = await spansFor(s.$, 't1-row', ANSWER, marks)
   expect(spans.map(x => ANSWER.slice(x.start, x.end))).toEqual(['retry budget', '30 seconds after a drop'])
-  // a highlight: a fill behind the words, teal for an explainer, orange for a heads-up, the words in the theme's text color
-  expect(spans[0]!.look).toEqual({ backgroundColor: '#1e4d47', hoverBg: '#2b7068' })
-  expect(spans[1]!.look).toEqual({ backgroundColor: '#5c3a17', hoverBg: '#80521f' })
-  expect(spans[1]!.focus).toEqual({ bold: true, backgroundColor: '#80521f' })
+  // a highlight: the words in the theme's text color on a faint teal (an explainer) or orange (a heads-up); the
+  // pointer over one puts the full fill behind it
+  const rest = [{ backgroundColor: '#19302d', hoverBg: '#1e4d47' }, { backgroundColor: '#382715', hoverBg: '#5c3a17' }]
+  expect(spans.map(x => x.look)).toEqual(rest)
+  expect(spans[1]!.focus).toEqual({ bold: true, backgroundColor: '#5c3a17' })
+  // the bar names the first one in its look at rest
+  expect((await trayBar(s.$, () => true, false))[0]).toMatchObject({ key: ']', marked: { words: 'explainer', look: { backgroundColor: '#19302d' } } })
+  // opened: bold on the full fill while the tray shows it; the other stays faint
+  await spans[0]!.onPress!()
+  expect(await looks()).toEqual([{ backgroundColor: '#1e4d47', hoverBg: '#1e4d47', bold: true }, rest[1]])
+  // the tray moves to the heads-up: the explainer is faint again
+  await spans[1]!.onPress!()
+  expect(await looks()).toEqual([rest[0], { backgroundColor: '#5c3a17', hoverBg: '#5c3a17', bold: true }])
+  // the tray closes (0): both faint
+  await (await trayKey(s.$, '0', 0))!.now()
+  expect(await trayNow(s.$)).toBe(null)
+  expect(await looks()).toEqual(rest)
+  // the light theme's shades
+  s.$.config.list = async () => [{ key: 'theme', value: 'light' }]
+  resetTheme()
+  expect(await looks()).toEqual([{ backgroundColor: '#e2f6f2', hoverBg: '#c4eee6' }, { backgroundColor: '#ffefdb', hoverBg: '#ffe0b8' }])
   expect(spans[0]!.label).toBe('explain retry budget')
   expect(await explainState(s.$)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
   expect(JSON.parse(s.files.get('/made-up/.thimble/conversations/s-explain/explain.json')!)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })

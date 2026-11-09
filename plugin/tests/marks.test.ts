@@ -1,10 +1,12 @@
 // Marks across one reply (marks/checker.ts, view.ts): a reply with marks starts one checker fork with the marks filled
 // into its text; the fork's answer, once validated, gives each mark its status and what main reads next; a citation the
 // check finds wrong is repaired at once, and x checks one again; the checker may only read, and run code as one Python
-// script. All data is made up. `claude plugin test plugin`.
+// script. An explainer's words in a reply are faint at rest and full while the tray shows them. All data is made up.
+// `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
+import { checkSpans } from '../core/answerview'
 import { autoRepair, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
 import { setOptions } from '../settings/features.mjs'
 import { marksIn } from '../marks/message.js'
@@ -207,4 +209,45 @@ test("a check that fails a citation repairs it at once, with a request that says
   expect(told['marks:row-1:repair:3']).not.toContain('pressed x')
   expect(told['marks:row-1:repair:3']).toContain('- "ship it" is corrected to "ship it now" (the check: "line 9 holds these words")')
   expect(told['marks:row-1']).toContain('"ship it" is flagged as wrong')
+})
+
+/** Every element of a drawing, in order. */
+function all(n: Any, out: Any[] = []): Any[] {
+  if (!n || typeof n !== 'object') return out
+  if (Array.isArray(n)) { n.forEach(x => all(x, out)); return out }
+  out.push(n)
+  all(n.props?.children, out)
+  return out
+}
+
+test("an explainer's words: a faint fill at rest, the full one under the pointer, bold on the full one while the tray shows it, on a citation's words too; a plain reply shows the full fill only under the pointer", () => {
+  const text = 'The retry budget ran out: [41 of the 44](#) failed.'
+  const marks = marksIn(text)
+  const at = (w: string) => ({ start: text.indexOf(w), end: text.indexOf(w) + w.length })
+  // as explain/seam.ts draws an explainer in the dark theme
+  const look = { backgroundColor: '#19302d', hoverBg: '#1e4d47' }
+  const focus = { bold: true, backgroundColor: '#1e4d47' }
+  const given = ['retry budget', '41 of the 44'].map((w, k) => ({ id: `g${k}`, ...at(w), look, focus, label: `explain ${w}`, onPress: () => undefined }))
+  const drawn = (open: string | null, plain = false) => {
+    const els = all(messageEl(ELS, { text, marks, looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, spans: checkSpans(given, text, marks, open), plain }))
+    return {
+      words: (w: string) => els.find(n => n.type === 'Text' && n.props?.children === w)?.props,
+      press: (w: string) => els.find(n => n.type === 'Button' && n.props?.label === `explain ${w}`)?.props,
+    }
+  }
+  // at rest: the faint fill, on plain words and on a citation's words under its underline; the full one under the pointer
+  const rest = drawn(null)
+  expect(rest.words('retry budget')).toMatchObject({ backgroundColor: '#19302d', hover: { backgroundColor: '#1e4d47' } })
+  expect(rest.words('41 of the 44')).toMatchObject({ backgroundColor: '#19302d', underline: true })
+  expect(rest.press('41 of the 44')!.hover).toMatchObject({ backgroundColor: '#1e4d47' })
+  for (const w of ['retry budget', '41 of the 44']) expect(rest.words(w)!.bold).toBeUndefined()
+  // the one the tray shows: bold on the full fill
+  expect(drawn('g0').words('retry budget')).toMatchObject({ backgroundColor: '#1e4d47', bold: true })
+  expect(drawn('g1').words('41 of the 44')).toMatchObject({ backgroundColor: '#1e4d47', bold: true, underline: true })
+  // a plain reply (Minimal): no fill at rest, the full one while the pointer is over its row
+  const plain = drawn(null, true)
+  for (const w of ['retry budget', '41 of the 44']) {
+    expect(plain.words(w)!.backgroundColor).toBeUndefined()
+    expect(plain.words(w)!.hover).toMatchObject({ backgroundColor: '#1e4d47' })
+  }
 })

@@ -83,8 +83,8 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 /** A run as a Text: its tone, bold, underline and inverse (the claim picked, on the map); cited words in evidence look as in the citations' card (citeWords,
  *  in hover group `id`); a citation (`cite`, its status) as citations look in the reply (wordsLook). */
 function spanOf(els: Any, r: Run, i: number, id: string): unknown {
-  // `gloss`: an explainer's term, in the explainers' fill as the reply draws it
-  const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossBg } : {}
+  // `gloss`: an explainer's term, in the explainers' faint fill, as the reply draws one at rest
+  const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossFaint } : {}
   return els.Text({
     key: `t${i}`, ...look(r.tone), ...bg, ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}), ...(r.inverse ? { inverse: true } : {}),
     ...(r.tint ? citeWords(id) : {}), ...(r.cite ? wordsLook(r.cite as MarkStatus, id) : {}), children: r.s,
