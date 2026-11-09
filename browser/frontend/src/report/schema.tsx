@@ -3,20 +3,27 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs } from '@blocknote/core'
 import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
 import { GlyphCites, RefChip } from '../components/RefChip'
+import { useReportCtx } from './context'
 import { FigureBlock } from './FigureBlock'
 import { PROMPT_TYPE } from './model'
 import { PromptBlock } from './PromptBlock'
+
+/** A citation's chip, in the workspace of the report it stands in. */
+function CiteChip({ refText, value }: { refText: string; value: string }) {
+  const { ws } = useReportCtx()
+  return (
+    <GlyphCites.Provider value={true}>
+      <RefChip ref={refText} value={value || undefined} workspace={ws || undefined} compact cite />
+    </GlyphCites.Provider>
+  )
+}
 
 /** A citation in the report's text: a cited number is the link's text, and a bare citation is its target's glyph alone,
  * its name in the hover (components/RefChip GlyphCites). */
 export const Cite = createReactInlineContentSpec(
   { type: 'cite', propSchema: { value: { default: '' }, ref: { default: '' } }, content: 'none' } as const,
   {
-    render: ({ inlineContent }) => (
-      <GlyphCites.Provider value={true}>
-        <RefChip ref={inlineContent.props.ref} value={inlineContent.props.value || undefined} compact cite />
-      </GlyphCites.Provider>
-    ),
+    render: ({ inlineContent }) => <CiteChip refText={inlineContent.props.ref} value={inlineContent.props.value} />,
   },
 )
 

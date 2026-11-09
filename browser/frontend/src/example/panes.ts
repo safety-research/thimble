@@ -9,21 +9,36 @@ export interface Box {
   height: number
 }
 
+/** What a frame shows, as its address names it (example.html?pane=report): `files`, the Files pane with the Labels
+ * sidebar, for the Files and Labels steps; `report`, the Report with the Comments sidebar, for the Report step. */
+export type PaneKind = 'files' | 'report'
+
+/** The panes of the frame at `search` (its address's query). */
+export const paneKind = (search: string): PaneKind => (new URLSearchParams(search).get('pane') === 'report' ? 'report' : 'files')
+
 /** What the panes tell the tour. */
 export interface PanesListeners {
   /** the person pressed, typed or scrolled in the panes (a demo playing stops) */
   input?: () => void
   /** the person pressed Escape and nothing in the panes took it (the tour closes) */
   escape?: () => void
-  /** the person closed the Labels sidebar (its ×, or Escape in it), or asked for it (a label's name in Files) */
+  /** the person closed the sidebar (its ×, or Escape in it), or asked for it (a label's name in Files) */
   side?: (open: boolean) => void
 }
 
-export interface ExamplePanes {
-  /** where the Files pane stands, and the Labels sidebar while it is open (null: closed) */
-  place: (files: Box, side: Box | null) => void
-  /** the Files pane shows its open file: the example is in place */
+/** What every frame of example panes lets the tour do. */
+export interface ExampleFrame {
+  /** where the pane stands (the Files pane, or the Report), and the sidebar while it is open (null: closed) */
+  place: (pane: Box, side: Box | null) => void
+  /** the pane shows its example: the Files pane its open file, the Report its page */
   ready: () => boolean
+  /** what the panes hold open over them closes, as Escape closes it: a menu, the label's editor */
+  close: () => Promise<void>
+  listen: (fns: PanesListeners) => void
+}
+
+/** The Files frame's panes, which the Labels step's demo also drives. */
+export interface ExamplePanes extends ExampleFrame {
   /** as the Labels step's demo starts: the panes as the Files step first shows them, the agent's transcript in front
    * and plain (the label off, its Color by Off) */
   reset: () => void
@@ -33,9 +48,6 @@ export interface ExamplePanes {
   plain: () => void
   /** the parts the demo's pointer goes to: Color by's control, and the label's row in its menu once open */
   part: (name: 'color-by' | 'color-by-label') => HTMLElement | null
-  /** what the panes hold open over them closes, as Escape closes it: a menu, the label's editor */
-  close: () => Promise<void>
-  listen: (fns: PanesListeners) => void
 }
 
 /** The name the frame's window gives its panes under. */

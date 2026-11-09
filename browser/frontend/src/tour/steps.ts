@@ -2,13 +2,13 @@
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own, marked
 // Example but for the views step's. Most are captured from real thimble markup (examples.json: a live page, and
 // thimble's own components for the marks and comments); a step that asks the analyst to act acts only on that example,
-// so nothing reaches the server. The Files and Labels steps show thimble's own Files pane and Labels sidebar over the
-// tour's example folder (src/example), whose requests are answered inside its frame.
+// so nothing reaches the server. The Files, Labels and Report steps show thimble's own Files pane, Labels sidebar,
+// Report and Comments sidebar over the tour's example folder (src/example), whose requests are answered inside its
+// frame.
 import { askKeyLabel, isMacPlatform } from '../lib/platform'
 import { TIP_DELAY_MS } from '../components/Tooltip'
-import { PANES_KEY, type Box, type ExamplePanes } from '../example/panes'
+import { PANES_KEY, type Box, type ExampleFrame, type ExamplePanes, type PaneKind } from '../example/panes'
 import { setMarkup, type Api, type Example, type Rect, type Step } from './engine'
-import reportFigs from './report-figs.json'
 
 const canvasPanel = '[data-panel="canvas"].shell-panel'
 const filesPanel = '[data-panel="files"].shell-panel'
@@ -244,57 +244,28 @@ const cardExample = (api: Api): Example => {
 }
 
 // ---------- the right sidebar (shell/LabelsSidebar.tsx), which the top bar's Labels and Comments buttons open, each on
-// its own section. A step about it opens the real one on its section with that button, so the panes make room for it
-// as they do for the analyst, and lays its example over it: the Report step's captured one (examples.json), the Labels
-// step the example panes' own (panesExample). The step's end puts the sidebar back as the analyst had it.
+// its own section. A step whose example has a sidebar opens the page's own on that section with its button, so the
+// panes make room for it as they do for the analyst, and lays the example's over it (frameExample). The step's end puts
+// the sidebar back as the analyst had it.
 type SideSection = 'labels' | 'comments'
 const realSide = () => [...document.querySelectorAll<HTMLElement>('aside.lside')].find((e) => !e.closest('.tour-root')) ?? null
 const sideButton = (section: string) => document.querySelector<HTMLElement>(`.shell-side-btn[data-side="${section}"]`)
-/** The sidebar open on `section`; what it returns puts it back as it was. */
-const holdSide = (section: SideSection) => {
-  const was = realSide()?.dataset.section ?? null
-  if (was !== section) sideButton(section)?.click()
-  return () => {
-    const now = realSide()?.dataset.section ?? null
-    // a click on the open section's button closes the sidebar, a click on the other's shows that one
-    if (now !== was) sideButton(was ?? now ?? section)?.click()
-  }
-}
-/** The categories' last row as the sidebar draws it now (LabelsSidebar.tsx NewCheck), which the capture predates. */
-const NEW_CHECK =
-  '<button type="button" class="lside-add"><svg class="icon icon-plus" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Ask for comments</button>'
-/** The example sidebar on `section`, laid over the real one while it is open; the comment categories end in + Ask for
- * comments, as thimble's do. */
-const sideExample = (api: Api, section: SideSection) => {
-  const wrap = api.snap(section === 'labels' ? 'labelsSide' : 'commentsSide', 'tour-ex-side')
-  const aside = wrap.firstElementChild as HTMLElement
-  aside.removeAttribute('data-section')
-  if (section === 'comments') {
-    const add = document.createElement('div')
-    add.className = 'lside-new'
-    setMarkup(add, NEW_CHECK)
-    aside.querySelector('.lside-section')?.append(add)
-  }
-  Object.assign(aside.style, { width: '100%', maxWidth: 'none', height: '100%', margin: '0' })
-  // the badge in the head's empty middle, clear of the heading and of the Label tool switch
-  Object.assign(api.tag(wrap).style, { top: '14px', left: '50%', right: 'auto', transform: 'translateX(-50%)' })
-  const layout = () => {
-    const S = api.rectOf(realSide())
-    wrap.style.display = S ? '' : 'none'
-    if (S) Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px` })
-    return !!S
-  }
-  return { wrap, aside, layout }
-}
 
-// ---------- Files and Labels: thimble's own Files pane and Labels sidebar over the tour's example folder, three made-up
-// agents fixing a tea shop's checkout (src/example), in a frame laid over the page's own Files pane and, while it is
-// open on its labels, the page's own Labels sidebar. The analyst uses them as in a workspace: every click, scroll, menu
-// and mode works, on the example's files and its label "what the step does", and the frame answers its requests
-// itself. The page's own sidebar opens and closes with the example's (the top bar's Labels button, the example's ×, a
-// label's name in Files), so the panes make room for it as they do for the analyst; until the frame draws, each pane's
-// place shows the pane's plain paper, never the analyst's files. Once the tour leaves these steps, the sidebar is as the
-// analyst had it.
+// ---------- Files, Labels and Report: thimble's own panes over the tour's example folder, three made-up agents fixing a
+// tea shop's checkout (src/example), in a frame laid over the page's own: the Files pane and, while it is open on its
+// labels, the Labels sidebar, for the Files and Labels steps; the Report and, while it is open on its comments, the
+// Comments sidebar, for the Report step. The analyst uses them as in a workspace: every click, scroll, menu, mode and
+// edit works, on the example's files, its label "what the step does" and the report main wrote about them, and the
+// frame answers its requests itself. The page's own sidebar opens and closes with the example's (the top bar's button,
+// the example's ×, a label's name in Files), so the panes make room for it as they do for the analyst; until the frame
+// draws, each pane's place shows the pane's plain paper, never the analyst's own. Once the tour leaves these steps, the
+// sidebar is as the analyst had it.
+
+/** Each frame's place: the page's pane it lies over, and the section of the sidebar it opens. */
+const FRAMES: Record<PaneKind, { panel: string; section: SideSection; title: string }> = {
+  files: { panel: filesPanel, section: 'labels', title: 'Files (example)' },
+  report: { panel: reportPanel, section: 'comments', title: 'Report (example)' },
+}
 
 /** The box of `r` inside `outer`, in the frame's px. */
 const inside = (r: Rect, outer: Rect): Box => ({ x: r.x - outer.x, y: r.y - outer.y, width: r.width, height: r.height })
@@ -303,41 +274,43 @@ const lay = (el: HTMLElement, r: Rect | null) => {
   el.style.display = r ? '' : 'none'
   if (r) Object.assign(el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
 }
-/** The real sidebar is open on its labels. */
-const labelsOpen = () => realSide()?.dataset.section === 'labels'
 
-const panesExample = (api: Api): Example => {
+/** The example frame of `kind` (FRAMES), as the example of the steps that show it. */
+function frameExample(api: Api, kind: PaneKind): Example {
+  const { panel, section, title } = FRAMES[kind]
+  /** The real sidebar is open on the frame's section. */
+  const sideShown = () => realSide()?.dataset.section === section
   // the sidebar as the analyst had it, which the tour puts back once it leaves these steps
   const was = realSide()?.dataset.section ?? null
-  // each pane's paper, as the page draws the Files pane and the sidebar
+  // each pane's paper, as the page draws the pane and the sidebar
   const paper = (background: string) => {
     const d = document.createElement('div')
     d.className = 'tour-ex-paper'
     Object.assign(d.style, { background, borderRadius: 'var(--radius-pane)' })
     return d
   }
-  const filesPaper = paper('var(--bg-panel)'),
+  const panePaper = paper('var(--bg-panel)'),
     sidePaper = paper('var(--surface-card)')
   const frame = document.createElement('iframe')
   frame.className = 'tour-ex-panes'
-  frame.title = 'Files (example)'
-  frame.src = `${import.meta.env.BASE_URL}example.html`
+  frame.title = title
+  frame.src = `${import.meta.env.BASE_URL}example.html${kind === 'report' ? '?pane=report' : ''}`
   Object.assign(frame.style, { border: '0', background: 'transparent' })
-  api.ex.append(filesPaper, sidePaper, frame)
-  /** The page's own sidebar on its labels (open) or as the analyst had it. */
+  api.ex.append(panePaper, sidePaper, frame)
+  /** The page's own sidebar on the frame's section (open) or as the analyst had it. */
   const side = (open: boolean) => {
-    if (open !== labelsOpen()) sideButton('labels')?.click()
+    if (open !== sideShown()) sideButton(section)?.click()
   }
   const putBack = () => {
     const now = realSide()?.dataset.section ?? null
-    if (now !== was) sideButton(was ?? now ?? 'labels')?.click()
+    if (now !== was) sideButton(was ?? now ?? section)?.click()
   }
-  let panes: ExamplePanes | null = null
+  let panes: ExampleFrame | null = null
   /** The panes in the frame, once its page has drawn them. */
-  const connect = (): ExamplePanes | null => {
+  const connect = (): ExampleFrame | null => {
     if (panes) return panes
     try {
-      panes = ((frame.contentWindow as unknown as Record<string, ExamplePanes | undefined> | null)?.[PANES_KEY] ?? null) as ExamplePanes | null
+      panes = ((frame.contentWindow as unknown as Record<string, ExampleFrame | undefined> | null)?.[PANES_KEY] ?? null) as ExampleFrame | null
     } catch {
       panes = null
     }
@@ -349,259 +322,52 @@ const panesExample = (api: Api): Example => {
     })
     return panes
   }
+  /** The Files frame's panes, which the Labels step's demo drives. */
+  const files = () => (kind === 'files' ? (connect() as ExamplePanes | null) : null)
   const els = {
     frame,
-    /** the sidebar's place while the example's is open, which the Labels step points at */
-    labels: null as HTMLElement | null,
+    /** the sidebar's place while the example's is open, which the step points at */
+    side: null as HTMLElement | null,
     /** the step on screen, read outside a demo's api, which ends with the demo */
     step: () => api.step(),
-    panes: connect,
+    panes: files,
     /** the panes' part `name` and its box on the page */
     part: (name: Parameters<ExamplePanes['part']>[0]) => {
-      const el = connect()?.part(name) ?? null
+      const el = files()?.part(name) ?? null
       const F = api.rectOf(frame)
       const r = el?.getBoundingClientRect()
       return el && F && r && r.width ? { el, at: { x: F.x + r.left + r.width / 2, y: F.y + r.top + r.height / 2 } } : null
     },
     /** colored by the label, the sidebar open on it */
     color: () => {
-      connect()?.color()
+      files()?.color()
       side(true)
     },
     /** as the Files step shows the transcript: the label off, the sidebar as the analyst had it */
     plain: () => {
-      connect()?.plain()
+      files()?.plain()
       putBack()
     },
   }
   const layout = () => {
-    const F = api.rectOf(api.q(filesPanel))
-    const S = labelsOpen() ? api.rectOf(realSide()) : null
-    lay(filesPaper, F)
+    const P = api.rectOf(api.q(panel))
+    const S = sideShown() ? api.rectOf(realSide()) : null
+    lay(panePaper, P)
     lay(sidePaper, S)
-    els.labels = S ? sidePaper : null
-    if (!F) return false
-    const U = api.unionOf([F, S])!
+    els.side = S ? sidePaper : null
+    if (!P) return false
+    const U = api.unionOf([P, S])!
     lay(frame, U)
     const p = connect()
     if (!p) return false
-    p.place(inside(F, U), S && inside(S, U))
+    p.place(inside(P, U), S && inside(S, U))
     return p.ready()
   }
   return { els, layout, cleanup: putBack }
 }
-
-// ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
-// "Alternative explanations"), at its own size, or scaled down to a panel narrower than the one it was drawn in
-const reportExample = (api: Api): Example => {
-  const panel = () => api.q(reportPanel)
-  const w = api.snap('reportPanel', 'tour-ex-report')
-  const inner = w.firstElementChild as HTMLElement
-  const [w0, h0] = (inner.getAttribute('data-size') || '1096x848').split('x').map(Number)
-  Object.assign(inner.style, { position: 'absolute', left: '0', top: '0', margin: '0', width: `${w0}px`, height: `${h0}px`, transformOrigin: '0 0' })
-  Object.assign(w.style, { background: api.groundOf(panel()), overflow: 'hidden' })
-  const spacer = w.querySelector<HTMLElement>('.wu-bar-spacer')
-  api.tag(spacer ?? w)
-  asReportNow(w)
-  // the report's first figure, a dense timeline chart, becomes a small table that makes one point in plain words (the
-  // figure markup is the report's own, from its table figure)
-  const first = w.querySelector('figure.wu-fig[data-tour-anchor="card:fb1d3ae9"]'),
-    model = w.querySelector('figure.wu-fig[data-tour-anchor="card:d800bfeb"]')
-  if (first && model) {
-    const fig = model.cloneNode(true) as HTMLElement
-    fig.setAttribute('data-tour-anchor', 'card:connections-limit')
-    const ask = fig.querySelector('.wu-fig-q')
-    if (ask) ask.textContent = 'How close did the database come to its limit of 200 connections?'
-    const rows = [
-      ['02:57, night warning', '181', '4.12.0'],
-      ['07:41, morning warning', '176', '4.12.0'],
-      ['08:04, outage starts', '200, full', '4.12.0'],
-      ['08:40, after the update was undone', '58', '4.11.3'],
-    ]
-    const table = fig.querySelector('table')
-    if (table)
-      setMarkup(
-        table,
-        '<thead><tr><th>When</th><th>Connections in use</th><th>Version running</th></tr></thead><tbody>' + rows.map(([a, b, c]) => `<tr><th>${a}</th><td>${b}</td><td>${c}</td></tr>`).join('') + '</tbody>',
-      )
-    const cap = fig.querySelector('.wu-fig-caption')
-    if (cap) cap.textContent = 'The database came close to its limit only while version 4.12.0 was running.'
-    if (table) table.style.width = '100%'
-    first.replaceWith(fig)
-  }
-  api.ex.append(w)
-  // each chart drawn at the width its figure has, as thimble's Report draws a chart to its figure's width: of the
-  // drawings captured at figure widths from 391 to 688 px (report-figs.json), the nearest, sized to the figure
-  type Cap = { content: number; svg: string }
-  const charts = Object.entries(reportFigs as Record<string, Cap[]>)
-    .map(([id, caps]) => {
-      const fig = w.querySelector(`figure.wu-fig[data-tour-anchor="card:${id}"]`)
-      const box = fig?.querySelector<HTMLElement>('.outputs-vega'),
-        body = fig?.querySelector<HTMLElement>('.wu-fig-body')
-      return box && body && caps.length ? { box, body, caps, at: null as Cap | null, cw: 0 } : null
-    })
-    .filter((c): c is NonNullable<typeof c> => !!c)
-  const fitCharts = () => {
-    for (const c of charts) {
-      const cs = getComputedStyle(c.body)
-      const cw = c.body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-      if (!(cw > 0) || Math.abs(cw - c.cw) < 0.5) continue
-      c.cw = cw
-      const cap = c.caps.reduce((a, b) => (Math.abs(b.content - cw) < Math.abs(a.content - cw) ? b : a))
-      if (cap !== c.at) {
-        setMarkup(c.box, cap.svg)
-        c.at = cap
-      }
-      const svg = c.box.querySelector('svg')
-      if (!svg) continue
-      const vb = (svg.getAttribute('viewBox') || `0 0 ${svg.getAttribute('width')} ${svg.getAttribute('height')}`).split(/[\s,]+/).map(Number)
-      Object.assign(svg.style, { width: `${cw}px`, height: `${(cw * vb[3]) / vb[2]}px` })
-    }
-  }
-  const rail = w.querySelector<HTMLElement>('.wu-rail')
-  // the page's ruler: with no comments thimble draws it plain (a 10 px bar and a plain thumb), with them a lane of marks
-  const rulerBar = w.querySelector<HTMLElement>('.wu-report > .reader-ruler .reader-ruler-bar'),
-    rulerThumb = rulerBar?.querySelector<HTMLElement>('.reader-ruler-thumb'),
-    rulerMarks = rulerBar?.querySelector<HTMLElement>('img.reader-ruler-marks')
-  const rulerWith = { bar: rulerBar?.style.width || '', thumb: rulerThumb?.className || '' }
-  const rulerPlain = (plain: boolean) => {
-    if (!rulerBar) return
-    rulerBar.style.width = plain ? '10px' : rulerWith.bar
-    if (rulerMarks) rulerMarks.style.display = plain ? 'none' : ''
-    if (rulerThumb) rulerThumb.className = plain ? 'reader-ruler-thumb plain' : rulerWith.thumb
-  }
-  // the Comments sidebar, which the checks step opens: the checks with their comments, + Ask for comments at their end,
-  // and the new one among them once made
-  const side = sideExample(api, 'comments')
-  const sideRow = side.aside.querySelector<HTMLElement>('[data-category="alternative-explanations"]')
-  const sideCount = side.aside.querySelector('.lside-heading .lside-n')
-  let putBack: (() => void) | null = null
-  const els = {
-    root: w,
-    page: w.querySelector<HTMLElement>('.wu-page'),
-    k: 1,
-    sideRow,
-    checksShown: false,
-    side: null as HTMLElement | null,
-    hideChecks: () => {},
-    showMargin: () => {},
-    showChecks: () => {},
-    showSide: () => {},
-    hideSide: () => {},
-  }
-  els.showSide = () => {
-    if (!putBack) putBack = holdSide('comments')
-    if (!side.wrap.isConnected) api.ex.append(side.wrap)
-    els.side = side.wrap
-  }
-  els.hideSide = () => {
-    putBack?.()
-    putBack = null
-    side.wrap.remove()
-    els.side = null
-  }
-  // the check's comment cards, placed as thimble's margin places them (report/Margin.tsx): each 8px above its passage's
-  // first line, stacked 8px apart so no two meet; measured again every frame, since the page's width, its fonts and
-  // the figures move the passages
-  const placeComments = () => {
-    if (!rail) return
-    const base = rail.getBoundingClientRect().top
-    const want: { card: HTMLElement; top: number; h: number }[] = []
-    for (const card of rail.querySelectorAll<HTMLElement>('.wu-cm')) {
-      const id = card.getAttribute('data-comment')
-      const passage = id && w.querySelector(`[data-cids~="${id}"]`)
-      if (passage) want.push({ card, top: (passage.getBoundingClientRect().top - base) / els.k - 8, h: card.offsetHeight })
-    }
-    want.sort((a, b) => a.top - b.top)
-    let floor = -Infinity
-    for (const it of want) {
-      const top = Math.round(Math.max(it.top, floor))
-      it.card.style.top = `${top}px`
-      floor = top + it.h + 8
-    }
-  }
-  // with no check comments, thimble's Report has no margin (ReportPage.tsx draws .wu-rail only for comments, or for a
-  // check that is on), so the text column takes the page's width; the margin comes with the comments on the next step
-  els.hideChecks = () => {
-    els.checksShown = false
-    w.classList.add('tour-checks-hidden')
-    if (rail) rail.style.display = 'none'
-    rulerPlain(true)
-    if (sideRow) sideRow.style.display = 'none'
-    if (sideCount) sideCount.textContent = '0'
-  }
-  // the margin alone, empty, as thimble stands it while a check is on and before its comments come
-  els.showMargin = () => {
-    if (rail) rail.style.display = ''
-  }
-  els.showChecks = () => {
-    els.checksShown = true
-    w.classList.remove('tour-checks-hidden')
-    if (rail) rail.style.display = ''
-    rulerPlain(false)
-    if (sideRow) sideRow.style.display = ''
-    if (sideCount) sideCount.textContent = '4'
-  }
-  els.hideChecks()
-  const layout = () => {
-    const r = api.rectOf(panel())
-    if (!r) return false
-    if (els.side) side.layout()
-    Object.assign(w.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
-    const k = Math.min(1, r.width / w0)
-    els.k = k
-    Object.assign(inner.style, { width: `${r.width / k}px`, height: `${r.height / k}px`, transform: k < 1 ? `scale(${k})` : '' })
-    fitCharts()
-    placeComments()
-    // the ruler's thumb frames the span of the page on screen, as thimble's does
-    const pg = els.page
-    if (rulerBar && rulerThumb && pg?.scrollHeight) {
-      const span = pg.scrollHeight - pg.clientHeight,
-        H = rulerBar.clientHeight
-      const h = Math.min(H, Math.max(els.checksShown ? 96 : 32, (H * pg.clientHeight) / pg.scrollHeight))
-      const at = `translateY(${span > 0 ? ((H - h) * pg.scrollTop) / span : 0}px)`
-      if (rulerThumb.style.transform !== at) Object.assign(rulerThumb.style, { height: `${h}px`, transform: at })
-    }
-  }
-  return { els, layout, cleanup: () => els.hideSide() }
-}
-/** The captured Report (examples.json) as the Report stands now: no Slides, Story or Video beside it; the cards an
- * orientation made listed under Your work; a figure's caption whole, as text, with no scroll of its own (the capture
- * has the field it was once edited in); no Comments pane in the sidebar, the checks being in the top bar's
- * Comments; and a comment's head with no "check" after its name. */
-const asReportNow = (w: HTMLElement) => {
-  w.querySelectorAll('.wu-types .seg-opt').forEach((b) => {
-    if (/^(slides|story|video)$/.test(b.querySelector('[data-doc-chip]')?.getAttribute('data-doc-chip') ?? '')) b.remove()
-  })
-  const orient = w.querySelector('.wu-sec[data-section="orientation"]'),
-    yours = w.querySelector('.wu-sec[data-section="yours"]')
-  if (orient && yours) {
-    const rows = [...orient.querySelectorAll('.wu-card-row')]
-    yours.querySelector('.wu-sec-head')?.after(...rows)
-    const n = yours.querySelector('.wu-sec-head .wu-count')
-    if (n) n.textContent = String(yours.querySelectorAll('.wu-card-row').length)
-    orient.remove()
-  }
-  w.querySelectorAll<HTMLTextAreaElement>('textarea.wu-fig-caption').forEach((ta) => {
-    const cap = document.createElement('div')
-    cap.className = 'wu-fig-caption chat-text wu-fig-caption-read'
-    const p = document.createElement('p')
-    p.textContent = ta.value
-    cap.append(p)
-    ta.replaceWith(cap)
-  })
-  w.querySelector('.wu-side .wu-checks')?.remove()
-  w.querySelectorAll('.wu-cm-meta').forEach((m) => m.remove())
-}
-// the page scrolled so `el` stands `above` px (as drawn) from the page's top
-const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth = true) => {
-  const page = api.els.page as HTMLElement | null
-  if (!page || !el) return
-  const k = api.els.k || 1
-  const top = (el.getBoundingClientRect().top - page.getBoundingClientRect().top) / k + page.scrollTop - above
-  page.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' })
-}
-const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
+/** The Files pane's frame, which the Files and Labels steps share, and the Report's. */
+const panesExample = (api: Api) => frameExample(api, 'files')
+const reportExample = (api: Api) => frameExample(api, 'report')
 
 /** What the steps about the chat and the ⌘-click box say. True however the workbench reaches Claude: an API key,
  * Workload Identity Federation or the Claude Code sign-in. */
@@ -692,7 +458,7 @@ export function tourSteps(key: string, chat = true): Step[] {
     },
     {
       // the Files pane, and the Labels sidebar while the example's is open
-      tab: 'files', example: panesExample, anchor: (api) => [filesPanel, api.els.labels], place: 'left', align: 'start', pad: 0, radius: 12,
+      tab: 'files', example: panesExample, anchor: (api) => [filesPanel, api.els.side], place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Files',
       body: 'The file browser lists the folder’s files. thimble provides custom views for agent transcripts.',
@@ -700,7 +466,7 @@ export function tourSteps(key: string, chat = true): Step[] {
     {
       tab: 'files', example: panesExample, place: 'left', align: 'end', pad: 0, radius: 12,
       // the Files pane, the sidebar once open, and the button that opens it, which takes a click
-      anchor: (api) => [filesPanel, api.els.labels, sideButton('labels')],
+      anchor: (api) => [filesPanel, api.els.side, sideButton('labels')],
       interact: (api) => api.els.frame ?? null,
       allow: () => sideButton('labels'),
       title: 'Labels',
@@ -867,21 +633,14 @@ export function tourSteps(key: string, chat = true): Step[] {
       body: SAID.ask,
     },
     {
-      // the whole Report surface: its bar (with Export), the cards, and the page
-      tab: 'report', example: reportExample, anchor: reportPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      // the whole Report surface (its bar with History, Export and Revise, the cards, the page), the Comments sidebar
+      // once open, and the top bar's button that opens it, which takes a click
+      tab: 'report', example: reportExample, anchor: (api) => [reportPanel, api.els.side, sideButton('comments')], place: 'left', align: 'start', pad: 0, radius: 12,
+      interact: (api) => api.els.frame ?? null,
+      allow: () => sideButton('comments'),
       title: 'Report',
       body: `Write the report yourself or ask Claude to write it. Drag in cards or <span class="kbd">${modKey}+Enter</span> to request one.`,
       note: 'Reopen this tour with /tour in the chat.',
-      scroll: (api) => api.els.page ?? null,
-      // the report from its top, with none of its comments and no Comments sidebar
-      demo: async (api) => {
-        api.els.hideSide?.()
-        api.els.hideChecks?.()
-        const page = api.els.page as HTMLElement | null
-        page?.scrollTo({ top: 0 })
-        await api.sleep(300)
-        page?.scrollTo({ top: 0 })
-      },
     },
   ]
   return steps.filter((s) => chat || !s.needsChat)

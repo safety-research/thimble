@@ -13,8 +13,9 @@
 // or a source is open, Esc closes only that.
 //
 // Examples are the tour's own markup (./examples.json, ./steps), or the frame of its example panes (src/example: thimble's
-// own Files pane and Labels sidebar over a made-up folder, whose requests are answered inside the frame), laid over the
-// page under the dim and removed when their step ends. Nothing the tour shows reaches the server.
+// own Files pane, Labels sidebar, Report and Comments sidebar over a made-up folder, whose requests are answered inside
+// the frame), laid over the page under the dim and removed when their step ends. Nothing the tour shows reaches the
+// server.
 import { markTips, placeAtPointer, TIP_MARK } from '../components/Tooltip'
 import { askKeyLabel, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { setGuard } from './freeze'
