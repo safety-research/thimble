@@ -5,14 +5,15 @@ Messages API is a fake client and the Agent SDK a fake ClaudeSDKClient: no model
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app import (agents, claude_access, config, events, ledger, llm, runtime, runtime_cc, subagents,
-                 write_session)
+from app import (agents, claude_access, config, events, ledger, llm, report_types, runtime, runtime_cc, session,
+                 subagents, write_session)
 
 CORPUS = "mini"
 
@@ -458,6 +459,45 @@ async def test_a_message_sent_to_an_agent_while_it_works_is_read_at_its_running_
     said = [json.loads(ln) for ln in conv.transcript.path.read_text().splitlines()]
     assert any(r.get("type") == "user" and r.get("message", {}).get("content") == "Also give each section a date."
                and (r.get("origin") or {}).get("kind") == "coordinator" for r in said), "its transcript records it"
+
+
+async def kill_server(monkeypatch) -> None:
+    """The server is killed, so its stop (stop_all) never runs: its agents' turns end with no end recorded, and what it
+    kept in memory goes (its runtimes, the mirror's sessions, the writes it was asked for). Its files stay."""
+    real = runtime._ended
+    monkeypatch.setattr(runtime, "_ended", lambda *a, **k: None)
+    for sp in list(runtime._spaces.values()):
+        for conv in (sp.main, *sp.convs.values()):
+            if conv.running:
+                conv.task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await conv.task
+    monkeypatch.setattr(runtime, "_ended", real)
+    for lv in session._live.values():
+        if lv.task is not None:
+            lv.task.cancel()
+    session._live.clear()
+    runtime._spaces.clear()
+    report_types.cancel_workspace(CORPUS)
+
+
+async def test_a_writer_a_killed_server_left_running_ends_stopped_when_the_session_comes_back(on, monkeypatch):
+    """A server killed under a writer never ends the writer's run: the registry and its chat still say it runs, so the
+    Report showed it writing for good, and no writer of the document could start. The next server's runtime of the
+    workspace (runtime.ensure, as thimble-browser --continue makes it) ends that run stopped, so the document can be
+    written again."""
+    api_key(monkeypatch, [text("Wrote it more plainly.")])
+    runtime.ensure(CORPUS)
+    ans = await write_session.start(CORPUS, "report", "Say this more plainly.")
+    chat = str((subagents.agent(CORPUS, str(ans.agent_id)) or {}).get("chat"))
+    await kill_server(monkeypatch)
+    assert write_session.running(CORPUS, "report") and agents.read_meta(CORPUS, chat)["status"] == "running"
+    runtime.ensure(CORPUS)
+    assert not write_session.running(CORPUS, "report"), "no process runs it"
+    assert agents.read_meta(CORPUS, chat)["status"] == "stopped"
+    again = await write_session.start(CORPUS, "report", "Say this more plainly.")
+    assert again.started, again.reason
+    await runtime._spaces[CORPUS].convs[str(again.agent_id)].task
 
 
 # --------------------------------------------------------------------------- main's chats (thimble-browser -c / -r)

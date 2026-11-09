@@ -728,7 +728,8 @@ def stop_done(text: str) -> bool:
 
 async def stop(c: str, agent_id: str) -> Answer:
     """Stop an agent's run, and the background shells it started (add_shell). An agent that had ended already counts as
-    stopped."""
+    stopped. When the registry still holds its run as running, its process is gone with no end recorded, so the run
+    ends stopped here (run_ended), and its chat no longer shows it running."""
     a = agent(c, agent_id) or {}
     rid = new_request(c, "stop", a.get("key"), {"task_id": agent_id}, None, CLICK, role=a.get("role"), agent=agent_id)
     ans = await _bridge(c, "stop", agent=agent_id, request=rid, shells=list(a.get("shells") or []))
@@ -737,6 +738,8 @@ async def stop(c: str, agent_id: str) -> Answer:
     _set(c, rid, state="done" if not ans.refused else "refused", at=files.now(), reason=ans.reason or None)
     if not ans.refused:
         mark_stopped_by(c, agent_id, STOPPED_ANALYST)
+        if ans.get("done") and (agent(c, agent_id) or {}).get("status") in ("running", "waiting"):
+            run_ended(c, agent_id, "stopped", None, source="stop")
     return Answer({**ans, "request": rid})
 
 
@@ -1167,6 +1170,18 @@ async def out_of_plan(c: str, poll_s: float = 2.0) -> None:
 
 
 # --------------------------------------------------------------------------- main's quit and moves
+
+
+def end_left(c: str) -> list[str]:
+    """The runs of thimble's agents that the registry still holds as running when the server makes the runtime of
+    workspace `c` (runtime.ensure): at the server's start, as with --continue, or when a session comes back. The server
+    runs every agent itself, so no process runs these any more: the server that ran them was killed, or its stop did
+    not finish (runtime.stop_all). Each ends `stopped`, as that stop ends a run (run_ended), so its chat no longer shows
+    it running and it can start again, such as a writer by Write or Revise. The ids."""
+    left = [k for k, a in agents_of(c).items() if a.get("status") in ("running", "waiting")]
+    for agent_id in left:
+        run_ended(c, agent_id, "stopped", None, source="left")
+    return left
 
 
 # --------------------------------------------------------------------------- the caller of a thimble tool

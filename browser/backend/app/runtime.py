@@ -820,15 +820,31 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def ensure(c: str) -> Space:
-    """The workspace's runtime, with main attached as the mirror's session."""
+    """The workspace's runtime, with main attached as the mirror's session. A new runtime runs no agent yet, so the runs
+    the registry still holds as running end first (_end_left)."""
     global _loop
     with contextlib.suppress(RuntimeError):
         _loop = asyncio.get_running_loop()
     sp = _spaces.get(c)
     if sp is None:
         sp = _spaces[c] = Space(c)
+        _end_left(c)
     sp.attach()
     return sp
+
+
+def _end_left(c: str) -> None:
+    """The runs of thimble's agents a server that is gone left running end stopped (subagents.end_left): a server
+    killed under a writer would otherwise show it writing for good, with no writer of its document able to start."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        left = subagents.end_left(c)
+    except Exception:  # noqa: BLE001 — the runtime is made either way, and Stop still ends such a run
+        log.exception("%s: the runs a previous server left were not ended", c)
+        return
+    if left:
+        log.info("%s: runs a previous server left, ended stopped: %s", c, ", ".join(left))
 
 
 async def forget(c: str) -> None:
