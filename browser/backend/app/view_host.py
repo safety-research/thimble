@@ -71,11 +71,17 @@ def _parsed(paths: list[str]) -> list[str]:
 
 
 def _rss() -> int | None:
-    """The kernel's resident memory in bytes, None where /proc does not tell it."""
+    """The kernel's resident memory in bytes: from /proc, else (macOS) from psutil; None where neither tells it."""
     try:
         with open("/proc/self/statm", "rb") as f:
             return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
     except (OSError, ValueError, IndexError):
+        pass
+    try:
+        import psutil  # noqa: PLC0415
+
+        return int(psutil.Process().memory_info().rss)
+    except Exception:  # noqa: BLE001
         return None
 
 

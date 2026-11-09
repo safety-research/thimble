@@ -112,7 +112,8 @@ GitHub counts the downloads of each release's file; thimble sends nothing else.
     rm -rf ~/.thimble ~/.thimble-browser
 
 The last line also deletes your fixes, the workbench's workspaces and the plugin's labels. Your data folders stay as
-they are. The workbench's headless Chromium stays in `~/.cache/ms-playwright`: delete it if nothing else uses it.
+they are. The workbench's headless Chromium stays in `~/.cache/ms-playwright` (on macOS `~/Library/Caches/ms-playwright`):
+delete it if nothing else uses it.
 
 ## The dev install
 

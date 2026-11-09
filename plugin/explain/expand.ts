@@ -80,8 +80,9 @@ export async function placeLines($: Engine, path: string, from: number | null, t
     try {
       lines = String(await $.fs.read(file)).split('\n').slice(a - 1, b)
     } catch {
-      // a file over the 4 MiB one read takes: its lines from sed
-      const r = await $.process.run(['sed', '-n', `${a},${b}p;${b}q`, '--', file]).catch(() => null)
+      // a file over the 4 MiB one read takes: its lines from sed (the script after -e, so that macOS's sed, which stops
+      // reading options at the script, takes -- as the end of them, not as a file)
+      const r = await $.process.run(['sed', '-n', '-e', `${a},${b}p;${b}q`, '--', file]).catch(() => null)
       if (!r || r.exitCode !== 0) continue
       lines = String(r.stdout).replace(/\n$/, '').split('\n')
     }

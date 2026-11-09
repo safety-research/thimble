@@ -29,6 +29,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kernel import install as IN  # noqa: E402
 from releases_server import Proxy, Releases  # noqa: E402
 
+
+def binds() -> bool:
+    """Whether a test may listen on 127.0.0.1: not in a fix's sandbox on macOS (kernel/fixes.py), which shares the
+    computer's network and so lets no command take a port."""
+    try:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(not binds(), reason="no port on 127.0.0.1 here, for the made-up GitHub")
+
 GIT_ID = {"GIT_AUTHOR_NAME": "Release", "GIT_AUTHOR_EMAIL": "release@example.invalid",
           "GIT_COMMITTER_NAME": "Release", "GIT_COMMITTER_EMAIL": "release@example.invalid"}
 
@@ -358,7 +372,7 @@ def test_the_server_s_packages_are_compiled_and_an_install_that_left_them_uncomp
     path = f"{w.bin}:{w.home / '.local' / 'bin'}:/usr/bin:/bin"
     assert w.install(PATH=path).returncode == 0
     backend = w.th / "fixes" / "live" / "browser" / "backend"
-    sync = f"sync --project {backend} --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
+    sync = f"sync --project {backend} --python >=3.12,<3.15 --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
     assert w.uv() == [sync] and (backend / ".venv" / IN.FX.COMPILED).is_file()
     (backend / ".venv" / IN.FX.COMPILED).unlink()
     p = w.install(PATH=path)
@@ -442,7 +456,7 @@ def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_le
     assert not mark.exists()
     p = start()
     assert p.returncode == 0 and p.stdout.splitlines()[0] == "thimble-browser: compiling the server's packages, once..."
-    sync = (f"sync --project {(browser / 'backend').resolve()} --frozen --no-dev --no-install-project --extra dev "
+    sync = (f"sync --project {(browser / 'backend').resolve()} --python >=3.12,<3.15 --frozen --no-dev --no-install-project --extra dev "
             "--compile-bytecode")
     assert w.uv() == [sync, sync] and mark.is_file() and p.stderr == ""
     p = start()

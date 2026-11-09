@@ -47,7 +47,7 @@ if TYPE_CHECKING:  # annotations only: the names are bound at first use (_bind_s
         tool as sdk_tool,
     )
 
-from . import capture, config, retry, sdk
+from . import capture, config, procs, retry, sdk
 from .sdk import bind_sdk, sdk_attr
 
 
@@ -422,12 +422,8 @@ def _child_pid(client: Any) -> int | None:
 
 
 def _looks_like_cli(pid: int) -> bool:
-    """True when /proc says the pid is a `claude` CLI (a pid can be reused by an unrelated process)."""
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            return b"claude" in fh.read(4096)
-    except OSError:
-        return False
+    """True when the pid's command line names `claude` (a pid can be reused by an unrelated process)."""
+    return "claude" in procs.cmdline(pid)
 
 
 def _kill_child(pid: int | None, *, why: str) -> bool:
