@@ -71,6 +71,7 @@ test("an agent's pick is saved at once, in thimble's config: its model, its effo
   await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
   await settle()
   await settle()
+  expect(row('dev').querySelector('.settings-name')?.textContent).toBe('View builds')
   await pick('Effort for Writer', 'max')
   expect(puts).toEqual([['/api/ws/mini/settings', { models: { writer: { effort: 'max' } } }]])
   await pick('Model for Comments', 'm:claude-sonnet-5-5')

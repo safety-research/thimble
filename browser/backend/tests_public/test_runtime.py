@@ -619,7 +619,7 @@ DEV_AGENTS = ("view-builder", "view-reviewer", "dev-ticket")  # the agents of Se
 
 
 def dev_row() -> dict[str, Any]:
-    """Settings' row "View builds and code tickets" as the page reads it (GET /settings)."""
+    """Settings' row "View builds" as the page reads it (GET /settings)."""
     return ledger.get_settings(CORPUS)["models"]["dev"]
 
 
@@ -634,8 +634,8 @@ def row_fast(fast: bool | None) -> None:
 
 
 async def test_an_agent_of_the_dev_row_runs_in_main_s_fast_mode_while_the_row_sets_none(on, monkeypatch):
-    """Settings' row "View builds and code tickets" has no fast mode of its own until the analyst sets one. With nothing
-    set main's fast mode is off, and a view's builder, its reviewer and a code ticket's agent run at standard speed.
+    """Settings' row "View builds" has no fast mode of its own until the analyst sets one. With nothing
+    set main's fast mode is off, and the row's agents (DEV_AGENTS) run at standard speed.
     Once the composer's bolt turns main's on, their next run asks for fast mode on the Messages API (`speed`) and in a
     Claude Code session (`fastMode`), with no restart, and the row shows what runs. A writer and a check, whose rows
     have no fast mode, run at standard speed, and so does a run that names a model without fast mode."""

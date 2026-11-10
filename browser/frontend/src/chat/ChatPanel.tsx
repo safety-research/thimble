@@ -547,7 +547,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   useEffect(() => bus.on('notice', (e) => void (e.replay ? undefined : e.chat === 'main' ? reloadMain() : e.chat && e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
   const agentRows = useAgentRows(ws, runningAgents.map((m) => m.id))
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
-  // a ticket that waits in the queue, or for the analyst's Start, is not at work: its foot says so (TicketStatus)
+  // a ticket that waits in the queue is not at work: its foot says so (TicketStatus)
   const waitingTicket = kind === 'dev' && !curMeta?.view && ticket?.status === 'queued'
   // where the thread's question is while it runs: waiting for its fork (main's short turn starts it), or with its fork
   const stage = kind === 'thread' ? threadStage(curMeta, running) : null

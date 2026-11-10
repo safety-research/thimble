@@ -1072,7 +1072,7 @@ export interface Ticket {
   chat?: string | null
   ts?: string
   error?: string | null
-  /** main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed) */
+  /** on a record of an earlier version: main's ticket that waited for the analyst's Start while another ran */
   held?: boolean | null
   /** the id of its agent, a `thimble:dev-ticket` subagent of the analyst's Claude Code session, once it started */
   agent_id?: string | null

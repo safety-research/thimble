@@ -47,14 +47,14 @@ export const MODELS_LABEL = 'Models'
 
 /** The Models rows in order, each an agent by its plain name and the role whose model and effort it runs (backend
  * config.MODEL_ROLES): main and its side threads, which are forks of main and run on its model; the writer that Write
- * and Revise start; the dev agent of view builds, view reviews, code tickets and thimble fix; the checks (Heads up,
+ * and Revise start; the dev agent of view builds, view reviews and thimble fix; the checks (Heads up,
  * Explainers, Judgment calls and the analyst's own); the calls that read records for labels, label drafts and view fit;
  * the card check, which reads each card's picture; the view proposals after a turn and the viewers proposed for file
  * types. */
 export const MODEL_ROWS: readonly { role: string; name: string }[] = [
   { role: 'main', name: 'Main and side threads' },
   { role: 'writer', name: 'Writer' },
-  { role: 'dev', name: 'View builds and code tickets' },
+  { role: 'dev', name: 'View builds' },
   { role: 'checks', name: 'Comments' },
   { role: 'labels', name: 'Labels' },
   { role: 'verify', name: 'Card check' },

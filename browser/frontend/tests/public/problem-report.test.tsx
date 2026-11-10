@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // Report a problem (src/shell/ProblemReport.tsx): the form offers two actions. File an issue on GitHub writes the zip
 // and opens the prefilled new issue in the same click, and the dialog then shows the zip, to attach. Fix it with
-// /thimble-fix shows wherever /thimble-fix works (GET /fixes says no problem), whatever the code tickets' runner says
-// (GET /dev/status), and starts a fix with the description. The dialog names no code ticket and no developer agent.
+// /thimble-fix shows wherever /thimble-fix works (GET /fixes says no problem), whatever GET /dev/status says, and
+// starts a fix with the description. The dialog names no ticket and no developer agent.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { bus } from '../../src/lib/bus.ts'
@@ -10,7 +10,7 @@ import type { ProblemReport } from '../../src/lib/types.ts'
 import { ProblemReportPopover } from '../../src/shell/ProblemReport.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-/** Why fixes cannot be made (backend fixes.OFF_LINE) and why code tickets do not run (backend dev.NO_RUNNER_LINE). */
+/** Why fixes cannot be made (backend fixes.OFF_LINE) and a problem GET /dev/status names (backend dev.NO_RUNNER_LINE). */
 const FIXES_OFF = "thimble's fixes are off on this server (THIMBLE_FIXES=off)"
 const NO_TICKETS = 'This server runs no dev tickets (THIMBLE_DEV_STACK is off, as on a validation stack).'
 const ISSUE = 'https://github.com/safety-research/thimble/issues/new?title=Minimap&body=Minimap'
@@ -94,7 +94,7 @@ async function open() {
 const words = () => [dialog().textContent ?? '', ...buttons().map((b) => b.title)].join(' ')
 
 test('where /thimble-fix works, the form offers Fix it with /thimble-fix and File an issue on GitHub, each with a tooltip', async () => {
-  tickets = NO_TICKETS // the code tickets' runner is off here: that does not matter
+  tickets = NO_TICKETS // GET /dev/status names a problem here: that does not matter
   await open()
   expect(buttons().map((b) => b.textContent)).toEqual(['Cancel', 'Fix it with /thimble-fix', 'File an issue on GitHub'])
   expect(button('Fix it with /thimble-fix')!.title).toMatch(/in your own thimble/)
@@ -102,9 +102,9 @@ test('where /thimble-fix works, the form offers Fix it with /thimble-fix and Fil
   expect(words()).not.toMatch(/ticket|developer|bundle/i)
 })
 
-test('where /thimble-fix does not work, the form offers no fix, even where code tickets run', async () => {
+test('where /thimble-fix does not work, the form offers no fix, whatever GET /dev/status says', async () => {
   fixProblem = FIXES_OFF
-  tickets = '' // the code tickets' runner would take one
+  tickets = '' // GET /dev/status names no problem
   await open()
   expect(buttons().map((b) => b.textContent)).toEqual(['Cancel', 'File an issue on GitHub'])
   expect(words()).not.toMatch(/ticket|developer/i)
