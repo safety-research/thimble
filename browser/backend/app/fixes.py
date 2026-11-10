@@ -444,8 +444,14 @@ words such as "this" or "this card" can name something in it. They can also name
 showed when they asked is below.
 
 Your working folder is the copy: {work}. Its browser/backend/.venv and browser/frontend/node_modules are links to the
-installed packages, so the browser's tests run there: `cd browser/frontend && npx vitest run FILE` for the page,
-`cd browser/backend && .venv/bin/python -m pytest tests_public/FILE` for the server.{earlier}
+installed packages, so the browser's tests run there.
+
+thimble checks your change after you end. For the page (browser/frontend), it runs the type check, the build and the
+unit tests of what you changed. For the server (browser/backend and browser/prompts), it checks that the server loads,
+and it runs the tests of the server's prompts. It does not run the server's other tests. For the plugin, it runs the
+plugin's tests. So run only a test that you added or changed, and the test file of a server module that you changed.
+`cd browser/frontend && npx vitest run FILE` runs a test file of the page.
+`cd browser/backend && .venv/bin/python -m pytest tests_public/FILE` runs a test file of the server.{earlier}
 
 <page>
 {page}
@@ -460,8 +466,9 @@ KEPT = ("\n\nThe last try did not pass because {why}. Your copy holds the change
 
 def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
     """The fixer's first message: the registry's fixer text as the workbench reads it (prompts.py), the person's words
-    (each round), where it works, what the try before left it, for another try (`earlier`: the kernel's redo says
-    where, and the record why that try did not pass), and the page."""
+    (each round), where it works, what thimble checks after it ends (the kernel's `done`), so which tests it runs
+    itself, what the try before left it, for another try (`earlier`: the kernel's redo says where, and the record why
+    that try did not pass), and the page."""
     from . import prompts  # noqa: PLC0415
 
     prompt = prompts.load(FIXER_TEXT).strip()
