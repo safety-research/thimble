@@ -54,7 +54,8 @@ RENDER_PAGE = "render.html"
 THEMES_FILE = "render-theme.json"  # workspaces/<c>/: the theme the analyst's browser last reported
 PAPERS = ("warm", "neutral", "dark")  # frontend/src/lib/theme.ts
 ACCENTS = ("pink", "orange", "yellow", "lime", "blue", "iris", "graphite")
-DEFAULT_THEME = {"paper": "warm", "accent": "iris"}
+FIGURES = ("thimble", "blog", "paper")  # the figure styles (theme.ts FigureStyle); one it does not name reads as thimble
+DEFAULT_THEME = {"paper": "warm", "accent": "iris", "figures": "thimble"}
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", urlsplit(RENDER_ORIGIN).hostname})  # what the page may reach
 _TAKEAWAY_REF = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]|]+?)\]\]")
 
@@ -503,15 +504,23 @@ def label_names(c: str, cell: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def figures_of(value: Any) -> str:
+    """A figure style as the harness reads it: one of FIGURES, else thimble's own."""
+    return value if value in FIGURES else DEFAULT_THEME["figures"]
+
+
 def theme(c: str) -> dict[str, str]:
-    """The theme the analyst's browser last reported for workspace `c` (PUT /ws/{c}/render/theme), else Warm and iris."""
+    """The theme the analyst's browser last reported for workspace `c` (PUT /ws/{c}/render/theme), else Warm, iris and
+    thimble's figures."""
     try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
         data = json.loads(nofollow.read_text(config.workspace_dir(c) / THEMES_FILE))
     except (OSError, ValueError):
         return dict(DEFAULT_THEME)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_THEME)
     paper = data.get("paper") if data.get("paper") in PAPERS else DEFAULT_THEME["paper"]
     accent = data.get("accent") if data.get("accent") in ACCENTS else DEFAULT_THEME["accent"]
-    return {"paper": paper, "accent": accent}
+    return {"paper": paper, "accent": accent, "figures": figures_of(data.get("figures"))}
 
 
 def label_data(c: str, cell: dict[str, Any]) -> dict[str, Any] | None:
@@ -596,19 +605,22 @@ router = APIRouter(lifespan=_lifespan)
 class ThemeBody(BaseModel):
     paper: str
     accent: str
+    figures: str = DEFAULT_THEME["figures"]
 
 
 @router.put("/ws/{c}/render/theme")
 async def put_theme(c: str, body: ThemeBody) -> dict[str, str]:
-    """The browser reports its paper and accent (lib/theme.ts), so a card is drawn offscreen in the analyst's colours."""
+    """The browser reports its paper, accent and figure style (lib/theme.ts), so a card is drawn offscreen in the
+    analyst's colours and charts; a figure style the harness does not know is kept as thimble's."""
     if body.paper not in PAPERS or body.accent not in ACCENTS:
         raise HTTPException(400, f"paper must be one of {', '.join(PAPERS)} and accent one of {', '.join(ACCENTS)}")
     try:
         p = config.workspace_dir(c) / THEMES_FILE
     except ValueError as e:
         raise HTTPException(404, str(e))
-    nofollow.write_text(p, json.dumps({"paper": body.paper, "accent": body.accent}))  # never through a card's link
-    return {"paper": body.paper, "accent": body.accent}
+    kept = {"paper": body.paper, "accent": body.accent, "figures": figures_of(body.figures)}
+    nofollow.write_text(p, json.dumps(kept))  # never through a card's link
+    return kept
 
 
 @router.get("/render/status")

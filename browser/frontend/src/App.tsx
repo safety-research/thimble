@@ -19,11 +19,11 @@ export default function App() {
   const [missing, setMissing] = useState(false)
   // the instance check has settled (INSTANCE_WAIT caps it)
   const [checked, setChecked] = useState(false)
-  const { paper, accent } = useTheme()
+  const { paper, accent, figures } = useTheme()
   // the card harness draws a card offscreen in the theme this browser last showed (backend/app/render.py)
   useEffect(() => {
-    if (ws) api.reportTheme(ws, paper, accent).catch(() => undefined)
-  }, [ws, paper, accent])
+    if (ws) api.reportTheme(ws, paper, accent, figures).catch(() => undefined)
+  }, [ws, paper, accent, figures])
   useEffect(() => {
     if (!ws) return
     let done = false

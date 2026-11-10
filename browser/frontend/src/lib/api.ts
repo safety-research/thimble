@@ -635,8 +635,9 @@ export const api = {
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
   putSettings: (c: string, patch: SettingsPatch) => j<Settings>(`${ws(c)}/settings`, { method: 'PUT', body: JSON.stringify(patch) }),
-  /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
-  reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
+  /** the paper, accent and figure style this browser shows, so the card harness draws a card in them
+   * (backend/app/render.py) */
+  reportTheme: (c: string, paper: string, accent: string, figures: string) => j<{ paper: string; accent: string; figures: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent, figures }) }),
 }
 
 /** Whether an error is the route's 404 (a backend without the route, or nothing there yet). */

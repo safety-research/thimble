@@ -664,7 +664,8 @@
   font: var(--type-mono-sm);
 }
 
-/* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
+/* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches, Figures as a
+   segmented track -------- */
 .theme-pop {
   padding: 10px;
 }

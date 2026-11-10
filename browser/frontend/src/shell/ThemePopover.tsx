@@ -1,11 +1,12 @@
 // The theme popover under the top bar's palette button: the paper (Warm, Neutral, Dark) as a segmented choice in a
-// track, then the seven accents as swatches; the chosen swatch is ringed in ink. Both are kept by lib/theme.
+// track, then the seven accents as swatches, the chosen swatch ringed in ink, then the figure style (thimble, Blog,
+// Paper) as a segmented choice. All three are kept by lib/theme.
 import { Segmented } from '../components/Button'
 import { Popover } from '../components/Menu'
-import { ACCENTS, PAPERS, useTheme } from '../lib/theme'
+import { ACCENTS, FIGURE_STYLES, PAPERS, useTheme } from '../lib/theme'
 
 export function ThemePopover({ anchor, open, onClose }: { anchor: HTMLElement | null; open: boolean; onClose: () => void }) {
-  const { paper, accent, setPaper, setAccent } = useTheme()
+  const { paper, accent, figures, setPaper, setAccent, setFigures } = useTheme()
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="end" label="Theme" className="theme-pop" width={232}>
       <div className="theme" data-panel="theme">
@@ -17,6 +18,8 @@ export function ThemePopover({ anchor, open, onClose }: { anchor: HTMLElement | 
             <button key={a.id} type="button" role="radio" aria-checked={a.id === accent} aria-label={a.id} className={`theme-swatch${a.id === accent ? ' on' : ''}`} style={{ background: a.hex }} data-accent={a.id} onClick={() => setAccent(a.id)} />
           ))}
         </div>
+        <span className="theme-label">Figures</span>
+        <Segmented label="Figures" track block value={figures} onChange={setFigures} options={FIGURE_STYLES.map((f) => ({ value: f.id, label: f.label }))} />
       </div>
     </Popover>
   )

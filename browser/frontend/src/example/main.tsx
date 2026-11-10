@@ -19,7 +19,7 @@ import { writeColor } from '../files/colorChoice'
 import { FilesTab } from '../files/FilesTab'
 import { LabelEditorHost } from '../files/LabelEditor'
 import { bus } from '../lib/bus'
-import { setAccent, setPaper, type Accent, type Paper } from '../lib/theme'
+import { setAccent, setFigures, setPaper, type Accent, type FigureStyle, type Paper } from '../lib/theme'
 import { storageKey, writeStorage } from '../lib/workspace'
 import { ReportTab } from '../report/ReportTab'
 import { LabelsSidebar } from '../shell/LabelsSidebar'
@@ -200,20 +200,22 @@ function App() {
       bus.on('askAbout', () => bus.emit('toast', { text: NEEDS_CLAUDE, kind: 'error' })),
       bus.on('openChat', () => bus.emit('toast', { text: NEEDS_CLAUDE, kind: 'error' })),
     ]
-    // the page's paper and accent, as they change
+    // the page's paper, accent and figure style, as they change
     let follow: MutationObserver | null = null
     try {
       const root = window.parent !== window ? window.parent.document.documentElement : null
       const sync = () => {
         const paper = root?.getAttribute('data-paper')
         const accent = root?.getAttribute('data-accent')
+        const figures = root?.getAttribute('data-figures')
         if (paper && paper !== document.documentElement.getAttribute('data-paper')) setPaper(paper as Paper)
         if (accent && accent !== document.documentElement.getAttribute('data-accent')) setAccent(accent as Accent)
+        if (figures && figures !== document.documentElement.getAttribute('data-figures')) setFigures(figures as FigureStyle)
       }
       if (root) {
         sync()
         follow = new MutationObserver(sync)
-        follow.observe(root, { attributes: true, attributeFilter: ['data-paper', 'data-accent'] })
+        follow.observe(root, { attributes: true, attributeFilter: ['data-paper', 'data-accent', 'data-figures'] })
       }
     } catch {
       /* opened alone: the default theme */

@@ -14,7 +14,7 @@ import { CanvasContext, type CanvasCtx } from './canvas/context'
 import { kindOf } from './canvas/layout'
 import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
-import { setAccent, setPaper, type Accent, type Paper } from './lib/theme'
+import { readFigures, setAccent, setFigures, setPaper, type Accent, type FigureStyle, type Paper } from './lib/theme'
 import type { Cell, Concept, ConceptDetail } from './lib/types'
 
 export interface RenderRequest {
@@ -26,7 +26,8 @@ export interface RenderRequest {
   /** the labels the card uses, for the tags in the Labels row under its question (canvas/CardFace CardLabels): each
    * one's name, and what its colour is read from (files/labels mainColour), as GET /ws/{c}/concepts lists it */
   labels?: ({ id: string; name: string } & Partial<Pick<Concept, 'unit' | 'marks' | 'labels' | 'classes'>>)[]
-  theme: { paper: Paper; accent: Accent }
+  /** the theme the analyst's browser last reported; a figure style it does not name is thimble's */
+  theme: { paper: Paper; accent: Accent; figures?: FigureStyle }
   width: number
   /** a label card's label as the API returns it: GET /concepts/{id}, and the workspace's settings */
   label?: LabelData | null
@@ -152,6 +153,8 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   history.replaceState(null, '', `?ws=${ws}`)
   if (req.theme?.paper) setPaper(req.theme.paper)
   if (req.theme?.accent) setAccent(req.theme.accent)
+  // the page is kept for the next card, so a request without a figure style draws in thimble's, not the last card's
+  setFigures(readFigures(req.theme?.figures ?? null))
   registerCells((req.names ?? []).map((c) => ({ id: c.id, title: c.title })))
   registerConcepts(req.labels ?? [])
   const cell: Cell = req.card
