@@ -21,7 +21,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { servedBuild, thisBuild, whenRestarted } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
-import { askClaudeText, changedLines, fixActions, fixText, RELOADING, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow } from './fix'
+import { askClaudeText, changedLines, fixActions, fixText, RELOADING, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow, type FixStatus } from './fix'
 import { offerDraft } from './pending'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
@@ -33,13 +33,27 @@ function typing(): boolean {
   return Array.from(document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('textarea, input[type=text]')).some((el) => el.value.trim() !== '')
 }
 
+let reading: Promise<FixStatus> | null = null
+
+/** The fixes (GET /fixes). Callers in the same task share one read: every row of the page asks when it shows and on
+ * each `fix` event, and each read runs the kernel's list on the server (backend fixes.status). A row that asks later
+ * reads again, so none shows a read from before the event it heard of. */
+function readFixes(): Promise<FixStatus> {
+  if (!reading) {
+    reading = api.fixes()
+    queueMicrotask(() => {
+      reading = null
+    })
+  }
+  return reading
+}
+
 /** The fixes the page shows now, read again on each `fix` event and when the stream comes back (`onBack`, else a
  * read). */
 function useFixes(onBack?: () => void): [FixRow[], () => void] {
   const [rows, setRows] = useState<FixRow[]>([])
   const load = useCallback(() => {
-    api
-      .fixes()
+    readFixes()
       .then((s) => setRows(Array.isArray(s?.fixes) ? s.fixes : []))
       .catch(() => undefined)
   }, [])

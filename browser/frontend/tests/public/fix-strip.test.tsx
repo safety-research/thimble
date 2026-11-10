@@ -17,24 +17,28 @@ const row = (over: Partial<FixRow> = {}): FixRow => ({ id: 3, title: 'Card says 
 const SAID = 'thimble fixed: Card says how many rows · tests pass'
 const ready = (over: Partial<FixRow> = {}) => row({ state: 'ready', kind: 'ready', said: SAID, ...over })
 
-/** What GET /fixes answers, what GET /health says of the server (null while it is down) and how often the page asked
- * it, and each request that changes state. */
+/** What GET /fixes answers and how often the page read it, what GET /health says of the server (null while it is down)
+ * and how often the page asked it, and each request that changes state. */
 let fixes: FixRow[] = []
+let reads = 0
 let server: { boot: string; ui: string } | null = null
 let asked = 0
 let sent: string[] = []
 beforeEach(() => {
   fixes = []
+  reads = 0
   server = { boot: 'b1', ui: 'u1' }
   asked = 0
   sent = []
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? 'GET'
     const u = String(url)
+    const list = /\/fixes(\?every=true)?$/.test(u) && method === 'GET'
+    if (list) reads++
     if (/\/health$/.test(u)) asked++
     if (!server) throw new TypeError('Failed to fetch')
     if (method !== 'GET') sent.push(`${method} ${u.replace(/^.*\/api/, '')}`)
-    const body = /\/fixes(\?every=true)?$/.test(u) && method === 'GET' ? { problem: '', fixes } : /\/health$/.test(u) ? { ok: true, ...server } : { ok: true, restart: true }
+    const body = list ? { problem: '', fixes } : /\/health$/.test(u) ? { ok: true, ...server } : { ok: true, restart: true }
     return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   })
 })
@@ -104,6 +108,29 @@ test('while the restart waits for a running turn, the row says whose turn, and w
   await settle()
   expect(said()).toBe('Reloading thimble…')
   expect(el.querySelector('button')).toBeNull()
+})
+
+test('the rows of a page read the fixes together: one read when they show, and one for each event', async () => {
+  fixes = [ready()]
+  const el = await mount(
+    <>
+      <FixPage />
+      <FixResult ws="mini" fid={3} text="Claude works on it" latest={false} />
+      <FixResult ws="mini" fid={3} text={SAID} kind="ready" latest />
+    </>,
+  )
+  await settle()
+  expect(reads).toBe(1)
+  expect(button(el, 'Use it now')).toBeTruthy()
+  // each event is read once, after it: the row shows what the server says then
+  fixes = [ready({ phase: 'restarting', kind: null, said: null, waits: { workspace: 'mini', name: 'main' } })]
+  await act(async () => bus.emit('fix', { id: 3, state: 'restarting' }))
+  await settle()
+  fixes = [ready({ phase: 'restarting', kind: null, said: null })]
+  await act(async () => bus.emit('fix', { id: 3, state: 'restarting' }))
+  await settle()
+  expect(reads).toBe(3)
+  expect(el.querySelector('[data-kind="reloading"] .chat-fix-text')?.textContent).toBe('Reloading thimble…')
 })
 
 test('the page asks the server whether it started again, and loads its new build once when it has', async () => {
