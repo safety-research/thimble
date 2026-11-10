@@ -403,3 +403,33 @@ async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_an
 def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():
     end = fixes.end_of("It already is.\n\n```\nTitle: Bar word is bold\nRequest: The bar's word is bold already.\n```")
     assert end == {"title": "Bar word is bold", "summary": "The bar's word is bold already.", "request": True}
+
+
+def test_a_page_with_no_build_to_take_is_built_without_a_second_type_check(monkeypatch, tmp_path):
+    # live's page after the person's click, with no build of its sources to take (prepare): the checks of each fix ran
+    # the type check, so the person waits for the page's build alone
+    root = tmp_path / "browser"
+    fe = root / "frontend"
+    fe.mkdir(parents=True)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes, "page_tree", lambda fe: "")
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: f"/usr/bin/{name}")
+    ran: list[tuple[list[str], Any]] = []
+    ends = [subprocess.CompletedProcess([], 0, "built in 9s\n", "")]
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        ran.append(([str(a) for a in argv], kw.get("cwd")))
+        return ends[0]
+
+    monkeypatch.setattr(fixes.subprocess, "run", run)
+    assert fixes.prepare(root) == ""
+    assert ran == [([str(fe / "node_modules" / ".bin" / "vite"), "build"], fe)]
+    # a page that does not build: the row says what the build said failed, not the heading above it
+    ends[0] = subprocess.CompletedProcess([], 1, "transforming...\n", (
+        'x Build failed in 2s\nerror during build:\nsrc/App.tsx (3:9): "Gone" is not exported by "src/chat/fix.ts", '
+        'imported by "src/App.tsx".\n    at getRollupError (parseAst.js:317:41)\n'))
+    assert '"Gone" is not exported by "src/chat/fix.ts"' in fixes.prepare(root)
+    # no Node to run the build with: the row says so, and nothing ran
+    del ran[:]
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    assert "Node" in fixes.prepare(root) and not ran

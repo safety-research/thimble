@@ -882,18 +882,22 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
         return ""
     if tree and not here and page_built(own) and page_tree(own) == tree and put_page(own / "dist", fe / "dist"):
         return ""
-    npm = shutil.which("npm")
-    if not npm:
-        return "the page was not built: npm is not on the PATH"
+    # the page's build alone, with the page's own vite: `npm run build` runs the type check first, which the checks of
+    # each fix ran (the kernel's done), and the person waits for this build after their click
+    if not shutil.which("node"):
+        return "the page was not built: Node is not on the PATH"
     try:
-        p = subprocess.run([npm, "--prefix", str(fe), "run", "build"], capture_output=True, text=True, timeout=900,
-                           env={**os.environ, "npm_config_update_notifier": "false"})
+        p = subprocess.run([str(fe / "node_modules" / ".bin" / "vite"), "build"], cwd=fe, capture_output=True,
+                           text=True, timeout=900)
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"the page was not built: {e}"
     if p.returncode != 0:
-        tail = [ln for ln in (p.stdout + "\n" + p.stderr).strip().splitlines() if ln.strip()]
-        err = next((ln for ln in tail if "error" in ln.lower()), tail[-1] if tail else "no message")
-        return f"the page did not build: {err.strip()[:300]}"
+        tail = [ln.strip() for ln in (p.stdout + "\n" + p.stderr).splitlines() if ln.strip()] or ["no message"]
+        at = next((i for i, ln in enumerate(tail) if "error" in ln.lower()), len(tail) - 1)
+        # vite's `error during build:` is a heading: the line after it says what failed
+        if tail[at].endswith(":") and at + 1 < len(tail):
+            at += 1
+        return f"the page did not build: {tail[at][:300]}"
     return ""
 
 
