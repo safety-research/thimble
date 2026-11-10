@@ -117,7 +117,7 @@ export function useChecks(ws: string): Checks {
         .then((saved) => put(withCheck(current.current, saved)))
         .catch((e) => {
           put(withShown(current.current, id, !shown))
-          toast(`Could not turn the check ${shown ? 'on' : 'off'}.`, e)
+          toast(`Could not turn ${cur.name} ${shown ? 'on' : 'off'}.`, e)
         })
     },
     [ws, put],
@@ -131,7 +131,7 @@ export function useChecks(ws: string): Checks {
         track('ui-click', { target: 'ui:report-check-new', detail: { check: made.id } })
         return true
       } catch (e) {
-        toast('Could not add the check.', e)
+        toast('Could not ask for comments.', e)
         return false
       }
     },
@@ -164,7 +164,7 @@ export function staleOf(run: Pick<CheckRun, 'stale' | 'status'> | null | undefin
 }
 
 /** A stale row's words: how many passages changed since the check last ran on them. Pure. */
-export const staleText = (n: number): string => `${n} passage${n === 1 ? '' : 's'} changed since checked`
+export const staleText = (n: number): string => `${n} passage${n === 1 ? '' : 's'} changed since the last run`
 
 /** The tip of a running check's spinner: open its run, or what it waits for, since it has no chat yet. Pure. */
 export function checkRunLabel(name: string, run: { chat?: string | null; waiting?: string | null }): string {
@@ -337,7 +337,7 @@ export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPane
           {anyResult && <span className="wu-count wu-count-inline">{shownCount}</span>}
           {news.runs.length > 0 && <NewCommentsDot />}
         </button>
-        <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
+        <IconButton label="Ask for comments" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
           <Icon name="plus" size={14} />
         </IconButton>
         {onHide && (
@@ -418,7 +418,7 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding, lis
           })}
         </div>
       )}
-      <Popover anchor={adding ?? editing?.at ?? null} open={!!adding || !!editCheck} onClose={close} side="aside" width={340} label={editCheck && !adding ? `Edit ${editCheck.name}` : 'New check'} className="check-card">
+      <Popover anchor={adding ?? editing?.at ?? null} open={!!adding || !!editCheck} onClose={close} side="aside" width={340} label={editCheck && !adding ? `Edit ${editCheck.name}` : 'Ask for comments'} className="check-card">
         {adding ? (
           <NewCheckCard
             colour={colourVar(freeColour(checks.list))}
@@ -492,7 +492,7 @@ function CheckCard({ ws, doc, check, on, comments, onSave, onClose }: {
       track('ui-click', { target: 'ui:report-check-run', detail: { check: check.id, action: 'run' } })
       ok = await checksApi.run(ws, check.id, doc).then(
         () => true,
-        (e) => (toast('Could not run the check.', e), false),
+        (e) => (toast(`Could not run ${check.name}.`, e), false),
       )
     }
     setBusy(false)
@@ -579,10 +579,10 @@ export function RunLine({ ws, check, doc, line, running }: { ws: string; check: 
   )
 }
 
-/** The card a + for a new check opens beside it (the head's + in a Comments pane, the canvas's Comments button's, "+ New
- * check" at the end of the top bar's Comments, shell/LabelsSidebar.tsx, beside that sidebar), laid out as a label's
- * edit card in Files: the colour the server will give the check and its name, its prompt, then Cancel and Run. Enter
- * in the name goes to the prompt; ⌘↵ in the prompt or Run adds the check, which the server turns on and runs. Run
+/** The card a + for a new check opens beside it (the head's + in a Comments pane, the canvas's Comments button's, "+ Ask
+ * for comments" at the end of the top bar's Comments, shell/LabelsSidebar.tsx, beside that sidebar), laid out as a
+ * label's edit card in Files: the colour the server will give the check and its name, its prompt, then Cancel and Run.
+ * Enter in the name goes to the prompt; ⌘↵ in the prompt or Run adds the check, which the server turns on and runs. Run
  * waits for a name no other check has and a prompt. */
 export function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken: (name: string) => boolean; onAdd: (name: string, prompt: string) => Promise<void>; onClose: () => void }) {
   const [name, setName] = useState('')

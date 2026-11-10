@@ -41,7 +41,6 @@ import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeKey, squeezeUnder, s
 import { THREADS_KEYS, askBar, askKey, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { tourSpans, tourUnder } from '../tour/tour'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
-import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
 import { askOnce } from './rowhook'
 import { waitsNow } from './selection'
@@ -84,12 +83,10 @@ const els0 = (xs: unknown): Any[] => (Array.isArray(xs) ? xs.filter(x => x != nu
 
 // ------------------------------------------------------------------------------------------------ a row's words
 
-/** The text a row shows, whether it draws at all and dim, and the lead of its first line: ▸ when the person picked
- *  this answer for the keys ({ }) over the newest. */
-export async function textView($: Engine, row: string, text: string): Promise<{ text: string; hidden: boolean; dim: boolean; lead: string | null }> {
+/** The text a row shows, whether it draws at all, and whether it draws dim. */
+export async function textView($: Engine, row: string, text: string): Promise<{ text: string; hidden: boolean; dim: boolean }> {
   const v = await safe(squeezeView($, row, text), null)
-  const lead = (await safe(pickedRow($), null)) === row ? '▸' : null
-  return { text: typeof v?.text === 'string' ? v.text : text, hidden: !!v?.hidden, dim: !!v?.dim, lead }
+  return { text: typeof v?.text === 'string' ? v.text : text, hidden: !!v?.hidden, dim: !!v?.dim }
 }
 
 /**
@@ -253,12 +250,11 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray (while open its own keys, 0 closes it;
- *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, 0), { } over the answers, then the
- *  keys that act on the selected words, while they wait (else typed): e, c and a; then w (the claims), then t. */
+ *  at rest ] [), s and b and the keys of the row under a simpler version (1–4, 0), then the keys that act on the
+ *  selected words, while they wait (else typed): e, c and a; then w (the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   return (await safe(trayKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
-    ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(citeKey($, key, until), null))
     ?? (await safe(askKey($, key, until), null))

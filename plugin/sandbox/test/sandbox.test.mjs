@@ -7,7 +7,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -76,6 +76,17 @@ function inSandbox(code, path = process.env.PATH) {
 test('setup.mjs installs srt in thimble\'s home, and the sandbox works here', () => {
   assert.equal(s.ok, true, `${s.why}. ${s.fix}`)
   assert.equal(s.srt, join(process.env.THIMBLE_HOME, 'srt', JSON.parse(readFileSync(join(PLUGIN, 'sandbox', 'package.json'), 'utf8')).dependencies['@anthropic-ai/sandbox-runtime']))
+})
+
+test("setup.mjs run through a link names the plugin's folder by its real path, and its probe starts the runner from that folder, as the hooks do", () => {
+  // a link to the plugin, as thimble's home behind a link gives: with --preserve-symlinks-main, Node keeps the link in
+  // the path of setup.mjs, so the folder is real only because setup.mjs resolves it
+  const link = join(dir, 'plugin')
+  symlinkSync(PLUGIN, link)
+  const r = spawnSync(process.execPath, ['--preserve-symlinks-main', join(link, 'sandbox', 'setup.mjs'), '--json', '--probe'], { encoding: 'utf8', timeout: 300000 })
+  const answer = JSON.parse(String(r.stdout).trim().split('\n').pop() || '{}')
+  assert.equal(answer.ok, true, `${answer.why}. ${answer.fix}`)
+  assert.equal(answer.plugin, realpathSync(PLUGIN))
 })
 
 test('in the sandbox: the card copies read, nothing else of the files; writes only in its own folder', () => {

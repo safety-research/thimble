@@ -34,11 +34,12 @@ export const NEXT_LAUNCH = 'Main uses it from your next message'
 /** The model main runs on when neither its menu nor the settings chose one (backend runtime.MAIN_MODEL). */
 export const MAIN_DEFAULT_MODEL = 'claude-opus-5-5'
 
-/** Main's model as its line shows it: the model its replies come from, which may not be the one it asks for (Claude's
- * safeguards can move a conversation to another model: backend session.FALLBACK_TEXT); before its first reply, the
- * menu's choice; else the one the settings keep for main (models.main); else the default. Pure. */
+/** Main's model as its line shows it: the one main's next turn asks for, as the menu or Settings chose it, which main's
+ * meta holds from the moment it is picked (backend events._choose); else the one the settings keep for main
+ * (models.main); else the model its replies came from; else the default. A reply can come from another model than the
+ * one asked for, when Claude's safeguards switch it, and a notice says so (backend session.FALLBACK_TEXT). Pure. */
 export function mainModel(a: Attached | null | undefined, kept?: string | null): string {
-  return a?.model || a?.model_choice || kept || MAIN_DEFAULT_MODEL
+  return a?.model_choice || kept || a?.model || MAIN_DEFAULT_MODEL
 }
 
 /** Why a model's bolt cannot switch: it has no fast mode. */
@@ -53,19 +54,21 @@ export const fastTip = (on: boolean, why: string | null): string => `Fast mode: 
 const isChoice = (e: unknown): e is MainEffort => typeof e === 'string' && (EFFORT_CHOICES as readonly string[]).includes(e)
 
 /**
- * Main's effort as its line shows it: the line's choice for this session; else Ultracode while the settings turn it on
- * and replies run at xhigh; else the level main's replies ran at; else the one main runs at by the analyst's Claude
- * Code settings (settings_effort); else the default. Pure.
+ * Main's effort as its line shows it: the line's or Settings' choice; else Ultracode while the settings turn it on and
+ * replies run at xhigh; else the level main's replies ran at, while they came from the model main asks for; else the
+ * one main runs at on that model by the analyst's Claude Code settings (settings_effort), as right after another model
+ * is picked; else the default. Pure.
  */
 export function mainEffort(a: Attached | null | undefined): MainEffort {
   if (isChoice(a?.effort_choice)) return a.effort_choice
   const own = isChoice(a?.settings_effort) ? a.settings_effort : null
-  const ran = isChoice(a?.effort) ? a.effort : null
+  // replies on another model ran at that model's effort
+  const ran = isChoice(a?.effort) && (!a.model_choice || sameModel(a.model, a.model_choice)) ? a.effort : null
   if (own === 'ultracode' && (ran == null || ran === 'xhigh')) return 'ultracode'
   return ran ?? own ?? MAIN_DEFAULT_EFFORT
 }
 
-/** Main's fast mode for the line: the line's choice for this session, else whether its replies ran fast. Pure. */
+/** Main's fast mode for the line: the line's or Settings' choice, else whether its replies ran fast. Pure. */
 export function mainFast(a: Attached | null | undefined): boolean {
   if (typeof a?.fast_choice === 'boolean') return a.fast_choice
   return a?.fast === true
@@ -137,7 +140,8 @@ export function ModelLine({ model, modelTip, models, onModel, effort, efforts = 
     label: modelLabel(m),
     note: m,
     checked: sameModel(m, model),
-    // the model shown goes on too when picked: the session may ask for another one than its replies come from
+    // the model shown goes on too when picked: with no choice made, main's line shows the model its replies came from,
+    // which may not be the one it asks for
     onSelect: () => onModel?.(m),
   }))
   const effortItems: MenuItem[] = efforts.map((e) => ({ id: e || 'session', label: effortWord(e), checked: e === effort, onSelect: () => e !== effort && onEffort?.(e) }))

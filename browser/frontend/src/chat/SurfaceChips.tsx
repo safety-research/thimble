@@ -89,7 +89,7 @@ export function LabelChip({ name, onClick, className }: { name: string; onClick?
 
 /** A label drawn as its row in the Labels pane, a size smaller, for a view's list of its fields and labels: a label over
  * files shows its color square (filled while on in Files) or, for a multi-class label, the label glyph; a label over
- * cards or report sentences shows the canvas or report glyph in its color. Then its name. */
+ * report sentences shows the report glyph in its color. Then its name. */
 export function LabelRowChip({ ws, name, onClick, className }: { ws: string; name: string; onClick?: (e: MouseEvent<HTMLElement>) => void; className?: string }) {
   const k = byName(useConcepts(ws), name)
   const files = !k || isFilesLabel(k)
@@ -97,7 +97,7 @@ export function LabelRowChip({ ws, name, onClick, className }: { ws: string; nam
   const multi = !!k && isMultiClass(classesOf(k))
   return (
     <SurfaceChip className={cls('label-row-chip', on && 'on', className)} onClick={onClick} style={{ '--c': k ? mainColour(k) : 'var(--label-none)' } as CSSProperties} data-label={name}>
-      {!files ? <Icon name={k?.unit === 'cell' ? 'canvas' : 'report'} size={11} className="label-row-chip-over" /> : multi ? <Icon name="label" size={11} className="label-row-chip-tag" /> : <span className="label-row-chip-box" />}
+      {!files ? <Icon name="report" size={11} className="label-row-chip-over" /> : multi ? <Icon name="label" size={11} className="label-row-chip-tag" /> : <span className="label-row-chip-box" />}
       <span className="surface-chip-name">{name}</span>
     </SurfaceChip>
   )

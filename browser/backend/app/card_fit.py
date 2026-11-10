@@ -42,7 +42,7 @@ log = logging.getLogger("thimble.card_fit")
 FIT_TOOLS = ("add_card", "edit_card")
 HELD = "held"  # the card's record while it is held (notebook.set_held)
 LOG_FILE = "card-fit.jsonl"
-NOT_MEASURED = ("label", "plan")  # a label card is drawn from its label, and a plan from its steps
+NOT_MEASURED = ("label",)  # a label card is drawn from its label
 
 
 @dataclass(frozen=True)

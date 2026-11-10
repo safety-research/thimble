@@ -16,11 +16,12 @@
 // package or a setting of the machine lacks, or a runner the machine keeps from starting, stays for the person to fix.
 // Setups that run at the same time (two sessions start, a card is called while the session start installs) install
 // once: the others wait for that install. It prints one line, or with --json one JSON object:
-//   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, missing, ms, repaired}
+//   {ok, node, nodeVersion, grants, platform, version, srt, plugin, why, fix, missing, ms, repaired}
 // `node` is this Node's binary (the runner's), `nodeVersion` its version, `grants` whether it takes each grant of
 // Node's permission model that the runner needs beyond its files (argv.mjs's GRANTS, such as {'--allow-net': true}),
 // as its list of the flags it allows in NODE_OPTIONS says (process.allowedNodeEnvironmentFlags, which holds each
-// --allow-* flag it takes), `srt` the folder srt is in, `why` what is wrong and `fix` the one command or step that
+// --allow-* flag it takes), `srt` the folder srt is in, `plugin` the plugin's folder by its real path, which the probe
+// and the hooks (cards/ask.ts) start the runner from, `why` what is wrong and `fix` the one command or step that
 // fixes it, `missing` the packages a Linux lacks for it by their names (bubblewrap, socat, ripgrep) when that is why,
 // `ms` how long the probe's runner took to start and draw the test card, `repaired` why srt was installed again
 // (--repair), when it was. Exits 0 when the sandbox works, else 1.
@@ -34,7 +35,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { GRANTS, SAID_MAX, SOCKET_MAX, endOf, runnerArgv, saidOf } from '../cards/argv.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const PLUGIN = dirname(HERE)
+// the plugin's folder by its real path: the sandbox shows a folder only at its real path, so a path through a link
+// (thimble's home behind one) is not there inside it
+const PLUGIN = fs.realpathSync(dirname(HERE))
 // the check is srt's own floor (package.json's engines), since the browser workbench, whose Node may be that old,
 // installs srt with this setup too; its fix names the terminal plugin's minimum (scripts/install.sh checks it)
 const NODE_MIN = [22, 12]
@@ -52,7 +55,7 @@ const platform = process.platform
 const grants = Object.fromEntries(GRANTS.map(g => [g, process.allowedNodeEnvironmentFlags.has(g)]))
 // this Node, as the lines that say why name it
 const thisNode = `Node ${process.versions.node} (${process.execPath})`
-const out = { ok: false, node: process.execPath, nodeVersion: process.versions.node, grants, platform, version: pin, srt, why: '', fix: '' }
+const out = { ok: false, node: process.execPath, nodeVersion: process.versions.node, grants, platform, version: pin, srt, plugin: PLUGIN, why: '', fix: '' }
 
 /** The first of these commands on PATH, or null. */
 function which(cmd) {

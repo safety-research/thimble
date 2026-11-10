@@ -1,0 +1,44 @@
+/* The tour's example panes (./main.tsx): the frame shows nothing but the panes, each where the tour places it over the
+   page's own, so the page shows through the rest. */
+html,
+body,
+#root {
+  background: transparent;
+  overflow: hidden;
+}
+/* the sidebar as the page draws it, the width the page's own has */
+.example-side {
+  position: absolute;
+  display: flex;
+}
+.example-side[hidden] {
+  display: none;
+}
+.example-side > .lside {
+  flex: 1;
+  width: auto;
+  max-width: none;
+  margin: 0;
+}
+/* the badge at the end of the Files pane's top row, past its views, and in the empty middle of the sidebar's head */
+.example-files > .example-tag {
+  top: 11px;
+  right: 12px;
+}
+.example-side > .example-tag {
+  top: 14px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+}
+/* the Report's badge in the empty middle of its bar, which never scrolls, kept at least as wide as the badge */
+.example-report .wu-bar-spacer {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+}
+.example-report .wu-bar-spacer > .example-tag {
+  position: static;
+}

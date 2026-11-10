@@ -280,9 +280,8 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
     return d if isinstance(d, dict) else None
 
 
-# how to give Claude Code a login, for every "not logged in" message: the login, and where the other ways are
-# (INSTALL.md's Authentication section: an API key, a cloud provider)
-AUTH_HELP = "log in with `claude auth login` (INSTALL.md, Authentication, has more ways)"
+# how to give Claude Code a login, for every "not logged in" message
+AUTH_HELP = "log in with `claude auth login`"
 
 
 def auth_problem() -> str:

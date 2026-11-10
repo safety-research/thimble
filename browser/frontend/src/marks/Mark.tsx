@@ -95,11 +95,13 @@ export interface CiteWords {
 export const CiteWordsContext = createContext<CiteWords | null>(null)
 
 /** A mark: the k-th of its text's marks (MarkItems), or `item` when the caller has it (an old card citation). With
- * `anchor`, its words carry the ⌘ pointer's anchor, so a ⌘-click on them asks about the citation. */
-export function Mark({ k, item: given, anchor, children }: { k: number; item?: MarkItem; anchor?: boolean; children: ReactNode }) {
+ * `unchecked`, no check read the caller's item: it draws as not checked yet, and its label shows the place it names
+ * under those words. With `anchor`, its words carry the ⌘ pointer's anchor, so a ⌘-click on them asks about the
+ * citation. */
+export function Mark({ k, item: given, unchecked = false, anchor, children }: { k: number; item?: MarkItem; unchecked?: boolean; anchor?: boolean; children: ReactNode }) {
   const { items, streaming } = useContext(MarkItems)
   const item = given ?? items[k]
-  const look: MarkLook = streaming ? 'pending' : lookOf(item)
+  const look: MarkLook = streaming || unchecked ? 'pending' : lookOf(item)
   const [pop, setPop] = useState<{ rect: DOMRect; pinned: boolean } | null>(null)
   const words = useRef<HTMLSpanElement>(null)
   const popEl = useRef<HTMLDivElement>(null)
@@ -230,7 +232,7 @@ export function Mark({ k, item: given, anchor, children }: { k: number; item?: M
           <div ref={popEl} className="refchip-pop overlay mark-pop" role="note" style={{ position: 'fixed', left: 8, top: 0 }} onMouseEnter={cancelHide} onMouseLeave={() => !pop.pinned && scheduleHide()} onMouseDown={(e) => e.stopPropagation()}>
             <OpenPlace.Provider value={openPlace}>
               <CiteHome.Provider value={home}>
-                <MarkEvidence item={item} look={look} />
+                <MarkEvidence item={item} look={look} unchecked={unchecked} />
               </CiteHome.Provider>
             </OpenPlace.Provider>
           </div>,
@@ -258,17 +260,27 @@ function wordsOf(node: ReactNode): string {
   return isValidElement<{ children?: ReactNode }>(node) ? wordsOf(node.props.children) : ''
 }
 
-function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: MarkLook }) {
-  if (!item || look === 'pending' || look === 'checking')
-    return (
-      <div className="mark-pop-state">
-        {look === 'checking' && <Spinner size={10} label="checking" />} {LOOK_WORD[look]}
-      </div>
-    )
+function MarkEvidence({ item, look, unchecked }: { item: MarkItem | undefined; look: MarkLook; unchecked: boolean }) {
+  const state = (
+    <div className="mark-pop-state">
+      {look === 'checking' && <Spinner size={10} label="checking" />} {LOOK_WORD[look]}
+    </div>
+  )
+  if (!item || (look === 'pending' && !unchecked) || look === 'checking') return state
   const given = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : [item.evidence]) : []
   // a card's places in another card or output (words with several values) show each in turn
   const evs = given.flatMap((ev) => (ev.kind === 'card' ? [ev, ...(ev.more ?? [])] : [ev]))
   const value = plain(item.shown ?? item.words)
+  // no check read it: the place it names, under the words that say so
+  if (unchecked)
+    return (
+      <>
+        {state}
+        {evs.map((ev, i) => (
+          <EvidenceView key={i} ev={ev} value={value} />
+        ))}
+      </>
+    )
   const was = wasLine(item)
   return (
     <>

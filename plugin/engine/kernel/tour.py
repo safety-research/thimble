@@ -3,11 +3,14 @@
 its first prompt (skills/tour/SKILL.md), in Claude Code's fullscreen layout, where the tour's clicks and selections
 reach thimble. A copy of the sample that is already there is replaced, so each tour starts from the same data; other
 files in the folder stay. Before it opens Claude Code, it says to answer yes when Claude Code asks whether the person
-trusts the folder: there, the first choice exits."""
+trusts the folder: there, the first choice exits. On a Claude Code older than CLAUDE_CODE_MIN, which cannot place the
+tour's rows, it opens nothing and says what updates Claude Code."""
 from __future__ import annotations
 
 import os
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,6 +25,9 @@ FULLSCREEN = "CLAUDE_CODE_NO_FLICKER"
 # Claude Code asks once whether the person trusts a new folder, and its first choice exits
 TRUST = "If Claude Code asks whether you trust this folder, choose \"Yes, I trust this folder\"."
 IN_CLAUDE_CODE = "it opens Claude Code, so run it in a shell. In this Claude Code session, type /thimble:tour."
+# the first Claude Code that places the tour's rows ($.ui.place): plugin/tour/tour.ts, scripts/install.sh and INSTALL.md
+# name it too; thimble itself runs on older ones (doctor.CLAUDE_CODE_MIN)
+CLAUDE_CODE_MIN = (2, 1, 314)
 
 
 def folder() -> Path:
@@ -30,6 +36,16 @@ def folder() -> Path:
 
 def claude() -> str:
     return os.environ.get("THIMBLE_CLAUDE") or "claude"
+
+
+def claude_version() -> tuple[int, ...]:
+    """The version `claude --version` prints, as numbers (2.1.311 → (2, 1, 311)); () when it prints none."""
+    try:
+        p = subprocess.run([claude(), "--version"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return ()
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", p.stdout.strip()) if p.returncode == 0 else None
+    return tuple(map(int, m.groups())) if m else ()
 
 
 def _tilde(p: Path) -> str:
@@ -53,6 +69,12 @@ def prepare() -> dict:
 def cmd(a) -> int:
     if os.environ.get("CLAUDECODE") or os.environ.get("THIMBLE_HANDED_OFF"):
         print(f"thimble tour: {IN_CLAUDE_CODE}", file=sys.stderr)
+        return 1
+    have = claude_version()
+    if have and have < CLAUDE_CODE_MIN:
+        need, here = ".".join(map(str, CLAUDE_CODE_MIN)), ".".join(map(str, have))
+        print(f"thimble tour: the tour needs Claude Code {need} or later (the one here is {here}). Update it with "
+              "claude update, or with the package manager that installed it.", file=sys.stderr)
         return 1
     try:
         r = prepare()

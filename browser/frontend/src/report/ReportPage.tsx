@@ -1,7 +1,8 @@
 // The report: the card sidebar (Sidebar.tsx; over the page when the pane is narrow), then the page:
-// the block editor in a card-wide column, the margin of comment cards (Margin.tsx), and at the right the ruler and
-// scrollbar (files/Ruler PageRuler) with a lane per check that is on. The checks (Checks.tsx useChecks), the active
-// comment and the analyst's new comment live here; their tints go to the editor as flags.
+// the block editor in a card-wide column, the margin of comment cards (Margin.tsx; over the page's right edge when the
+// pane is narrow), and at the right the ruler and scrollbar (files/Ruler PageRuler) with a lane per check that is on.
+// The checks (Checks.tsx useChecks), the active comment and the analyst's new comment live here; their tints go to the
+// editor as flags.
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { PageRuler, type Passage, type RulerColumn, type RulerTick } from '../files/Ruler'
 import { api } from '../lib/api'
@@ -18,6 +19,9 @@ import { ReportEditor, type DocFilter, type EditorHandle } from './Editor'
 import { Margin, RAIL_ROOM } from './Margin'
 import { allSentences, paragraphOf, passageOrder, readableText, TITLE_ID } from './model'
 import { Sidebar } from './Sidebar'
+
+/** A value for an attribute selector: CSS.escape where the page has it (jsdom, in the tests, does not). */
+const esc = (s: string) => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&'))
 
 const CANVAS_DEBOUNCE_MS = 400
 
@@ -74,9 +78,10 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   const editor = useRef<EditorHandle | null>(null)
   const column = useRef<HTMLDivElement | null>(null)
   const scroller = useRef<HTMLDivElement | null>(null)
-  // while a check is on, comments can arrive at any moment, so the margin stands (empty until they come) wherever the page
-    // has room beside the text column (report.css `.wu-page > .read-probe`), so the text does not reflow. A page too
-    // narrow for both takes the margin only while it has a card to show
+  // the margin docks beside the text column wherever the page has room for both (report.css `.wu-page > .read-probe`).
+  // While a check is on, comments can arrive at any moment, so there the margin stands even while empty, and the text
+  // does not reflow when they come. A page too narrow for both keeps its whole width for the text: the margin stands
+  // over the page's right edge and shows only the open comment (Margin.tsx `over`)
   const rail = useDock(RAIL_ROOM)
   const setRailRow = rail.row
   const page = useCallback(
@@ -154,7 +159,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     if (!box || !col) return
     const base = box.getBoundingClientRect().top - box.scrollTop
     const spanOf = (sid: string): [number, number] | null => {
-      const r = col.querySelector(`[data-sid="${CSS.escape(sid)}"]`)?.getBoundingClientRect()
+      const r = col.querySelector(`[data-sid="${esc(sid)}"]`)?.getBoundingClientRect()
       return r ? [r.top - base, r.bottom - base] : null
     }
     setColumns(checkColumns(shown, on, checks.list, spanOf, Math.max(1, box.scrollHeight)))
@@ -207,7 +212,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
             <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={flags} filter={filter} client={client} onSaved={onSaved} onFigures={setFigures} onComment={setDraft} captionOf={captionOf} />
           </div>
           {shown.length > 0 || draft ? (
-            <Margin ws={ws} slug={slug} comments={shown} look={look} active={active} onActivate={setActive} onResolve={resolve} draft={draft} onDraft={saveDraft} onDraftCancel={() => setDraft(null)} column={column} textOf={textOf} />
+            <Margin ws={ws} slug={slug} comments={shown} look={look} active={active} onActivate={setActive} onResolve={resolve} draft={draft} onDraft={saveDraft} onDraftCancel={() => setDraft(null)} column={column} textOf={textOf} over={!rail.docks} />
           ) : (
             rail.docks && on.size > 0 && <div className="wu-rail" aria-hidden="true" />
           )}

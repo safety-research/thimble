@@ -73,8 +73,8 @@ export function asksTo(tool: string): string {
 }
 
 /** The session that asks, in words: your Claude Code session for main (or the thread of it that asked), the report
- * writer, a report check, the dev agent and its task (dev · view Posts, dev · ticket #3). `labels` names each chat as
- * the thread tree does. Pure. */
+ * writer, a report check's comments agent, the dev agent and its task (dev · view Posts, dev · ticket #3). `labels`
+ * names each chat as the thread tree does. Pure. */
 export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   if (ask.chat === 'main') {
     const id = ask.request.chat
@@ -90,18 +90,18 @@ export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, l
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null
   if (kind === 'writer') return 'The report writer'
-  if (kind === 'check') return m?.title ? `The ${m.title} check` : 'A report check'
+  if (kind === 'check') return m?.title ? `The comments agent “${m.title}”` : 'A comments agent'
   if (kind === 'dev') return `dev · ${devTask(m?.title ?? '', !!m?.view)}`
   if (kind === 'step') return `The step ${(m?.title || 'step').trim()}`
   return labels.get(ask.chat) ?? 'A session'
 }
 
-/** One of thimble's agents run as a subagent of main, as the card names it: the writer of a document, a report check,
- * the builder or the reviewer of a view (its chat titled `view: <name>` or `review: <name>`, live check
+/** One of thimble's agents run as a subagent of main, as the card names it: the writer of a document, a report check's
+ * comments agent, the builder or the reviewer of a view (its chat titled `view: <name>` or `review: <name>`, live check
  * L31: "The view: Stored Revisions By Label asks to run a command"). Pure. */
 export function subagentName(m: Pick<ChatMeta, 'role' | 'title' | 'doc'>): string {
   if (m.role === 'writer') return m.doc ? `The writer of the ${m.doc}` : 'The report writer'
-  if (m.role === 'check') return m.title ? `The ${m.title} check` : 'A report check'
+  if (m.role === 'check') return m.title ? `The comments agent “${m.title}”` : 'A comments agent'
   const view = /^(view|review):\s*(.+)$/.exec((m.title ?? '').trim())
   if (m.role === 'dev' && view) return `The ${view[1] === 'view' ? 'builder' : 'reviewer'} of the view ${view[2]}`
   return m.title ? `The ${m.title}` : "One of thimble's agents"

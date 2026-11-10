@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_fixes import FX, fake, made, upstream, world  # noqa: E402, F401  (world and upstream are fixtures)
 
-from kernel import cli, doctor  # noqa: E402
+from kernel import cli, doctor, tour  # noqa: E402
 
 
 def answers(node: str, sandbox: dict) -> str:
@@ -47,7 +47,7 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
     fixes it, a command to copy where there is one. The sandbox's check runs as the install runs it: it draws a test
     card (setup.mjs --probe) and installs the sandbox again when its own files are broken (--repair)."""
     upstream({"plugin/notes.md": "made-up release note\n"}, "v0.10.3")
-    bin_ = doctor_world(world, monkeypatch, claude="2.1.312", enabled=False, node="v22.14.0",
+    bin_ = doctor_world(world, monkeypatch, claude="2.1.305", enabled=False, node="v22.14.0",
                         sandbox={"ok": False, "why": "the card runner did not answer in 15 s", "fix": ""})
     FX.put({"id": 1, "state": "pending", "title": "Bar says read", "words": ["the bar should say read"]})
     # scripts/install.sh linked the thimble command into a folder that is not on PATH
@@ -65,7 +65,7 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
     assert all(fix.startswith("      ") and fix.strip() for fix in fixes.values()), out
     setup = world["rel"] / "plugin" / "sandbox" / "setup.mjs"
     assert fixes == {
-        "  × Claude Code 2.1.312 is older than 2.1.314, which thimble needs":
+        "  × Claude Code 2.1.305 is older than 2.1.307, which thimble needs":
             "      Update it with the package manager that installed it, or: claude update",
         "  × the thimble plugin is off in Claude Code": "      Turn it on: claude plugin enable thimble@thimble",
         "  × Node 22.14.0 is older than 22.18, which thimble's plugin needs":
@@ -130,16 +130,28 @@ def test_a_workbench_without_the_headless_chromium_it_checks_cards_in_says_so_wi
 
 
 def test_each_place_that_names_the_claude_code_thimble_needs_names_the_one_ci_tests():
-    """CI runs the plugin's tests on one Claude Code (.github/workflows/ci.yml), the oldest that has what the plugin
-    calls. The doctor, the install, INSTALL.md, the README, scripts/check.sh and the workbench (TESTED_CLAUDE_CODE) name
-    that one, so a pin raised for a newer call fails here until each of them names it too."""
+    """CI runs the plugin's tests (.github/workflows/ci.yml) on the oldest Claude Code that has what the plugin calls,
+    and on the first that places the tour's rows ($.ui.place). The doctor, the install, INSTALL.md, scripts/check.sh and
+    the workbench (TESTED_CLAUDE_CODE) name the oldest; thimble tour, the install's end, INSTALL.md, the plugin's tour
+    and its hooks tests name the tour's. The README names no version. A pin raised for a newer call fails here until
+    each of them names it too."""
     root = Path(__file__).resolve().parents[2]
     v = r"(\d+\.\d+\.\d+)"
-    pin = re.search(rf"CLAUDE_CODE_VERSION: {v}", (root / ".github" / "workflows" / "ci.yml").read_text())[1]
+    numbers = lambda s: tuple(map(int, s.split(".")))  # noqa: E731
+    tested = sorted({m for m in re.findall(rf"claude: {v}", (root / ".github" / "workflows" / "ci.yml").read_text())},
+                    key=numbers)
+    assert len(tested) == 2, tested
+    pin, tour_pin = tested
     assert ".".join(map(str, doctor.CLAUDE_CODE_MIN)) == pin, "plugin/engine/kernel/doctor.py"
+    assert ".".join(map(str, tour.CLAUDE_CODE_MIN)) == tour_pin, "plugin/engine/kernel/tour.py"
+    for path, named in (("scripts/install.sh", r"tour_cc=(\S+)"),
+                        ("INSTALL.md", rf"the tour needs {v} or later"),
+                        ("plugin/tour/tour.ts", rf"TOUR_CLAUDE_CODE = '{v}'|Claude Code {v} or later"),
+                        ("plugin/tests/kit.ts", rf"'ui\.place': '{v}'")):
+        found = {g for m in re.finditer(named, (root / path).read_text()) for g in m.groups() if g}
+        assert found == {tour_pin}, path
     for path, named in (("scripts/install.sh", rf'ver_ge "\$v" {v}|Claude Code {v} or later'),
                         ("INSTALL.md", rf"Claude Code {v} or later|Claude Code is older than {v}"),
-                        ("README.md", rf"Claude Code {v}\+"),
                         ("scripts/check.sh", rf"Claude Code {v} or later"),
                         ("browser/backend/app/cli.py", rf'TESTED_CLAUDE_CODE = "{v}"')):
         found = {g for m in re.finditer(named, (root / path).read_text()) for g in m.groups() if g}

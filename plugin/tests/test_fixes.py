@@ -476,8 +476,8 @@ def test_update_puts_back_the_fixes_that_fit_and_reapply_brings_back_the_one_tha
     assert r["argv"][0] == os.environ["THIMBLE_CLAUDE"] and r["cwd"] == str(live) and r["carried"] is None
     text = r["argv"][1]
     assert text == Path(r["prompt"]).read_text() and Path(r["prompt"]) == FX.home() / "pending" / "0.10.3.md"
-    assert ("The person updated thimble from 0.10.2 to 0.10.3. thimble set aside 1 fix of theirs, made with thimble fix; "
-            "it is listed below, and this copy of 0.10.3 does not have it.") in text
+    assert ("The person updated thimble from 0.10.2 to 0.10.3. thimble set aside 1 fix that they made with thimble fix. "
+            "This copy of 0.10.3 does not have it, and it is listed below.") in text
     assert "(`git log v0.10.2..v0.10.3` and the diff" in text and "{{" not in text
     assert sh("git", "log", "--format=%s", "v0.10.2..v0.10.3", cwd=live) == "thimble v0.10.3"
     made_on = FX._date(FX.get(c)["created"])
@@ -531,7 +531,7 @@ def test_the_workbench_s_server_packages_are_compiled_once_also_where_an_older_i
         (b / part / lock).write_text(f"made-up {lock}\n")
     # as an install by thimble 0.10.12 left them: stamped with their lock files, and not compiled
     FX.write_json(FX.home() / "browser.json", {lock: FX._sha_of(b / part / lock) for part, lock, _ in FX.BROWSER_LOCKS})
-    sync = f"sync --project {b / 'backend'} --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
+    sync = f"sync --project {b / 'backend'} --python >=3.12,<3.15 --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
 
     def syncs() -> int:
         return tools.read_text().splitlines().count(sync)

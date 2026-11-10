@@ -894,7 +894,7 @@ def _workspace(b: Bundle, c: str, ws: Path, description: str, focus: list[str]) 
         b.part("workspace/check-timings.jsonl", b.file_tail, "workspace/check-timings.jsonl", times, STATE_MAX,
                "each card check's times and how it ended")
     b.part("workspace/report-checks.jsonl", lambda: b.rows(
-        "workspace/report-checks.jsonl", _report_checks(ws), STATE_MAX, "each report check's runs"))
+        "workspace/report-checks.jsonl", _report_checks(ws), STATE_MAX, "each comments agent's runs"))
     b.part("workspace/views", _views, b, ws)
     b.part("workspace/dev-tickets.jsonl", lambda: b.rows(
         "workspace/dev-tickets.jsonl", [trimmed(t) for t in dev_tickets(c)[-MAX_TICKETS:]], STATE_MAX,

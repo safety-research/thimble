@@ -24,13 +24,12 @@
 // ends, whatever came of it.
 //
 // One look, in order:
-// 1. What the conversation does not show of the work: the cards main drew in the looked-at turns (title and text copy,
-//    cards/draw.ts cardText), and `thimble coverage` of the session, which the look waits for a few seconds at most
-//    (COVERAGE_MS) and never runs in the home folder.
+// 1. What the conversation does not show of the work: `thimble coverage` of the session, which the look waits for a
+//    few seconds at most (COVERAGE_MS) and never runs in the home folder.
 // 2. The pass: one `$.model.fork` over the conversation as main last sent it, so the prompt cache serves that prefix.
 //    Its prompt is the frame (prompts/observer.md) with the enabled lenses' sections (lenses.mjs, compose.mjs), then
-//    the turn template (prompts/observer-turn.md): the messages to read, the evidence, each lens's digest of what
-//    thimble already gave (explain/seam.ts explainState, claims/seam.ts claimsState), and the reply's skeleton. The
+//    the turn template (prompts/observer-turn.md): the messages to annotate, the coverage, the claims lens's digest of
+//    what thimble already gave (claims/seam.ts claimsState), and the reply's skeleton. The
 //    call is a line in the session's events (telemetry, feature `observer`).
 // 3. A pass that fails is tried once more (a failed sign-in is not: it fails again until the person signs in); a
 //    second failure says so on the failure line, and the claims hear that the turn's claims are missing.
@@ -48,15 +47,13 @@ import { update, type EngineInterface, type Register } from 'claude-code'
 
 import { coverageRoot } from '../bar/counts'
 import { failNotice } from '../bar/notice'
-import { cardText } from '../cards/draw'
-import { metaOf } from '../cards/store'
 import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMerge, claimsState, claimsUnread } from '../claims/seam'
 import { messageOf, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import { textView } from '../core/answerview'
 import { readKept, runThimble, writeKept } from '../core/env'
 import { drawsHere } from '../core/host'
 import { modelWhy } from '../core/why.js'
-import { explainMerge, explainState } from '../explain/seam'
+import { explainMerge } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
 import { promptText, type PromptName } from '../prompts/prompts'
 import { featureOn, lensesAfterReply } from '../settings/features.mjs'
@@ -93,7 +90,6 @@ const RETRY_MS = 2000 // ms before a failed pass is tried again
 // (bar/counts.ts), and the kernel keeps the row counts, so a later look's count is quick
 const COVERAGE_MS = 10000
 const COVERAGE_CHARS = 2400
-const CARD_CHARS = 3000
 
 /** The messages queued or being looked at, this conversation's, as $.state keeps them across a reload of the plugin. */
 const LOOKS = { plugin: 'thimble', key: 'observerLooks' } as const
@@ -126,20 +122,6 @@ const readsClaims = (m: { only?: string[] }): boolean => (m.only ? m.only.includ
 
 // ------------------------------------------------------------------------------------------------ what it reads
 
-/** The cards main drew in these turns, each its title and its text copy as the person sees it now. */
-async function cardsNow($: Engine, turns: TurnRec[]): Promise<string> {
-  const out: string[] = []
-  for (const t of turns) {
-    for (const c of t.cards) {
-      const meta = await metaOf($, c.id).catch(() => null)
-      if (!meta || meta.version < 1) continue
-      const copy = await cardText($, c.id).catch(err => `(it does not draw: ${cut(String((err as Error)?.message || err), 160)})`)
-      out.push(`Card "${cut(meta.title, 80)}" (version ${meta.version}, drawn in turn ${t.n}), as the analyst sees it:\n${cut(copy, CARD_CHARS)}`)
-    }
-  }
-  return out.length ? out.join('\n\n') : 'No cards in these turns.'
-}
-
 /** `thimble coverage` of the session: what it read of the folder, in words. The folder is the one the bar counts
  *  (bar/counts.ts coverageRoot), so never the home folder, whose walk takes minutes. */
 async function coverageNow($: Engine): Promise<string> {
@@ -152,9 +134,6 @@ async function coverageNow($: Engine): Promise<string> {
     return `(thimble coverage failed: ${cut(String((err as Error)?.message || err), 200)})`
   }
 }
-
-/** The keys above the analyst's prompt, as the features leave them. */
-const rowKeys = () => [['cards', 'v visualize'], ['squeezeAnswers', 's rewrite'], ['claims', 'w claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
 
 /** The look's step on the bar's busy line: `adding explainers, details, claims`. */
 export function lookWord(lenses: string[]): string {
@@ -331,15 +310,15 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
       finds = true
       await claimsFindStart($, new Set(batch.map(m => m.turnId)).size)
     }
-    const turns: TurnRec[] = []
-    for (const id of [...new Set(batch.map(m => m.turnId))]) { const t = await turnOf($, id); if (t) turns.push(t) }
-    const [objects, coverage] = await Promise.all([cardsNow($, turns), coverageNow($)])
-    const st = { ...(await explainState($).catch(() => ({}))), ...(await claimsState($).catch(() => ({}))) }
+    const coverage = await coverageNow($)
+    // the explainers and heads-ups already shown need no list: main hears them with the next prompt (engaged.mjs), so
+    // they are in the conversation the fork reads. The claims' ids are not, so the claims lens keeps its digest
+    const st = await claimsState($).catch(() => ({}))
     // a message the person reads in another version (squeezed): the look reads the version they read (a catch-up's
     // words stand in its message's place, messagesText)
     const shownText = newest.catchUp ?? (await textView($, newest.row, newest.text)).text
     const shown = !newest.catchUp && shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
-    const vals = { MESSAGES: messagesText(batch), ROW: rowKeys(), SHOWN: shown, OBJECTS: objects, COVERAGE: coverage }
+    const vals = { MESSAGES: messagesText(batch), SHOWN: shown, COVERAGE: coverage }
     const frame = await promptText($, 'observer')
     let p = await pass($, { frame, parts, msgs: batch, vals, st })
     if (!p.out && !signInFailed(p.f)) {

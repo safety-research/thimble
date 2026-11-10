@@ -5,8 +5,9 @@ analyst laid out notes or figures before the first write, their version is gener
 draft the newest generation again, by the analyst, its record naming the draft it restored.
 
 One writer run is one generation: each later save of the run updates it in place, the replaced save kept as a
-revision at versions/<slug>/<n>.revisions.json. In a legacy workspace with a generation per save, consecutive
-generations of one writer's chat fold into the newest (legacy_revisions)."""
+revision at versions/<slug>/<n>.revisions.json. A run that changes passages with edit_document gets its generation at
+its first edit (report_types.open_run_draft), and its edits change that generation in place. In a legacy workspace
+with a generation per save, consecutive generations of one writer's chat fold into the newest (legacy_revisions)."""
 from __future__ import annotations
 
 import logging
@@ -377,7 +378,8 @@ def history(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> dict[str, An
                                   current=False, available=True))
             else:
                 out.append(_entry(k, ts=None, source=FIRST_SOURCE if k == 1 else "", instructions=None, summary=None, current=False, available=False))
-    # each entry's length and, for a save made inside a writer's session, that writer's chat
+    # each entry's length, counted from its text (an edit in place leaves the stored count behind), and, for a save
+    # made inside a writer's session, that writer's chat
     from . import report_types  # noqa: PLC0415
 
     spans = _writer_spans(c, slug)
@@ -385,8 +387,7 @@ def history(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> dict[str, An
         k = e["n"]
         text = doc if k == current else (recs.get(k + 1) or {}).get("previous")
         if isinstance(text, dict):
-            words = text.get("words")
-            e["words"] = int(words) if isinstance(words, (int, float)) else report_types.doc_words(text)
+            e["words"] = report_types.doc_words(text)
         if e["source"] != ANALYST_SOURCE:
             e["writer"] = _writer_of(spans, e["ts"])
         rev = _revision_file(c, inv_id, slug, k)

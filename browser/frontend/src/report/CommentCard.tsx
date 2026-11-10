@@ -3,7 +3,7 @@
 // its check's name in the check's color beside the color square, then its statement, and ✓ (Done) at the head's end,
 // which resolves the comment and hides it. Show more under the statement opens its details, whose citations show as
 // chips, and Show less folds them. A click makes it active, which opens its details and a field whose text asks Thimble
-// about it in a thread anchored to the comment's passage, card or step, with the comment's id and words. The canvas
+// about it in a thread anchored to the comment's passage or card, with the comment's id and words. The canvas
 // hears when the pointer or the keyboard's focus comes onto a card, to show where its comment points (CommentLayer.tsx).
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { ChatMarkdown, ChipContext } from '../chat/markdown'
@@ -36,12 +36,10 @@ export interface CommentView {
 
 /** Where the thread the active card's field opens is anchored, and what it shows of the place. */
 export interface CommentThread {
-  /** the comment's passage, card or step, as a ref */
+  /** the comment's passage or card, as a ref */
   anchor: string
   /** the passage's words, or the card's question */
   passage: string
-  /** where on it the comment stands, such as "step 2" */
-  where?: string
   /** the surface the comment is on: the chat for a check's comment on Claude's answer (chat/AnswerComment.tsx) */
   surface: 'report' | 'canvas' | 'chat'
 }
@@ -79,12 +77,11 @@ function keyboardFocus(el: Element): boolean {
   }
 }
 
-/** The words the thread's first lines show of the comment: who left it, its id, where, its statement and details. */
+/** The words the thread's first lines show of the comment: who left it, its id, its statement and details. */
 export function threadText(c: CommentView, name: string, thread: CommentThread): string {
-  const who = c.check != null ? `The comment ${c.id} of the check “${name}”` : c.author === CLAUDE_AUTHOR ? `Claude’s comment ${c.id}` : `The analyst’s comment ${c.id}`
-  const where = thread.where ? ` (on ${thread.where})` : ''
+  const who = c.check != null ? `The comment ${c.id} from “${name}”` : c.author === CLAUDE_AUTHOR ? `Claude’s comment ${c.id}` : `The analyst’s comment ${c.id}`
   const said = [c.text, c.details].filter((s) => s.trim()).join('\n\n')
-  return `${thread.passage ? `${thread.passage}\n\n` : ''}${who}${where}: ${said}`
+  return `${thread.passage ? `${thread.passage}\n\n` : ''}${who}: ${said}`
 }
 
 export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, note, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {

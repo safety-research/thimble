@@ -2,19 +2,21 @@
 the context, can do work, and can be created and run from the chat. A check runs again after a writer saves the
 document, but is cached: a passage whose text did not change, or that is locked, is not checked again.
 
-A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, shown_set, builtin, created_by, ts,
-version, runs: {doc: Run}}. The built-ins (`heads-up`, `explainers`, `judgment`: Heads up, Explainers and Judgment
-calls) are prompts/checks/<id>.md, read from the prompt file until first changed: Heads up and Explainers are the
-terminal's heads-up and explainer lenses (plugin/prompts/lens-heads.md, lens-explain.md) as checks, and cover the
-documents and Claude's answers; Judgment calls covers the documents and the cards. The front matter's `shown` says
-whether a built-in is on until the analyst turns it on or off (Heads up and Explainers on, Judgment calls off). A stored
-copy still holding a prompt its built-in had before reads with the prompt now (FORMER_PROMPTS), since thimble stores a
-built-in whole when it is turned on or off or runs. Its `shown` stays as stored once the analyst set it (`shown_set`,
+A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, prompt_set, colour, shown, shown_set, builtin,
+created_by, ts, version, runs: {doc: Run}}. The built-ins (`heads-up`, `explainers`, `judgment`: Heads up, Explainers
+and Judgment calls) are prompts/checks/<id>.md, read from the prompt file until first changed: Heads up and Explainers
+are the terminal's heads-up and explainer lenses as checks, with what a heads-up and an explainer are from the texts the
+lenses include (plugin/prompts/heads-up.md, explainer.md), and cover the documents and Claude's answers; Judgment calls
+covers the documents and the cards. The front matter's `shown` says whether a built-in is on until the analyst turns it
+on or off (Heads up and Explainers on, Judgment calls off). thimble stores a built-in whole when it is turned on or off
+or runs, with `prompt_set` false; edit sets it when the analyst changes the prompt. A stored built-in whose prompt the
+analyst never set reads with its built-in's prompt now, and so does a copy stored before `prompt_set` that holds a
+prompt its built-in had before (FORMER_PROMPTS). Its `shown` stays as stored once the analyst set it (`shown_set`,
 which edit records for the analyst's switch and for main's run_check and stop_check) or when it is off; one stored on
-without `shown_set` reads as its built-in is now (_shown_now). A former built-in (RETIRED: `verified` and
-`unverified`, Unverifiable) is listed only where the workspace stored it, as any stored check is, so its comments stay
-readable there, and is on only where the analyst turned it on; it never runs again, and no new check takes its id. A
-run is a `thimble:check`, a subagent of main
+without `shown_set` reads as its built-in is now (_shown_now). A former built-in (RETIRED: `verified` and `unverified`,
+Unverifiable) is listed only where the workspace stored it, as any stored check is, so its comments stay readable there,
+and is on only where the analyst turned it on; it never runs again, and no new check takes its id. A run is a
+`thimble:check`, a subagent of main
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
 (context.render) and then the document, the check's prompt and the passages it covers (a run of Heads up or Explainers,
@@ -41,8 +43,8 @@ answers it in one line.
 
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
 check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,
-CANVAS (`@canvas`), whose passages are canvas_comments.passages: each card of the analyst's and the threads' groups and
-each step of a plan card. Its comments are canvas_comments' store, and Done resolves them. Main's turn end starts each
+CANVAS (`@canvas`), whose passages are canvas_comments.passages: each card of the analyst's and the threads' groups.
+Its comments are canvas_comments' store, and Done resolves them. Main's turn end starts each
 shown check that covers the cards, a follow-on start (main_turn_ended), on the cards that changed since its last run
 there and that it has not seen; Run on its row in the canvas's Comments pane and main's run_check with `on: cards` start
 one too.
@@ -98,15 +100,20 @@ OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("heads-up", "explainers", "judgment")  # prompts/checks/<id>.md, listed first in this order
 # former built-ins: listed only where the workspace stored them, never run again, and no new check takes their ids
 RETIRED = ("verified", "unverified")
-# the sha1 of the words (collapsed) of each prompt the built-ins shipped with before: a workspace's stored copy of a
-# built-in that still holds one reads with the prompt now (_as_now)
+# the sha1 of the words (collapsed) of each prompt the built-ins had before: a workspace's stored copy of a built-in that
+# still holds one reads with the prompt now (_as_now). A copy stored since `prompt_set` needs no former prompt: one the
+# analyst never set reads with the prompt now.
 FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
     "heads-up": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5",
                  "0829a23430817c86bc793d3a14a4cac5f644a93b", "7ad911bc447c64e183a48130f7d7d8857b3c2de4",
-                 "9e461822a6def677feec8fe2461061831bd35234", "bafaba148b11b6a45197bf6fb4112ee3c230f5a7"),
+                 "9e461822a6def677feec8fe2461061831bd35234", "bafaba148b11b6a45197bf6fb4112ee3c230f5a7",
+                 "f650d8df559458f0b8dc6e6877922b8143525de1", "107dd2780bf461842bcb45de15d21e3e8ab68666"),
     "explainers": ("9478d19fb7bf335552308b11f88df81af897e591", "17bb4469222f1f6bb27a4a032a03ac7aaf9dd511",
-                   "3c9a674810ff281086d46d169514db9f0b1650fc"),
+                   "3c9a674810ff281086d46d169514db9f0b1650fc", "c30d8b264c97594eec54b92bb1e2f9f240dfcecc",
+                   "e83d0a09aeef97d0ce977bd0dc8cbbdbaa3e6408", "08a1640f13e7c61c36d7f69ddd1ea891274d298c",
+                   "9c55ea78fb0aa8f51ba5332318dd6419bcb3273c", "e62acaf1840a70551fd31f107d38b51e2e9f23de",
+                   "e3fbb3eda713aa004481702941f0190d65a8186a"),
 }
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
@@ -161,7 +168,7 @@ def _dir(c: str) -> Path:
 
 def _path(c: str, cid: str) -> Path:
     if not ID_RE.match(cid or ""):
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     return _dir(c) / f"{cid}.json"
 
 
@@ -190,7 +197,7 @@ def builtin(cid: str) -> dict[str, Any] | None:
     front = yaml.safe_load(head) if sep else {}
     front = front if isinstance(front, dict) else {}
     colour = front.get("color", front.get("colour"))  # `colour`, the British spelling, is its alias
-    return {"id": cid, "name": _collapse(front.get("name") or cid), "prompt": body.strip(),
+    return {"id": cid, "name": _collapse(front.get("name") or cid), "prompt": body.strip(), "prompt_set": False,
             "colour": colour if colour in COLOURS else COLOURS[0], "shown": front.get("shown") is True, "builtin": True,
             "covers": covers_of(front.get("covers")), "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
 
@@ -208,9 +215,10 @@ def _shown_now(stored: dict[str, Any], now: dict[str, Any]) -> bool:
 
 
 def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
-    """A stored built-in with the prompt its built-in has now in place of a former one it still holds (FORMER_PROMPTS),
-    and `shown` as _shown_now reads it; one the analyst changed stays. A former built-in (RETIRED) reads as stored, but
-    on only where the analyst turned it on."""
+    """A stored built-in with the prompt its built-in has now when the analyst never set it (`prompt_set` false, or a
+    copy stored before `prompt_set` that holds a former prompt, FORMER_PROMPTS), and `shown` as _shown_now reads it;
+    what the analyst changed stays. A former built-in (RETIRED) reads as stored, but on only where the analyst turned it
+    on."""
     cid = str(stored.get("id") or "")
     if cid in RETIRED:
         stored["shown"] = _shown_now(stored, {"shown": False})
@@ -219,7 +227,8 @@ def _as_now(stored: dict[str, Any]) -> dict[str, Any]:
     if now is None:
         return stored
     stored["shown"] = _shown_now(stored, now)
-    if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
+    if stored.get("prompt_set") is False or (
+            "prompt_set" not in stored and _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ())):
         stored["prompt"] = now["prompt"]
     return stored
 
@@ -301,9 +310,9 @@ def create(c: str, name: str, prompt: str, *, created_by: str, covers: Any = Non
     400 for an empty name or prompt."""
     name, prompt = _collapse(name)[:NAME_CHARS], str(prompt or "").strip()[:PROMPT_CHARS]
     if not name or not prompt:
-        raise HTTPException(400, "a check needs a name and a prompt")
+        raise HTTPException(400, "a comments agent needs a name and a prompt")
     if by_name(c, name) is not None:
-        raise HTTPException(409, f"a check named {name!r} exists")
+        raise HTTPException(409, f"a comments agent named {name!r} exists")
     made = save(c, {"id": _new_id(c, name), "name": name, "prompt": prompt, "colour": _free_colour(c), "shown": False,
                     "builtin": False, "covers": covers_of(covers), "created_by": created_by, "ts": _now(), "version": 1,
                     "runs": {}})
@@ -320,19 +329,20 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
 
     check = read(c, cid)
     if check is None:
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     if name is not None:
         name = _collapse(name)[:NAME_CHARS]
         other = by_name(c, name)
         if not name or (other is not None and other["id"] != cid):
-            raise HTTPException(409 if name else 400, f"a check named {name!r} exists" if name else "a check needs a name")
+            raise HTTPException(409 if name else 400, f"a comments agent named {name!r} exists" if name
+                                else "a comments agent needs a name")
         check["name"] = name
     if prompt is not None:
         prompt = str(prompt).strip()[:PROMPT_CHARS]
         if not prompt:
-            raise HTTPException(400, "a check needs a prompt")
+            raise HTTPException(400, "a comments agent needs a prompt")
         if prompt != check.get("prompt"):
-            check["prompt"] = prompt
+            check["prompt"], check["prompt_set"] = prompt, True  # the analyst's words, which stay (_as_now)
             check["version"] = int(check.get("version") or 1) + 1
             for doc, run in (check.get("runs") or {}).items():
                 d = report_types.read_doc(c, inv.MAIN, doc) if _is_doc(doc) else None
@@ -448,7 +458,7 @@ def canvas_cover(c: str, check: dict[str, Any], wanted: list[str] | None = None,
                  since: str | None = None) -> list[dict[str, Any]]:
     """The passages of the cards a run of `check` covers: the ones `wanted` names, else every one when `force`, else the
     ones whose fingerprint the check has not seen, of the cards that changed at or after `since` when it is given. At
-    most the MAX_CARDS cards that changed last, each with the steps of it that are covered."""
+    most the MAX_CARDS cards that changed last."""
     ps = canvas_comments.passages(c, None if wanted or force else since)
     if wanted:
         refs = {p["ref"] for w in wanted if (p := canvas_comments.passage_of(c, w, ps)) is not None}
@@ -906,7 +916,7 @@ async def _launch(act: _Active) -> None:
     c = act.c
     check = read(c, act.check)
     if check is None:
-        _finish(act, "failed", f"no check {act.check}")
+        _finish(act, "failed", f"Comments has no {act.check}")
         return
     cover = [p for p in passages_of(c, act.doc) if p["ref"] in set(act.covered)]
     if act.doc == ANSWERS and _is_lens(check):
@@ -924,7 +934,7 @@ async def _launch(act: _Active) -> None:
     ans = await subagents.start_job(
         c, ROLE, session_key(act.check, act.doc), read_parts.named(paths, "check-task-file", "check-task-files"),
         subagents.values_for(c, ROLE), act.route,
-        description=f"check: {check['name']} · "
+        description=f"comments: {check['name']} · "
                     f"{CANVAS_NAME if act.doc == CANVAS else ANSWERS_NAME if act.doc == ANSWERS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,
               "brief": tools.hint("check-instructions", check=check["name"],
@@ -1414,8 +1424,8 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             refused.append(getattr(ans, "reason", "") or str(rec.get("summary") or "") or "it did not start")
             continue
         if fork is not None:
-            res = await tools._fork_start(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
-                                          agent="the check")
+            res = await tools._fork_start(ctx, ans, what=f"a run of the comments agent “{check['name']}” on "
+                                                         f"{target_name(doc)}", agent="the comments agent")
             (refused if res.is_error else lines).append(res.text)
             continue
         lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=target_name(doc),
@@ -1502,8 +1512,8 @@ def note_parts(c: str, text: str, details: Any = None, doc_ids: set[str] | None 
 
 
 def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
-    """add_comment in a run over the cards: a comment beside a card or a step the run covers (a comment on a card whose
-    step alone is covered goes too), stored in the cards' comments (canvas_comments.add)."""
+    """add_comment in a run over the cards: a comment beside a card the run covers, stored in the cards' comments
+    (canvas_comments.add)."""
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     text = _collapse(args.get("text"))
     if not text:
@@ -1512,14 +1522,12 @@ def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
     p = canvas_comments.passage_of(ctx.c, ref, ps)
     if p is None:
         return tools.err(tools.hint("add_comment-no-card", ref=ref or "(no ref)"))
-    covered = set(act.covered)
-    if p["ref"] not in covered and not (p["kind"] == "card" and any(q["card"] == p["card"] and q["ref"] in covered
-                                                                     for q in ps)):
+    if p["ref"] not in set(act.covered):
         return tools.err(tools.hint("add_comment-uncovered", ref=ref))
     shown, details, evidence = note_parts(ctx.c, text, args.get("details"))
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
-    _, new = canvas_comments.add(ctx.c, card=p["card"], step=p["step"], text=shown, details=details, author=AUTHOR,
+    _, new = canvas_comments.add(ctx.c, card=p["card"], text=shown, details=details, author=AUTHOR,
                                  check=act.check, run=act.run, evidence=evidence, fp=p["fp"])
     if new:
         act.comments += 1
@@ -1629,7 +1637,7 @@ async def edit_route(c: str, cid: str, body: CheckEdit, request: Request) -> dic
     _ws(c)
     before = read(c, cid)
     if before is None:
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     wider = body.covers is not None and bool(set(covers_of(body.covers)) - set(covers_of(before.get("covers"))))
     starts = body.shown is True or (body.prompt is not None and (before.get("shown") or body.shown)
                                     and str(body.prompt).strip() != before.get("prompt")) or (wider and before.get("shown"))
@@ -1648,15 +1656,16 @@ async def _run(c: str, cid: str, body: RunBody) -> dict[str, Any]:
 
     _ws(c)
     if read(c, cid) is None:
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     doc = str(body.doc or "").strip().lower().removeprefix("report:")
     if doc != CANVAS and (not report_types.SLUG_RE.match(doc) or report_types.read_type(c, doc) is None):
         raise HTTPException(404, f"no document {doc!r}")
     if doc == CANVAS and not covers(read(c, cid), "cards"):
-        raise HTTPException(409, f"check {cid!r} does not cover the cards")
+        raise HTTPException(409, f"{cid!r} does not comment on the cards")
     rec = await start_run(c, cid, doc, passages_=body.passages or None, force=True, route="click")
     if rec is None:
-        raise HTTPException(409, "no card to check" if doc == CANVAS else f"report:{doc} has no passage to check")
+        raise HTTPException(409, "no card to comment on" if doc == CANVAS
+                            else f"report:{doc} has no passage to comment on")
     return rec
 
 
@@ -1683,7 +1692,7 @@ async def stop_route(c: str, cid: str, doc: str, request: Request) -> dict[str, 
     _ws(c)
     check = read(c, cid)
     if check is None:
-        raise HTTPException(404, f"no check {cid!r}")
+        raise HTTPException(404, f"Comments has no {cid!r}")
     act = _active.get((c, cid, doc))
     if act is not None:
         _click(request)

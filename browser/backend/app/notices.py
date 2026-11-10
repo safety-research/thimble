@@ -10,8 +10,8 @@ The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, 
 action, ts}: `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command,
 such as /login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS,
 or a failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words
-("Citation check", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
-is the button, one object {label, do, slug?, text?} or a list of them, `do` one of ACTIONS:
+("Citation check", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to;
+`action` is the button, one object {label, do, slug?, text?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
@@ -428,7 +428,7 @@ ROLE_NAMES: dict[str, tuple[str, str]] = {
     "writer": ("Writer: {t}", "The writer of {t}"),
     "view-builder": ("View build: {t}", "The build of the view {t}"),
     "view-reviewer": ("View review: {t}", "The review of the view {t}"),
-    "check": ("Report check: {t}", "The report check {t}"),
+    "check": ("Comments: {t}", "The comments agent \"{t}\""),
     "dev-ticket": ("Code ticket: {t}", "The code ticket {t}"),
     "thread": ("Side thread: {t}", "The side thread \"{t}\""),
 }

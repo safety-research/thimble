@@ -31,7 +31,7 @@ import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
-import { tourHoldsCites } from '../tour/tour'
+import { tourCited, tourHoldsCites } from '../tour/tour'
 import { openTray, trayFocus } from '../tray/seam'
 import { awaitsCheck } from './checker'
 import { askedWords, carrier, codeRanges, linksIn, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections, withoutLinks } from './message.js'
@@ -216,8 +216,10 @@ export async function citeSelection($: Engine): Promise<void> {
   const row = own ?? (await rowHolding($, words))
   if (!row) { await howTo($, 'cite', 'ask Claude something, then select a passage in its answer and press c to verify the claim.', 'cite'); return }
   const why = await citeWords($, row, words)
-  if (why) hintLine($, why, 'cite')
-  else await hintUsed($, 'cite')
+  if (why) { hintLine($, why, 'cite'); return }
+  await hintUsed($, 'cite')
+  // the tour's cite step in manual counts the words cited there (tour/tour.ts tourCited)
+  await tourCited($, row).catch(() => undefined)
 }
 
 /** Whether c cites now: Citations is on, an answer exists, and words are selected that c has not cited yet (Claude

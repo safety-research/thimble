@@ -488,15 +488,16 @@ class Space:
         return self.dir / self.sid / "subagents" / f"agent-{agent_id}.jsonl"
 
     def attach(self) -> None:
-        """Main is the mirror's session, with the effort it runs at while the composer chose none (spec_of), for the
-        composer's chip."""
+        """Main is the mirror's session, with the effort it runs at while the composer chose none (spec_of) and the
+        model, effort and fast mode the settings keep for it (models.main), for the composer's chip."""
         from . import cc_settings, session  # noqa: PLC0415
 
         lv = session.current(self.c)
         if lv is None or lv.sid != self.sid:
-            model = str(_main_choice(self.ws).get("model") or MAIN_MODEL)
+            choice = _main_choice(self.ws)
+            model = str(choice.get("model") or MAIN_MODEL)
             session.attach(self.c, self.sid, str(self.corpus), transcript_path=str(self.main_path),
-                           effort=cc_settings.session_effort(self.corpus, model))
+                           effort=cc_settings.session_effort(self.corpus, model), choice=choice)
 
     def live(self) -> Any:
         from . import session  # noqa: PLC0415
@@ -820,15 +821,31 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def ensure(c: str) -> Space:
-    """The workspace's runtime, with main attached as the mirror's session."""
+    """The workspace's runtime, with main attached as the mirror's session. A new runtime runs no agent yet, so the runs
+    the registry still holds as running end first (_end_left)."""
     global _loop
     with contextlib.suppress(RuntimeError):
         _loop = asyncio.get_running_loop()
     sp = _spaces.get(c)
     if sp is None:
         sp = _spaces[c] = Space(c)
+        _end_left(c)
     sp.attach()
     return sp
+
+
+def _end_left(c: str) -> None:
+    """The runs of thimble's agents a server that is gone left running end stopped (subagents.end_left): a server
+    killed under a writer would otherwise show it writing for good, with no writer of its document able to start."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        left = subagents.end_left(c)
+    except Exception:  # noqa: BLE001 — the runtime is made either way, and Stop still ends such a run
+        log.exception("%s: the runs a previous server left were not ended", c)
+        return
+    if left:
+        log.info("%s: runs a previous server left, ended stopped: %s", c, ", ".join(left))
 
 
 async def forget(c: str) -> None:
@@ -1341,17 +1358,21 @@ def _as_after_stop(c: str) -> None:
 
 
 def _thread(sp: Space, meta: dict[str, Any], text: str) -> None:
+    """A side thread's event: a new turn of the thread's fork, or a new fork of main's conversation, whose first
+    message gives the thread's instructions before the event (threads.fork_text)."""
+    from . import threads  # noqa: PLC0415
+
     agent = str(meta.get("agent") or "")
     conv = sp.convs.get(agent) if agent else None
     if conv is None:
         name = str(meta.get("name") or "thread")
+        text = f"{threads.fork_text()}\n\n{text}\n\nthread:{name}"
         agent_id = _agent_id()
         conv = Conv(sp, agent_id, "fork", agent_id=agent_id, agent_type=FORK_TYPE, base=MAIN,
                     transcript=Transcript(sp.sub_path(agent_id), sp.sid, agent_id))
         sp.convs[agent_id] = conv
         conv.transcript.write_meta({"agentType": FORK_TYPE, "isFork": True, "description": f"thread:{name}",
                                     "name": name})
-        text = f"{text}\n\nthread:{name}"
     conv.queue.append(text)
     if not conv.running:
         conv.task = _spawn_task(_agent_loop(conv), f"fork:{sp.c}:{conv.id}")

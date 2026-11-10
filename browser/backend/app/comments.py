@@ -1,9 +1,9 @@
-"""Comments and checks from the chat: main's own note beside a passage of a written document or beside a card or a plan
-step (`add_comment` from main's shim), a comment resolved or opened again (`resolve_comment`), and a check turned off
+"""Comments and checks from the chat: main's own note beside a passage of a written document or beside a card
+(`add_comment` from main's shim), a comment resolved or opened again (`resolve_comment`), and a check turned off
 (`stop_check`), the chat counterparts of the margin's Comment and ✓ and a check's switch in Comments.
 
 A note on a card goes to the cards' comments (canvas_comments.add) with author `claude`; `resolve_comment` takes such a
-comment's id, or `card:<id>` (`#step-<n>`) for every open comment there.
+comment's id, or `card:<id>` for every open comment there.
 
 Main's note is stored as the analyst's comments are, `{id, sentence_id, text, details, author: "claude", ts, status:
 open}`, with no check and no run, so no run supersedes it. A note on a paragraph goes on its first sentence marked
@@ -58,21 +58,17 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 def _add_card_note(ctx: Any, ref: str, text: str, details: Any) -> Any:
-    """Main's note beside a card or a plan step of any group (canvas_comments.add, author claude)."""
+    """Main's note beside a card of any group (canvas_comments.add, author claude)."""
     from . import canvas_comments, checks, notebook  # noqa: PLC0415
 
-    hit = canvas_comments.parse_ref(ref)
-    cell = notebook.get_cell(ctx.c, hit[0]) if hit else None
-    steps = canvas_comments.steps_of(cell) if cell else []
-    step = next((s for s in steps if s["n"] == hit[1]), None) if hit and hit[1] is not None else None
-    if hit is None or cell is None or (hit[1] is not None and step is None):
+    card = canvas_comments.parse_ref(ref)
+    if card is None or notebook.get_cell(ctx.c, card) is None:
         return tools.err(tools.hint("add_comment-no-card", ref=ref))
     shown, more, evidence = checks.note_parts(ctx.c, text, details)
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
-    cm, _ = canvas_comments.add(ctx.c, card=hit[0], step=step["id"] if step else None, text=shown, details=more,
-                                author=AUTHOR, evidence=evidence)
-    return tools.ok(f"commented on {canvas_comments.step_ref(*hit)}, comment {cm['id']}")
+    cm, _ = canvas_comments.add(ctx.c, card=card, text=shown, details=more, author=AUTHOR, evidence=evidence)
+    return tools.ok(f"commented on {canvas_comments.card_ref(card)}, comment {cm['id']}")
 
 
 def _add_comment(ctx: Any, args: dict[str, Any]) -> Any:
@@ -160,14 +156,14 @@ async def tool_resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 def _resolve_card_comments(ctx: Any, value: str, reopen: bool) -> Any | None:
-    """resolve_comment on the cards' comments: a comment's id, or a card's or a step's ref for every comment there in
-    the state asked; None when `value` names none of them."""
+    """resolve_comment on the cards' comments: a comment's id, or a card's ref for every comment there in the state
+    asked; None when `value` names none of them."""
     from . import canvas_comments  # noqa: PLC0415
 
-    hit = canvas_comments.parse_ref(value)
+    card = canvas_comments.parse_ref(value)
     pool = [cm for cm in canvas_comments.all_comments(ctx.c) if ((cm.get("status") or "open") == "open") != reopen]
-    if hit is not None:
-        found = [cm for cm in pool if cm["card"] == hit[0] and (hit[1] is None or cm.get("n") == hit[1])]
+    if card is not None:
+        found = [cm for cm in pool if cm["card"] == card]
     else:
         found = [cm for cm in pool if str(cm["id"]) == value]
     if not found:

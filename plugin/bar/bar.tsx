@@ -76,6 +76,13 @@ const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: 
 function keyLook(x: Item) {
   return { color: x.color ?? accent(), bold: true }
 }
+
+/** How the bar draws each key, by its letter, as its preview would with every feature on (`e` in the explainers'
+ *  teal, a key with no color of its own in thimble's): the settings pane draws each feature's key after its name so. */
+export async function keyLooks($: Engine): Promise<(key: string) => { color: string; bold: boolean }> {
+  const items = await barLeft($, () => true, true).catch(() => [] as Item[])
+  return key => keyLook(items.find(x => x.key === key) ?? { id: key, words: '' })
+}
 const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + (x.words ? 1 : 0) : 0) + len(x.words)
 /** The item in its shortest words. */
 const shortest = (x: Item): Item => (x.shorter?.length ? { ...x, words: x.shorter[x.shorter.length - 1]! } : x)

@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 // The chat as the analyst uses it (src/chat/ChatPanel.tsx, useChat.ts, Rows.tsx), over a stand-in server that answers
 // the routes the panel calls as the server does: a question goes to main, and the answer shows with the card it made
-// and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a rewind
-// takes a message back; a side thread says it is starting, then that it works, and ends on its answer.
+// and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a model
+// picked under the composer shows there at once; a rewind takes a message back; a side thread says it is starting, then
+// that it works, and ends on its answer; a fix shows in main as a side thread does.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
 import { bus } from '../../src/lib/bus.ts'
+import type { FixRow } from '../../src/chat/fix.ts'
 import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -19,6 +21,8 @@ const REWOUND = 'Rewound to before your message. Claude no longer sees it or any
 let chats: Record<string, { meta: ChatMeta; events: ChatRecord[] }>
 /** What the page sent the server, each request that changes state. */
 let posted: { url: string; body: unknown }[]
+/** The fixes GET /fixes lists (backend fixes.status). */
+let fixes: FixRow[]
 
 const main = (extra: Record<string, unknown> = {}) =>
   ({ id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: false, attached: ATTACHED, unread: [], ...extra }) as unknown as ChatMeta
@@ -33,6 +37,14 @@ function answer(u: string, init?: RequestInit): unknown {
     if (!chats.main.meta.running) chats.main.events.push({ type: 'user', ts: T, text: body.payload.text, by: 'browser' })
     return { id: 'e2', kind: 'main', delivered: 1 }
   }
+  if (u.endsWith('/session/model')) {
+    // main's meta holds the pick at once (events._choose), with the effort main runs at on it by Claude Code's
+    // defaults (high on Opus 4.8, medium on Opus 5.5 and Sonnet 5.5); a model without fast mode turns fast mode off
+    const held = chats.main.meta.attached!
+    const fast = body.model.includes('opus') ? {} : { fast_choice: false }
+    chats.main.meta = { ...chats.main.meta, attached: { ...held, model_choice: body.model, settings_effort: body.model.endsWith('4-8') ? 'high' : 'medium', ...fast } }
+    return { model: body.model }
+  }
   if (u.endsWith('/interrupt')) return { stopped: true }
   if (u.endsWith('/chats/main/rewind')) {
     // the rewind's line in main's log, and the words it gives back
@@ -41,6 +53,7 @@ function answer(u: string, init?: RequestInit): unknown {
     return { text: words, event: body.event }
   }
   if (/\/chats(\?|$)/.test(u)) return Object.values(chats).map((c) => c.meta)
+  if (/\/fixes(\?|$)/.test(u)) return { problem: '', fixes }
   if (/\/(proposals|notices|views)(\?|$)/.test(u)) return []
   return {}
 }
@@ -48,6 +61,7 @@ function answer(u: string, init?: RequestInit): unknown {
 beforeEach(() => {
   chats = { main: { meta: main(), events: [] } }
   posted = []
+  fixes = []
   localStorage.clear()
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   Element.prototype.scrollIntoView = () => undefined // jsdom lays nothing out
@@ -140,6 +154,37 @@ test('while main works, a message sent waits until main reads it, and Stop main 
   expect(squares(el).map((b) => b.getAttribute('aria-label'))).toEqual(['Send'])
 })
 
+test('a model picked in the line under the composer shows there at once, with the effort and fast mode main runs it at', async () => {
+  // main's replies came from Opus 5.5 at medium, with fast mode on
+  chats.main.meta = main({ attached: { ...ATTACHED, effort: 'medium', settings_effort: 'medium', fast_choice: true } })
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  const line = () => el.querySelector<HTMLElement>('.chat-composer .model-line')!
+  const bolt = () => line().querySelector<HTMLElement>('.fast-bolt')!
+  /** The line's model and effort, its menu's checked model, and its bolt: pressed, locked. */
+  const shown = async () => {
+    await click(line().querySelector<HTMLElement>('[aria-label="Model for main and its threads"]')!)
+    const checked = document.querySelector('.menu-item.checked')?.getAttribute('data-item')
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    return [line().querySelector('.model-line-part')?.textContent, line().querySelector('.model-line-effort')?.textContent, checked, bolt().getAttribute('aria-pressed'), bolt().getAttribute('aria-disabled')]
+  }
+  const pick = async (model: string) => {
+    await click(line().querySelector<HTMLElement>('[aria-label="Model for main and its threads"]')!)
+    await click(document.querySelector<HTMLElement>(`.menu-item[data-item="model:${model}"]`)!)
+    await settle()
+    await settle()
+  }
+  expect(await shown()).toEqual(['Opus 5.5', 'medium', 'model:claude-opus-5-5', 'true', null])
+  await pick('claude-sonnet-5-5')
+  expect(posted).toEqual([{ url: '/api/ws/mini/session/model', body: { model: 'claude-sonnet-5-5' } }])
+  // before main replies on it: the line and its menu name Sonnet 5.5, whose bolt is off and locked, since it has no
+  // fast mode
+  expect(await shown()).toEqual(['Sonnet 5.5', 'medium', 'model:claude-sonnet-5-5', 'false', 'true'])
+  await pick('claude-opus-4-8')
+  // Opus 4.8 at the effort main runs it at, with fast mode off until the bolt turns it on
+  expect(await shown()).toEqual(['Opus 4.8', 'high', 'model:claude-opus-4-8', 'false', null])
+})
+
 test('Rewind asks under the message first, then takes it and what came after back, its words in the box again', async () => {
   chats.main.events = [
     { type: 'user', ts: T, text: 'How many runs failed?', by: 'browser', event: 'e1' },
@@ -192,4 +237,62 @@ test('a side thread says it is starting while its question waits for its fork, t
   // nothing under the answer sends it to main
   expect(el.querySelector('.chat-hand-back')).toBeNull()
   expect(posted).toEqual([])
+})
+
+test('a fix shows in main as a side thread does: one line per fixer with its thread, which spins until the fix ends', async () => {
+  const name = "fixing make the composer's placeholder say Ask…"
+  const fixer = (extra: Record<string, unknown>) =>
+    ({ id: 'f1', kind: 'agent', role: 'fixer', title: name, created_at: T, parent: 'main', status: 'running', running: false, fix: 1, ...extra }) as unknown as ChatMeta
+  const started = (title: string) => ({ type: 'agent', ts: T, chat: 'f1', role: 'fixer', title }) as ChatRecord
+  chats.main.events = [
+    { type: 'user', ts: T, text: "/thimble-fix make the composer's placeholder say Ask thimble…", by: 'browser' },
+    started(name),
+    { type: 'text', delta: 'I started a fix that changes the placeholder.' },
+    { type: 'done' },
+  ] as ChatRecord[]
+  chats.f1 = { meta: fixer({}), events: [] }
+  const working: FixRow = { id: 1, title: '', state: 'working', phase: 'fixing', kind: null, said: null, words: "make the composer's placeholder say Ask thimble…", tests: null, error: null, at: 1 }
+  fixes = [working]
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  await settle()
+  /** The fixer's lines in main: the words, the thread chip's name, and whether the line spins. */
+  const lines = () => [...el.querySelectorAll('.chat-agent-note[data-chat="f1"]')].map((l) => [l.querySelector('.chat-note-text')?.textContent, l.querySelector('.chat-thread-chip')?.textContent, !!l.querySelector('.spinner')])
+  /** The chats the folded thread tree counts as running. */
+  const running = () => el.querySelector('.tt-active')?.getAttribute('data-active') ?? null
+  /** The page read again on the stream's `chat` record: the chat's log, and the list of chats. */
+  const reread = async (chat: string) => {
+    await act(async () => bus.emit('chat', { chat }))
+    await act(async () => new Promise((r) => setTimeout(r, 400)))
+  }
+  expect(lines()).toEqual([['Fix started in', `main/${name}`, true]])
+  expect(running()).toBe('1')
+  // nothing else stands for it: no subagent's card, and no row above the composer
+  expect(el.querySelector('.chat-agent')).toBeNull()
+  expect(el.querySelector('.chat-foot .chat-fix')).toBeNull()
+
+  // the fixer ended and the kernel checks its change: its chat still runs
+  chats.f1.meta = fixer({ status: 'done', running: true })
+  fixes = [{ ...working, phase: 'testing' }]
+  await reread('f1')
+  expect(lines()).toEqual([['Fix started in', `main/${name}`, true]])
+  expect(running()).toBe('1')
+  expect(el.querySelector('.chat-foot .chat-fix')).toBeNull()
+
+  // a round of the fix, by a new fixer in the same thread: its own line spins, and the first one stops
+  const round = 'changing Main chat box now says "Ask thimble…"'
+  chats.f1.meta = fixer({ title: round })
+  chats.main.events.push({ type: 'user', ts: T, text: '/thimble-fix the box still says Reply in main', by: 'browser' } as ChatRecord, started(round))
+  await reread('main')
+  expect(lines()).toEqual([
+    ['Fix started in', `main/${round}`, false],
+    ['Fix started in', `main/${round}`, true],
+  ])
+
+  // the fix ended: no line spins, and the tree counts nothing running
+  chats.f1.meta = fixer({ title: round, status: 'done' })
+  fixes = []
+  await reread('f1')
+  expect(lines().map((l) => l[2])).toEqual([false, false])
+  expect(running()).toBeNull()
 })

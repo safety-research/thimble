@@ -28,7 +28,7 @@ export interface CommentItem {
   details: string
   /** the card's or the passage's ref, which Go to it opens */
   ref: string
-  /** where it stands, in words: "card abc · step 2", "the report", a document's name */
+  /** where it stands, in words: "card abc", "the report", a document's name */
   where: string
   /** the passage's words, for a comment in a document or on an answer */
   quote?: string | null
@@ -38,12 +38,12 @@ export interface CommentItem {
 
 /** The message Apply sends to main: which comment, where, and what it says. Pure. */
 export function applyText(c: CommentItem, name: string): string {
-  const who = c.check != null ? `the check “${name}”` : c.author === 'claude' ? 'your own note' : 'my note'
+  const who = c.check != null ? `from “${name}”` : c.author === 'claude' ? 'of your own note' : 'of my note'
   const doc = c.doc && c.doc.slug !== SLUG ? `the ${c.doc.name}` : 'the report'
   const at =
     c.surface === 'report' ? `in ${doc}${c.quote ? ` at “${c.quote}”` : ''} (${c.ref})` : c.surface === 'chat' ? `on your answer${c.quote ? ` at “${c.quote}”` : ''}` : `on ${c.ref}`
   const said = [c.text.trim(), c.details.trim()].filter(Boolean).join('\n\n')
-  return `Apply this comment of ${who} ${at}: ${said}`
+  return `Apply this comment ${who} ${at}: ${said}`
 }
 
 /** The open comments of the written documents, in the type bar's order, the report's from the first render, as before
@@ -75,7 +75,7 @@ export function useCommentItems(ws: string) {
         text: c.text,
         details: c.details,
         ref: `card:${c.card}`,
-        where: `card ${c.card}${c.n != null ? ` · step ${c.n}` : ''}`,
+        where: `card ${c.card}`,
       })),
       ...docs.flatMap(({ slug, name, comments }) =>
         comments.map((c) => ({

@@ -22,8 +22,8 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, ChatRecord } from '../lib/types'
 import { waitingAt } from './waiting'
-import { agentChipName, agentFiles, messageRuns, durationText, foldRecords, lastRowTs, madeBy, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type Row } from './model'
-import { openThread, ThreadChip, ThreadsContext } from './Notes'
+import { agentChipName, agentFiles, durationText, foldRecords, madeBy, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type Row } from './model'
+import { openThread, ThreadsContext } from './Notes'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
@@ -196,11 +196,6 @@ export interface AgentCardProps {
   log?: { meta: ChatMeta | null; records: readonly ChatRecord[]; error: string | null }
   /** open on its steps while it runs (a session in its own thread) */
   openWhileRunning?: boolean
-  /** the run the card stands for: 0 its first, then each of a subagent's next messages, such as a round of a fix;
-   * unset, its whole session */
-  run?: number
-  /** a subagent with a thread of its own: the card links to it */
-  thread?: boolean
   /** a running session's Stop shows on the card; its own thread has it on the composer instead */
   stopHere?: boolean
 }
@@ -295,14 +290,10 @@ function AgentChipLive(props: AgentCardProps) {
  * A subagent or workflow agent as a chip: its name (model.agentChipName), its steps and duration, its state and the
  * chips of what it made. Open: the files its calls read (model.agentFiles), then its calls as plain-word steps.
  */
-function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentChip({ ws, chat, role, title, ts, log }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
-  const all = useMemo(() => foldRecords(records), [records])
-  const runs = useMemo(() => (run == null ? null : messageRuns(all)), [all, run])
-  const rows = runs ? runs[run!] ?? [] : all
-  // a run that a later one followed has ended, whatever the chat's status says of the run going on now
-  const later = !!runs && runs.length > run! + 1
-  const status: ToolState = later ? 'done' : meta?.status ?? (error ? 'failed' : 'running')
+  const rows = useMemo(() => foldRecords(records), [records])
+  const status: ToolState = meta?.status ?? (error ? 'failed' : 'running')
   const running = status === 'running'
   const tools = useMemo(() => rows.filter((r) => r.kind === 'tool'), [rows])
   const steps = useMemo(() => toolSteps(tools, running, { plain: true }), [tools, running])
@@ -310,10 +301,8 @@ function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardPro
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(madeBy(rows), proposals), [rows, proposals])
   const [open, setOpen] = useState(false)
-  // a run's card keeps the name it started with; the chat's title is its latest run's
-  const { name, target } = agentChipName((runs ? title : meta?.title) || title)
-  const first = runs ? rows.find((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user')?.ts : undefined
-  const took = running ? '' : durationText(first ?? meta?.created_at, later ? lastRowTs(rows) : meta?.ts_end)
+  const { name, target } = agentChipName(meta?.title || title)
+  const took = running ? '' : durationText(meta?.created_at, meta?.ts_end)
   const metaText = [steps.length > 0 ? `${steps.length} ${steps.length === 1 ? 'step' : 'steps'}` : '', took].filter(Boolean).join(' · ')
   const toggle = () => {
     if (!open) track('agent-row-expand', { target: `chat:${chat}`, detail: { role } })
@@ -321,7 +310,7 @@ function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardPro
   }
   return (
     <div className={`chat-msg chat-task chat-agent${open ? ' open' : ''}`} data-chat={chat} data-role={role} data-status={status} data-ts={ts}>
-      <span className={`chat-agent-head${thread ? ' chat-agent-threaded' : ''}`}>
+      <span className="chat-agent-head">
         <button type="button" className="chat-callchip chat-agent-chip" aria-expanded={open} onClick={toggle}>
           <span className="chat-agent-name">{name}</span>
           {target && <span className="chat-agent-target">{target}</span>}
@@ -329,7 +318,6 @@ function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardPro
           <Icon name="chevron-right" size={10} className="chat-callchip-caret" />
         </button>
         {running ? <Spinner size={10} label="running" /> : status === 'done' ? <Mark kind="verified" label="done" className="chat-agent-mark" /> : <Mark kind="failed" label={status} className="chat-agent-mark" />}
-        {thread && <ThreadChip id={chat} label="thread" />}
         {madeSections(ws, made).map((sec) => (
           <span key={sec.key} className="chat-agent-made">
             {sec.chips}
@@ -373,7 +361,7 @@ function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardPro
   )
 }
 
-function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, run, stopHere = true }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, stopHere = true }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
   const rows = useMemo(() => foldRecords(records), [records])
   const status: ToolState = meta?.status ?? (error ? 'failed' : 'running')
@@ -408,7 +396,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const shownOpen = open ?? (openWhileRunning && running)
   const took = running ? '' : durationText(meta?.created_at, meta?.ts_end)
   const count = steps.length
-  const values = valuesText(runValues(meta, run))
+  const values = valuesText(runValues(meta))
   const metaText = [values, count > 0 ? `${count} ${count === 1 ? 'step' : 'steps'}` : '', took].filter(Boolean).join(' · ')
   return (
     <ToolCard

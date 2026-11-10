@@ -239,7 +239,7 @@ export function runLine(run: Pick<CheckRun, 'status' | 'chat' | 'started' | 'end
   const at = hhmm(run.ended || run.started)
   if (run.status === 'running') {
     if (run.waiting === 'writer') return 'Runs once the writer has finished'
-    if (run.waiting === 'queued' || !run.chat) return 'Queued: at most 3 checks run at once'
+    if (run.waiting === 'queued' || !run.chat) return 'Queued: at most 3 runs at once'
     return hhmm(run.started) ? `Running since ${hhmm(run.started)}` : 'Running'
   }
   if (run.status === 'failed') return `Failed${at ? ` at ${at}` : ''}${run.summary ? `: ${run.summary}` : ''}`

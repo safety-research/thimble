@@ -23,7 +23,8 @@
 # in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed) and for a hooks test that loads the
 # plugin (plugin/tests/kit.ts; the kit's 5 s for one that does not), and vitest's testTimeout (10 s) for the page.
 #
-# The plugin's steps need claude (Claude Code 2.1.314 or later), node 22.18 or later, and Python 3.10 or later with pytest:
+# The plugin's steps need claude (Claude Code 2.1.307 or later; before 2.1.314, the hooks tests that answer the tour's
+# rows check nothing and say so: plugin/tests/kit.ts), node 22.18 or later, and Python 3.10 or later with pytest:
 # THIMBLE_PYTHON, else python3. The browser's steps need uv and node 22.12 or later. Each step runs with a Claude Code
 # config folder and a THIMBLE_HOME of its own, made fresh and deleted after, so it never reads or writes your own; the
 # server's tests give each test a thimble browser home of its own.

@@ -21,8 +21,9 @@ new change to the card cancels a running check and starts the next. At most READ
    replacement is told to the card's author (card_size.tell_replaced).
 A card that does not fit on the analyst's screen is held until its check ends (card_fit): the reading assesses it
 against one more criterion, with the card guidance and the toolkit its author works from (prompts/card-check.md
-`## too-large`), its size is not told to its author, and the card shows when the check ends (card_fit.checked), as the
-check left it, whatever its size.
+`## too-large`, whose criterion is the text the terminal's card check reads too, plugin/prompts/card-criteria.md), its
+size is not told to its author, and the card shows when the check ends (card_fit.checked), as the check left it,
+whatever its size.
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -1021,11 +1022,11 @@ def _tool(secs: dict[str, str], name: str, criteria: int = CRITERIA) -> Any:
 
 def _guide() -> dict[str, str]:
     """What the reading of a card that does not fit reads besides, since its replacement is often a new graphic: the card
-    guidance its author works from (prompts/shared.md `## Cards`, without its part on a group of cards) and the toolkit
+    guidance its author works from (main's text, plugin:main `## Cards`, without its part on several cards) and the toolkit
     its author writes a card's code with (the `code` field of prompts/tools.md `## add_card`)."""
     from . import prompts, tools  # noqa: PLC0415
 
-    guidance = prompts.without(prompts.section("shared", "Cards"), ["Several cards"], strict=False).strip()
+    guidance = prompts.without(prompts.section("plugin:main", "Cards"), ["Several cards"], strict=False).strip()
     schema = tools.tool_sections(["add_card"])["add_card"][1] or {}
     return {"guidance": guidance, "toolkit": str(((schema.get("properties") or {}).get("code") or {}).get("description") or "")}
 

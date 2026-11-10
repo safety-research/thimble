@@ -8,35 +8,54 @@
 //                                                                                   why, because}
 //                                                                                   | {error}
 //   requestFor(template, label, units, settings) -> a $.model.complete request for one batch (units: [{ref, text}])
+//   partsOf(template)                            -> {head, parts: {NAME: words}}: the classifier's text in its parts
 //   answersOf(reply, units, values)              -> {values: {ref: {value, confidence, reason}}, failed: {ref: why},
 //                                                    unread: why the reply could not be read | null, leftOut: n,
 //                                                    offList: n, offWhy}
 //   because(tally)                               -> why records of a read got no value, in one phrase for the person
 //   failedCall(reply, units)                     -> {failed: {ref: why}} for a call that brought no text
 //
-// The records go in batches of up to 50 (the kernel's `batches`), one call each, with the registry's `labels` prompt,
-// a wave of calls at a time (settings.wave), made side by side by the plugin. After each wave the answers go back to
-// the label (`thimble label NAME --answers -`), so reads that stop halfway keep what they got. A call that fails, a
-// reply that is not JSON, or a value off the label's list leaves those records with no value and says why; they never
-// wait again by themselves (`--again` asks once more).
+// The records go in batches of up to 50 (the kernel's `batches`), one call each, with the registry's `labels` text (the
+// workbench's label classifier reads it too), a wave of calls at a time (settings.wave), made side by side by the
+// plugin. After each wave the answers go back to the label (`thimble label NAME --answers -`), so reads that stop
+// halfway keep what they got. A call that fails, a reply that is not JSON, or a value off the label's list leaves those
+// records with no value and says why; they never wait again by themselves (`--again` asks once more).
 import { fill } from '../prompts/registry.mjs'
 import { modelWhy } from '../core/why.js'
 
 const NO_ARRAY = 'held no JSON array of values'
 const LEFT_OUT = 'the reply gave this record no value'
 
-const REASON = ', "reason": one short sentence naming the words in the record that decided the value'
+/** The classifier's text in its parts: `head`, what every call reads, above its first `## ` heading, and `parts`, the
+ *  words of each `## NAME` part by NAME, which fill a slot of the head when a call needs them (a reason asked for, a
+ *  label with no definition). */
+export function partsOf(template) {
+  const [head, ...rest] = String(template).split(/^## /m)
+  const parts = {}
+  for (const part of rest) {
+    const nl = part.indexOf('\n')
+    parts[(nl < 0 ? part : part.slice(0, nl)).trim()] = nl < 0 ? '' : part.slice(nl + 1).trim()
+  }
+  return { head: head.trim(), parts }
+}
 
-/** The request for one batch: the label's definition, its values and the records, each under its number. */
+/** The request for one batch: the classifier's text with the label's definition and values, and with the reason's
+ *  words when the label asks for a reason, then the records, each under its number. The terminal gives the model no
+ *  examples (the workbench's checked records). */
 export function requestFor(template, label, units, cfg = {}) {
+  const { head, parts } = partsOf(template)
+  const part = name => {
+    if (typeof parts[name] !== 'string') throw new Error(`the classifier's text (prompts/labels.md) has no ## ${name} part`)
+    return parts[name]
+  }
   const records = units.map((u, i) => `### record ${i + 1}\n${String(u.text || '').trim()}`).join('\n\n')
-  const prompt = fill(template, {
+  const prompt = `${fill(head, {
     NAME: label.name,
-    DEFINITION: String(label.definition || '').trim() || '(no definition was given)',
+    DEFINITION: String(label.definition || '').trim() || part('no-definition'),
     VALUES: label.values.join(', '),
-    REASON_FIELD: label.reason ? REASON : '',
-    RECORDS: records,
-  })
+    EXAMPLES: '',
+    REASON_FIELD: label.reason ? `, ${part('reason')}` : '',
+  })}\n\n${records}\n`
   return {
     // the label's own model when it names one (the labels pane's edit), else the reads' setting
     model: String(label.model || cfg.model || 'sonnet'),

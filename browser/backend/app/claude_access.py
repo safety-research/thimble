@@ -241,6 +241,17 @@ def problem_line() -> str:
     return f"{p['what']} {p['fix']}" if p else ""
 
 
+def start_line() -> str:
+    """thimble-browser's start line: the way it is authenticated in a few words, with the host its calls go to when it
+    is not API_HOST (_sent_to), or what keeps Claude from being reached (problem_line)."""
+    p = problem_line()
+    if p:
+        return p
+    h = how()
+    way = {CLAUDE_CODE: "Claude Code sign-in", API_KEY: "API key", WIF: "WIF"}.get(h, h)
+    return f"authenticated via {way}" + ("" if h == CLAUDE_CODE else _sent_to())
+
+
 # Claude Code's words for its login (`claude auth status --json`: authMethod, apiProvider, apiKeySource), as the
 # person reads them
 LOGINS = {"claude.ai": "a Claude account", "api_key": "an API key",

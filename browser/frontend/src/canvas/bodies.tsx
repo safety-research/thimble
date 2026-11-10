@@ -1,6 +1,6 @@
 // What a card shows between its question and its takeaway, by kind: a plot or table (components/Outputs), shell output,
 // a note's text, an example's quoted records, a label's values, a timeline or diagram (DataViz), a custom
-// card's frame, a plan's steps (PlanBody). `width` is the room the body has.
+// card's frame. `width` is the room the body has.
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
@@ -25,14 +25,12 @@ import type { Cell, Concept, ConceptDetail, ResolvedRef } from '../lib/types'
 import { CanvasContext } from './context'
 import { CustomFrame, DatasetView } from './DataViz'
 import { conceptName, type ConceptDetailState } from './concepts'
-import { PlanBody } from './PlanBody'
 import { labeledTotal, labelIdentity, labelShares, labelValues, shownValues, unitWord } from './details'
 import { resolvedOf } from './excerpts'
 import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
-import { ThimbleTag } from '../files/LabelsHelp'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -71,8 +69,6 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
       const libs = Array.isArray(payload.libs) ? (payload.libs as unknown[]).filter((x): x is string => typeof x === 'string') : undefined
       return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} ws={ws} libs={libs} onTall={drawn ? (h) => drawn(cell.id, { height: h }) : undefined} onWide={drawn ? (w, f) => drawn(cell.id, { width: w, frame: f }) : undefined} /> : null
     }
-    case 'plan':
-      return <PlanBody cell={cell} />
     default: {
       if ((kind === 'timeline' || kind === 'diagram') && !cell.code && payload.dataset != null) return <DatasetView kind={kind} dataset={payload.dataset} fitWidth={width} />
       const art = primaryArtifact(cell.outputs)
@@ -297,12 +293,6 @@ export const asksQuestion = (title: string | undefined, name: string): boolean =
   return !!t && t !== name.trim().toLowerCase()
 }
 
-/** The small tag that says a card is a label's card, first on its label row (LabelHead, CardFace CardLabels): thimble's
- * logo in grey, then Label, and on hover what a label is (files/LabelsHelp ThimbleTag). */
-export function LabelKindTag() {
-  return <ThimbleTag>Label</ThimbleTag>
-}
-
 /** What a label card's label row says after the label's name (details labelIdentity): what kind of classifier gave its
  * values, in plain words (a code or regex rule over the data, or a model's prompt), how many units it ran over, the
  * label it ran within and where, in one quiet line; the hover gives the whole line, every file pattern whole. */
@@ -441,9 +431,9 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
   )
 }
 
-/** A label card's head when the card has no question of its own: the Label tag, the square (the label's colour for a
- * label over files, else ink) and the label's name in mono, then what the label row says of it (LabelMeta). `detail`
- * is the card's own copy of the label, else the board's list's. */
+/** A label card's head when the card has no question of its own: the square (the label's color for a label over
+ * files, else ink) and the label's name in mono, then what the label row says of it (LabelMeta). `detail` is the
+ * card's own copy of the label, else the board's list's. */
 export function LabelHead({ conceptId, detail }: { conceptId: string; detail?: Concept | null }) {
   const ctx = useContext(CanvasContext)
   const k = detail ?? ctx.concepts.get(conceptId)
@@ -451,7 +441,6 @@ export function LabelHead({ conceptId, detail }: { conceptId: string; detail?: C
   return (
     <span className="bcell-label-head">
       <span className="bcell-label-name">
-        <LabelKindTag />
         {files && isMultiClass(classesOf(k)) ? (
           <Icon name="label" size={11} className="bcell-label-tag" style={{ color: mainColour(k) }} />
         ) : (

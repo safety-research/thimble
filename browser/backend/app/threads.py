@@ -9,7 +9,8 @@ question as a slug, which Claude Code's agent tray shows; the event's line in ma
 first question, line_name);
 the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
 the messages the analyst typed to it in Claude Code's agent view, and calls fork_finished when it stops. The fork
-replies with `reply_in_thread` or its text.
+replies with `reply_in_thread` or its text. In browser mode a new fork reads the thread's instructions before its
+first event (fork_text, runtime._thread), as the plugin's fork reads them before its question.
 
 A fork lives only as long as its session: after that, the next event forks anew and carries the earlier turns. A
 message typed while the first event waits for its fork is queued (`queued`) and sent once the fork is known (flush)."""
@@ -55,6 +56,9 @@ STOP_TEXT = {
     FORK_LOST: "The thread's fork could not be reached",
 }
 STOP_KINDS = (SESSION_ENDED, UNANSWERED, FORK_LOST, "failed", "stopped")
+# the thread's instructions (fork_text): the text both modes give a side thread's fork (plugin/prompts/thread.md), then
+# the workbench's own words on its threads (prompts/thread.md)
+GUIDE, OWN = "plugin:thread", "thread"
 _DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.S)
 _CHAT_REF_RE = re.compile(r"^chat:([A-Za-z0-9_-]{1,64})#(\d+)$")
 # (workspace, thread) -> the session a forkless event of the thread went to, until its fork is known (module note)
@@ -64,6 +68,15 @@ _moved: dict[tuple[str, str], str] = {}  # (workspace, thread) -> the session it
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def fork_text() -> str:
+    """What a new fork of a thread reads before the thread's event (runtime._thread), as the plugin's fork reads its
+    directive before its question (plugin/threads/threads.mjs forkDirective): the side thread's instructions as the
+    workbench reads them (prompts.py, `plugin:thread`), then the workbench's own words on its threads."""
+    from . import prompts  # noqa: PLC0415
+
+    return f"{prompts.load(GUIDE).strip()}\n\n{prompts.load(OWN).strip()}"
 
 
 def thread_of(description: Any) -> str | None:
@@ -665,9 +678,9 @@ def session_ended(c: str, sid: str) -> None:
 def reply(c: str, thread_id: str, text: str, *, by: str) -> None:
     """The thread's visible reply: a `text` record marked `reply`, so the fold shows it as the model's message and
     fork_finished knows the run answered. Every reply is this one record, its citations in their chat form
-    (cite.from_links), so the browser and the terminal check them as they check any answer's."""
+    (cite.chat_form), so the browser and the terminal check them as they check any answer's."""
     _, log_path = agents.paths(c, thread_id)
-    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by})
+    agents.append(log_path, {"type": "text", "delta": cite.chat_form(text), "reply": True, "by": by})
     agents.notify(c, thread_id)
 
 

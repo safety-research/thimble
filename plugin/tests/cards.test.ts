@@ -2,9 +2,10 @@
 // the one Client with the runner's tree; a new version draws in the card's place, and a view that does not parse is
 // fixed with edits; a card's link alone on a line of a reply draws the card there; a key at an empty prompt reaches the
 // card on screen that takes it; a card taller than its frame waits for the card check. The person's permission rules, a
-// data file whose real path leaves the folder, and a sandbox that cannot start each keep the card from running. A card
-// as large as the runner lets through draws, and one Claude Code cannot draw sends Claude why. The runner is answered
-// here, at http.fetch (cards/test/runner.test.mjs tests the real one). All data is made up. `claude plugin test plugin`.
+// data file whose real path leaves the folder, and a sandbox that cannot start each keep the card from running. With
+// thimble's home behind a link, the runner gets every path by its real path. A card as large as the runner lets
+// through draws, and one Claude Code cannot draw sends Claude why. The runner is answered here, at http.fetch
+// (cards/test/runner.test.mjs tests the real one). All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
@@ -51,12 +52,20 @@ function textOf(n: Any): string {
 }
 
 /** A session over DATA whose card runner the test answers at http.fetch; `sandbox`: what setup.mjs says of the sandbox
- *  (one that works unless given). */
-function world(on: Any, o: { sandbox?: Record<string, unknown> } = {}) {
+ *  (one that works unless given); `links`: folders that are links, each to the folder it leads to; `fresh`: no runner
+ *  listens until the hooks start one (its first ping fails). */
+function world(on: Any, o: { sandbox?: Record<string, unknown>; links?: Record<string, string>; fresh?: boolean } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: string[] = []
+  // the requests that loaded a card into the runner
+  const loads: Any[] = []
+  // a path that goes through one of the links, by its real path; '' for any other path
+  const viaLink = (p: string) => {
+    for (const [link, to] of Object.entries(o.links ?? {})) if (p === link || p.startsWith(`${link}/`)) return `${to}${p.slice(link.length)}`
+    return ''
+  }
   // the width the runner holds the card at, which each of its answers says, as the runner does
   let runnerWidth = 0
   on('config.list', () => ({ value: [{ key: 'theme', value: 'dark', isLocked: false }] }) as never)
@@ -80,7 +89,8 @@ function world(on: Any, o: { sandbox?: Record<string, unknown> } = {}) {
       : e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
         : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
-            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
+            : viaLink(e.path) ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: viaLink(e.path) }
+              : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
   }))
   const spawned: string[][] = []
   const runs: string[][] = []
@@ -89,7 +99,11 @@ function world(on: Any, o: { sandbox?: Record<string, unknown> } = {}) {
     runs.push(e.argv)
     // a copy of a made-up file (a card's rows into its version's folder) holds what the file holds
     if (e.argv[0] === 'cp' && e.argv[2]! in files) files[e.argv[3]!] = files[e.argv[2]!]!
-    return { value: { ...(tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }
+    const out = tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }
+    // a shell that prints the real path of the folder it made (pwd -P) prints it past the links
+    const printed = out.stdout.trim()
+    if (e.argv[0] === 'sh' && String(e.argv[2]).includes('pwd -P') && viaLink(printed)) out.stdout = `${viaLink(printed)}\n`
+    return { value: { ...out, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('process.spawn', async function* (_$: unknown, e: { argv: string[] }) {
     spawned.push(e.argv)
@@ -100,9 +114,10 @@ function world(on: Any, o: { sandbox?: Record<string, unknown> } = {}) {
   on('http.fetch', (_$: unknown, e: { url: string; init?: { body?: string } }) => {
     const op = e.url.replace('http://runner/', '')
     asked.push(op)
-    // no runner listens when the sandbox cannot start
-    if (o.sandbox?.ok === false) throw new Error('made-up: no such socket')
+    // no runner listens when the sandbox cannot start, nor at first in a fresh world
+    if (o.sandbox?.ok === false || (o.fresh && asked.length === 1)) throw new Error('made-up: no such socket')
     const body = JSON.parse(e.init?.body || '{}')
+    if (op === 'load') loads.push(body)
     const reply = (answer: object) => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answer) } })
     // a view that does not parse
     if (op === 'load' && String(body.view).includes('BROKEN')) return reply({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' })
@@ -127,7 +142,7 @@ function world(on: Any, o: { sandbox?: Record<string, unknown> } = {}) {
   on('tool.check', (_$: unknown, e: Any) => (e.tool === 'Read' && String(e.input?.file_path).endsWith('secret.json') ? { decision: 'deny', reason: 'a made-up deny rule', rule: 'Read(./secret.json)' } : { decision: 'allow' }) as never)
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, clock, spawned, runs }
+  return { files, asked, clock, spawned, runs, loads }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -360,6 +375,39 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   // the call's row says the whole reason and the fix
   const result = textOf(await $.ui.render(callRow('toolu_made_up_8', { title: 'Scores' })))
   expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
+})
+
+test("with thimble's home behind a link, the runner gets every path by its real path: its code from the folder setup.mjs names, the card copies, its own folder and a card's rows", async ($, on) => {
+  // thimble's home is a link to a folder on a disk whose path is too long for a socket in it, and the plugin is in it
+  const disk = `/made-up/mnt/shared-data/${'deep/'.repeat(10)}.thimble`
+  const plugin = `${disk}/fixes/live/plugin`
+  const w = world(on, { links: { '/made-up/.thimble': disk }, sandbox: { plugin }, fresh: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_L1', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(String(r.result)).toContain('“Scores” is drawn where this call stands')
+  await w.clock.advance(10)
+  expect(w.spawned).toHaveLength(1)
+  const argv = w.spawned[0]!
+  const at = argv.indexOf('--')
+  const sock = argv[argv.length - 1]!
+  const run = sock.slice(0, sock.lastIndexOf('/'))
+  // the card copies' folder by its real path: the hooks write the copies (meta.json) under thimble's home as it is named
+  const meta = Object.keys(w.files).find(p => p.endsWith('/meta.json'))!
+  const cards = `${disk}${meta.slice('/made-up/.thimble'.length).replace(/\/c[0-9a-f]+\/meta\.json$/, '')}`
+  // its socket: the real path of its folder in thimble's home is too long for a socket, so the temp folder holds it, and
+  // the folder made in thimble's home is gone
+  expect(sock).toMatch(/^\/made-up\/tmp\/thimble\/thimble-user\/cards-[0-9a-f]+\/cards\.sock$/)
+  expect(w.runs.some(a => a[0] === 'rm' && a[a.length - 1]!.startsWith(`${disk}/run/cards-`))).toBe(true)
+  expect(argv[at - 4]).toBe(`${plugin}/sandbox/run.mjs`)
+  expect(argv.slice(at + 1)).toEqual(['/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', '/made-up/bin/node', '--permission', `--allow-fs-read=${plugin}/cards`,
+    `--allow-fs-read=${plugin}/core/text.js`, `--allow-fs-read=${cards}`, `--allow-fs-write=${run}`, '--disallow-code-generation-from-strings',
+    '--max-old-space-size=1024', `${plugin}/cards/runner.mjs`, sock])
+  const rules = JSON.parse(argv[at - 1]!)
+  expect(rules.filesystem.allowRead.map((e: Any) => e.path)).toEqual(expect.arrayContaining([`${plugin}/cards`, cards, run]))
+  expect(rules.filesystem.allowWrite).toEqual([{ path: run, literal: true }])
+  expect(rules.bwrapPath).toBe(`${plugin}/sandbox/bwrap.sh`)
+  // the card's rows, in its copy, by their real path
+  expect(w.loads.map(b => b.rows)).toEqual([expect.stringMatching(new RegExp(`^${cards.replace(/\./g, '\\.')}/c[0-9a-f]+/v1/rows\\.json$`))])
 })
 
 // the card check of a card that does not fit (cards/fit.ts): one model call, answered here with `views`, in order, each

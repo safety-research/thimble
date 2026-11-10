@@ -20,8 +20,8 @@
 //   e         the explainer of the selected words shows in the tray (explain/seam.ts). The step names the words in
 //             bold, and while it waits they shimmer in the sample answer (tourSpans): a brighter band in thimble's
 //             color sweeps across them again and again, the rest of the words in thimble's color. A tick of its own
-//             moves the band (SHIMMER_MS), only while e waits: no timer stays once e is done, a /clear ends the tour or
-//             the tour ends
+//             moves the band (SHIMMER_MS), only while a step that names words waits (e, or cite in manual): no timer
+//             stays once that step is done, a /clear ends the tour or the tour ends
 //   v         the first card that v's designer draws is on the screen (designer/v.ts). A design that ends with no
 //             card counts too (tourMissed), so the tour goes on
 //   s         the first text of the simpler version shows (squeeze/term.ts)
@@ -31,22 +31,30 @@
 //             thimble puts CITE_QUESTION in the prompt box when the box is empty (askCite), and the step says to press
 //             Enter; where the box did not take it, the step names the question in bold for the person to type. That
 //             turn is a normal turn: Claude cites its numbers as the setting Citations asks, and the checker checks
-//             them as the turn ends, in `auto cite` too (tourCites, marks/checker.ts startCheck), so the person
+//             them as the turn ends, in `auto` too (tourCites, marks/checker.ts startCheck), so the person
 //             watches them turn while they are checked and land checked. Claude that restates the sample answer often
 //             cites the wrong 7 again, and the check corrects it; Claude that reads the file writes 4, and the check
 //             verifies it. The step row moves under that answer as under any reply (turnEnded) and says that the
 //             numbers are being checked. About DONE_MS after the last result, the step row is asked for in view; it
 //             counts what the check did (Claude's numbers), or says that Claude cited none. Claude Code moves a row of
 //             the transcript only while a hook answers the person's press, pick, prompt or command (cards/draw.ts
-//             revealCard): the move after DONE_MS may move nothing
+//             revealCard): the move after DONE_MS may move nothing.
+//             In manual (`manual`), Claude cites nothing, so the person cites the wrong number: the step names its
+//             words (CITE_WORDS) in bold, they shimmer in the sample answer as e's do, and the prompt box stays as it
+//             is. c makes the words selected a citation (marks/cite.ts), whose check opening it starts; that answer is
+//             the one the step counts (`cited`: tourCited), and the step row says the words are being checked. The step
+//             is done once each citation the person made there has its result, with what the check did (their words);
+//             a reply to the person's own prompt meanwhile is no answer of the step's
 //
 // Citations come last, and the tour introduces them: by then the person knows the answer, so they ask Claude for one
-// that cites its numbers and watch thimble check them. The step that waits is the first one not done whose feature is
-// on: e needs a selection, which only a click reaches (bar/intro.ts clicksReach); cite needs Claude's citations
-// (Citations auto cite + verify or auto cite: settings/features.mjs claudeCites). Claude Code's types ask no hook of
-// $.prompt.fill, as they do of the moves of a row: it answers isFilled false only under a dialog or where no box is
-// drawn. So the box is filled when the step starts, whatever started it (most often the simpler version's first text,
-// which no hook of the person's carries); where it is not, the step names the question.
+// that cites its numbers, or in manual cite the wrong number themselves, and watch thimble check them. The step that
+// waits is the first one not done whose feature is on: e needs a selection, which only a click reaches (bar/intro.ts
+// clicksReach); cite needs Claude's citations (Citations auto + verify or auto: settings/features.mjs
+// claudeCites), or in manual a selection, as e. Where no cite step can run, the intro does not say that a number is
+// wrong, since nothing checks it. Claude Code's types ask no hook of $.prompt.fill, as they do of the moves of a row:
+// it answers isFilled false only under a dialog or where no box is drawn. So the box is filled when the step starts,
+// whatever started it (most often the simpler version's first text, which no hook of the person's carries); where it
+// is not, the step names the question.
 //
 // While the tour runs after the sample answer and before its cite step, main's turns answer nothing for thimble's
 // features (core/answers.ts holdAnswers). So v, e, s and the observer act on the sample answer, not on a reply to the
@@ -67,9 +75,11 @@
 //   tourRuns($)           whether a tour runs (bar/hints.ts gives no reminder meanwhile)
 //   tourSample($, row)    whether a row is the tour's sample answer, or the answer of the turn that writes it now
 //   tourCites($, row)     whether a row is the answer of the cite step, which the checker checks in every mode that cites
+//   tourCited($, row)     c cited words of an answer: in manual, the answer the cite step counts
 //   tourChecked($, ended) a check of citations ended, or (`ended`) main's turn: the cite step done once each citation of
 //                         its answer has its result, or once that answer's turn ended with none
-//   tourSpans($, row, t)  the shimmer on the words step e names, in the sample answer while e waits
+//   tourSpans($, row, t)  the shimmer on the words a step names (e's; the cite step's in manual), in the sample answer
+//                         while the step waits
 //   tourUnder($, e)       the step row at the end of an answer's drawing, when the answer is a tour's sample answer
 //   turnTour($)           a /clear or a /resume: the tour ends
 //   registerTour          the start, the intro, the end of main's turn, the placed rows, and the start after an install
@@ -88,7 +98,7 @@ import { drawsHere } from '../core/host'
 import { accent, themeNow } from '../core/theme'
 import { repairsDue } from '../marks/checker'
 import { replyKeyOf, replyOf } from '../marks/store'
-import { claudeCites, featureOn } from '../settings/features.mjs'
+import { choiceOf, claudeCites, featureOn } from '../settings/features.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,12 +115,13 @@ export type Checked = { n: number; corrected: number; failed: number; fix?: { wa
  *  and the row of its sample answer (null until Claude ends it). Its placed rows: the intro (null until placed) and the
  *  step row placed under a later reply (null while the sample answer draws it). `k` counts the rows placed, so each
  *  has an id of its own. The cite step's: `asked`, whether the prompt box took its question (null before the step);
- *  `cited`, the row of the answer it checks (null until a turn ends with one); `checked`, what the check did, once the
- *  step is done. */
+ *  `manual`, the step runs in Citations manual, where the person cites the words with c; `cited`, the row of the
+ *  answer it checks (null until a turn ends with one, or in manual until c cites words); `checked`, what the check
+ *  did, once the step is done. */
 export type TourState = {
   at: Step | 'end'; done: Step[]; missed: Step[]; startedAt: number; k: number
   intro: string | null; sample: string | null; moved: string | null
-  asked?: boolean | null; cited?: string | null; checked?: Checked | null
+  asked?: boolean | null; manual?: boolean; cited?: string | null; checked?: Checked | null
   /** CLOSE_MS after the tour ends, its step row closes to one line */
   closed?: boolean
 }
@@ -118,6 +129,11 @@ export type Tour = TourState & { at: Step }
 
 /** The skill, as Claude Code names it (with the plugin's name, or without). */
 export const TOUR_SKILL = /^(?:thimble:)?tour$/
+
+/** The first Claude Code that places the tour's rows ($.ui.place), as scripts/install.sh, kernel/tour.py and INSTALL.md
+ *  name it. thimble runs on older ones, where /thimble:tour says TOO_OLD at once and the tour does not start. */
+export const TOUR_CLAUDE_CODE = '2.1.314'
+export const TOO_OLD = `The tour needs Claude Code ${TOUR_CLAUDE_CODE} or later: update it (claude update), then type /thimble:tour again.`
 
 /** The file in thimble's home that an install inside Claude Code writes the session's id and the time to
  *  (scripts/install.sh). */
@@ -150,11 +166,17 @@ export const SHIMMER_MS = 110
 const BAND = 4
 const PAUSE = 8
 
-/** What the intro says. */
-export const INTRO = [
-  "thimble works on Claude's answers: it explains words, draws cards, simplifies, and checks numbers.",
-  'Below, Claude writes an answer about the made-up orders of a tea shop. One number in it is wrong on purpose.',
-]
+/** What the intro says. `cites`: a cite step can run (stepOn), which checks the number that is wrong on purpose; where
+ *  none can, the intro says only what comes. */
+export const INTRO = (cites: boolean): string[] => (cites
+  ? [
+      "thimble works on Claude's answers: it explains words, draws cards, simplifies, and checks numbers.",
+      'Below, Claude writes an answer about the made-up orders of a tea shop. One number in it is wrong on purpose.',
+    ]
+  : [
+      "thimble works on Claude's answers: it explains words, draws cards and simplifies.",
+      'Below, Claude writes an answer about the made-up orders of a tea shop.',
+    ])
 
 /** What the end says. Where no click reaches thimble, the settings are named by their command alone. */
 export const END = (clicks: boolean): string[] => [
@@ -166,17 +188,25 @@ export const END = (clicks: boolean): string[] => [
 /** The words of the sample answer that step e names. */
 export const E_WORDS = 'loose-leaf tins'
 
+/** The words of the sample answer that the cite step names in manual: the number that is wrong on purpose
+ *  (skills/tour/SKILL.md), which the person cites with c. */
+export const CITE_WORDS = 'refunded 7 orders'
+
 /** The step row once the tour closed. */
 export const CLOSED = '✓ thimble tour done · type /thimble:tour to take it again'
 
 /** One step's action while it waits: its words, with each key as `{k}` and words drawn bold as `**words**`. v and s
  *  name the answer they act on, since the row can stand under a reply to the person's own prompt. The cite step's:
  *  `asked`, whether the prompt box took its question (else the person types it); `checking`, its answer came, and its
- *  citations are being checked. */
-export function stepAction(s: Step, cite: { asked?: boolean | null; checking?: boolean } = {}): string {
+ *  citations are being checked; `manual`, the person cites the words with c (Citations manual). */
+export function stepAction(s: Step, cite: { asked?: boolean | null; checking?: boolean; manual?: boolean } = {}): string {
   if (s === 'e') return `Highlight **${E_WORDS}** in the answer above, then press {e}.`
   if (s === 'v') return 'Press {v} to draw a card of the tea shop answer.'
   if (s === 's') return 'Press {s} for a shorter, plainer version of the tea shop answer.'
+  if (s === 'cite' && cite.manual) {
+    if (cite.checking) return 'thimble is checking the words you cited against the data.'
+    return `Last, citations: highlight **${CITE_WORDS}** in the answer above, then press {c}. thimble checks it against the data.`
+  }
   if (s === 'cite') {
     if (cite.checking) return 'thimble is checking each number Claude cited against the data.'
     const send = cite.asked === false ? `type **${CITE_QUESTION}** and press {Enter}` : 'press {Enter} to send the question in the prompt box'
@@ -205,13 +235,14 @@ export function stepDone(s: Step, missed: boolean, checked: Checked | null = nul
   return ''
 }
 
-/** Whether a step's feature is on now. Step e needs a selection, which only a click reaches. Step cite needs Claude's
- *  citations (Citations auto cite + verify or auto cite, not manual or off), which the tour introduces. */
+/** Whether a step's feature is on now. Step e needs a selection, which only a click reaches. Step cite, which
+ *  introduces citations, needs Claude's (Citations auto + verify or auto), or in manual a selection, as e,
+ *  since the person cites the words with c; with Citations off there is none. */
 function stepOn(s: Step, clicks: boolean): boolean {
   if (s === 'answer') return true
   if (s === 'v') return featureOn('cards') === true
   if (s === 'e') return clicks && featureOn('explain') === true
-  if (s === 'cite') return claudeCites()
+  if (s === 'cite') return claudeCites() || (clicks && choiceOf('citations') === 'manual')
   return featureOn('squeezeAnswers') === true
 }
 
@@ -239,7 +270,7 @@ function parse(x: unknown): TourState | null {
   return {
     at: t.at, done: steps(t.done), missed: steps(t.missed),
     startedAt: Number(t.startedAt) || 0, k: Number(t.k) || 0, intro: id(t.intro), sample: id(t.sample), moved: id(t.moved),
-    asked: typeof t.asked === 'boolean' ? t.asked : null, cited: id(t.cited), closed: !!t.closed,
+    asked: typeof t.asked === 'boolean' ? t.asked : null, manual: !!t.manual, cited: id(t.cited), closed: !!t.closed,
     checked: c && typeof c === 'object' ? { n: Number(c.n) || 0, corrected: Number(c.corrected) || 0, failed: Number(c.failed) || 0, ...(c.fix && typeof c.fix.was === 'string' && typeof c.fix.now === 'string' ? { fix: { was: c.fix.was, now: c.fix.now } } : {}) } : null,
   }
 }
@@ -287,6 +318,19 @@ export async function tourData($: Engine): Promise<string | null> {
   return `${$.plugin.root.replace(/\/+$/, '')}/tour/sample`
 }
 
+/** The file of the tour's sample data, as the sample answer names it (skills/tour/SKILL.md). */
+export const TOUR_DATA = 'orders.csv'
+
+/** The files that the explainer of words in `row` reads from the tour's sample data (explain/expand.ts): TOUR_DATA
+ *  when `row` is the sample answer of a tour of this session, else none. Claude wrote that answer without reading the
+ *  file, so the conversation holds none of its lines. The explainer's writer cannot read a file itself, so it reads
+ *  only the lines it is given. The path is the one the answer names, which expand.ts reads in tour/sample (readRoots),
+ *  as it reads the links of the tour's answers. */
+export async function tourFiles($: Engine, row: string): Promise<string[]> {
+  if ((await $.state.get(SAMPLE)).value === row) return [TOUR_DATA]
+  return [await stateNow($), ...(await pastNow($))].some(t => t?.sample === row) ? [TOUR_DATA] : []
+}
+
 /** Whether `row` is the tour's sample answer: the row kept when step 0 was done, or, while step 0 waits, the answer of
  *  the turn that ends now. */
 export async function tourSample($: Engine, row: string | null | undefined): Promise<boolean> {
@@ -296,14 +340,14 @@ export async function tourSample($: Engine, row: string | null | undefined): Pro
 }
 
 /** Whether `row` is an answer of the tour: its sample answer (tourSample), or its cite step's answer, also after the
- *  tour ends (while the cite step waits for it, the answer of the turn that ends now). The look leaves both alone
- *  (observer/observer.ts): the tour shows each feature at its own step, and a heads-up or an explainer of the look
- *  would cover the cite step's citations. */
+ *  tour ends (while the cite step waits for it, the answer of the turn that ends now; in manual no turn's answer is
+ *  the step's). The look leaves both alone (observer/observer.ts): the tour shows each feature at its own step, and a
+ *  heads-up or an explainer of the look would cover the cite step's citations. */
 export async function tourAnswer($: Engine, row: string | null | undefined): Promise<boolean> {
   if (!row) return false
   if (await tourSample($, row)) return true
   const t = await stateNow($)
-  if (t?.at === 'cite' && !t.cited) return true
+  if (t?.at === 'cite' && !t.cited && !t.manual) return true
   for (const x of [t, ...(await pastNow($))]) {
     if (!x?.cited) continue
     if (x.cited === row) return true
@@ -315,14 +359,24 @@ export async function tourAnswer($: Engine, row: string | null | undefined): Pro
 
 /** Whether `row` is the answer of the cite step: the cite step waits, and the row is the answer it checks, or a row
  *  of that answer's turn (the checker names a reply by its last row: marks/checker.ts startCheck). Its citations are
- *  checked as its turn ends, in every mode that cites. */
+ *  checked as its turn ends, in every mode that cites. In manual none is: the person's words are checked as c opens
+ *  them. */
 export async function tourCites($: Engine, row: string | null | undefined): Promise<boolean> {
   if (!row) return false
   const t = await tourNow($)
-  if (!t || t.at !== 'cite' || !t.cited) return false
+  if (!t || t.at !== 'cite' || !t.cited || t.manual) return false
   if (t.cited === row) return true
   const [a, b] = [await turnOfRow($, row), await turnOfRow($, t.cited)]
   return !!a && !!b && a.turnId === b.turnId
+}
+
+/** Whether this Claude Code is older than TOUR_CLAUDE_CODE; false where its version names no release. */
+async function tooOld($: Engine): Promise<boolean> {
+  const v = await $.session.version().then(r => r.base ?? r.version, () => '')
+  const n = (s: string) => (/^(\d+)\.(\d+)\.(\d+)/.exec(s) ?? []).slice(1).map(Number)
+  const [have, need] = [n(v), n(TOUR_CLAUDE_CODE)]
+  const k = have.findIndex((x, i) => x !== need[i])
+  return have.length === 3 && k >= 0 && have[k]! < need[k]!
 }
 
 /** A row placed at the transcript's end: null once placed, else the error. A failure leaves the tour without it. */
@@ -365,19 +419,21 @@ export function placeIntro($: Engine): Promise<void> {
     const k = t.k + 1
     const intro = `tour-intro-${k}`
     await save($, { ...t, k, intro })
-    // the intro is the tour's first row: a Claude Code older than 2.1.314 cannot place it (kernel/doctor.py
-    // CLAUDE_CODE_MIN), and an update of thimble does not check Claude Code, so the line says why, with the fix
+    // the intro is the tour's first row: a Claude Code older than 2.1.314 cannot place it (TOUR_CLAUDE_CODE), and one
+    // whose version names no release starts the tour anyway (tooOld), so the line says why, with the fix
     const err = await place($, intro)
     if (err) failNotice($, `The tour could not draw its intro (${reasonOf(err)}). It needs Claude Code 2.1.314 or later: update it (claude update), then type /thimble:tour again.`)
   })
 }
 
 /** The step that waits goes on to the next one, or to the end. The step row draws again from the state. The cite step
- *  puts its question in the prompt box as it starts (askCite). */
+ *  puts its question in the prompt box as it starts (askCite), where Claude cites; in manual the person cites the
+ *  words with c, and the box stays as it is. */
 async function goOn($: Engine, t: Tour, done: Step[], missed: Step[]): Promise<void> {
   const next = nextStep(t.at, done, await clicksNow($))
-  const asked = next === 'cite' ? await askCite($) : t.asked ?? null
-  await save($, { ...t, at: next ?? 'end', done, missed, asked })
+  const manual = next === 'cite' ? !claudeCites() : !!t.manual
+  const asked = next === 'cite' && !manual ? await askCite($) : t.asked ?? null
+  await save($, { ...t, at: next ?? 'end', done, missed, asked, manual })
   if (!next) { const startedAt = t.startedAt; $.clock.after(CLOSE_MS, () => { void closeRow($, startedAt).catch(() => undefined) }) }
 }
 
@@ -429,27 +485,47 @@ async function askCite($: Engine): Promise<boolean> {
 /** A check of citations ended (marks/register.ts, after endCheck and after autoRepair, and at session start after
  *  resumeChecks), or main's turn did (`ended`, after its check started): once each citation of the cite step's answer
  *  has its result (none checked now, none waiting, none that autoRepair has yet to repair), the cite step is done, with
- *  what the check did (Claude's numbers), and DONE_MS later the view goes to the step row. An answer that cited nothing
- *  is done as its turn ends. */
+ *  what the check did (Claude's numbers; in manual the person's words), and DONE_MS later the view goes to the step
+ *  row. An answer that cited nothing is done as its turn ends. */
 export function tourChecked($: Engine, ended = false): Promise<void> {
   return inTurn(async () => {
     const t = await tourNow($)
-    if (!t || t.at !== 'cite' || !t.cited) return
-    const key = await replyKeyOf($, t.cited)
-    const items = key ? (await replyOf($, key))?.items ?? [] : []
-    if (!key || !items.length) {
-      if (ended) await citeDone($, t, { n: 0, corrected: 0, failed: 0 })
-      return
-    }
-    if (items.some(m => m.status === 'checking' || m.status === 'deferred') || repairsDue(key)) return
-    // Claude's numbers alone (not words the person cited), and a narrowing changes no value (designer/v.ts checkedSince)
-    const own = items.filter(m => !m.asked)
-    const fixed = own.filter(m => m.status === 'corrected' && !m.narrowed)
-    // the one correction, named, so the person reads what it changed beside the count (as designer/v.ts)
-    const one = fixed.length === 1 ? fixed[0] as { was?: string; words?: string; shown?: string } : null
-    const was = String(one?.was ?? one?.words ?? ''), now = String(one?.shown ?? '')
-    await citeDone($, t, { n: own.length, corrected: fixed.length, failed: own.filter(m => m.status === 'failed').length, ...(was && now && was !== now ? { fix: { was, now } } : {}) })
+    if (t) await checkedNow($, t, ended)
   })
+}
+
+/** c cited words of an answer (marks/cite.ts citeSelection): while the cite step waits in manual with nothing cited
+ *  yet, that answer is the one the step counts (`cited`), and the step row says the words are being checked. Their
+ *  check, which opening them started, may have ended already: then the step is done now. */
+export function tourCited($: Engine, row: string): Promise<void> {
+  return inTurn(async () => {
+    const t = await tourNow($)
+    if (!t || t.at !== 'cite' || !t.manual || t.cited) return
+    const cited = { ...t, cited: row }
+    await save($, cited)
+    await checkedNow($, cited, false)
+  })
+}
+
+/** tourChecked's work, inside the tour's chain. */
+async function checkedNow($: Engine, t: Tour, ended: boolean): Promise<void> {
+  if (t.at !== 'cite' || !t.cited) return
+  const key = await replyKeyOf($, t.cited)
+  const items = key ? (await replyOf($, key))?.items ?? [] : []
+  if (!key || !items.length) {
+    if (ended && !t.manual) await citeDone($, t, { n: 0, corrected: 0, failed: 0 })
+    return
+  }
+  // Claude's numbers alone (not words the person cited), or in manual the person's words alone
+  const own = items.filter(m => (t.manual ? m.asked : !m.asked))
+  if (t.manual && !own.length) return
+  if (items.some(m => m.status === 'checking' || m.status === 'deferred') || repairsDue(key)) return
+  // a narrowing changes no value (designer/v.ts checkedSince)
+  const fixed = own.filter(m => m.status === 'corrected' && !m.narrowed)
+  // the one correction, named, so the person reads what it changed beside the count (as designer/v.ts)
+  const one = fixed.length === 1 ? fixed[0] as { was?: string; words?: string; shown?: string } : null
+  const was = String(one?.was ?? one?.words ?? ''), now = String(one?.shown ?? '')
+  await citeDone($, t, { n: own.length, corrected: fixed.length, failed: own.filter(m => m.status === 'failed').length, ...(was && now && was !== now ? { fix: { was, now } } : {}) })
 }
 
 /** The cite step done, with what its check did, and DONE_MS later the view goes to the step row. */
@@ -468,8 +544,9 @@ async function showStepRow($: Engine, startedAt: number): Promise<void> {
 
 /** Main's turn ended while the tour runs. The turn that the skill started, with an answer: step 0 done, and the sample
  *  answer draws the step row under it. A later turn (the answer to the person's own prompt): the step row is placed
- *  under it. While the cite step waits, the first such answer is the one it checks (`cited`). A step that waits while
- *  its feature is off goes on, since the person cannot do it. */
+ *  under it. While the cite step waits, the first such answer is the one it checks (`cited`); in manual none is, since
+ *  the person cites the words with c. A step that waits while its feature is off goes on, since the person cannot do
+ *  it. */
 async function turnEnded($: Engine, turn: TurnRec | null): Promise<void> {
   await inTurn(async () => {
     const t = await tourNow($)
@@ -483,7 +560,7 @@ async function turnEnded($: Engine, turn: TurnRec | null): Promise<void> {
     }
     const k = t.k + 1
     // the cite step's answer: the first answer once the step waits; its check starts after this hook (marks/register.ts)
-    const cited = t.at === 'cite' && !t.cited ? turn?.answer ?? null : t.cited ?? null
+    const cited = t.at === 'cite' && !t.cited && !t.manual ? turn?.answer ?? null : t.cited ?? null
     const moved = { ...t, k, moved: `tour-step-${k}`, cited }
     if (stepOn(t.at, await clicksNow($))) await save($, moved)
     else await goOn($, moved, t.done, t.missed)
@@ -501,15 +578,24 @@ export async function turnTour($: Engine): Promise<void> {
 let shimmerAt = 0
 let shimmering = false
 
-/** The tick of the shimmer on step e's words: the frame moves each SHIMMER_MS while e waits, and the drawing that reads
- *  it draws again. It stops, with no timer left, once e is done, the tour ends (a /clear too) or a read fails; the next
- *  drawing of the sample answer while e waits starts it again (after a reload of the plugin). */
+/** The words the step that waits names in the sample answer, which shimmer while it waits: e's, and in manual the
+ *  cite step's until c cites words (`cited`); null for any other step. */
+function shimmerWords(t: TourState | null): { step: Step; words: string } | null {
+  if (t?.at === 'e') return { step: 'e', words: E_WORDS }
+  if (t?.at === 'cite' && t.manual && !t.cited) return { step: 'cite', words: CITE_WORDS }
+  return null
+}
+
+/** The tick of the shimmer on the words a step names: the frame moves each SHIMMER_MS while that step waits, and the
+ *  drawing that reads it draws again. It stops, with no timer left, once the step is done, the tour ends (a /clear
+ *  too) or a read fails; the next drawing of the sample answer while such a step waits starts it again (after a reload
+ *  of the plugin). */
 function shimmer($: Engine): void {
   if (shimmering) return
   shimmering = true
   const step = async () => {
     try {
-      if ((await tourNow($))?.at !== 'e') { shimmering = false; return }
+      if (!shimmerWords(await tourNow($))) { shimmering = false; return }
       shimmerAt += 1
       await $.state.set(SHIMMER, shimmerAt)
       $.clock.after(SHIMMER_MS, () => { void step() })
@@ -524,31 +610,31 @@ function shimmer($: Engine): void {
   }
 }
 
-/** The shimmer at frame `f` on `n` characters from `start`: the words in thimble's color in up to three runs, the
- *  middle one the band in `bright`, which enters before the first character, leaves after the last, and comes again
- *  after PAUSE frames. */
-export function shimmerSpans(start: number, n: number, f: number, bright: string): Span[] {
+/** The shimmer at frame `f` on `n` characters from `start`, the words `step` names: the words in thimble's color in up
+ *  to three runs, the middle one the band in `bright`, which enters before the first character, leaves after the last,
+ *  and comes again after PAUSE frames. */
+export function shimmerSpans(start: number, n: number, f: number, bright: string, step: Step = 'e'): Span[] {
   const at = (f % (n + BAND + PAUSE)) - BAND
   const lo = Math.max(0, Math.min(n, at))
   const hi = Math.max(0, Math.min(n, at + BAND))
   const runs: [number, number, boolean][] = [[0, lo, false], [lo, hi, true], [hi, n, false]]
   return runs.filter(([a, b]) => b > a).map(([a, b, band]) => ({
-    id: `tour-e-${a}`, start: start + a, end: start + b, look: { color: band ? bright : accent() }, label: 'the words step e names',
+    id: `tour-${step}-${a}`, start: start + a, end: start + b, look: { color: band ? bright : accent() }, label: `the words step ${step} names`,
   }))
 }
 
-/** The shimmer on the words step e names in the sample answer, while e waits (shimmerSpans at the frame now); none for
- *  any other row, or step. Reading the frame makes the answer draw again at each tick. */
+/** The shimmer on the words the step that waits names in the sample answer (shimmerWords; shimmerSpans at the frame
+ *  now); none for any other row, or step. Reading the frame makes the answer draw again at each tick. */
 export async function tourSpans($: Engine, row: string, text: string): Promise<Span[]> {
-  const t = await tourNow($)
-  if (!t || t.at !== 'e' || (await $.state.get(SAMPLE)).value !== row) return []
-  const at = text.toLowerCase().indexOf(E_WORDS)
+  const w = shimmerWords(await tourNow($))
+  if (!w || (await $.state.get(SAMPLE)).value !== row) return []
+  const at = text.toLowerCase().indexOf(w.words)
   if (at < 0) return []
   const f = Number((await $.state.get(SHIMMER)).value) || 0
   shimmer($)
   // a lighter purple than thimble's on a dark background; on a light one, a paler purple than its deep one
   const bright = (await themeNow($)) === 'light' ? '#c39bff' : '#e6d9ff'
-  return shimmerSpans(at, E_WORDS.length, f, bright)
+  return shimmerSpans(at, w.words.length, f, bright, w.step)
 }
 
 // ------------------------------------------------------------------------------------------------ the rows
@@ -576,8 +662,9 @@ function frame(els: Any, key: string, cols: number, title: string, lines: Any[],
   })
 }
 
-export function introEl(els: Any, cols: number): Any {
-  return frame(els, 'tour-intro', cols, 'thimble tour', INTRO.map((l, i) => els.Text({ key: `l${i}`, children: l })))
+/** The intro. `cites`: a cite step can run, as the person's settings and layout stand (INTRO). */
+export function introEl(els: Any, cols: number, cites: boolean): Any {
+  return frame(els, 'tour-intro', cols, 'thimble tour', INTRO(cites).map((l, i) => els.Text({ key: `l${i}`, children: l })))
 }
 
 /** The key of a tour's step row, by which the view goes to it (showStepRow). */
@@ -595,7 +682,7 @@ export function stepRowEl(els: Any, t: TourState, clicks: boolean, cols: number,
   for (const s of steps) {
     if (t.done.includes(s)) lines.push(els.Text({ key: `d-${s}`, dimColor: true, children: `✓ ${stepDone(s, t.missed.includes(s), t.checked ?? null)}` }))
     else if (s === t.at && !past) {
-      lines.push(withKeys(els, `› ${stepAction(s, { asked: t.asked, checking: !!t.cited })}`, `a-${s}`))
+      lines.push(withKeys(els, `› ${stepAction(s, { asked: t.asked, checking: !!t.cited, manual: !!t.manual })}`, `a-${s}`))
     }
   }
   if (t.at === 'end') lines.push(...(lines.length ? [els.Text({ key: 'gap2', children: ' ' })] : []), ...END(clicks).map((l, i) => els.Text({ key: `e${i}`, children: l })))
@@ -621,7 +708,7 @@ export async function tourUnder($: Engine, e: Any): Promise<Any | null> {
 async function drawRow($: Engine, e: Any): Promise<Any> {
   const els = $.ui.resolve(e) as Any
   const id = String(e.props?.id ?? '')
-  if (id.startsWith('tour-intro-')) return introEl(els, colsOf(e))
+  if (id.startsWith('tour-intro-')) return introEl(els, colsOf(e), stepOn('cite', await clicksReach($, e).catch(() => true)))
   const t = await stateNow($)
   const past = t?.moved === id ? null : (await pastNow($)).find(p => p.moved === id)
   const of = t?.moved === id ? t : past
@@ -649,20 +736,25 @@ function startAfterInstall($: Engine): void {
 }
 
 export const registerTour: Register = on => {
-  // /thimble:tour: the tour starts, and the intro stands under its prompt
+  // /thimble:tour: the tour starts, and the intro stands under its prompt; on a Claude Code too old for its rows, the
+  // prompt does not enter, and the person reads why
   on('prompt.submit', { origin: { kind: /./ } }, async ($, e, next) => {
+    const tour = !!e.command && TOUR_SKILL.test(String(e.command.name ?? ''))
+    if (tour && (await tooOld($))) return { drop: TOO_OLD }
     const r = await next(e)
-    if (e.command && TOUR_SKILL.test(String(e.command.name ?? ''))) {
+    if (tour) {
       await tourStart($).catch(() => undefined)
       await placeIntro($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  // Claude starts the skill with the Skill tool: the tour starts, and the skill runs as written
+  // Claude starts the skill with the Skill tool: the tour starts, and the skill runs as written; on a Claude Code too old
+  // for its rows, Claude reads why instead
   on('tool.call', { tool: 'Skill', skill: TOUR_SKILL }, async ($, e, next) => {
     const skill = String((e as { skill?: unknown }).skill ?? '')
     if (e.agentId === undefined && TOUR_SKILL.test(skill)) {
+      if (await tooOld($)) return { deny: TOO_OLD }
       await tourStart($).catch(() => undefined)
       await placeIntro($).catch(() => undefined)
     }
@@ -670,8 +762,10 @@ export const registerTour: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // the skill expanded some other way (the first prompt of `thimble tour`): the tour starts too. The prompt is not in
-  // the transcript yet, so the intro waits for main's turn to start
+  // the transcript yet, so the intro waits for main's turn to start. On a Claude Code too old for its rows, Claude says
+  // why instead of the skill
   on('skill.prompt', { skill: TOUR_SKILL }, async ($, e, next) => {
+    if (await tooOld($)) return next({ ...e, text: `Reply with this sentence alone: ${TOO_OLD}` })
     const r = await next(e)
     await tourStart($).catch(() => undefined)
     return r

@@ -21,7 +21,7 @@
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
 //                    Claude Code refused is noted as it ends (checker.ts readEnded), and so is its Python that don't
 //                    ask mode refused (checker.ts pythonEnded)
-//   turn.step        the checker's requests: the model and the effort the setting Checker names
+//   turn.step        the checker's requests: the model and the effort that Verifier model and Verifier effort name
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
@@ -222,10 +222,11 @@ export const registerMarks: Register = on => {
     return no ? { deny: no } : next(e)
   })
 
-  // the checker's requests on the model the setting Checker names, at the effort its Effort names (settings/features.mjs
-  // checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its spawn takes no other, so
-  // each request of a checker's turn names them. Unset, the requests go as they are; so do they on Bedrock, Vertex or
-  // Foundry, which do not take the first-party ids Checker names (settings/term.ts firstPartyApi), whatever it holds
+  // the checker's requests on the model the setting Verifier model names, at the effort Verifier effort names
+  // (settings/features.mjs checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its
+  // spawn takes no other, so each request of a checker's turn names them. Unset, the requests go as they are; so do
+  // they on Bedrock, Vertex or Foundry, which do not take the first-party ids Verifier model names (settings/term.ts
+  // firstPartyApi), whatever it holds
   on('turn.step', { agentId: /./ }, async function* ($, e, next) {
     const checker = forkOf(e.agentId)?.kind === 'checker'
     const model = checker ? checkerModel() : null
@@ -334,7 +335,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     const shown = withoutCardLinks(text)
     return shown === raw ? below() : below({ ...e, props: { ...e.props, text: shown } })
   }
-  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) return plain()
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !under.length && !placesCards) return plain()
   // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations`
   // runs (the tray's `checking` turns with it)
   const spin = reply?.checking ? await spinNow($) : SPIN[0]!
@@ -358,10 +359,10 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
   // the citations' tint is the theme set's (view.ts citeLook)
   if (marks.length) await themeNow($)
-  const body = marks.length || spans.length || view.dim || view.lead || placesCards
+  const body = marks.length || spans.length || view.dim || placesCards
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
-      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
+      spans, dim: view.dim, focus: focus >= 0 ? focus : null, cards,
       // Minimal: plain words at rest, each row's marks under the pointer (view.ts), where Claude Code reports the
       // pointer; elsewhere the marks stand at rest as in any mode
       plain: minimalOn() && (await pointerReported($, e)),

@@ -4,9 +4,12 @@
 
 {{include:preamble.md}}
 
-The analyst opened a file that thimble's files view shows only as raw text or bytes, since none of its built-in modes reads the format. thimble's dev agent can write a viewer for the file type, which then opens every file of that type. From the file's start, you decide whether such a viewer would help the analyst read it, and if so you write the proposal the dev agent builds from when the analyst accepts it.
+From the start of one file, you decide whether a viewer for its file type would help the analyst read it. If it would, you write the proposal that thimble's dev agent builds from when the analyst accepts it.
 
-A viewer helps when the format has a structure a page shows better than its text, such as timed events a player can replay, tiers of annotations over a recording, a capture's nested layers or a binary log's records. It does not help when the text already reads well, such as prose, a config file or code, since the analyst would gain a step and nothing else.
+The analyst opened a file that thimble's files view shows only as raw text or bytes, because none of the view's built-in modes reads the format.
+
+- A viewer helps when the format has a structure that a page shows better than its text. Examples are timed events that a player can replay, tiers of annotations over a recording, a capture's nested layers, or a binary log's records.
+- A viewer does not help when the text already reads well, for example prose, a config file or code.
 
 ## file
 

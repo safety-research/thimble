@@ -9,7 +9,8 @@
 // the other kind is not added, and an explainer the analyst asks for is drawn only on words no heads-up stands on.
 // Only what the analyst sees keeps words: one a switch hides keeps none.
 // The row draws each as a press on its words: an explainer highlighted teal, a heads-up orange (place.mjs
-// markColors); a press opens the tray on it (tray/seam.ts openTray). Claude hears with the next prompt the words of
+// markColors), on a faint fill at rest and on the full fill under the pointer and while the tray shows it (markLook);
+// a press opens the tray on it (tray/seam.ts openTray). Claude hears with the next prompt the words of
 // each one shown on its answer (tellComments), and which ones the analyst opened (core/engaged.ts). A term is
 // explained once per conversation; the lenses' digests name the terms already explained and the heads-ups already
 // given, which this module keeps in the conversation's folder (explain.json).
@@ -98,6 +99,15 @@ async function memory($: Engine): Promise<typeof M> {
 /** Whether a lens's switch shows what it gave: Explainers for an explainer, Heads-ups for a heads-up. */
 const shown = (g: Gloss) => featureOn(g.kind === 'heads' ? 'details' : 'explain')
 
+/** How an explainer or a heads-up is drawn (place.mjs markColors). At rest its words are in the text's own color on
+ *  the faint fill of its kind (the explainers' teal, the heads-ups' orange). The pointer over it puts the full fill
+ *  behind it. While the tray shows it, it is bold on the full fill (`focus`, core/answerview.ts checkSpans); when the
+ *  tray closes or shows another mark, it is faint again. */
+function markLook(c: ReturnType<typeof markColors>, heads: boolean): Pick<Span, 'look' | 'focus'> {
+  const full = heads ? c.headsBg : c.glossBg
+  return { look: { backgroundColor: heads ? c.headsFaint : c.glossFaint, hoverBg: full }, focus: { bold: true, backgroundColor: full } }
+}
+
 export async function explainSpans($: Engine, row: string, text: string, _marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
   const part = await partOf<ExplainPart>($, row, 'explain')
   if (!part?.items || !Object.keys(part.items).length) return []
@@ -116,8 +126,7 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       id: p.id,
       start: p.start,
       end: p.end,
-      look: { backgroundColor: heads ? c.headsBg : c.glossBg, hoverBg: heads ? c.headsFocus : c.glossFocus },
-      focus: { bold: true, backgroundColor: heads ? c.headsFocus : c.glossFocus },
+      ...markLook(c, heads),
       label: `${heads ? 'heads up' : 'explain'} ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')}`.slice(0, 120),
       onPress: async () => {
         await openTray($, { row, kind, id: p.id })
@@ -157,8 +166,7 @@ export async function explainSpansOf($: Engine, rows: string[], text: string): P
       id: p.id,
       start: p.start,
       end: p.end,
-      look: { backgroundColor: heads ? c.headsBg : c.glossBg, hoverBg: heads ? c.headsFocus : c.glossFocus },
-      focus: { bold: true, backgroundColor: heads ? c.headsFocus : c.glossFocus },
+      ...markLook(c, heads),
       label: `${heads ? 'heads up' : 'explain'} ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')}`.slice(0, 120),
       onPress: async () => {
         await openTray($, { row, kind, id })
@@ -273,7 +281,7 @@ export async function pendingSpans($: Engine, row: string, text: string): Promis
     id: p.id,
     start: p.start,
     end: p.end,
-    look: { backgroundColor: c.glossBg, hoverBg: c.glossFocus },
+    ...markLook(c, false),
     label: `explainer of ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')} being written`.slice(0, 120),
   }))
 }

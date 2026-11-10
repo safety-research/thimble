@@ -1,10 +1,14 @@
 // The top bar's Report a problem dialog. The form takes a description, an optional screenshot of this tab
-// (getDisplayMedia) and optionally the logs. Prepare bundle asks the server to write a zip (POST /ws/{c}/feedback) with
-// the tab's recent console errors and failed requests; the dialog then offers Download, Copy path, Show in folder and
-// Open a GitHub issue, prefilled by the server without the logs. The dialog hides itself while the tab is captured.
-// In a development install (GET /dev/status says code tickets run here) the form also offers File a code ticket, which
-// files the description as a ticket for thimble's developer agent (POST /dev/tickets, the analyst's click, which starts
-// the agent as a subagent of their Claude Code session) and opens the ticket's thread.
+// (getDisplayMedia) and optionally the logs, and offers two actions:
+//   File an issue on GitHub   the server writes a zip (POST /ws/{c}/feedback) with the tab's recent console errors and
+//                             failed requests, and the new issue, which the server prefills without the logs, opens in
+//                             the same click. The dialog then shows the zip to attach (Download, Copy path, Show in
+//                             folder), and Open a GitHub issue for a browser that blocked the new tab.
+//   Fix it with /thimble-fix  only where /thimble-fix works (GET /fixes names no problem): the description starts a fix
+//                             of the person's own thimble (POST /dev/tickets, the analyst's click, which the server
+//                             makes a fix wherever fixes work), and the dialog closes on main's chat, where the fix
+//                             shows.
+// The dialog hides itself while the tab is captured.
 //
 // Where something fails, ReportProblemButton opens the same dialog through the bus with the failure written in.
 import { useCallback, useEffect, useState, type MouseEvent } from 'react'
@@ -13,6 +17,7 @@ import { TextArea } from '../components/Field'
 import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { api, feedbackApi } from '../lib/api'
+import { notStartedToast } from '../chat/fix'
 import { openThread } from '../chat/Notes'
 import { bus, type ProblemPrefill } from '../lib/bus'
 import { recentProblems } from '../lib/problemLog'
@@ -45,9 +50,13 @@ export function linkPieces(sentence: string, links: readonly { text: string; hre
   return out
 }
 
-/** A code ticket's title from what the analyst wrote: its first line that has words, at most TITLE_CHARS long. Pure. */
+/** What each of the form's two actions does, as its tooltip says it. */
+export const FIX_TIP = 'Claude fixes this in your own thimble, as /thimble-fix in the chat does. You choose whether to use the fix.'
+export const ISSUE_TIP = 'Saves a zip of this report and opens a new GitHub issue with your description filled in. You choose whether to attach the zip.'
+
+/** A fix's title from what the person wrote: its first line that has words, at most TITLE_CHARS long. Pure. */
 export const TITLE_CHARS = 80
-export function ticketTitle(description: string): string {
+export function fixTitle(description: string): string {
   const first = description.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
   return first.length > TITLE_CHARS ? `${first.slice(0, TITLE_CHARS - 1).trimEnd()}…` : first
 }
@@ -146,17 +155,18 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<ProblemReport | null>(null)
   const [copied, setCopied] = useState(false)
-  // whether code tickets run here (a development install), asked each time the dialog opens
-  const [tickets, setTickets] = useState(false)
-  const [filing, setFiling] = useState(false)
+  // whether /thimble-fix works here (GET /fixes names no problem, as the server's /thimble-fix checks), asked each time
+  // the dialog opens
+  const [fixable, setFixable] = useState(false)
+  const [fixing, setFixing] = useState(false)
 
   useEffect(() => {
     if (!open) return
     let alive = true
     api
-      .devStatus()
-      .then((s) => alive && setTickets(s.tickets === ''))
-      .catch(() => alive && setTickets(false))
+      .fixes()
+      .then((s) => alive && setFixable(s?.problem === ''))
+      .catch(() => alive && setFixable(false))
     return () => {
       alive = false
     }
@@ -179,33 +189,37 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
     setCopied(false)
   }, [open])
 
-  const prepare = useCallback(async () => {
+  // the zip, then the prefilled issue in a new tab at once; where the browser blocks a tab opened this long after the
+  // click, the zip's Open a GitHub issue opens it
+  const fileIssue = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
       const screenshot = shot ? await captureTab(setHidden) : null
       const body: ProblemReportBody = { description, screenshot, screenshot_asked: shot, logs, user_agent: navigator.userAgent, browser: logs ? recentProblems() : [], focus: prefill?.focus ?? [] }
-      setDone(await feedbackApi.prepare(ws, body))
+      const zip = await feedbackApi.prepare(ws, body)
+      setDone(zip)
+      openIssue(zip.issue_url)
     } catch (e) {
-      setError(`The bundle could not be written: ${(e as Error).message}`)
+      setError(`The zip could not be written: ${(e as Error).message}`)
     } finally {
       setBusy(false)
     }
   }, [ws, description, shot, logs, prefill])
 
-  // the description as a ticket for thimble's developer agent: a click, which starts its agent; the dialog closes on the
-  // ticket's thread
-  const fileTicket = useCallback(async () => {
-    setFiling(true)
+  // the description as a fix of the person's own thimble: a click, which starts its fixer; the dialog closes on main's
+  // chat, where the fix shows
+  const fix = useCallback(async () => {
+    setFixing(true)
     setError(null)
     try {
-      const t = await api.fileTicket({ workspace: ws, title: ticketTitle(description), body: description.trim(), source: 'ui' })
-      if (t.chat) openThread(t.chat, 'file-ticket')
+      await api.fileTicket({ workspace: ws, title: fixTitle(description), body: description.trim(), source: 'ui' })
       onClose()
+      openThread('main', 'report-problem')
     } catch (e) {
-      setError(`The ticket could not be filed: ${(e as Error).message}`)
+      setError(notStartedToast(e as Error).text)
     } finally {
-      setFiling(false)
+      setFixing(false)
     }
   }, [ws, description, onClose])
 
@@ -236,15 +250,15 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
   }
 
   return (
-    <Popover anchor={anchor} open={open} onClose={onClose} align="end" label="Report a problem" className={`problem-pop${hidden ? ' is-capturing' : ''}`} width={340}>
+    <Popover anchor={anchor} open={open} onClose={onClose} align="end" label="Report a problem" className={`problem-pop${hidden ? ' is-capturing' : ''}`} width={400}>
       {done ? (
         <div className="problem" data-panel="problem" data-state="done">
           <div className="problem-ready" role="status">
             <Mark kind="verified" label="ready" />
-            <span>Bundle ready, {done.size}</span>
+            <span>The zip is ready, {done.size}</span>
           </div>
           <div className="problem-path">{done.path}</div>
-          {done.screenshot_missing && <p className="problem-note">The screenshot was not captured, so the bundle has none.</p>}
+          {done.screenshot_missing && <p className="problem-note">The screenshot was not captured, so the zip has none.</p>}
           <div className="problem-actions">
             <Button size="sm" variant="secondary" onClick={download}>
               Download
@@ -296,16 +310,16 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
           <p className="problem-note">{LOGS_NOTE}</p>
           {error && <div className="problem-error">{error}</div>}
           <div className="problem-foot">
-            <Button variant="ghost" onClick={onClose} disabled={busy || filing}>
+            <Button variant="ghost" onClick={onClose} disabled={busy || fixing}>
               Cancel
             </Button>
-            {tickets && (
-              <Button variant="secondary" busy={filing} disabled={busy || !description.trim()} onClick={() => void fileTicket()} data-tel="file-code-ticket" title="thimble's developer agent works on it in a copy of thimble's code, and asks you before the change reaches thimble">
-                File a code ticket
+            {fixable && (
+              <Button variant="secondary" busy={fixing} disabled={busy || !description.trim()} onClick={() => void fix()} data-tel="fix-with-thimble-fix" title={FIX_TIP}>
+                Fix it with /thimble-fix
               </Button>
             )}
-            <Button variant="primary" busy={busy} disabled={filing} onClick={() => void prepare()}>
-              Prepare bundle
+            <Button variant="primary" busy={busy} disabled={fixing} onClick={() => void fileIssue()} data-tel="file-github-issue" title={ISSUE_TIP}>
+              File an issue on GitHub
             </Button>
           </div>
         </div>

@@ -63,35 +63,52 @@ const AROUND_ROWS = 14
 const SCHEMA = {
   type: 'object',
   properties: {
-    title: { type: 'string', description: 'what the card shows, in a few words; with `id`, leave out to keep the title' },
-    data: { type: 'string', description: 'the path of the JSON file of rows, in this folder or $TMPDIR (may start with $TMPDIR/); with `id`, leave out to keep the rows' },
-    view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, give `edits` instead, or only new `data` to keep the view' },
+    title: { type: 'string', description: 'What the card shows, in a few words. With `id`, leave it out to keep the title.' },
+    data: { type: 'string', description: 'The path of the JSON file of rows, in this folder or in $TMPDIR. The path may start with $TMPDIR/. With `id`, leave it out to keep the rows.' },
+    view: { type: 'string', description: 'With `id`, give `edits` instead, or give only new `data` to keep the view.' },
     edits: {
       type: 'array',
-      description: 'with `id`: changes to the view of your last call of that card (also one that failed), in order; each `old` occurs once in it',
+      description: 'With `id`: changes to the view of your last call of that card, also a call that failed. The changes apply in order. Each `old` occurs once in that view.',
       items: { type: 'object', required: ['old', 'new'], properties: { old: { type: 'string' }, new: { type: 'string' } } },
     },
-    id: { type: 'string', description: 'the id of a card you drew: alone, to move the card as it is to this call; with `edits`, `view` or `data`, for a new version in its place' },
+    id: { type: 'string', description: 'The id of a card you drew. Alone, it moves the card as it is to this call. With `edits`, `view` or `data`, it draws a new version of the card in its place.' },
     actions: {
       type: 'array',
-      description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
-      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y]: the cell at column x of line y of the text copy, both from 0', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
+      description: 'Keys and clicks to try, in order. Then the card goes back to how it was.',
+      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'Words the card shows: a click on them. Or [x, y]: the cell at column x of line y of the text copy, both counted from 0.', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
 }
 
-/** The card guide, as the model reads it: card-tool.md with the temp folder and thimble's own keys filled in. The
- *  tool's description, and what a squeeze's request shows of how a card's view is written (squeeze/cards.ts). */
-export async function cardGuide($: Engine): Promise<string> {
+/** The line of card-tool.md that opens its part on the `view` field: the text above it is the tool's description, and
+ *  the part below it goes in the field's description, since Claude Code refuses a tool whose description is longer
+ *  than 4096 characters. */
+const VIEW_PART = /^<!--\s*view\s*-->[ \t]*$/m
+
+/** card-tool.md with the temp folder and thimble's own keys filled in: the tool's description, and its part on the
+ *  `view` field ('' when it has none). */
+async function cardText($: Engine): Promise<{ description: string; view: string }> {
   const text = await promptText($, 'card-tool')
   const own = ownKeys()
   const kept = `${own.slice(0, -1).join(', ')} or ${own[own.length - 1]}`
-  return fill(text, { TMPDIR: await tempDir($), KEPT: kept }).trim()
+  const [description = '', view = ''] = fill(text, { TMPDIR: await tempDir($), KEPT: kept }).split(VIEW_PART)
+  return { description: description.trim(), view: view.trim() }
 }
 
-/** The tool, as the model reads it. */
+/** The card guide, as the model reads it: the tool's description, then its part on the `view` field. What the card
+ *  check holds a card that does not fit to (fit.ts), and what a squeeze's request shows of how a card's view is written
+ *  (squeeze/cards.ts). */
+export async function cardGuide($: Engine): Promise<string> {
+  const { description, view } = await cardText($)
+  return [description, view].filter(Boolean).join('\n\n')
+}
+
+/** The tool, as the model reads it: card-tool.md's description, and its part on the `view` field in that field. */
 export async function registerCardTool($: Engine): Promise<void> {
-  await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: SCHEMA })
+  const { description, view } = await cardText($)
+  const field = SCHEMA.properties.view
+  const inputSchema = view ? { ...SCHEMA, properties: { ...SCHEMA.properties, view: { ...field, description: `${field.description}\n\n${view}` } } } : SCHEMA
+  await $.tool.register({ name: 'card', isDeferred: false, description, inputSchema })
 }
 
 /** Why the person's permission rules refuse this call, or null (step 0 above). */

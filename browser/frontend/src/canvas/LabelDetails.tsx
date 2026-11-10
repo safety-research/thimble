@@ -288,7 +288,7 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
         setTexts((cur) => (cur[r.ref] === r.text ? cur : { ...cur, [r.ref]: r.text as string }))
         continue
       }
-      if (concept.unit === 'cell' || concept.unit === 'span') {
+      if (concept.unit === 'span') {
         setTexts((cur) => ({ ...cur, [r.ref]: '' }))
         continue
       }

@@ -42,7 +42,7 @@ _NAME = r"[A-Za-z0-9._-]+"
 # (kind, pattern, characters that must not come right before a match)
 GENERIC: list[tuple[str, str, str | None]] = [
     ("path", r"/(?:home|Users)/" + _NAME + _PATH_TAIL, r"[\w.~$-]"),
-    ("path", r"/mnt[/]" + _NAME + _PATH_TAIL, r"[\w.~$-]"),
+    ("path", r"/(?:mnt|Volumes)[/]" + _NAME + _PATH_TAIL, r"[\w.~$-]"),
     ("path", r"[A-Za-z]:\\Users\\[A-Za-z0-9._ -]+" + _PATH_TAIL, r"[\w]"),
     ("key", r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----)?", None),
     ("token", r"sk-ant-[a-z]{2,8}\d{2}-[A-Za-z0-9_-]{20,}", r"[\w-]"),

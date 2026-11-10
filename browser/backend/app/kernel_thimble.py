@@ -121,7 +121,8 @@ def _ws() -> Path:
 
 def _concepts(ws=None) -> list:
     """Every concept file of the workspace, oldest first (the fields a cell needs); of the workspace folder `ws` when
-    given, else the kernel's."""
+    given, else the kernel's. A label over cards, which thimble made before 1.0, is no label now and is left out
+    (concepts.GONE_UNITS)."""
     out = []
     d = (Path(ws) if ws is not None else _ws()) / "concepts"
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
@@ -130,7 +131,7 @@ def _concepts(ws=None) -> list:
                 k = json.load(f)
         except (OSError, ValueError):
             continue
-        if not isinstance(k, dict):
+        if not isinstance(k, dict) or k.get("unit") == "cell":
             continue
         stats = k.get("label_stats") if isinstance(k.get("label_stats"), dict) else {}
         out.append({"id": str(k.get("id") or p.stem), "name": str(k.get("name") or p.stem), "kind": k.get("kind"),

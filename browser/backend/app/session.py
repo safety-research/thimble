@@ -77,7 +77,7 @@ SEND_TOOL = "SendMessage"
 REPLY_TOOL = "reply_in_thread"
 # what main ends a turn with when it has nothing for the analyst, which no chat shows (module note, the end token)
 END_TOKEN = "(shown in the dashboard)"
-TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
+TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md, thread.md)
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
 # Claude Code's calls that are nothing the analyst reads, so no row in any chat: loading a deferred tool's schema before
@@ -601,12 +601,23 @@ def current(c: str) -> Live | None:
     return _live.get(c)
 
 
+CHOICES = ("model", "effort", "fast")  # what the composer's chip chooses for main (models.main in the settings)
+
+
+def chosen(choice: dict[str, Any] | None) -> dict[str, Any]:
+    """Main's choices, as the settings keep them (models.main) or as just made, the way main's `attached` holds them
+    for the composer's chip: model_choice, effort_choice and fast_choice."""
+    return {f"{k}_choice": v for k, v in (choice or {}).items() if k in CHOICES}
+
+
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
-           config_dir: str | None = None, *, effort: str | None = None) -> Live | None:
+           config_dir: str | None = None, *, effort: str | None = None,
+           choice: dict[str, Any] | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
     unset, None for not known). `attached.settings_effort` is the effort main runs at while the composer chose none, for
     the composer's chip: `effort`, which the server's runtime gives (runtime.Space.attach), else the analyst's own
-    (cc_settings.analyst_effort)."""
+    (cc_settings.analyst_effort). A new session's `attached` holds `choice` too (chosen), what the settings keep for main
+    (models.main), which main's turns run with: a new chat's chip shows them before its first reply."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
@@ -648,7 +659,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
         own = effort or (cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None)
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since,
-                            **({"settings_effort": own} if own else {})}
+                            **({"settings_effort": own} if own else {}), **chosen(choice)}
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
@@ -714,7 +725,7 @@ def main_mode(c: str) -> str | None:
 
 def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
     """After a restart, or when a session followed before is attached again: the session's subagent chats and threads'
-    forks
+    forks, and the forks the server started for a chat of its own (_restore_own),
     are picked up where their files are, finished ones as done so _scan_subs matches them to their chats. Each file
     is
     read on from its kept place first, before main's transcript; a file with no kept place starts at its start when
@@ -747,6 +758,7 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
                 sub.workflow = True
                 sub.workflow_dir = _workflow_dir(lv, meta["workflow_dir"])
             lv.subs.append(sub)
+        _restore_own(lv, meta)
     if not lv.subs:
         return
     _scan_subs(lv, replay=False, places=kept)
@@ -1333,9 +1345,10 @@ def handback_report(body: str) -> str:
 def visible(text: str) -> str:
     """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
     token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY,
-    and with the citations written as Markdown links for the terminal in their chat form (cite.from_links)."""
+    and with its citations in their chat form (cite.chat_form): those written as Markdown links for the terminal, and
+    a card's value cited in the older form as a mark, which the citation check reads (marks.turn_ended)."""
     m = END_RE.search(text)
-    text = cite.from_links(text[: m.start()].rstrip() if m else text)
+    text = cite.chat_form(text[: m.start()].rstrip() if m else text)
     if TERMINAL_ONLY not in text:
         return text
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
@@ -1632,17 +1645,45 @@ def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
 
 
 _own: dict[tuple[str, str], tuple[str, str]] = {}  # (workspace, agent id) → (chat, role) of a fork follow() names
+OWN_FORKS = "forks"  # in a chat's meta: the agent ids of the forks follow() names for it, oldest first
 
 
 def follow(c: str, agent_id: str, chat: str, role: str) -> None:
     """A fork the server started for a chat of its own (a fix's fixer, fixes.fixer_chat): the mirror reads its
-    transcript into that chat whenever it finds the file, never into main's, and shows none of its prompts."""
+    transcript into that chat whenever it finds the file, never into main's, and shows none of its prompts. The chat's
+    meta keeps the fork's id (OWN_FORKS), so the next server knows the file too (_restore_own)."""
     _own[(c, agent_id)] = (chat, role)
+    try:
+        agents.change_meta(c, chat, lambda m: m.update({OWN_FORKS: [*(a for a in _forks(m) if a != agent_id),
+                                                                   agent_id]}))
+    except Exception:  # noqa: BLE001 — this server follows the fork all the same
+        log.warning("%s: chat %s does not keep its fork %s", c, chat, agent_id, exc_info=True)
     lv = _live.get(c)
     if lv is None or _sub_by(lv, agent_id=agent_id) is not None:
         return
     lv.subs.append(_own_sub(lv, agent_id))
     lv.wake.set()
+
+
+def _forks(meta: dict) -> list[str]:
+    """The agent ids a chat's meta keeps of the forks follow() named for it (OWN_FORKS)."""
+    got = meta.get(OWN_FORKS)
+    return [a for a in got if isinstance(a, str) and a] if isinstance(got, list) else []
+
+
+def _restore_own(lv: Live, meta: dict) -> None:
+    """After a restart: the file of each fork the server started for the chat (OWN_FORKS) goes to that chat. Without
+    this, the new server, which knows no fork it did not start, took the file for a subagent of main's: a new agent chat
+    whose card in main ran on for good. A fork is still at work only when this server started it and the chat says it
+    runs."""
+    for aid in _forks(meta):
+        if _sub_by(lv, agent_id=aid) is not None:
+            continue
+        mine = (lv.c, aid) in _own
+        _own[(lv.c, aid)] = (str(meta["id"]), str(meta.get("role") or ""))
+        sub = _own_sub(lv, aid)
+        sub.done = not (mine and aid == meta.get("agent_id") and meta.get("status") == "running")
+        lv.subs.append(sub)
 
 
 def _own_sub(lv: Live, agent_id: str) -> Sub:

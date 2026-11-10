@@ -1,7 +1,8 @@
 """The texts both modes read: a text of plugin/prompts whose entry in plugin/prompts/registry.mjs names a reader in the
-terminal and one in the workbench. Each mode reads such a text the same, but for its own words in the slots of
-plugin/prompts/slots.json; no other text a model reads holds a copy of one; each slot gives each mode a name or a
-clause, and is used; and each mode's reader still loads the text. A failure names the file, quotes the words and says
+terminal and one in the workbench, or that each mode reads in a text that includes it (thimble.md, which the terminal's
+guidance and the workbench's preamble.md include). Each mode reads such a text the same, but for its own words in the
+slots of plugin/prompts/slots.json; no other text a model reads holds a copy of one; each slot gives each mode a name or
+a clause, and is used; and each mode's reader still loads the text. A failure names the file, quotes the words and says
 how to fix it."""
 from __future__ import annotations
 
@@ -26,12 +27,12 @@ RUN = 20
 TEXT_GLOBS = ("browser/prompts/**/*.md", "plugin/prompts/*.md", "plugin/commands/*.md", "plugin/skills/**/*.md")
 CODE_ROOTS = ("browser/backend/app", "plugin")
 NOT_CODE = {"node_modules", ".venv", "__pycache__", "test", "tests", "tests_public"}
-# The copies of today, (file, text): the workbench's Heads up and Explainers checks over a document say what the lenses
-# say, word for word (test_prompts.py holds them equal), until they are made from the lenses. A pair whose copy is gone
-# fails too, so the list only shrinks.
-KNOWN_COPIES = {("browser/prompts/checks/explainers.md", "lens-explain"),
-                ("browser/prompts/checks/heads-up.md", "lens-heads")}
+# The copies of today, (file, text). A pair whose copy is gone fails too, so the list only shrinks. The view builder's
+# principles (dev-view.md) are the five principles of main's Cards, which guidance-cards.md holds, written for a view.
+KNOWN_COPIES: set[tuple[str, str]] = set()
 WORD = re.compile(r"[A-Za-z0-9']+")
+INCLUDE = re.compile(r"\{\{include:([a-z0-9-]+)\}\}")  # a plugin text's include of another
+PLUGIN_INCLUDE = re.compile(r"\{\{include:plugin:([a-z0-9-]+)\}\}")  # a workbench prompt's include of a plugin text
 SLOT = re.compile(r"\{\{([A-Z_]+)\}\}")
 
 NODE = """
@@ -42,8 +43,7 @@ import { TEXTS } from %(registry)s
 const slots = Object.keys(JSON.parse(readFileSync(%(slots)s, 'utf8')))
 const marked = Object.fromEntries(slots.map(k => [k, { terminal: `\\u27e6${k}\\u27e7`, browser: `\\u27e6${k}\\u27e7` }]))
 const renders = {}
-for (const [name, t] of Object.entries(TEXTS)) {
-  if (!t.terminal || !t.browser) continue
+for (const name of Object.keys(TEXTS)) {
   try { renders[name] = await textOf(name, 'terminal', marked) } catch (e) { renders[name] = { error: e.message } }
 }
 process.stdout.write(JSON.stringify({ texts: TEXTS, lenses: LENSES.map(l => l.feature), renders }))
@@ -52,8 +52,10 @@ process.stdout.write(JSON.stringify({ texts: TEXTS, lenses: LENSES.map(l => l.fe
 
 @pytest.fixture(scope="module")
 def registry() -> dict:
-    """The registry's texts, the texts the look's lenses read, and each shared text as the terminal reads it with a
-    marker, `\u27e6NAME\u27e7`, in each slot of slots.json (plugin/prompts/node.mjs), or the error of reading it."""
+    """The registry's texts, the texts the look's lenses read, the shared texts, and each text as the terminal reads it
+    with a marker, `\u27e6NAME\u27e7`, in each slot of slots.json (plugin/prompts/node.mjs), or the error of reading it.
+    A mode reads the texts its readers load and each text they include, and the workbench also the texts its prompts
+    include."""
     urls = {k: json.dumps(str((PLUGIN / p).as_uri())) for k, p in (
         ("lenses", "observer/lenses.mjs"), ("node", "prompts/node.mjs"), ("registry", "prompts/registry.mjs"))}
     done = subprocess.run(["node", "--input-type=module", "-e", NODE % {**urls, "slots": json.dumps(str(SLOTS))}],
@@ -61,7 +63,21 @@ def registry() -> dict:
     assert done.returncode == 0, ("plugin/prompts/registry.mjs or plugin/prompts/slots.json does not read in Node: "
                                   f"{done.stderr.strip()[-600:]}")
     got = json.loads(done.stdout)
-    got["shared"] = sorted(got["renders"])
+
+    def read(names) -> set[str]:
+        out, todo = set(), list(names)
+        while todo:
+            name = todo.pop()
+            if name not in out and name in got["texts"]:
+                out.add(name)
+                todo += INCLUDE.findall((PLUGIN / "prompts" / f"{name}.md").read_text("utf-8"))
+        return out
+
+    terminal = read(n for n, t in got["texts"].items() if t.get("terminal"))
+    browser = read([*(n for n, t in got["texts"].items() if t.get("browser")),
+                    *(n for f in sorted((REPO / "browser" / "prompts").rglob("*.md"))
+                      for n in PLUGIN_INCLUDE.findall(f.read_text("utf-8")))])
+    got["shared"] = sorted(terminal & browser)
     return got
 
 
@@ -240,25 +256,30 @@ def test_each_slot_gives_each_mode_a_name_or_a_clause_and_is_used(registry):
 
 
 # How a reader loads a text by its name, by the reader's kind of file: the hooks module with promptText, Node with
-# textOf and the workbench's Python with prompts' `plugin:<name>`; and how it loads a lens's text, by the lens's
-# `feature`.
+# textOf, the workbench's Python with prompts' `plugin:<name>`, and a text that includes it with `{{include:<name>}}`,
+# in the workbench `{{include:plugin:<name>}}`; and how it loads a lens's text, by the lens's `feature`.
 LOADS = {".ts": ("promptText($, '{name}')", "promptText($, lens.feature)"),
          ".mjs": ("textOf('{name}'", "textOf(lens.feature"),
-         ".py": ('"plugin:{name}"', None)}
+         ".py": ('"plugin:{name}"', None),
+         ".md": ("{{{{include:{plugin}{name}}}}}", None)}
 
 
 def test_each_mode_s_reader_still_loads_its_shared_texts(registry):
-    """Each reader the registry names for a shared text loads it by its name with its mode's loader, or, for a lens's
-    text, by the lens's `feature`, as both modes read the look's lenses (plugin/observer/lenses.mjs)."""
+    """Each reader the registry names for a shared text loads it by its name with its mode's loader, or includes it, or,
+    for a lens's text, loads it by the lens's `feature`, as both modes read the look's lenses
+    (plugin/observer/lenses.mjs). A text that only other texts include may name no reader: its readers are theirs."""
     bad = []
     for name in registry["shared"]:
         for mode in MODES:
-            reader = registry["texts"][name][mode]
+            reader = registry["texts"][name].get(mode)
+            if not reader:
+                continue
             path = PLUGIN / reader if mode == "terminal" else REPO / reader
             src = path.read_text("utf-8") if path.is_file() else ""
             by_name, by_lens = LOADS.get(path.suffix, ("{name}", None))
-            if by_name.format(name=name) not in src and not (by_lens and name in registry["lenses"] and by_lens in src):
-                bad.append(f"{path.relative_to(REPO)} holds no {by_name.format(name=name)}, so it does not load "
+            by_name = by_name.format(name=name, plugin="plugin:" if mode == "browser" else "")
+            if by_name not in src and not (by_lens and name in registry["lenses"] and by_lens in src):
+                bad.append(f"{path.relative_to(REPO)} holds no {by_name}, so it does not load "
                            f"plugin/prompts/{name}.md, which the registry names it the {mode}'s reader of: load the "
                            "text by its name with its mode's loader, or name the module that reads it in "
                            "plugin/prompts/registry.mjs.")

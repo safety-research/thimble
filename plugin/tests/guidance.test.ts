@@ -64,7 +64,7 @@ async function thimbleText($: Any, w: World): Promise<string> {
   return carried[0]
 }
 
-test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", { options: { citations: 'auto cite' } }, async ($, on) => {
+test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", { options: { citations: 'auto' } }, async ($, on) => {
   const w = world(on)
   expect(await thimbleText($, w)).toBe(GUIDANCE.trim())
   expect(await ask($, w, 'And why?')).toEqual([])
@@ -73,4 +73,15 @@ test("the first prompt carries guidance.md's text beside it, the next prompts do
   w.messages = [{ role: 'user', content: [{ type: 'text', text: 'Summary: the analyst asked which runs failed; thimble is on in this folder.' }] }]
   expect(await ask($, w, 'And why?')).toEqual([GUIDANCE.trim()])
   expect(await ask($, w, 'Show me one.')).toEqual([])
+})
+
+test('only the newest copy counts: an older copy holds the text (Cards on demand), a newer one says cards are off, so with Cards auto the next prompt carries the text again, once', { options: { citations: 'auto' } }, async ($, on) => {
+  const w = world(on)
+  const asked = (text: string, context: string) => ({ role: 'user', content: [{ type: 'text', text }, { type: 'text', text: `<system-reminder>\nprompt.submit hook additional context: ${context}\n</system-reminder>` }] })
+  const answer = { role: 'assistant', content: [{ type: 'text', text: 'A made-up answer.' }] }
+  const cardsOff = `${GUIDANCE.replace(/## Cards\n\n[^\n]*\n\n/, '').trim()}\n\nCards are off, so draw no cards.`
+  // Cards was on demand, then off, and is auto now
+  w.messages = [asked('Which runs failed?', `${GUIDANCE.trim()}\n\nDraw a card only when the analyst asks for one.`), answer, asked('And why?', cardsOff), answer]
+  expect(await ask($, w, 'Show me one.')).toEqual([GUIDANCE.trim()])
+  expect(await ask($, w, 'And the next?')).toEqual([])
 })

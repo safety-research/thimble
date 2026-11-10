@@ -18,9 +18,6 @@
 //
 //   turnsNow($), turnOf($, id), turnOfRow($, row), messageOf($, row), textRows($)   the records
 //   answerRows($), latestAnswer($)    each answered turn's answer row, oldest first; the newest
-//   actingRow($), pickAnswer($, row), stepAnswer($, dir)   the answer the keys act on: the one the person picked with
-//                                     { and } (answerStepKey) or by opening one of its marks, else the newest; a new
-//                                     turn of main's gives the keys back to its answer (s squeezes the newest alone)
 //   sinceLast($)                      since the person's last prompt: the prompt, Claude's text rows, the answers
 //   expectPrompt(text)                a prompt of thimble's own that Claude reads as the person's, whose turn is theirs
 //   holdAnswers($, held), answersNothing($, turnId)   turns that answer nothing: every turn while answers are held
@@ -34,7 +31,7 @@ import { callOf, metaOf } from '../cards/store'
 import { keptDir } from './env'
 import { safeName } from './layout.mjs'
 import { mainTurn } from './turn'
-import { labelCommands, sinceLastPrompt, stepFrom } from './answers.mjs'
+import { labelCommands, sinceLastPrompt } from './answers.mjs'
 
 type Engine = EngineInterface
 
@@ -43,7 +40,8 @@ type Engine = EngineInterface
 export type Prompt = { text: string; by: string; row: string | null; command?: string }
 export type LabelUse = { name: string; args: string[]; toolUseId: string; seq: number; ok: boolean }
 /** A card a card call of the turn drew: `after`, how many of the turn's text rows stand above it (the card draws at
- *  its call; a version drawn in an earlier call's place keeps that place). */
+ *  its call, unless a reply places it on a line of its own, cards/store.ts CardMeta.inRow; a version drawn in an
+ *  earlier call's place keeps that place). */
 export type CardUse = { id: string; toolUseId: string; seq: number; after?: number }
 export type TurnRec = {
   turnId: string; n: number; prompt: Prompt; rows: string[]; answer: string | null; reason: string | null
@@ -55,7 +53,6 @@ const TURN = { plugin: 'thimble', key: 'answerTurn' } as const
 const TURNS = { plugin: 'thimble', key: 'answerTurns' } as const
 const MSG = { plugin: 'thimble', key: 'answerMsg' } as const
 const ROWTURN = { plugin: 'thimble', key: 'answerRowTurn' } as const
-const SEL = { plugin: 'thimble', key: 'answerSel' } as const
 const HELD = { plugin: 'thimble', key: 'answersHeld' } as const
 
 const PROMPT_MAX = 4000
@@ -147,33 +144,6 @@ export async function answerRows($: Engine): Promise<string[]> {
 
 export async function latestAnswer($: Engine): Promise<string | null> {
   return (await answerRows($)).at(-1) ?? null
-}
-
-/** The answer the keys act on: the one the person picked ({ }), while it is an answer, else the newest. */
-export async function actingRow($: Engine): Promise<string | null> {
-  const sel = (await $.state.get(SEL)).value as string | null | undefined
-  const all = await answerRows($)
-  return sel && all.includes(sel) ? sel : all.at(-1) ?? null
-}
-
-/** Whether the person picked an answer other than the newest for the keys. */
-export async function pickedRow($: Engine): Promise<string | null> {
-  const sel = (await $.state.get(SEL)).value as string | null | undefined
-  return sel && sel !== (await latestAnswer($)) && (await answerRows($)).includes(sel) ? sel : null
-}
-
-/** The keys act on `row` (null: the newest answer again). */
-export async function pickAnswer($: Engine, row: string | null): Promise<void> {
-  await $.state.set(SEL, row && row !== (await latestAnswer($)) ? row : null)
-}
-
-/** The keys act on the answer before (-1) or after (1) the one they act on now; the row now, or null when there is
- *  none that way (nothing changes then). */
-export async function stepAnswer($: Engine, dir: number): Promise<string | null> {
-  const next = stepFrom(await answerRows($), await actingRow($), dir)
-  if (!next) return null
-  await pickAnswer($, next)
-  return next
 }
 
 /** Since the person's last prompt: that prompt, Claude's text rows after it, and the answers among them. */
@@ -321,30 +291,11 @@ export async function restoreAnswers($: Engine, all = false): Promise<void> {
   })
 }
 
-/** A /clear or a /resume (hooks/turnover.ts): the answers are the new conversation's, none of the earlier one's; the
- *  keys act on its newest. */
+/** A /clear or a /resume (hooks/turnover.ts): the answers are the new conversation's, none of the earlier one's. */
 export async function turnAnswers($: Engine): Promise<void> {
   waiting = []
   await $.state.set(TURNS, [])
-  await $.state.set(SEL, null)
   await restoreAnswers($, true)
-}
-
-// ------------------------------------------------------------------------------------------------ the keys { }
-
-/** { and } at an empty prompt, while there are two answers or more: the keys act on the answer before or after the one
- *  they act on now (the newest gives them back to the latest turn). (hooks/keys.ts asks.) */
-export async function answerStepKey($: Engine, key: string): Promise<{ now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
-  if (key !== '{' && key !== '}') return null
-  if ((await answerRows($)).length < 2) return null
-  const was = (await $.state.get(SEL)).value as string | null | undefined
-  return {
-    now: async () => {
-      const row = await stepAnswer($, key === '{' ? -1 : 1)
-      if (row) await $.ui.scroll({ to: { key: `ans-${row}` }, block: 'nearest' }).catch(() => undefined)
-    },
-    undo: () => $.state.set(SEL, was ?? null),
-  }
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
@@ -415,8 +366,6 @@ export const registerAnswers: Register = on => {
         const text = String(e.text || '').slice(0, PROMPT_MAX)
         const p = takeWaiting(text) ?? { text, by: text ? 'unknown' : 'continuation', row: null }
         await newTurn($, e.turnId, p)
-        // a new turn of main's: the keys act on its answer
-        await $.state.set(SEL, null)
       } catch {
         // the turn runs whatever the record makes of it
       }

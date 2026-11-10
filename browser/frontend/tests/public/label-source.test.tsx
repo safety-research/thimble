@@ -39,8 +39,8 @@ test('a label card names a rule over the data apart from a model prompt, with wh
   // a trial, and a label not run yet
   expect(labelIdentity({ kind: 'prompt', unit: 'record', glob: 'a.jsonl', n_labeled: 40, counts: {}, trial: true }).where).toBe('over a sample of 40 records in a.jsonl')
   expect(labelIdentity({ kind: 'regex', unit: 'record', glob: 'a.jsonl', counts: {} }).where).toBe('in a.jsonl')
-  // a label over canvas cards
-  expect(labelIdentity({ kind: 'prompt', unit: 'cell', n_labeled: 3, counts: {} }).where).toBe('over 3 cards on the canvas')
+  // a label over the report's sentences
+  expect(labelIdentity({ kind: 'prompt', unit: 'span', n_labeled: 3, counts: {} }).where).toBe('over 3 sentences in the report')
 })
 
 test('the class switches are headed "Highlight in Files", which says they color values and change nothing of the label', async () => {

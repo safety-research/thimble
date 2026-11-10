@@ -72,12 +72,12 @@ function Wrapped({ text }: { text: string }) {
 }
 
 /** The agents of thimble's that main's quit stopped (route `subagent`, stopped by `quit`), as the card names them: the
- * writer of a document, a check; '' when none. Pure. */
+ * writer of a document, the comments agent of a check; '' when none. Pure. */
 export function stoppedAgentsLine(metas: Iterable<ChatMeta>): string {
   const names: string[] = []
   for (const m of metas) {
     if (m.route !== 'subagent' || m.status !== 'stopped' || m.stopped_by !== 'quit') continue
-    const name = m.role === 'writer' ? (m.doc ? `the writer of the ${m.doc}` : 'a writer') : m.role === 'check' ? (m.title ? `the ${m.title} check` : 'a check') : m.title || 'an agent'
+    const name = m.role === 'writer' ? (m.doc ? `the writer of the ${m.doc}` : 'a writer') : m.role === 'check' ? (m.title ? `the comments agent “${m.title}”` : 'a comments agent') : m.title || 'an agent'
     if (!names.includes(name)) names.push(name)
   }
   if (!names.length) return ''

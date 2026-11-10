@@ -7,12 +7,16 @@
 // simplifies its answer when it ends; an answer rewritten in place in an earlier release shows its original again when
 // s simplifies it; the row stays whole while a version is written; a choice at its end stays in its place, dim, and its
 // key does nothing; a letter right after a choice undoes it, and a click on a choice does what its key does; there is
-// no + choice and no /rewrite; a simpler version kept before very short was added keeps its levels. All data is made
-// up.
+// no + choice and no /rewrite; a simpler version kept before very short was added keeps its levels; with Citations
+// manual, the words the analyst cited with c are citations of the original a simpler version is written from, and a
+// version that keeps them shows no warning; with Citations auto, a version that changes a cited value says so.
+// All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { noteViewport } from '../cards/draw'
 import { accent } from '../core/theme'
+import { ASKED_HEAD, CITING } from '../squeeze/chips.mjs'
 import { resetSqueeze } from '../squeeze/term'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
@@ -111,7 +115,7 @@ const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key chang
 const SHORT = 'The build failed on [3 of 12](#) runs: the cache key changed.'
 const ROW = '1 shorter · 2 longer · 3 explain more · 4 assume more · 0 hide'
 
-test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 hides it with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('s writes a simpler version below the answer in one press, at Length short and Background learning, with its row of choices; 2 asks one more call, Claude hears it with the next prompt, s brings it into view, and 0 hides it with no call', { options: { citations: 'auto' } }, async ($, on) => {
   const t = await setup($, on, [SHORT, 'The build failed on [3 of 12](#) runs, because the cache key changed when the lockfile moved, in more words.'])
   await t.turn('t1', LONG)
   expect(await t.bar()).toContain('s simplify')
@@ -182,7 +186,7 @@ function simplifyWords(n: Any): Any {
   return null
 }
 
-test('s simplify stands right after v visualize; pressed, it stays on the bar, lit, while the first version is on its way, and goes once that version shows with its row', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('s simplify stands right after v visualize; pressed, it stays on the bar, lit, while the first version is on its way, and goes once that version shows with its row', { options: { citations: 'auto' } }, async ($, on) => {
   let give: (text: string) => void = () => {}
   const t = await setup($, on, [new Promise<string>(r => { give = r })])
   await t.turn('t1', LONG)
@@ -425,4 +429,54 @@ test('a simpler version kept before very short was added keeps its levels: its v
   await t.clock.advance(5000)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('Old short.')
   expect(t.asked.length).toBe(0)
+})
+
+// an answer as main writes it with Citations manual: it cites nothing
+const PLAIN = 'The nightly build failed on 3 of 12 runs over 36 nights. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
+
+test("with Citations manual, the words the analyst cited with c are citations of the original that a simpler version is written from, named in its request, and Simplify's words on citing are left out; a version that keeps the analyst's citation shows no warning", { options: { citations: 'manual' } }, async ($, on) => {
+  noteViewport({ isFullscreen: true })
+  const selected: Any[] = []
+  on('ui.selection', () => ({ value: selected.at(-1) }) as never)
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-1' }) as never)
+  on('agent.list', () => ({ value: [] }))
+  const t = await setup($, on, ['The build failed on [3 of 12 runs](#), because the cache key changed.'])
+  await t.turn('t1', PLAIN)
+  // the analyst selects "3 of 12 runs" and presses c: a citation of the answer, its check started
+  selected.push({ text: '3 of 12 runs', requestId: 'row-t1' })
+  await t.press('c')
+  await t.clock.advance(100)
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  const sent = JSON.stringify(t.asked[0])
+  // the original holds the analyst's citation as Claude's own are written, and the request names it, for the version
+  // to keep on its words
+  expect(sent).toContain('The nightly build failed on [3 of 12 runs](#) over 36 nights.')
+  expect(sent).toContain(JSON.stringify(`${ASKED_HEAD}\n- [3 of 12 runs](#)`).slice(1, -1))
+  // Claude cites nothing on its own: Simplify's principle on citations and its new numbers cited are left out
+  expect(sent).not.toContain(CITING)
+  expect(sent).not.toContain('cite each new number')
+  expect(sent).toContain('- **Take every number.**')
+  const host = textOf(await $.ui.render(answer('row-t1', PLAIN)))
+  expect(host).toContain('because the cache key changed')
+  expect(host).not.toContain('! this version')
+})
+
+test("with Citations auto, Simplify keeps its words on citing, each new number cited, and a version that changes a value the original cites says so under it", { options: { citations: 'auto' } }, async ($, on) => {
+  const cited = 'The nightly build failed on [26 runs](#) over 36 nights. The cache key changed when the lockfile moved, so every run fetched again.'
+  const t = await setup($, on, ['The build failed on [36 runs](#), because the cache key changed.'])
+  await t.turn('t1', cited)
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  const sent = JSON.stringify(t.asked[0])
+  expect(sent).toContain('The nightly build failed on [26 runs](#) over 36 nights.')
+  expect(sent).toContain(CITING)
+  expect(sent).toContain('- **Take every number, and cite each new number.**')
+  expect(sent).not.toContain('Words the analyst cited')
+  const host = textOf(await $.ui.render(answer('row-t1', cited)))
+  expect(host).toContain('because the cache key changed')
+  expect(host).toContain('! this version says "36 runs" where the original answer says "26 runs"')
 })

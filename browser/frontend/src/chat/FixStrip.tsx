@@ -1,7 +1,6 @@
-// thimble fix in the chat (backend fixes.py, chat/fix.ts):
-//   FixWorking  the row above the composer while Claude fixes the person's thimble and the kernel checks the fix: what it
-//               fixes and for how long so far. The person keeps working. The fixer itself is main's subagent, a card
-//               where main started it (Rows, AgentCard), whose thread shows its whole run.
+// thimble fix in the chat (backend fixes.py, chat/fix.ts). While Claude fixes the person's thimble and the kernel
+// checks the fix, the fixer shows as a side thread does: a line in main's chat where main started it, with its thread's
+// chip and a spinner while it works (Rows, FixLine), and the thread shows its whole run. The person keeps working.
 //   FixResult   how the fix ended, a row of main's chat and of the fix's thread at the time it ended (the server's `fix`
 //               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble
 //               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
@@ -21,7 +20,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { servedBuild, thisBuild } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
-import { askClaudeText, changedLines, fixActions, fixText, reloading, STATE_WORDS, triedLines, working, workingText, type FixAction, type FixRow } from './fix'
+import { askClaudeText, changedLines, fixActions, fixText, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow } from './fix'
 import { offerDraft } from './pending'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
@@ -63,26 +62,6 @@ function useFixes(onBack?: () => void): [FixRow[], () => void] {
 
 function failText(what: string, e: Error): string {
   return `${what} didn't work: ${e.message.replace(/^\d{3}\s+/, '')}`
-}
-
-/** The row above the composer while Claude fixes the person's thimble. */
-export function FixWorking() {
-  const [rows] = useFixes()
-  const row = rows.find(working) ?? null
-  const [, tick] = useState(0)
-  const on = row !== null
-  useEffect(() => {
-    if (!on) return
-    const t = window.setInterval(() => tick((n) => n + 1), 1000)
-    return () => window.clearInterval(t)
-  }, [on])
-  if (!row) return null
-  return (
-    <div className="chat-fix" role="status" data-fix={row.id} data-kind="working" data-phase={row.phase ?? undefined}>
-      <Spinner size={12} className="chat-fix-ico" />
-      <span className="chat-fix-text">{workingText(row)}</span>
-    </div>
-  )
 }
 
 /** The page after the person's click put a fix on or took it off: once the server is back from its restart, the page

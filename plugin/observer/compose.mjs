@@ -3,7 +3,8 @@
 //
 // A lens's fragment (prompts/lens-<name>.md) has up to three kinds of section, split by a comment line:
 //   its instructions first (what it gives, its principles, its examples, its part of the reply);
-//   `<!-- digest -->`, the template of what it needs to know of the state, filled by the lens's digest();
+//   `<!-- digest -->`, the template of what it needs to know of the state, filled by the lens's digest() (none when
+//   that gives null);
 //   `<!-- when NAME -->`, a rule that holds this time when the lens's when() names it (a backoff, a quiet turn).
 // composeSystem: the frame (prompts/observer.md) with every enabled lens's instructions at {{LENSES}} (and the reply's
 // skeleton at {{SKELETON}}, where the frame has it). composeTurn: the turn template (prompts/observer-turn.md) with its
@@ -53,10 +54,14 @@ export function composeSystem(frame, parts) {
   return { text, chars, shared: Math.max(0, shared) }
 }
 
+/** The turn without its sections that are empty this time: the coverage where there is none (the workbench), what
+ *  thimble already gave where no lens has a digest. */
+const withoutEmpty = text => text.split(/(?=^## )/m).filter(s => !/^## [^\n]*\s*$/.test(s)).join('')
+
 /**
  * The pass's message: the turn template filled, with each lens's digest and its rules this turn. Returns {text, chars:
  * {lens: characters of its digest and rules}, shared}.
- * @param {string} template  @param {Record<string, unknown>} vals  the turn's values (MESSAGES, OBJECTS, COVERAGE, ...)
+ * @param {string} template  @param {Record<string, unknown>} vals  the turn's values (MESSAGES, COVERAGE, ...)
  * @param {{lens: any, text: string}[]} parts  @param {any} st  the state the digests read
  */
 export function composeTurn(template, vals, parts, st) {
@@ -66,8 +71,9 @@ export function composeTurn(template, vals, parts, st) {
   for (const p of parts) {
     const s = sectionsOf(p.text)
     let n = 0
-    if (s.digest) {
-      const d = fill(s.digest, p.lens.digest(st) || {})
+    const v = s.digest ? p.lens.digest(st) : null
+    if (v) {
+      const d = fill(s.digest, v)
       digests.push(d)
       n += d.length + 2
     }
@@ -78,7 +84,7 @@ export function composeTurn(template, vals, parts, st) {
     }
     chars[p.lens.name] = n
   }
-  const text = fill(template, { ...vals, DIGEST: digests.join('\n\n'), RULES: rules.length ? `\n${rules.join('\n\n')}\n` : '' })
+  const text = withoutEmpty(fill(template, { ...vals, DIGEST: digests.join('\n\n'), RULES: rules.length ? `\n${rules.join('\n\n')}\n` : '' }))
   const shared = text.length - Object.values(chars).reduce((s, n) => s + n, 0)
   return { text, chars, shared: Math.max(0, shared) }
 }

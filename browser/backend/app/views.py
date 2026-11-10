@@ -2186,10 +2186,10 @@ def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str,
 
 
 # ----------------------------------------------------------------------------------------------------------
-# the forms the model learns ({{forms}} in prompts/shared.md, and the view tools' results)
+# the forms the model learns ({{forms}} in prompts/refs.md, and the view tools' results)
 # ----------------------------------------------------------------------------------------------------------
 
-FORM_PAD = 44  # the width of the description column in shared.md's table of forms
+FORM_PAD = 44  # the width of the description column in refs.md's table of forms
 
 
 def view_forms(view: dict[str, Any]) -> list[tuple[str, str]]:
@@ -2207,7 +2207,7 @@ def view_forms(view: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 def forms_text(c: str | None) -> str:
-    """The rows of shared.md's table of forms that the workspace's views add, one per form ('' for none). A built-in
+    """The rows of refs.md's table of forms that the workspace's views add, one per form ('' for none). A built-in
     viewer's
     forms are listed only where the corpus holds a file it claims."""
     rows: list[str] = []

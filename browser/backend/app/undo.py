@@ -45,10 +45,11 @@ CARD_FIELDS = ("title", "slug", "code", "payload", "text", "labels", "takeaway",
 # undo or redo shows the drawing of the code it restores. The browser saves code before running it, so card_ran fills in
 # the step's after side once that run lands. The labels' revisions a run read go with its outputs.
 RUN_FIELDS = ("outputs", "status", "label_revs")
-# a document's keys that are not its text: a write that changes only these is not a step
+# a document's keys that are not its text: a write that changes only these is not a step, such as the write that
+# opens a writer run's draft (report_types.open_run_draft)
 DOC_VOLATILE = {"comments", "locked", "lock_reverts", "generation", "generated_at", "verified", "verified_at", "snapshot",
                 "model", "written_by", "words", "title_ok", "history", "tags", "tag_notes", "rewritten_at", "status",
-                "partial", "ts", "by", "actor", "was_on"}
+                "partial", "ts", "by", "actor", "was_on", "writer_run", "revision", "instructions", "what_changed"}
 
 _APPLYING: contextvars.ContextVar[bool] = contextvars.ContextVar("thimble_undo_applying", default=False)
 # (THIMBLE_SESSION, the task running the call) of a session's tool call (acting_session); the session holds only in the
@@ -280,11 +281,11 @@ def _running(c: str, stack: list[dict[str, Any]]) -> set[str]:
 
 
 def session_name(key: str) -> str:
-    """A THIMBLE_SESSION as the analyst reads it: the writer of the report, a check."""
+    """A THIMBLE_SESSION as the analyst reads it: the writer of the report, a check's comments agent."""
     kind, _, rest = str(key).partition(":")
     if kind == "writer":
         return f"the writer of the {rest}" if rest else "the writer"
-    return {"check": "a report check"}.get(kind, f"the session {key}")
+    return {"check": "a comments agent"}.get(kind, f"the session {key}")
 
 
 def _pick(c: str, stack: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:

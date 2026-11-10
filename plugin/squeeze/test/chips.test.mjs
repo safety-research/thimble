@@ -1,12 +1,14 @@
 // A squeeze's rewrite (squeeze/chips.mjs): the rewrite is held to the original's citations and numbers; a simpler
-// version's request names one message to make simpler, at Length short and Background learning; the choices under it
-// stop at each end and never land on the original; a record kept before very short was added keeps its levels.
-// Made-up data only.
+// version's request names one message to make simpler, at Length short and Background learning; Simplify's words on
+// citing come only while Claude cites its claims, and in manual and off the request names the analyst's citations; the
+// choices under it stop at each end and never land on the original; a record kept before very short was added keeps
+// its levels. Made-up data only.
 // node --test plugin/squeeze/test/chips.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { CATCHUP_HEAD, CHOICES, SCALE, SIMPLIFY_AT, SIMPLIFY_HEAD, checkRewrite, chipsOf, choiceAt, fromVersions, isSimplify, mapLinks, request, settledNote, upgradeSqueeze } from '../chips.mjs'
+import { ASKED_HEAD, CATCHUP_HEAD, CHOICES, CITING, SCALE, SIMPLIFY_AT, SIMPLIFY_HEAD, checkRewrite, chipsOf, choiceAt, fromVersions, isSimplify, mapLinks, request, settledNote, squeezeText, upgradeSqueeze } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -47,6 +49,31 @@ test("a simpler version's request names one message to make simpler, at Length s
   assert.match(note, /^Below your message \("Fixed test_checkout_total\. It failed in about 1 run…"\), which still shows as you wrote it/)
   assert.match(note, /Length: short, Background: learning/)
   assert.match(settledNote({ ...rec, shown: 'x', catchup: { ...rec.catchup, dismissed: true } }, 'cu:x:1'), /closed the simpler version/)
+})
+
+test("Simplify's words on citing come only while Claude cites; in manual and off, the request names the analyst's citations instead, and no level asks for a citation of Claude's own", () => {
+  const system = readFileSync(new URL('../../prompts/squeeze.md', import.meta.url), 'utf8')
+  const card = { id: 'c1a2b3c4d5', title: 'Runs by night', columns: ['night', 'runs'], sample: '{"night":1,"runs":3}', drawn: 'Runs by night', view: 'function view() {}' }
+  const rec = { id: 'r1#s', row: 'r1', text: TEXT.replace('[passed 200 times in a row](#)', 'passed 200 times in a row'), shown: null, squeeze: { at: { length: 3, familiarity: 1 } }, catchup: { host: 'r1', rows: ['r1'], replies: 1, kind: 'simplify' } }
+  // squeeze.md has the principle on citations that CITING names, and it is the one line that shows a citation
+  assert.equal(system.split('\n').filter(l => l.startsWith(CITING)).length, 1)
+  assert.doesNotMatch(squeezeText(system, false), /\]\(#\)/)
+  // while Claude cites (auto + verify, auto): the principle, and each new number cited
+  const auto = request(rec, { system, cards: [card] })
+  assert.ok(auto.system[0].text.includes(system.split('\n').find(l => l.startsWith(CITING))))
+  assert.match(auto.system[0].text, /a card or a card's rows, and cite each new number\.\*\*/)
+  assert.match(auto.prompt[1].text, /Add detail from the cards and their rows where it helps, each new number cited\./)
+  // in manual and off: no principle on citations, and no new number cited
+  const manual = request(rec, { system, cards: [card], cites: false })
+  assert.doesNotMatch(manual.system[0].text.split('## Your reply')[0], /citation/)
+  assert.doesNotMatch(manual.system[0].text, /cite each new number|\{\{/)
+  assert.match(manual.system[0].text, /a card or a card's rows\.\*\*/)
+  assert.match(manual.prompt[1].text, /Add detail from the cards and their rows where it helps\./)
+  assert.doesNotMatch(manual.prompt[1].text, /cited/)
+  assert.doesNotMatch(manual.prompt[0].text, /Words the analyst cited/)
+  // the words the analyst cited with c are named, as the original writes them
+  const asked = request({ ...rec, text: rec.text.replace('about 1 run in 9', 'about [1 run in 9](#)') }, { system, cards: [card], cites: false, asked: ['1 run in 9'] })
+  assert.ok(asked.prompt[0].text.includes(`${ASKED_HEAD}\n- [1 run in 9](#)`))
 })
 
 const choice = words => CHOICES.find(c => c.words === words)

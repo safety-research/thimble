@@ -29,16 +29,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR") or REPO_ROOT / "prompts").resolve()
 
 # The files a model call sends as they are rendered: main (the analyst session's system-prompt append), shared (rules
-# main's prompt includes), tools, dev, labels (the label classifier's system prompt), context
+# main's prompt includes), tools, dev, labels (a label's draft from the analyst's words), context
 # (what the context engine renders for writers and checks), card-check (card_check.py's calls), view-review
 # (the view reviewer's registered prompt, its `review` section), dev-view-review (a review run's prompt), dev-view-task
 # (a view build's prompt), dev-view-repair (what a repair's builder gets besides it), dev-view-change (a change to a
 # view, sent to its builder), dev-view-message (a message about a built view from its thread, sent to its builder),
 # dev-ticket-task (a code ticket's agent's prompt), file-viewer (the proposal of a viewer for a file type,
-# views.suggest) and thimble-fix (what main reads of the person's /thimble-fix, fixes.ask).
+# views.suggest), thimble-fix (what main reads of the person's /thimble-fix, fixes.ask) and thread (the workbench's own words on its threads, which a new fork of a
+# thread reads after the side thread's instructions, threads.fork_text).
 PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check", "view-review", "dev-view-review",
                 "dev-view-task", "dev-view-repair", "dev-view-change", "dev-view-message", "dev-ticket-task",
-                "file-viewer", "thimble-fix")
+                "file-viewer", "thimble-fix", "thread")
 # Agent definitions, in a plugin agent's form, that Claude Code gets with --agents instead of from plugin/agents/, where
 # main would also see them: the writer and the report check.
 AGENT_FILES = ("writer", "check")
@@ -331,7 +332,7 @@ def section(name: str, heading: str) -> str:
 
 def render_head(name: str, values: dict[str, str]) -> str:
     """render(name, values) of the part of `name` above its first `## ` heading, for a file whose `## ` sections are
-    sent apart (wiring.json's `mixed`), such as labels.md, whose sections fill its own slots."""
+    sent apart, such as the label classifier's text (plugin:labels), whose sections fill its own slots."""
     head, _ = _parts(load(name))
     return _fill(head, values, _norm(name))
 

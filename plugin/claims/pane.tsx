@@ -23,7 +23,7 @@
 //                        claim) · c the current citation's code and output whole · x repair the current citation
 //                        (the evidence hidden: its first failed one) when it failed (a check of it again in the background, marks/checker.ts
 //                        launchRepair, started in this feature's ui.press hook, seam.ts; while that check runs, x says so),
-//                        or x check the current citation when it was not checked yet (auto cite, manual: checkOpened)
+//                        or x check the current citation when it was not checked yet (auto, manual: checkOpened)
 //   A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit each, and Claude Code types any other
 //   letter into the prompt, the keyboard going with it; so a key shows while its press can still be expected (x after
 //   a repair began). f at rest finds the claims of the answers not read. The input under the pane asks about what is
@@ -83,8 +83,8 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 /** A run as a Text: its tone, bold, underline and inverse (the claim picked, on the map); cited words in evidence look as in the citations' card (citeWords,
  *  in hover group `id`); a citation (`cite`, its status) as citations look in the reply (wordsLook). */
 function spanOf(els: Any, r: Run, i: number, id: string): unknown {
-  // `gloss`: an explainer's term, in the explainers' fill as the reply draws it
-  const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossBg } : {}
+  // `gloss`: an explainer's term, in the explainers' faint fill, as the reply draws one at rest
+  const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossFaint } : {}
   return els.Text({
     key: `t${i}`, ...look(r.tone), ...bg, ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}), ...(r.inverse ? { inverse: true } : {}),
     ...(r.tint ? citeWords(id) : {}), ...(r.cite ? wordsLook(r.cite as MarkStatus, id) : {}), children: r.s,
@@ -248,7 +248,7 @@ export async function repairShown($: Engine): Promise<boolean> {
   // the evidence shown: the citation it shows; hidden: the claim's first failed citation (the failed ones come first)
   const at = a.open ? Math.max(0, Math.min(cites.length - 1, Number(a.cite) || 0)) : cites.findIndex(repairable)
   const s = cites[at]
-  // a citation not checked yet (auto cite, manual): x checks it, as opening it in the reply does
+  // a citation not checked yet (auto, manual): x checks it, as opening it in the reply does
   if (a.open && checkable(s)) { await checkOpened($, s.row, s.n); return true }
   const ok = repairable(s) ? await repairOk($, s) : null
   const r = ok ? await repairOf($, s.row, s.n) : null

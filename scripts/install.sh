@@ -19,7 +19,7 @@ usage() {
 Usage: install.sh [--no-browser] [--sign-in claude-code|api-key|wif] [--wif-file PATH] [--bin-dir DIR] [--ref REF]
                   [--local] [--remove-0.9]
 
-Installs thimble in ~/.thimble: the newest release, its plugin for Claude Code, and its browser workbench (about 1 GB).
+Installs thimble in ~/.thimble: the newest release, its plugin for Claude Code, and its browser workbench (about 2 GB).
 It checks first what thimble needs, and installs nothing while something is missing. Run it again at any time: an
 install in ~/.thimble stays as it is, with your fixes, and thimble update moves it to a newer release.
 
@@ -175,9 +175,10 @@ needs() {
   # every system has curl, so it is named only when it is missing; the dev install downloads no release
   [ "$local" = 1 ] || command -v curl >/dev/null 2>&1 || missing+=("curl: $(fix curl)")
   v=$(claude --version 2>/dev/null | awk '{print $1}') || v=""
-  if [ -n "$v" ] && ver_ge "$v" 2.1.314; then have+=("Claude Code $v")
-  elif [ -n "$v" ]; then missing+=("Claude Code 2.1.314 or later (the one here is $v): $(claude_update)")
-  else missing+=("Claude Code 2.1.314 or later: curl -fsSL https://claude.ai/install.sh | bash"); fi
+  claude_v=$v  # finish says whether the tour runs on it
+  if [ -n "$v" ] && ver_ge "$v" 2.1.307; then have+=("Claude Code $v")
+  elif [ -n "$v" ]; then missing+=("Claude Code 2.1.307 or later (the one here is $v): $(claude_update)")
+  else missing+=("Claude Code 2.1.307 or later: curl -fsSL https://claude.ai/install.sh | bash"); fi
   if [ "$web" = 1 ]; then
     v=$(uv --version 2>/dev/null | awk '{print $2}') || v=""
     if [ -n "$v" ] && ver_ge "$v" 0.8; then have+=("uv $v")
@@ -327,14 +328,19 @@ signin() {
 # runs the install (it sets CLAUDECODE for its commands), the file tour-next in thimble's home names that session and
 # the time, and thimble starts its tour there at the person's /reload-plugins (plugin/tour/tour.ts); the line that says
 # so comes last, on its own, since it is the one thing the person must do. In a terminal, it asks last whether to take
-# the tour now, and runs thimble tour on yes (plugin/engine/kernel/tour.py)
+# the tour now, and runs thimble tour on yes (plugin/engine/kernel/tour.py). The tour needs a Claude Code of tour_cc or
+# later, the first that places its rows ($.ui.place): on an older one nothing starts or offers it, and the line before
+# the last says what updates Claude Code.
 finish() {
-  local tour=0 answer reload=""
+  local tour=0 answer reload="" tour_cc=2.1.314 toured=1
+  ver_ge "$claude_v" "$tour_cc" || toured=0
   say ""
   say "$1."
   say ""
   if [ -n "${CLAUDECODE:-}" ]; then
-    if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] &&
+    if [ "$toured" = 0 ]; then
+      reload="Type /reload-plugins to enable thimble."
+    elif [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] &&
       printf '%s %s\n' "$CLAUDE_CODE_SESSION_ID" "$(date +%s)" >"$home/tour-next" 2>/dev/null; then
       reload="Type /reload-plugins to enable thimble and start the tour."
     else
@@ -342,18 +348,19 @@ finish() {
     fi
   else
     # in a terminal, the notes come first, so the question to take the tour stands right under how to try thimble
-    if terminal; then
+    if terminal && [ "$toured" = 1 ]; then
       tour=1
       if [ -s "$notes" ]; then cat "$notes"; say ""; fi
     fi
     say "Try it now: run claude in a folder of data files."
-    [ "$tour" = 1 ] || say "Take the two-minute tour: run thimble tour"
+    [ "$tour" = 1 ] || [ "$toured" = 0 ] || say "Take the two-minute tour: run thimble tour"
   fi
   if [ "$built" = 1 ]; then
     say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
       "it prints."
   fi
   if [ "$tour" = 0 ] && [ -s "$notes" ]; then say ""; cat "$notes"; fi
+  [ "$toured" = 1 ] || { say ""; say "The tour needs Claude Code $tour_cc or later (the one here is $claude_v): $(claude_update)."; }
   if [ -n "$reload" ]; then say ""; say "$reload"; fi
   [ "$tour" = 1 ] || return 0
   printf 'Take the two-minute tour now? [Y/n]: '
@@ -366,7 +373,7 @@ finish() {
 
 main() {
   # the options
-  web=1 local=0 remove09=0 sign_in="" wif_file="" asked="" bin_dir="$HOME/.local/bin"
+  web=1 local=0 remove09=0 sign_in="" wif_file="" asked="" bin_dir="$HOME/.local/bin" claude_v=""
   while [ $# -gt 0 ]; do
     case "$1" in
       -h | --help) usage; exit 0 ;;

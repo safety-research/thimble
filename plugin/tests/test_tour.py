@@ -5,6 +5,7 @@ All data is made up."""
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -69,6 +70,26 @@ def test_inside_claude_code_it_opens_nothing_and_names_the_command_there(started
     assert "/thimble:tour" in capsys.readouterr().err
 
 
+def test_on_a_claude_code_too_old_for_the_tour_it_opens_nothing_and_names_the_update(started, tmp_path, monkeypatch,
+                                                                                     capsys):
+    """The tour needs Claude Code 2.1.314 or later, the first that places its rows ($.ui.place); thimble itself runs on
+    older ones. On one of those it opens nothing and says what updates Claude Code; on 2.1.314 it opens Claude Code."""
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    monkeypatch.setenv("THIMBLE_CLAUDE", str(claude))
+    for version in ("2.1.311", "2.1.314"):
+        claude.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo "{version} (Claude Code)"\n')
+        claude.chmod(0o755)
+        if version == "2.1.311":
+            assert cli.main(["tour"]) == 1
+            assert "argv" not in started
+            assert ("the tour needs Claude Code 2.1.314 or later (the one here is 2.1.311). Update it with claude update"
+                    in capsys.readouterr().err)
+        else:
+            assert cli.main(["tour"]) == 0
+            assert started["argv"] == [str(claude), "/thimble:tour"]
+
+
 def test_the_help_names_the_tour():
     assert "thimble tour " in cli._help()
 
@@ -86,3 +107,8 @@ def test_the_sample_is_small_made_up_data_with_the_numbers_the_tours_answer_stat
     for stated in ("refunded 7 orders", "6 orders", "36 orders", "$1,872", "$52", "14 of the 36"):
         assert stated in skill
     assert "](#)" not in skill
+    # with Citations manual the tour's cite step names the wrong number's words (tour/tour.ts CITE_WORDS), which the
+    # person finds in the answer and cites with c
+    tour_ts = (Path(TR.SAMPLE).parents[1] / "tour" / "tour.ts").read_text()
+    words = re.search(r"export const CITE_WORDS = '([^']+)'", tour_ts).group(1)
+    assert words in skill and "7" in words

@@ -64,7 +64,7 @@ import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
 import { fixWords, notStartedToast, pageText } from './fix'
-import { FixPage, FixWorking } from './FixStrip'
+import { FixPage } from './FixStrip'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -79,7 +79,7 @@ export type ComposerStop =
   | { kind: 'ticket'; ticket: string; label: string }
   | { kind: 'view'; slug: string; review: boolean; label: string }
 
-const STOP_LABELS: Readonly<Record<string, string>> = { writer: 'Stop the writer', check: 'Stop the check' }
+const STOP_LABELS: Readonly<Record<string, string>> = { writer: 'Stop the writer', check: 'Stop the comments agent' }
 export const STOP_MAIN = 'Stop main'
 export const STOP_THREAD = 'Stop the thread'
 
@@ -486,7 +486,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   )
 
   // main and every thread run on the session's model, which main's meta carries once the mirror has read it
-  // the model main keeps in the settings (models.main), which its line shows until main replies or the menu picks one
+  // the model main keeps in the settings (models.main), which its line shows while main's meta holds no choice
   // (mainModel)
   const [mainKept, setMainKept] = useState<Settings | null>(null)
   useEffect(() => {
@@ -704,9 +704,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     if (fixing !== null || target.to === 'fix') {
       // `/thimble-fix <words>` goes to main, which reads it with the person's fixes beside it and starts the fix (a round
       // of one of theirs, or a new one) or first asks one short question, as in the terminal (backend fixes.ask). The fix
-      // runs in the background as main's subagent, in a thread of its own (fixes.fixer_chat); main's chat shows the
-      // message, the fixer's card where main started it, main's line, and how the fix ended once it did. Typed in a
-      // fix's thread, the words are a round of that fix
+      // runs in the background in a thread of its own (fixes.fixer_chat); main's chat shows the message, the fixer's
+      // line where main started it, as a side thread's (Rows), main's line, and how the fix ended once it did. Typed in
+      // a fix's thread, the words are a round of that fix
       const inFix = target.to === 'fix'
       track('ui-click', { target: inFix ? `fix:${target.fix}` : 'fix:ask' })
       if (!inFix) {
@@ -819,7 +819,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
             {!chat.loading && !chat.error && kind === 'writer' && <SessionView ws={ws} id={current} chat={chat} role="writer" title={curMeta?.title || 'Writer'} running={running} />}
-            {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
+            {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Comments'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
             {!chat.loading && !chat.error && kind === 'fix' && <Rows rows={chat.rows} ws={ws} chat={current} streaming={chat.streaming} />}
@@ -838,7 +838,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           </div>
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
-          <FixWorking />
           <Composer
             model={mainChip ? mainModelNow : null}
             models={mainChip ? modelChoices(mainKept, mainModelNow) : undefined}

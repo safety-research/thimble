@@ -24,7 +24,7 @@
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
 //   deferred     as pending, with a dim ` ?` after it: a citation whose check waits until the person opens it (the
-//                setting Citations: auto cite, or words the person asked about with c), so it is not checked yet
+//                setting Citations: auto, or words the person asked about with c), so it is not checked yet
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
@@ -33,14 +33,14 @@
 // shows or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer highlighted teal or a heads-up orange (a fill behind the words); where a span and a mark share words they
-// keep the mark's underline with the span's fill behind them at rest, and take the span's press: an explainer or a
-// heads-up opens before the citation it stands on (] goes on to the citation). A span's own words are one hover group
-// (spanScope), as a citation's are: the pointer over any piece of it (its inline code, its bold words, a line it wraps
-// to) puts its slightly stronger fill (`hoverBg`) behind all of it and underlines it, as thimble's other presses are
-// underlined under the pointer (core/askcell.js quiet), never Claude Code's inverse. While the tray shows
-// a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
-// and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
+// explainer highlighted teal or a heads-up orange (a fill behind the words, faint at rest); where a span and a mark
+// share words they keep the mark's underline with the span's fill behind them, and take the span's press: an explainer
+// or a heads-up opens before the citation it stands on (] goes on to the citation). A span's own words are one hover
+// group (spanScope), as a citation's are: the pointer over any piece of it (its inline code, its bold words, a line it
+// wraps to) puts its full fill (`hoverBg`) behind all of it and underlines it, as thimble's other presses are
+// underlined under the pointer (core/askcell.js quiet), never Claude Code's inverse. While the tray shows a mark
+// (`focus`), it is drawn bold on its tint, and a span bold on its full fill, so the open one is easy to find. `dim`
+// draws the words dim (a rewrite of them runs).
 //
 // Where side threads can be asked about its passages (`passages`), each row of blocks is a passage (a heading's, its
 // whole section), and its margin cell asks about it (core/askcell.js): a purple ? while the pointer is over the row, a
@@ -48,8 +48,8 @@
 //
 // A plain reply (`plain`, while Minimal is on: marks/register.ts) draws its marks and spans as its plain words at rest,
 // with no sign after a citation: each row of blocks is one hover group (rowScope), and the pointer anywhere over the
-// row shows its marks in their colors: a citation underlined (a failed one red), an explainer on its teal and a heads-up
-// on its orange (their fills at rest elsewhere). A click opens one as
+// row shows its marks in their colors: a citation underlined (a failed one red), an explainer on its full teal and a
+// heads-up on its full orange (their faint fills at rest elsewhere). A click opens one as
 // at any time, and the mark the tray shows stands in its look, its sign after it, as in any reply. Only Claude Code's
 // fullscreen layout reports the pointer, and not while its mouse reports are off or keep only the wheel's
 // (CLAUDE_CODE_DISABLE_MOUSE, CLAUDE_CODE_DISABLE_MOUSE_CLICKS), so a reply is plain only there (marks/register.ts).
@@ -90,8 +90,6 @@ export type MessageOpts = {
   focus?: number | null
   /** the words drawn dim */
   dim?: boolean
-  /** what stands in place of the ● of the reply's first block */
-  lead?: string | null
   /** false: no margin cell before each row (a reply drawn inside a frame, such as the tray's, starts at the frame's
    *  left, as its title does) */
   gutter?: boolean
@@ -256,16 +254,17 @@ export function rowScope(replyKey: string, k: number): string {
 /** A span's run as a press of the feature's, drawn in the span's look. A span split into runs (inline code, bold, the
  *  lines it wraps to) is a press per run, every one in the span's hover group, so the pointer over any piece lights the
  *  whole span with its `hoverBg` and underlines it (no inverse: Claude Code draws a plain Button inverse under the
- *  pointer). In a plain reply, but the one the tray shows, each run is in its row's group, which puts the span's fill
- *  behind it. */
+ *  pointer). In a plain reply, but the one the tray shows, each run is in its row's group, which puts the span's full
+ *  fill behind it. */
 function spanEl(els: Any, o: RowOpts, r: Run, key: string) {
   const sp = o.spans?.[r.span as number]
   const { tint: _tint, hoverBg, ...look } = sp?.look ?? {}
-  // in a plain reply, its words read as the reply's at rest, its fill behind them while the pointer is over its row
+  // in a plain reply, its words read as the reply's at rest, its full fill behind them while the pointer is over its row
   const plain = !!o.row && !sp?.open
   const scope = plain ? o.row! : spanScope(o.key, r.span as number)
+  const full = hoverBg ?? look.backgroundColor
   const hover = plain
-    ? { scope, ...(look.backgroundColor ? { backgroundColor: look.backgroundColor } : {}) }
+    ? { scope, ...(full ? { backgroundColor: full } : {}) }
     : { scope, ...(hoverBg ? { backgroundColor: hoverBg } : {}), ...(sp?.onPress ? { underline: true } : {}) }
   const p: Any = { children: r.s, ...(plain ? {} : look), hover }
   if (r.b) p.bold = true
@@ -291,24 +290,26 @@ function markEl(els: Any, o: RowOpts, r: Run, key: string) {
   else if (r.tag === 'wait') p.dimColor = true
   else if (r.tag) p.color = 'error'
   else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
-  // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
-  // citation's underline, so both show. Its words are the span's press and hover group: an explainer or a heads-up
-  // opens first, and ] goes on to the citation (a span comes before the citation it stands on, tray.ts). The
-  // citation's other words keep its press
+  // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill under the citation's
+  // underline, so both show (faint at rest; while the tray shows the span, bold on its full fill, as on plain words).
+  // Its words are the span's press and hover group: an explainer or a heads-up opens first, and ] goes on to the
+  // citation (a span comes before the citation it stands on, tray.ts). The citation's other words keep its press
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // in a plain reply (but the one the tray shows, or the span on its words it shows), its words read as the reply's at
-  // rest; while the pointer is over its row, underlined (on the fill of a span on its words, if any), a failed one red:
-  // citations underline and comments highlight. Its press is the span's, else the citation's, as at any time
+  // rest; while the pointer is over its row, underlined (on the full fill of a span on its words, if any), a failed one
+  // red: citations underline and comments highlight. Its press is the span's, else the citation's, as at any time
   if (o.row && o.focus !== r.mark && !sp?.open) {
-    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, ...(bg ? { backgroundColor: bg } : {}), ...(look.status === 'failed' ? { color: 'error' } : {}) } }
+    const full = sp?.look.hoverBg ?? bg
+    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, ...(full ? { backgroundColor: full } : {}), ...(look.status === 'failed' ? { color: 'error' } : {}) } }
     if (r.b) q.bold = true
     if (r.it) q.italic = true
     const span = sp?.onPress ? sp : null
     return els.Button({ key, plain: true, label: span ? String(span.label || r.s).slice(0, 120) : label, hover: { scope: o.row, inverse: false }, children: [els.Text(q)], onPress: () => (span ? span.onPress!() : o.onMark(r.mark as number)) })
   }
   if (bg) p.backgroundColor = bg
+  if (sp?.look.bold) p.bold = true
   // the one the tray shows: bold, and its tint kept, so the open one is easy to find
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
   if (sp?.onPress && !r.tag) {
@@ -413,25 +414,22 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   const bs = blocks(o.text)
   const w = Math.max(20, o.cols)
   const rows: Any[] = []
-  let dot = o.first || !!o.lead
+  let dot = o.first
   let k = 0
   // a row's passage (its blocks i to j; a heading's, its whole section), when side threads can be asked about them
   const passageOf = (i: number, j: number): Passage => {
     const words = bs[i].type === 'heading' ? sectionOf(o.text, bs, i) : o.text.slice(bs[i].start, bs[j].end)
     return { text: words, label: passageLabel(words) }
   }
-  // the reply's ● (or its lead) stands beside its first words: a card placed before them draws beside none. `scope`:
-  // the row's hover group in a plain reply, which the pointer anywhere over the row lights
+  // the reply's ● stands beside its first words: a card placed before them draws beside none. `scope`: the row's hover
+  // group in a plain reply, which the pointer anywhere over the row lights
   const push = (content: Any[], gap: boolean, p: Passage, card = false, scope?: string) => {
     const key = `${o.key}-b${k++}`
     const wait = card && hasWords
-    const lead = dot && !wait && o.lead
     const glyph = dot && !wait ? '●' : ' '
-    const cell = lead
-      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: accent(), bold: true, children: o.lead })] })
-      : o.passages
-        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
-        : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
+    const cell = o.passages
+      ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
+      : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
     if (o.rule) {
       // the gap above the row stands inside it, so the rule runs through it
       const top = gap || !rows.length ? 1 : 0

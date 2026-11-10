@@ -56,7 +56,7 @@ export type ChatRecord =
   | { type: 'marks'; ts?: string; turn: string; items: import('../marks/marks').MarkItem[] }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
-  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
+  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
@@ -160,7 +160,7 @@ export interface Group {
   session?: string
 }
 
-export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom' | 'plan'
+export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom'
 
 export type MimeBundle = Record<string, any> & { _stream?: 'stdout' | 'stderr'; _out?: number; truncated?: OutputTruncation }
 
@@ -230,36 +230,6 @@ export interface Cell {
   held?: Record<string, unknown> | null
 }
 
-/** A plan card's step status (backend notebook.PLAN_STATUSES). */
-export type PlanStatus = 'not started' | 'running' | 'done' | 'needs you'
-
-/** One step of a plan card's payload (backend notebook.plan_step_of): its id never changes, `makes` names what it makes,
- * `details` what it shows under it on request, `runs` the Agent calls that do it, `time` a time the agent gave,
- * `started`/`ended` thimble's stamps. */
-export interface PlanStep {
-  id: string
-  text: string
-  makes: string[]
-  status: PlanStatus
-  note: string
-  details: string
-  runs: string[]
-  time: string
-  started: string | null
-  ended: string | null
-}
-
-/** The live row of one run of a plan's step (backend plans.plan_runs): the subagent chat of that name, its state, its
- * latest event and how long it has run. */
-export interface PlanRun {
-  step: number
-  name: string
-  chat: string | null
-  state: string
-  latest: string
-  elapsed: string
-}
-
 export interface CanvasResponse {
   groups: Group[]
   cells: Cell[]
@@ -296,8 +266,10 @@ export interface CellName {
 // ---- labels and filters ----
 
 export type ConceptKind = 'prompt' | 'regex' | 'code'
-export type ConceptUnit = 'record' | 'cell' | 'span' | 'agent' | 'run'
+export type ConceptUnit = 'record' | 'span' | 'agent' | 'run'
 export type FilterScope = 'files' | 'canvas' | 'report'
+/** Where a label's value filters: the records in Files or the report's sentences. The canvas's filter holds no label. */
+export type LabelScope = 'files' | 'report'
 
 /** What a label over files marks in the reader: the texts that carry the value, the record, or the file. */
 export type LabelMarks = 'span' | 'record' | 'file'
@@ -327,7 +299,7 @@ export interface Concept {
   n_reviewed?: number
   /** every record the analyst gave a value by hand */
   n_marked?: number
-  /** a label over files: what it marks; null for a label of cards or report sentences */
+  /** a label over files: what it marks; null for a label of report sentences */
   marks?: LabelMarks | null
   /** what it applies to: comma-separated globs */
   glob?: string
@@ -380,7 +352,7 @@ export interface LabelRuler {
  * scope, its classifier and its values, the positive first. Nothing is stored until the row creates it. */
 export interface LabelDraft {
   name: string
-  over: 'files' | 'cards' | 'sentences'
+  over: 'files' | 'sentences'
   marks: LabelMarks | null
   glob: string
   kind: ConceptKind
@@ -447,12 +419,11 @@ export interface CardFilterParts {
   /** words, each of which starts a word of a kept card's question or takeaway */
   text?: string
 }
-/** The canvas's filter: a label value, the card parts, or both. */
-export type CanvasFilterEntry = Partial<FilterEntry> & CardFilterParts
 export interface Filters {
   files?: FilterEntry
   report?: FilterEntry
-  canvas?: CanvasFilterEntry
+  /** the canvas's filter: its card parts */
+  canvas?: CardFilterParts
 }
 
 // ---- views and proposals ----
@@ -897,15 +868,12 @@ export interface WriteupComment {
   resolution?: 'done' | 'superseded' | string | null
 }
 
-/** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a
- * check's run over the cards left it (`check`), or main did (author `claude`). `ref` is `card:<id>`, or
- * `card:<id>#step-<n>` with `n` the step's place. Only open comments on cards that are there are served. */
+/** A comment beside a card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a check's run over the cards
+ * left it (`check`), or main did (author `claude`). `ref` is `card:<id>`. Only open comments on cards that are there are
+ * served. */
 export interface CanvasComment {
   id: string
   card: string
-  /** the step's stable id; null for a comment on the card */
-  step: string | null
-  n: number | null
   ref: string
   check: string | null
   run: string | null
@@ -1115,16 +1083,8 @@ export interface NewTicketBody {
   title: string
   body: string
   target?: unknown
-  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  /** where it was filed: `ui` for Report a problem's Fix it with /thimble-fix (backend dev.SOURCES) */
   source?: 'ui'
-}
-
-/** The ticket runner's state (`GET /dev/status`): `tickets` is '' where code tickets run here (a development install),
- * else why they do not (backend dev.ticket_problem). */
-export interface DevStatus {
-  running: boolean
-  tickets: string
-  queued: number
 }
 
 // ---- settings ----
@@ -1680,7 +1640,7 @@ export interface ConceptDetail extends Concept {
 }
 
 /** GET /concepts/{id}/coverage?offset=: how many corpus files the label's rows cover, with a page of each group (file
- * units; a cell or span unit has none). */
+ * units; a span unit has none). */
 export interface CoverageFile {
   path: string
   covered: boolean
@@ -1799,9 +1759,10 @@ export interface Attached {
   model?: string
   /** the effort they ran at, as the mirror last read it */
   effort?: string
-  /** what the composer's chip chose for main's next launch, while this session runs */
+  /** the effort the composer's chip or Settings chose for main's next turn, as the settings keep it (models.main): from
+   * the session's start and from the moment it is picked (backend session.chosen) */
   effort_choice?: MainEffort
-  /** the model the composer's menu chose for main's next turn (events.model_route) */
+  /** the model the composer's menu or Settings chose for main's next turn (events.model_route), held the same way */
   model_choice?: string
   /** the effort main runs at while the composer chose none: the analyst's own Claude Code settings' for main's model,
    * else Claude Code's default for it (cc_settings.session_effort); where main's effort menu opens */
@@ -1812,7 +1773,8 @@ export interface Attached {
    * bypassPermissions, dontAsk), which the dev agent's program follows until the analyst sets its row, Bypass as Manual
    * (backend modes.py) */
   permission_mode?: string
-  /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
+  /** whether the composer's bolt or Settings turned fast mode on for main's next turn, held the same way; a model
+   * without fast mode turns it off (events.model_route) */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
   after?: string

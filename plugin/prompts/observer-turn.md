@@ -1,14 +1,8 @@
-## Read now
+## Message to annotate
 
 {{MESSAGES}}
-
-The keys above the analyst's prompt: {{ROW}}
 {{SHOWN}}
-## Cards
-
-{{OBJECTS}}
-
-## What the session read
+## Coverage
 
 {{COVERAGE}}
 

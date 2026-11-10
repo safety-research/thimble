@@ -5,20 +5,30 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { SWITCHES, choiceOf, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, setOptions, switchesFrom } from '../features.mjs'
+import { SWITCHES, choiceOf, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, RENAMED, atPreset, currentValues, renamedTo, setOptions, switchesFrom, valueIn } from '../features.mjs'
 
-test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
+test("the manifest's userConfig is the features, each at its default until an option sets it; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
   {
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
     assert.deepEqual(Object.keys(manifest.userConfig), SWITCHES.map(s => s.key))
-    assert.deepEqual(SWITCHES.map(s => s.key), ['minimal', 'citations', 'checkerModel', 'checkerEffort', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
+    // in the order of their keys on the bar, Minimal mode first, as the settings pane lists them
+    assert.deepEqual(SWITCHES.map(s => s.key), ['minimal', 'cards', 'squeezeAnswers', 'catchUp', 'citations', 'checkerModel', 'checkerEffort', 'explain', 'details', 'labels', 'claimsMode', 'coverage'])
     for (const s of SWITCHES) {
       const kind = s.choices ? { type: 'string', options: s.choices } : { type: 'boolean' }
       assert.deepEqual(manifest.userConfig[s.key], { ...kind, title: s.title, description: s.does, default: s.default })
-      // a feature with modes says what each one gives
-      if (s.choices) assert.deepEqual(Object.keys(s.says), s.choices)
+      // each mode says what it gives, on and off for a switch; the settings under Citations have no line of their own
+      if (s.under) assert.equal(s.says, undefined, s.key)
+      else assert.deepEqual(Object.keys(s.says), s.choices ?? ['on', 'off'], s.key)
     }
+    // the groups the pane draws between thin lines, each a run of rows
+    const runs = []
+    for (const s of SWITCHES) (runs.at(-1)?.[0].group === s.group ? runs.at(-1) : runs[runs.push([]) - 1]).push(s)
+    assert.deepEqual(runs.map(r => r.map(s => s.key)), [['minimal'], ['cards'], ['squeezeAnswers', 'catchUp'], ['citations', 'checkerModel', 'checkerEffort'], ['explain', 'details'], ['labels', 'claimsMode', 'coverage']])
+    // each row's key on the bar; Minimal mode, Heads-ups and the settings under Citations have none
+    assert.deepEqual(Object.fromEntries(SWITCHES.filter(s => s.letter).map(s => [s.key, s.letter])), { cards: 'v', squeezeAnswers: 's', catchUp: 'b', citations: 'c', explain: 'e', labels: 'l', claimsMode: 'w', coverage: 'r' })
+    assert.deepEqual(SWITCHES.filter(s => s.under).map(s => [s.title, s.under]), [['Verifier model', 'citations'], ['Verifier effort', 'citations']])
+    assert.equal(SWITCHES[0].title, 'Minimal mode')
     // the person reads Squeeze as Simplify, and Claims by its name; the keys stay, so a saved setting still applies
     assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Simplify')
     assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Claims')
@@ -30,8 +40,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
     const heads = SWITCHES.find(s => s.lenses?.includes('heads'))
     assert.equal(heads.key, 'details')
     assert.equal(heads.title, 'Heads-ups')
-    // the settings list it under Comments, with the explainers
-    assert.deepEqual(SWITCHES.filter(s => s.group === 'Comments').map(s => s.title), ['Explainers', 'Heads-ups'])
+    // the settings list it with the explainers
+    assert.deepEqual(SWITCHES.filter(s => s.group === heads.group).map(s => s.title), ['Explainers', 'Heads-ups'])
     assert.match(heads.does, /heads-up/)
     setOptions({ details: false })
     assert.equal(featureOn('details'), false)
@@ -67,17 +77,18 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('cards'), 'off')
     setOptions({})
   }
-  // Citations: auto cite + verify by default; Claude cites in the two auto modes, c cites selected words in every mode
-  // but off; a value outside them is the default
+  // Citations: manual by default, where Claude cites nothing and c cites selected words; Claude cites in the two auto
+  // modes, c cites selected words in every mode but off; a value outside them is the default
   {
     setOptions({})
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(choiceOf('citations'), 'manual')
+    assert.equal(claudeCites(), false)
+    assert.equal(featureOn('cite'), true)
+    assert.deepEqual(SWITCHES.find(s => s.key === 'citations').choices, ['auto + verify', 'auto', 'manual', 'off'])
+    setOptions({ citations: 'auto' })
     assert.equal(claudeCites(), true)
     assert.equal(featureOn('cite'), true)
-    setOptions({ citations: 'auto cite' })
-    assert.equal(claudeCites(), true)
-    assert.equal(featureOn('cite'), true)
-    setOptions({ citations: 'auto cite + verify' })
+    setOptions({ citations: 'auto + verify' })
     assert.equal(claudeCites(), true)
     setOptions({ citations: 'manual' })
     assert.equal(claudeCites(), false)
@@ -90,24 +101,27 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cite'), false)
     assert.equal(switchesFrom({ citations: 'off' })('cite'), false)
     setOptions({ citations: 'sometimes' })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(choiceOf('citations'), 'manual')
     setOptions({})
   }
   // a value that settings.json still holds under a field of the manifest until 0.10.12 changes nothing
   {
-    setOptions({ marks: false, citationChecks: 'off', squeeze: false, counts: false, claims: false, defaultsAt: 'none' })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    setOptions({ marks: true, citationChecks: 'on', squeeze: false, counts: false, claims: true, defaultsAt: 'none' })
+    assert.equal(choiceOf('citations'), 'manual')
     assert.equal(featureOn('squeezeAnswers'), true)
     assert.equal(featureOn('labels'), true)
-    assert.equal(choiceOf('claims'), 'auto')
+    assert.equal(choiceOf('claims'), 'off')
     setOptions({})
   }
   // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only when Claims
-  // is auto (auto by default, a value outside its modes too); Claims off is no claims
+  // is auto; Claims off is no claims (off by default, a value outside its modes too)
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
-    assert.equal(choiceOf('claimsMode'), 'auto')
+    assert.equal(choiceOf('claimsMode'), 'off')
+    assert.equal(featureOn('claims'), false)
+    assert.equal(lensesAfterReply('claims'), false)
+    setOptions({ claimsMode: 'auto' })
     assert.equal(featureOn('claims'), true)
     assert.equal(lensesAfterReply('claims'), true)
     setOptions({ claimsMode: 'on demand' })
@@ -121,7 +135,15 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('observer'), false)
     assert.equal(featureOn('claims'), false)
     setOptions({ claimsMode: true })
-    assert.equal(choiceOf('claimsMode'), 'auto')
+    assert.equal(choiceOf('claimsMode'), 'off')
+    setOptions({})
+  }
+  // Coverage: off by default; an option turns it on
+  {
+    setOptions({})
+    assert.equal(featureOn('coverage'), false)
+    setOptions({ coverage: true })
+    assert.equal(featureOn('coverage'), true)
     setOptions({})
   }
   // Minimal is a preset: its modes (PRESET) keep Claude citing, each citation verified when it is opened, and the
@@ -133,7 +155,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(minimalOn(), false)
     assert.equal(choiceOf('explain'), 'auto')
     assert.equal(atPreset({}), false)
-    assert.deepEqual(PRESET, { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false })
+    assert.deepEqual(PRESET, { citations: 'auto', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false })
     setOptions({ minimal: true, ...PRESET })
     assert.equal(minimalOn(), true)
     assert.equal(atPreset(currentValues()), true)
@@ -142,7 +164,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(lensesAfterReply('details'), true)
     assert.equal(lensesAfterReply('claims'), false)
     assert.equal(claudeCites(), true)
-    assert.equal(choiceOf('citations'), 'auto cite')
+    assert.equal(choiceOf('citations'), 'auto')
     assert.equal(featureOn('cite'), true)
     assert.equal(featureOn('explain'), true)
     assert.equal(featureOn('details'), true)
@@ -159,11 +181,20 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('details'), false)
     setOptions({})
   }
-  // a mode saved under its old name stands for the new one: auto cite + check is auto cite + verify
+  // a mode saved under its old name stands for the new one: auto cite + check and auto cite + verify are auto + verify,
+  // auto cite is auto; a mode of Minimal mode's saved so still stands for it
   {
-    setOptions({ citations: 'auto cite + check' })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
-    assert.equal(claudeCites(), true)
+    for (const [old, now] of [['auto cite + check', 'auto + verify'], ['auto cite + verify', 'auto + verify'], ['auto cite', 'auto']]) {
+      assert.equal(renamedTo('citations', old), now)
+      assert.equal(valueIn({ citations: old }, 'citations'), now)
+      setOptions({ citations: old })
+      assert.equal(choiceOf('citations'), now)
+      assert.equal(claudeCites(), true)
+    }
+    // every old name is a mode the manifest no longer offers, and stands for one it offers
+    const choices = SWITCHES.find(s => s.key === 'citations').choices
+    for (const [old, now] of Object.entries(RENAMED.citations)) assert.ok(!choices.includes(old) && choices.includes(now), old)
+    assert.equal(atPreset({ ...PRESET, citations: 'auto cite' }), true)
     setOptions({})
   }
 })

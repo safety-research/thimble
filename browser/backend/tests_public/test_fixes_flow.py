@@ -16,14 +16,15 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import agents, config, dev, fixes
+from app import agents, config, dev, fixes, runtime, session
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
 
 class Kernel:
-    """`thimble fix VERB` in memory: new makes the copy's folder, done answers ready, apply takes the click's secret and
-    puts a ready or off fix on (and refuses any other, as the kernel does), undo takes it off."""
+    """`thimble fix VERB` in memory: new makes the copy's folder, round takes more words for a fix (a fix the person
+    has, at work again), done answers ready, apply takes the click's secret and puts a ready or off fix on (and refuses
+    any other, as the kernel does), undo takes it off."""
 
     def __init__(self, home: Path) -> None:
         self.home = home
@@ -45,7 +46,9 @@ class Kernel:
         if verb == "list":
             return fixes.Ran(True, json.dumps({"fixes": list(self.recs.values()), "kind": self.kind}), "")
         rec = self.recs[int(args[1])]
-        if verb == "done":
+        if verb == "round":
+            rec.update(state="working", prev="HEAD", words=[*rec["words"], stdin])
+        elif verb == "done":
             if "--title" in args:
                 rec["title"] = args[args.index("--title") + 1]
             rec.update(state="ready", tests="passed", error=None,
@@ -172,6 +175,64 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     assert row["words"] == "make this card's title say how many rows it shows" and row["files"] == 2
     [chat] = _fixer_chats(CORPUS)
     assert any(r.get("kind") == "fix" and r.get("status") == "ready" for r in _log(CORPUS, chat["id"]))
+
+
+async def _started_again() -> None:
+    """The server starts again (Use it now): its agents stop and the mirror keeps where each transcript stands
+    (runtime.stop_all), what it held in memory goes, and the next server attaches main's session again."""
+    await runtime.stop_all(0.5)
+    for lv in session._live.values():
+        if lv.task is not None:
+            lv.task.cancel()
+    session._live.clear()
+    session._own.clear()
+    fixes._where.clear()
+    runtime._spaces.clear()
+    runtime.ensure(CORPUS)
+
+
+async def test_a_fix_is_one_line_in_main_per_fixer_that_runs_until_its_checks_end_also_after_restarts(fixing,
+                                                                                                     monkeypatch):
+    """Main's chat shows each fixer once, as a side thread's line, whose chat runs while the fixer works and while the
+    kernel checks its change, and stops when the fix's row says how it ended. A server that starts again knows each
+    fixer's file as its fix's: live check br19 had main show a fixer again after each restart, as a new subagent of
+    main's whose card ran on for good."""
+    running: list[bool] = []
+
+    def kernel(args: list[str], **kw: Any) -> fixes.Ran:
+        if args[0] == "done":  # the kernel's checks of the change
+            running.extend(agents.running(CORPUS, m["id"]) for m in _fixer_chats(CORPUS))
+        return fixing(args, **kw)
+
+    monkeypatch.setattr(fixes, "kernel", kernel)
+    api_key(monkeypatch, [
+        text("Title: Card counts rows\nWhat it does: The card counts rows."),
+        text("Hello."),
+        text("Title: Card counts rows\nWhat it does: The card counts rows, empty ones too."),
+        text("Hello again."),
+    ])
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    [chat] = _fixer_chats(CORPUS)
+    assert running == [True] and not agents.running(CORPUS, chat["id"])
+    lines = len(_log(CORPUS, chat["id"]))
+
+    def in_main() -> list[str]:
+        return [r["chat"] for r in _log(CORPUS) if r["type"] == "agent"]
+
+    await _started_again()
+    await main_turn("Hello?")
+    assert in_main() == [chat["id"]]
+    assert len(_log(CORPUS, chat["id"])) == lines, "the fixer's lines are read once"
+
+    # a round of the fix: a new fixer, in the fix's chat; then the server starts again once more
+    await fixes.change(CORPUS, 1, "count the empty rows too", "")
+    await _ended()
+    assert running == [True, True] and not agents.running(CORPUS, chat["id"])
+    await _started_again()
+    await main_turn("And now?")
+    assert in_main() == [chat["id"], chat["id"]]
+    assert [m["id"] for m in agents.list_chats(CORPUS) if m.get("kind") == agents.KIND_AGENT] == [chat["id"]]
 
 
 async def test_only_the_analyst_s_click_puts_a_fix_on_and_undo_takes_it_off(fixing, monkeypatch, analyst):

@@ -83,8 +83,6 @@ export interface AgentRow {
   role: string
   title: string
   ts?: string
-  /** the run of its session a message started (1 for the first): a fix's next round */
-  run?: number
   /** a dev chat that builds or reviews this view rather than running a code ticket */
   view?: string
 }
@@ -245,7 +243,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'agent': {
-        const row: AgentRow = { kind: 'agent', index, chat: e.chat, role: e.role, title: e.title, ts: e.ts, ...(typeof e.run === 'number' ? { run: e.run } : {}), ...(e.view ? { view: e.view } : {}) }
+        const row: AgentRow = { kind: 'agent', index, chat: e.chat, role: e.role, title: e.title, ts: e.ts, ...(e.view ? { view: e.view } : {}) }
         const call = e.tool_use_id ? calls.get(e.tool_use_id) : undefined
         if (e.tool_use_id && call !== undefined && call > index) held.set(e.tool_use_id, [...(held.get(e.tool_use_id) ?? []), row])
         else rows.push(row)
@@ -527,8 +525,8 @@ export const TOOL_WORDS: Record<string, string> = {
   set_filter: 'Filter',
   clear_filter: 'Clear filter',
   set_layout: 'Lay out panes',
-  run_check: 'Run check',
-  stop_check: 'Turn check off',
+  run_check: 'Ask for comments',
+  stop_check: 'Turn comments off',
   propose_view: 'Propose view',
   write_document: 'Write document',
   edit_document: 'Edit passage',
@@ -563,8 +561,8 @@ export const TOOL_GROUPS: Record<string, string> = {
   set_filter: 'Filter',
   clear_filter: 'Filter',
   set_layout: 'Layout',
-  run_check: 'Checks',
-  stop_check: 'Checks',
+  run_check: 'Comments',
+  stop_check: 'Comments',
   propose_view: 'Views proposed',
   write_document: 'Report',
   edit_document: 'Report',
@@ -810,9 +808,9 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'delete_label':
       return with_('Deleted label', str(inp.name))
     case 'run_check':
-      return with_('Ran check', str(inp.name))
+      return with_('Asked for comments', str(inp.name))
     case 'stop_check':
-      return with_('Turned off check', str(inp.name))
+      return with_('Turned comments off', str(inp.name))
     case 'propose_view':
       return with_('Proposed view', str(inp.name))
     case 'write_document':
@@ -1384,9 +1382,9 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
           hidden.add(e.id)
           skip.add(i)
         }
-        // main's call that starts a writer's session: that session's own note in main stands for it, as the fixer's card
-        // stands for the fix_thimble call that started it. Its look at the agent tray is bookkeeping, which the tray
-        // itself shows
+        // main's call that starts a writer's session: that session's own note in main stands for it, as the fixer's
+        // line stands for the fix_thimble call that started it. Its look at the agent tray is bookkeeping, which the
+        // tray itself shows
         if ((name === 'start_writing' || name === 'list_agents' || name === 'fix_thimble') && !e.parent_tool_use_id) {
           hidden.add(e.id)
           skip.add(i)
@@ -1439,42 +1437,6 @@ export function sessionSteps(rows: readonly Row[], metas: ReadonlyMap<string, { 
 
 /** Whether a step has ended, well or not: what a strip counts as finished. Pure. */
 export const stepEnded = (s: { state?: StepState }): boolean => s.state !== 'running' && s.state !== 'pending'
-
-// ---- a subagent's runs ----
-
-/** A subagent's runs: each message to it starts one (a round of a fix opens with the person's words), and what came
- * before the first message is the first run's. Pure. */
-export function messageRuns(rows: readonly Row[]): Row[][] {
-  const out: Row[][] = [[]]
-  let seen = false
-  for (const r of rows) {
-    if (r.kind === 'user' && seen) out.push([])
-    if (r.kind === 'user') seen = true
-    out[out.length - 1].push(r)
-  }
-  return out
-}
-
-/** The latest time a row of `rows` carries (a message, a call, its result, a step's start); null when none does. Pure. */
-export function lastRowTs(rows: readonly Row[]): string | null {
-  let best: string | null = null
-  let at = -Infinity
-  const see = (ts: string | undefined) => {
-    const t = ts ? Date.parse(ts) : NaN
-    if (Number.isFinite(t) && t > at) {
-      at = t
-      best = ts!
-    }
-  }
-  for (const r of rows) {
-    if (r.kind === 'user' || r.kind === 'agent' || r.kind === 'chip') see(r.ts)
-    if (r.kind === 'tool') {
-      see(r.ts)
-      see(r.result?.ts)
-    }
-  }
-  return best
-}
 
 // ---- a subagent's own work, as its chip opens on it ----
 

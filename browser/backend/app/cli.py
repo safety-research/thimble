@@ -1651,7 +1651,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
 # disk, who holds the port, and whether the API host answers. Each reader returns a short phrase and never raises,
 # since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.314"  # INSTALL.md and CI (.github/workflows/ci.yml) name the same version
+TESTED_CLAUDE_CODE = "2.1.307"  # INSTALL.md and CI (.github/workflows/ci.yml) name the same version
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
 DISK_LOW_BYTES = 1_000_000_000  # under this much free space the doctor says the disk is low
 LOG_ROTATE_BYTES = 20_000_000  # a server.log past this size is moved to server.log.1 when a server starts
@@ -2633,13 +2633,11 @@ def cmd_browser(args: argparse.Namespace) -> int:
                 return 1
     link = ui_url(name, pair=to_terminal())
     print(BROWSER_LINE.format(what=link), flush=True)
-    p = claude_access.problem_line()
-    print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")), flush=True)
+    print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)
     if not env["dev"] and not has_ui_build():
         print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):
         return 0
-    print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
     stop = watch_links(name, link)
     try:
         hold_until_quit()

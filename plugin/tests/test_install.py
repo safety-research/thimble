@@ -29,6 +29,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kernel import install as IN  # noqa: E402
 from releases_server import Proxy, Releases  # noqa: E402
 
+
+def binds() -> bool:
+    """Whether a test may listen on 127.0.0.1: not in a fix's sandbox on macOS (kernel/fixes.py), which shares the
+    computer's network and so lets no command take a port."""
+    try:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(not binds(), reason="no port on 127.0.0.1 here, for the made-up GitHub")
+
 GIT_ID = {"GIT_AUTHOR_NAME": "Release", "GIT_AUTHOR_EMAIL": "release@example.invalid",
           "GIT_COMMITTER_NAME": "Release", "GIT_COMMITTER_EMAIL": "release@example.invalid"}
 
@@ -358,7 +372,7 @@ def test_the_server_s_packages_are_compiled_and_an_install_that_left_them_uncomp
     path = f"{w.bin}:{w.home / '.local' / 'bin'}:/usr/bin:/bin"
     assert w.install(PATH=path).returncode == 0
     backend = w.th / "fixes" / "live" / "browser" / "backend"
-    sync = f"sync --project {backend} --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
+    sync = f"sync --project {backend} --python >=3.12,<3.15 --frozen --no-dev --no-install-project --extra dev --compile-bytecode"
     assert w.uv() == [sync] and (backend / ".venv" / IN.FX.COMPILED).is_file()
     (backend / ".venv" / IN.FX.COMPILED).unlink()
     p = w.install(PATH=path)
@@ -442,7 +456,7 @@ def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_le
     assert not mark.exists()
     p = start()
     assert p.returncode == 0 and p.stdout.splitlines()[0] == "thimble-browser: compiling the server's packages, once..."
-    sync = (f"sync --project {(browser / 'backend').resolve()} --frozen --no-dev --no-install-project --extra dev "
+    sync = (f"sync --project {(browser / 'backend').resolve()} --python >=3.12,<3.15 --frozen --no-dev --no-install-project --extra dev "
             "--compile-bytecode")
     assert w.uv() == [sync, sync] and mark.is_file() and p.stderr == ""
     p = start()
@@ -513,18 +527,37 @@ def test_what_is_missing_is_said_with_its_fix_and_nothing_is_installed(w):
 
 
 def test_a_claude_code_older_than_thimble_needs_is_said_with_the_command_that_updates_it(w):
-    """thimble needs Claude Code 2.1.314 or later, the first with $.ui.place, which the tour draws its rows with. An
-    older one is said with the command that updates it (claude update, for a claude no package manager installed), and
-    nothing is installed; 2.1.314 installs."""
-    p = w.install("--no-browser", FAKE_CLAUDE_VERSION="2.1.312")
+    """thimble needs Claude Code 2.1.307 or later. An older one is said with the command that updates it (claude update,
+    for a claude no package manager installed), and nothing is installed; 2.1.307 installs."""
+    p = w.install("--no-browser", FAKE_CLAUDE_VERSION="2.1.305")
     assert p.returncode == 1, text_of(p)
     lines = p.stdout.splitlines()
     assert lines[lines.index("Checking what thimble needs...") + 1:] == [
-        "thimble needs these first:", "  - Claude Code 2.1.314 or later (the one here is 2.1.312): claude update",
+        "thimble needs these first:", "  - Claude Code 2.1.307 or later (the one here is 2.1.305): claude update",
         "Run the install again after that. Nothing was installed."]
     assert not w.th.exists() and not w.cc.exists()
-    p = w.install("--no-browser", FAKE_CLAUDE_VERSION="2.1.314")
-    assert p.returncode == 0 and "Claude Code 2.1.314: all here." in p.stdout, text_of(p)
+    p = w.install("--no-browser", FAKE_CLAUDE_VERSION="2.1.307")
+    assert p.returncode == 0 and "Claude Code 2.1.307: all here." in p.stdout, text_of(p)
+
+
+def test_on_a_claude_code_older_than_the_tour_needs_nothing_starts_or_offers_the_tour_and_the_end_says_why(w):
+    """The tour needs Claude Code 2.1.314 or later, the first with $.ui.place, which it draws its rows with. On an older
+    one that thimble runs on, the install writes no tour-next and offers no tour, and the line before the last says what
+    updates Claude Code; inside Claude Code the last line still says /reload-plugins."""
+    clone = w.home / "thimble"
+    sh("git", "clone", "-q", str(w.bare), str(clone))
+    tour = "The tour needs Claude Code 2.1.314 or later (the one here is 2.1.311): claude update."
+    p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", CLAUDECODE="1",
+                  CLAUDE_CODE_SESSION_ID="made-up-session", FAKE_CLAUDE_VERSION="2.1.311")
+    assert p.returncode == 0, text_of(p)
+    assert p.stdout.rstrip().splitlines()[-4:] == ["", tour, "", "Type /reload-plugins to enable thimble."], p.stdout
+    assert not (w.th / "tour-next").exists()
+    p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh", FAKE_CLAUDE_VERSION="2.1.311")
+    assert p.returncode == 0, text_of(p)
+    lines = p.stdout.rstrip().splitlines()
+    at = lines.index("thimble is installed from your clone ~/thimble.")
+    assert lines[at + 1:at + 3] == ["", "Try it now: run claude in a folder of data files."], p.stdout
+    assert lines[-2:] == ["", tour] and "thimble tour" not in p.stdout, p.stdout
 
 
 def wsl(w, kernel: str) -> None:

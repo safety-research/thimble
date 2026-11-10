@@ -178,3 +178,14 @@ def test_claude_code_check_runs_one_headless_turn_and_names_the_login(tmp_path, 
     turn = [line for line in calls.read_text().splitlines() if line.startswith("-p")]
     assert len(turn) == 1 and "--safe-mode" in turn[0] and "--max-turns 1" in turn[0]
     assert claude_access.read()["consent"]["text"] == claude_access.CONSENT, "choosing it is the consent"
+
+
+def test_the_start_line_says_how_the_workbench_is_authenticated_or_what_is_missing(tmp_path, monkeypatch):
+    assert claude_access.start_line().startswith("thimble does not know yet how to reach Claude.")
+    claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
+    assert claude_access.start_line() == "authenticated via API key"
+    claude_access.save(claude_access.WIF, wif_file=str(wif_file(tmp_path)))
+    assert claude_access.start_line() == "authenticated via WIF"
+    monkeypatch.setattr(config, "CLI_PATH", "claude")
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    assert claude_access.start_line() == "authenticated via Claude Code sign-in"

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// A card on the canvas as the analyst reads it (src/canvas/Cell.tsx, CardFace.tsx, CheckDetails.tsx, PlanBody.tsx): a
-// card whose run failed says so in one line; a click on a takeaway's citation opens its evidence and a click on its
-// words edits it; the card check marks a card only when it found a problem, and its details hold the fix's Undo; and a
-// plan card shows its steps as they go.
+// A card on the canvas as the analyst reads it (src/canvas/Cell.tsx, CardFace.tsx, CheckDetails.tsx): a card whose run
+// failed says so in one line; a click on a takeaway's citation opens its evidence and a click on its words edits it; the
+// card check marks a card only when it found a problem, and its details hold the fix's Undo; and a label's card names
+// its label by the label's own tag alone.
 import { act } from 'react'
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
@@ -11,7 +11,7 @@ import { CheckDetails } from '../../src/canvas/CheckDetails.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
 import { DOUBLE_MS } from '../../src/canvas/layout.ts'
 import { ERROR_MIME } from '../../src/components/Outputs.tsx'
-import type { Cell, MimeBundle, PlanStep } from '../../src/lib/types.ts'
+import type { Cell, Concept, MimeBundle } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
@@ -113,35 +113,29 @@ test("the card check marks a card only for a problem it found, and the card's de
   expect(details.textContent).toContain('agent-03 merged every PR.')
 })
 
-test('a plan card shows each step with its status: a running step its time and a live row per run, a done step one line a click opens', async () => {
-  const now = Date.parse('2026-10-08T12:00:00Z')
-  const at = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString()
-  const step = (id: string, over: Partial<PlanStep>): PlanStep => ({ id, text: '', makes: [], status: 'not started', note: '', details: '', runs: [], time: '', started: null, ended: null, ...over })
-  const steps = [
-    step('s1', { text: 'Mirror pandas', makes: ['mirror/'], status: 'done', note: 'six repos mirrored', started: at(70), ended: at(64) }),
-    step('s2', { text: 'Run both conditions', makes: ['runs/'], status: 'running', started: at(40), runs: ['Run the emergent condition', 'Run the managed condition'] }),
-    step('s3', { text: 'Ask which model the manager runs on', status: 'needs you' }),
-  ]
-  const runs = {
-    runs: [
-      { step: 2, name: 'Run the emergent condition', chat: 'c0ffee01', state: 'running', latest: 'Bash swarmctl status runs/emergent', elapsed: '40 m' },
-      { step: 2, name: 'Run the managed condition', chat: null, state: 'not started', latest: '', elapsed: '' },
-    ],
-  }
-  vi.stubGlobal('fetch', async (url: string) => new Response(JSON.stringify(String(url).endsWith('/ws/ws/cards/p1an0001/plan-runs') ? runs : {}), { status: 200, headers: { 'content-type': 'application/json' } }))
-  vi.useFakeTimers({ toFake: ['Date'] })
-  vi.setSystemTime(now)
-  try {
-    const el = await face({ id: 'p1an0001', notebook: 'nb', kind: 'plan', title: 'Plan: build the environment and pilot it', created_by: 'chat:main', ts: at(60), payload: { steps, follows: null }, takeaway: '' } as Cell)
-    await settle()
-    const [done, running, you] = [...el.querySelectorAll<HTMLElement>('.plan-step')]
-    expect([done, running, you].map((s) => s.querySelector('.plan-status')?.textContent)).toEqual(['done · 6 m', 'running · 40 m', 'needs you'])
-    expect([...running.querySelectorAll('.plan-run')].map((r) => r.getAttribute('data-run'))).toEqual(['Run the emergent condition', 'Run the managed condition'])
-    expect(running.querySelector('.plan-run-latest')?.textContent).toBe('⎿ Bash swarmctl status runs/emergent')
-    expect(done.querySelector('.plan-note')).toBeNull()
-    await act(async () => done.querySelector<HTMLButtonElement>('button.plan-toggle')!.click())
-    expect(done.querySelector('.plan-note')?.textContent).toBe('six repos mirrored')
-  } finally {
-    vi.useRealTimers()
+test("a label card names its label by the label's own tag, with no thimble tag that says Label", async () => {
+  const k = {
+    id: 'k1', name: 'shows a failure', description: '', unit: 'record', kind: 'regex', spec: '(?i)fail', labels: ['yes', 'no'], created_by: 'main',
+    ts: '2026-11-01T00:00:00Z', glob: 'runs/*.jsonl', counts: { yes: 10, no: 2 }, n_labeled: 12,
+    classes: [{ name: 'yes', color: 1, highlight: true }, { name: 'no', color: 0, highlight: false }],
+  } as Concept
+  const withLabel = { ...ctx, concepts: new Map([['k1', k]]) }
+  const labelCard = (title: string) =>
+    mount(
+      <CanvasContext.Provider value={withLabel}>
+        <CardFace cell={{ id: 'c9', kind: 'label', title, created_by: 'main', ts: '2026-11-01T00:00:00Z', payload: { concept: 'k1' }, status: 'ok' } as Cell} width={400} label={{ concept: k, error: null, reload: async () => undefined, set: () => undefined }} onCheckAgain={noop} />
+      </CanvasContext.Provider>,
+    )
+  // its question of its own, then the label's tag on the row under it
+  const asked = await labelCard('Which runs show a failure?')
+  await settle()
+  expect(asked.querySelector('.bcell-label-who')?.textContent).toBe('shows a failure')
+  // the label's name as its head
+  const named = await labelCard('shows a failure')
+  await settle()
+  expect(named.querySelector('.bcell-label-name')?.textContent).toBe('shows a failure')
+  for (const el of [asked, named]) {
+    expect(el.querySelector('.bcell-kind-tag')).toBeNull()
+    expect(el.querySelector('svg.icon-thimble')).toBeNull()
   }
 })

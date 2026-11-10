@@ -34,6 +34,10 @@
 // with their cards (cardListsAt). A card the original places on a line of its own (marks/message.js cardRef) draws
 // where a version places its line, and a version that leaves the line out leaves the card out (placedCards).
 //
+// A version keeps the original's citations on their words. While Claude cites its claims, squeeze.md says what a
+// citation is and asks for each new number cited (squeezeText). In manual and off, Claude cites nothing on its own: the
+// text says nothing of citations, and the request names the words the analyst cited with c (ASKED_HEAD).
+//
 // A record (term.ts builds it from the message and the feature's part of it, core/answers.ts):
 //   {row, text, at, shown, squeeze, catchup?}
 //   squeeze: {
@@ -54,6 +58,7 @@
 // the answer's drawing gives it the look of the checked citation with the same words (marks/register.ts looksByWords).
 
 import { cardRef } from '../marks/message.js'
+import { fill } from '../prompts/registry.mjs'
 
 /** Each Markdown link of a text, in order, as a match: [0] the whole link, [1] its words, [2] its target, `index`.
  *  The words may hold balanced brackets and the target balanced parentheses. */
@@ -234,16 +239,17 @@ const round = n => (n >= 40 ? Math.round(n / 5) * 5 : Math.max(1, Math.round(n))
  * What each level asks of the text: the one definition the request carries for a chip at that level (pickLine). Each
  * is a function of the message: `words`, the original's length in words, which Length turns into the number the model
  * aims for (it keeps a number better than a level's name); `data`, whether the request shows cards and their rows to
- * add detail from; `keep`, how many corrections the request lists. A typed chip's words stand in its line, so its
- * definitions say "these words".
+ * add detail from; `keep`, how many corrections the request lists; `cites`, whether Claude cites its claims, which a
+ * new number's citation follows (CITE_NEW). A typed chip's words stand in its line, so its definitions say "these
+ * words".
  */
 export const MEANS = Object.freeze({
   length: Object.freeze([
     m => `One or two sentences, at most about ${Math.min(40, round(m.words / 8))} words${m.keep ? ', not counting the corrections listed above' : ''}. Give the main point, and leave out the rest.`,
     m => `About a quarter of the original, about ${round(m.words / 4)} words${m.keep ? ', not counting the corrections listed above' : ''}. Keep the main point and the facts it rests on, and leave out the rest.`,
     m => `About as long as the original, about ${m.words} words.`,
-    m => `About one and a half times the original, about ${round(m.words * 1.5)} words. Explain what the original says more fully, such as what a term means or how one step led to the next.${m.data ? ' Add detail from the cards and their rows where it helps, each new number cited.' : ''}`,
-    m => `About two and a half times the original, about ${round(m.words * 2.5)} words. Give each point in full, with each term explained and each step that led to it.${m.data ? ' Add the detail behind each point from the cards and their rows, each new number cited.' : ''}`,
+    m => `About one and a half times the original, about ${round(m.words * 1.5)} words. Explain what the original says more fully, such as what a term means or how one step led to the next.${m.data ? ` Add detail from the cards and their rows where it helps${m.cites ? ', each new number cited' : ''}.` : ''}`,
+    m => `About two and a half times the original, about ${round(m.words * 2.5)} words. Give each point in full, with each term explained and each step that led to it.${m.data ? ` Add the detail behind each point from the cards and their rows${m.cites ? ', each new number cited' : ''}.` : ''}`,
   ]),
   // (working, where the original stands, asks nothing)
   familiarity: Object.freeze([
@@ -263,7 +269,7 @@ export const MEANS = Object.freeze({
 /** One chip as the request names it, the analyst's pick and what it asks: Length always, since it gives the length to
  *  aim for, and any other chip only when it stands away from the original. '' for a chip left where the original is. */
 export function pickLine(c, m = {}) {
-  const ctx = { words: 0, data: false, keep: 0, ...m }
+  const ctx = { words: 0, data: false, keep: 0, cites: true, ...m }
   if (c.id !== LENGTH.id && c.level === c.level0) return ''
   const means = (c.kind === 'own' ? MEANS.own : MEANS[c.id])?.[c.level]
   const what = means ? means(ctx) : ''
@@ -309,16 +315,42 @@ export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
 /** Whether a record is a simpler version of one answer (s): a catch-up of that one message. */
 export const isSimplify = rec => isCatchUp(rec) && rec.catchup.kind === 'simplify'
 
+/** How squeeze.md's principle on citations starts: what a citation is, and that a version keeps each one on its words.
+ *  While Claude cites its claims (Citations auto + verify, or auto), the text has it. In manual and off,
+ *  Claude cites nothing on its own, and the principle is left out, as main's Citing claims is (guidance/guidance.ts):
+ *  with it, a version of an answer that cites nothing cited words of its own, most often the answer's main numbers and
+ *  the terms of its explainers. The request names the analyst's citations instead (ASKED_HEAD). */
+export const CITING = '- **Keep every citation on the words it cites'
+
+/** What squeeze.md's slot {{CITE_NEW}} says while Claude cites its claims: a version cites a number it takes from a
+ *  card, as Claude cites its own. In manual and off it says nothing. */
+export const CITE_NEW = ', and cite each new number'
+
+/** The line that heads the words the analyst cited with c (marks/cite.ts) in a request. They stand in the original as
+ *  citations, and a version keeps each one on the words that keep what it says. */
+export const ASKED_HEAD = 'Words the analyst cited in the original, for thimble to check against the data. Where your text keeps what one says, keep its citation on those words, written as in the original:'
+
+/** squeeze.md as a request sends it: while Claude cites (`cites`), with its slot {{CITE_NEW}} filled; in manual and
+ *  off, without its principle on citations (CITING), and the slot empty. */
+export function squeezeText(system, cites = true) {
+  const text = String(system || '')
+  return cites ? fill(text, { CITE_NEW }) : fill(text.split('\n').filter(l => !l.startsWith(CITING)).join('\n'), { CITE_NEW: '' })
+}
+
 /**
  * The $.model.complete request that writes the message at its chips' levels: the input (the question, the original,
- * its cards, the corrections and terms it holds), then what the analyst picked, each chip with only its level's
- * definition. `system` is squeeze.md's text, and `toolkit` the card guide (how a card's view is written),
- * sent only with cards. The fixed text goes first and is marked for the prompt cache: squeeze.md, then the input, so a
- * second change of the same message reads them from the cache.
+ * its cards, the words the analyst cited in it, the corrections and terms it holds), then what the analyst picked,
+ * each chip with only its level's definition. `system` is squeeze.md's text, as Claude's citing has it (squeezeText,
+ * `cites`), and `toolkit` the card guide (how a card's view is written), sent only with cards. The fixed text goes
+ * first and is marked for the prompt cache: squeeze.md, then the input, so a second change of the same message reads
+ * them from the cache.
  */
-/** @param {any} rec @param {{system?: string, toolkit?: string, question?: string, chips?: any[], keep?: string[], terms?: string[], cards?: any[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
-export function request(rec, { system, toolkit = '', question = '', chips = chipsOf(rec), keep = [], terms = [], cards = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
+/** @param {any} rec @param {{system?: string, toolkit?: string, question?: string, chips?: any[], keep?: string[], terms?: string[], cards?: any[], asked?: string[], cites?: boolean, model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
+export function request(rec, { system, toolkit = '', question = '', chips = chipsOf(rec), keep = [], terms = [], cards = [], asked = [], cites = true, model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
   const drawn = cardsBlock(cards)
+  // the words the analyst cited with c, which stand in the original as citations: kept on their words where the text
+  // keeps what they say
+  const cited = asked.length ? ['', ASKED_HEAD, ...asked.map(w => `- [${w}](#)`)] : []
   // the corrections in the original stay at every level, shortened if need be (mustKeep); the length does not count them
   const kept = keep.length ? ['', 'Corrections in the original. Each stays in your version, in as few words as it needs, next to what it corrects:', ...keep.map(k => `- ${k}`)] : []
   // the terms the person can open an explanation of (explain marks): kept in their own words where the text keeps them
@@ -331,15 +363,16 @@ export function request(rec, { system, toolkit = '', question = '', chips = chip
     String(rec?.text ?? ''),
     '</original>',
     ...(drawn ? ['', drawn] : []),
+    ...cited,
     ...kept,
     ...named,
   ].join('\n')
-  const m = { words: wordsOf(rec?.text), data: !!drawn, keep: keep.length }
+  const m = { words: wordsOf(rec?.text), data: !!drawn, keep: keep.length, cites }
   const lines = chips.map(c => pickLine(c, m)).filter(Boolean)
   const tail = ['The analyst picked:', ...lines, '', `Write back the answer at these levels: the message in <text>${drawn ? ', then a block for each card it changes' : ''}.`]
   return {
     model, effort, maxTokens, timeoutMs,
-    system: [{ text: String(system || ''), cache: true }, ...(drawn && toolkit ? [{ text: String(toolkit), cache: true }] : [])],
+    system: [{ text: squeezeText(system, cites), cache: true }, ...(drawn && toolkit ? [{ text: String(toolkit), cache: true }] : [])],
     prompt: [{ text: head, cache: true }, { text: tail.join('\n') }],
   }
 }

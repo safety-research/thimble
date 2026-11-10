@@ -92,12 +92,12 @@ const ROLE_WORDS: Readonly<Record<string, string>> = {
   writer: 'thimble:writer',
   'view-builder': 'thimble:view-builder',
   'view-reviewer': 'thimble:view-reviewer',
-  check: 'thimble:check',
+  check: 'comments agent',
 }
 
-/** The request's line: its type, then its model and effort. Pure. */
+/** The request's line: its role's name, else its type, then its model and effort. Pure. */
 export function requestLine(r: Pick<SubagentRequest, 'role' | 'input' | 'values'>): string {
-  const type = r.input?.subagent_type || (r.role ? ROLE_WORDS[r.role] ?? `thimble:${r.role}` : '')
+  const type = (r.role ? ROLE_WORDS[r.role] : '') || r.input?.subagent_type || (r.role ? `thimble:${r.role}` : '')
   const model = r.values?.model ? modelLabel(r.values.model) : ''
   const values = [model, r.values?.effort ?? ''].filter(Boolean).join(' · ')
   return [type, values].filter(Boolean).join(' · ')

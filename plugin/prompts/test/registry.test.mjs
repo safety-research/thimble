@@ -47,9 +47,10 @@ test('placeholders are filled, a value kept as written, and the card tool text f
     assert.equal(fill('a {{X}} b {{Y}} c {{Z}}', { X: 1, Y: () => 'two' }), 'a 1 b two c {{Z}}')
     assert.equal(fill('{{X}}', { X: '$& $1' }), '$& $1')
   }
-  // the card tool text fits the 4096 characters Claude Code gives a tool description, with a long temp folder
+  // the card tool text fits the 4096 characters Claude Code gives a tool description, with a long temp folder: the
+  // text above its `<!-- view -->` line, since the part below it is the `view` field's (cards/tool.ts)
   {
-    const text = fill(readFileSync(join(ROOT, fileOf('card-tool')), 'utf8'), { TMPDIR: `/${'x'.repeat(99)}`, KEPT: 'v, r, l, f, F, p or u' }).trim()
+    const text = fill(readFileSync(join(ROOT, fileOf('card-tool')), 'utf8'), { TMPDIR: `/${'x'.repeat(99)}`, KEPT: 'v, r, l, f, F, p or u' }).split(/^<!--\s*view\s*-->[ \t]*$/m)[0].trim()
     assert.ok(text.length <= 4096, `${text.length} characters`)
   }
 })
@@ -63,10 +64,10 @@ test("every text reads in each mode with what it includes and slots.json's words
   }
 })
 
-test("each section that guidance/guidance.ts leaves out with its feature off is a heading of guidance.md", () => {
+test("each section that guidance/guidance.ts leaves out with its feature off is a heading of guidance.md", async () => {
   const src = readFileSync(join(ROOT, 'guidance', 'guidance.ts'), 'utf8')
   const headings = [...(/const SECTIONS[^{]*\{([^}]*)\}/.exec(src)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(m => m[1])
   assert.deepEqual(headings, ['Citing claims', 'Cards', 'Labels'])
-  const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
+  const text = await textOf('guidance', 'terminal')
   for (const h of headings) assert.match(text, new RegExp(`^## ${h}$`, 'm'), `guidance.md has ## ${h}`)
 })

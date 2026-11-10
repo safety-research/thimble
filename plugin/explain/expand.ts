@@ -6,9 +6,11 @@
 // message's part `explain` keeps it as it keeps the look's explainers.
 //
 // The files: the places the checker's evidence found for the answer's citations (marks/store.ts MarkItem.evidence),
-// then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray. A relative
-// path is read in the folder the session started in, then the folder holding the labels, then, after a tour, the
-// tour's sample data (readRoots).
+// then the files the answer links to, then, for the tour's sample answer, the tour's data, which Claude did not read
+// for it (tour/tour.ts tourFiles). The writer reads no file itself: Claude Code refuses each tool call of a fork. So it
+// reads the lines given here, and the records in the conversation. placeLines reads the lines an explainer's link
+// points to, for the tray. A relative path is read in the folder the session started in, then the folder holding the
+// labels, then, after a tour, the tour's sample data (readRoots).
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf, questionOf, setPart } from '../core/answers'
@@ -19,7 +21,7 @@ import { rowMarks } from '../marks/store'
 import { jsonIn } from '../observer/reply.mjs'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
-import { tourData } from '../tour/tour'
+import { tourData, tourFiles } from '../tour/tour'
 import type { ExplainPart } from './seam'
 import { filePlaces } from './place.mjs'
 
@@ -80,8 +82,9 @@ export async function placeLines($: Engine, path: string, from: number | null, t
     try {
       lines = String(await $.fs.read(file)).split('\n').slice(a - 1, b)
     } catch {
-      // a file over the 4 MiB one read takes: its lines from sed
-      const r = await $.process.run(['sed', '-n', `${a},${b}p;${b}q`, '--', file]).catch(() => null)
+      // a file over the 4 MiB one read takes: its lines from sed (the script after -e, so that macOS's sed, which stops
+      // reading options at the script, takes -- as the end of them, not as a file)
+      const r = await $.process.run(['sed', '-n', '-e', `${a},${b}p;${b}q`, '--', file]).catch(() => null)
       if (!r || r.exitCode !== 0) continue
       lines = String(r.stdout).replace(/\n$/, '').split('\n')
     }
@@ -112,7 +115,9 @@ async function writeAbout($: Engine, row: string, term: string): Promise<Any> {
   if (!msg) return 'That answer is not in this session any more.'
   const roots = await readRoots($)
   const answer = (await textView($, row, msg.text)).text
-  const places = [...(await evidencePlaces($, row)), ...filePlaces(answer)]
+  // the tour's sample answer names its data file, and links nothing: the file is read whole
+  const tour = (await tourFiles($, row).catch(() => [] as string[])).map(path => ({ path, from: null, to: null }))
+  const places = [...(await evidencePlaces($, row)), ...filePlaces(answer), ...tour]
   const question = await questionOf($, row).catch(() => '')
   const system = await promptText($, 'explain-expand')
   const files = await citedFiles($, places, roots)

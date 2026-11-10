@@ -1,5 +1,6 @@
-// The answer the keys act on (core/answerview.ts): { at an empty prompt picks the answer before, drawn with ▸, and a
-// new turn gives the keys back. All data is made up. `claude plugin test plugin`.
+// The keys that act on Claude's answers (core/answerview.ts restoredKey): thimble takes neither { nor }, so at an empty
+// prompt each types as any other character does, and every answer keeps Claude Code's own drawing. All data is made
+// up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { test } from './kit'
@@ -15,8 +16,9 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : '') + textOf(n.children)
 }
 const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } }) as never
+const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-test('{ at an empty prompt picks the answer before for the keys, drawn with ▸; a new turn gives the keys back', async ($, on) => {
+test('{ and } at an empty prompt type into the box, with two answers or more, and no answer is marked', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-answerview' }))
@@ -37,6 +39,8 @@ test('{ at an empty prompt picks the answer before for the keys, drawn with ▸;
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: { text: string }) => ({ text: e.text }))
+  // what the box holds once a key is typed
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
@@ -52,15 +56,16 @@ test('{ at an empty prompt picks the answer before for the keys, drawn with ▸;
   await turn('t2', 'Two runs failed.')
   // at rest both answers are Claude Code's own drawing
   expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')
-  const r = (await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: '{' }, text: '', cursor: 0, start: 0, end: 0, inputText: '{' } as never)) as Any
-  expect(r).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toContain('▸The revert undid a change.')
+  // { and } each go into the box, at an empty prompt, as the person typed them
+  for (const k of ['{', '}']) {
+    expect(await $.prompt.edit(key(k))).toEqual({ text: k, cursor: 1 })
+    await clock.advance(1000)
+  }
+  // no answer is marked: both stay Claude Code's own drawing
+  expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')
   expect(textOf(await $.ui.render(answer('row-t2', 'Two runs failed.')))).toBe('the engine')
-  // the bar names s (squeeze/seam.ts) once there is an answer
+  // the bar names s (squeeze/seam.ts), which acts on the last answer
   const band = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))
   expect(band).toContain('thimble')
   expect(band).toContain('s simplify')
-  expect(band).not.toContain('answer 1 of 2')
-  await turn('t3', 'You are welcome.')
-  expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')
 })

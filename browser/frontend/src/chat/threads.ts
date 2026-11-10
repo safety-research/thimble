@@ -136,11 +136,11 @@ export function writerDoc(m: Pick<ChatMeta, 'title'> & { doc?: string | null }):
   return m.doc || (m.title || '').replace(/^write\s+/i, '').trim().toLowerCase() || 'document'
 }
 
-/** A check's run as a thread name: `check/` and its chat's title (the check's name), a leading `check/` or `check `
+/** A check's run as a thread name: `comments/` and its chat's title (the check's name), a leading `check/` or `check `
  * dropped. Pure. */
 export function checkLabel(title: string): string {
   const t = title.replace(/\s+/g, ' ').trim().replace(/^check(?:\/|\s+)/i, '')
-  return `check/${t || 'run'}`
+  return `comments/${t || 'run'}`
 }
 
 /** A ticket's title as a thread name: `ticket #2: ` dropped, the first four words, lower case, joined by '-'. Pure. */
@@ -222,7 +222,8 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
       done: m.status === 'done' || m.status === 'failed' || m.status === 'stopped',
       parent: parentOf(m),
       lastTs: m.last_ts ?? m.ts_end ?? m.created_at,
-      ended: !agent || m.status === 'running' ? null : m.status === 'done' ? 'done' : m.status === 'failed' || m.status === 'stopped' ? 'failed' : null,
+      // an agent at work again (a fix's chat while the kernel checks its change) shows its spinner, not how it ended
+      ended: !agent || isRunning ? null : m.status === 'done' ? 'done' : m.status === 'failed' || m.status === 'stopped' ? 'failed' : null,
       endTs: m.ts_end ?? null,
       hidden: !shown && left,
       waiting,

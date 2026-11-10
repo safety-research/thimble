@@ -38,7 +38,7 @@ import { hintUsed } from '../bar/hints'
 import { failNotice, reasonOf } from '../bar/notice'
 import { quiet } from '../core/askcell.js'
 import { markPressed, spansOver } from '../core/answerview'
-import { latestAnswer, pickAnswer, turnOf } from '../core/answers'
+import { latestAnswer, turnOf } from '../core/answers'
 import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
 import { accent } from '../core/theme'
@@ -237,7 +237,6 @@ async function catchUpWith($: Engine): Promise<{ id: string; was: Rec[] } | null
   }
   const id = await catchUp($, { host, rows: pile.rows, replies: pile.n, question: pile.prompt?.text ?? '', prompt: pile.prompt?.row ?? null })
   if (!id) return null
-  await pickAnswer($, null)
   const cu = await recOf($, id)
   await $.ui.scroll({ to: { key: `ans-${cu ? drawnAt(cu) : host}` }, block: 'nearest' }).catch(() => undefined)
   return { id, was }

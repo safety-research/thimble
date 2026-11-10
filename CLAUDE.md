@@ -8,8 +8,8 @@ This repository holds two products: the terminal plugin for Claude Code (`plugin
 When someone asks you to install thimble, ask what they want, run the install script, and pass on what it says.
 
 1. Ask, with your question tool:
-   - **The plugin and the workbench** (recommended): in Claude Code, Claude cites its claims, a second Claude checks
-     them, and Claude draws cards of the data; the workbench does the same in a web page on this machine. About 1 GB.
+   - **The plugin and the workbench** (recommended): in Claude Code, Claude draws cards of the data, and a second
+     Claude checks claims against the files; the workbench does the same in a web page on this machine. About 2 GB.
    - **The plugin alone**: only the Claude Code part.
 
    When they choose the workbench, then ask how it reaches Claude:
@@ -48,8 +48,10 @@ check CI runs, and `scripts/check.sh STEP` one of them.
   CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
   symptom.
 - The browser workbench (`browser/`) keeps its own texts in `browser/prompts/`; from
-  `plugin/` it reads only what it runs as the terminal does: the citation checker and the look at each answer.
-  `scripts/check.sh parity` checks that they render and name only what its code has.
+  `plugin/` it reads the texts that both modes share, such as the citation checker, the look at each answer, a side
+  thread's instructions, the label classifier, the guidance on labels and on what a card shows, and main's Citing claims
+  (`plugin/prompts/registry.mjs` names each one's readers). `scripts/check.sh parity` checks that both modes read a
+  shared text the same, and that the workbench's texts render and name only what its code has.
 - In the plugin, Claude's card views run only in the card runner (`plugin/cards/runner.mjs`), which runs only in
   Anthropic's sandbox runtime (`plugin/cards/argv.mjs` gives its rules; `plugin/sandbox/` holds the pin and the
   launcher): no network, reads only the runner's code and the card copies, writes only its own folder. A `vm` context

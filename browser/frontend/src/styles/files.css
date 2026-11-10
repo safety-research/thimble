@@ -34,11 +34,13 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* 2px at each end: the picked or focused option's ring (components.css .seg-opt) lies outside its box, where the bar's
+   overflow would cut it */
 .files-views.is-compact {
   flex: 1 1 0;
-  min-width: calc(2 * var(--control-sm) + 4px);
+  min-width: calc(2 * var(--control-sm) + 8px);
   height: var(--control-sm);
-  padding: 0;
+  padding: 0 2px;
   border-bottom: 0;
   overflow: hidden;
 }
@@ -687,8 +689,7 @@
   pointer-events: none;
   user-select: none;
 }
-/* a label over cards or report sentences: the canvas or report glyph in the label's colour, where a label over files
-   has its square */
+/* a label over report sentences: the report glyph in the label's color, where a label over files has its square */
 .files-label-over {
   flex: none;
   color: var(--c);
@@ -3586,7 +3587,7 @@
 
 /* the ? that says what labels or fields are (files/LabelsHelp HelpButton): a borderless icon button the size of its
    heading's text, centered on its line in a menu and in the Labels sidebar's name, in the quiet ink until hovered or
-   focused; and the grey thimble tag of a label card and a label's edit card (ThimbleTag) */
+   focused; and the grey thimble tag of a label's edit card (ThimbleTag) */
 .labels-help-heading {
   display: flex;
   align-items: center;

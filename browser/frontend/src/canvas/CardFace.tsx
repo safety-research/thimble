@@ -27,7 +27,7 @@ import { checkOf, checkProblem } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
-import { CardBody, LabelHead, LabelKindTag, LabelMeta, asksQuestion, exampleRefs } from './bodies'
+import { CardBody, LabelHead, LabelMeta, asksQuestion, exampleRefs } from './bodies'
 import { conceptName, labelsShown, staleLabels, type ConceptDetailState } from './concepts'
 import { CanvasContext } from './context'
 import { editedLabels, labelDraft, setLabelDraft, useLabelDrafts } from './labelDrafts'
@@ -83,8 +83,7 @@ function Face(p: CardFaceProps) {
   const failed = cell.status === 'error' && !running
   const check = checkOf(cell)
   const problem = p.onCheckAgain ? checkProblem(check) : ''
-  // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
-  const takeaway = kind === 'plan' || held ? '' : cell.takeaway
+  const takeaway = held ? '' : cell.takeaway
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
@@ -144,7 +143,7 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
+            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} linked />
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>
@@ -189,8 +188,8 @@ export function labelTagTip(id: string, regenerating: ReadonlySet<string>, edite
 /** The labels the card uses (concepts.labelsShown), in a row under its question, each a tag in the label's colour. A
  * click opens the label's edit card in a popover. thimble runs a card again by itself once a label it read changes; a
  * label that changed and is not being run again for shows its tag in ink. A label card whose head holds a question of
- * its own names its label on a row of its own instead: the Label tag, the label's tag, then how the label is defined
- * and what it ran on (bodies LabelMeta, from `detail`, the card's own copy of the label, else the board's list's). */
+ * its own names its label on a row of its own instead: the label's tag, then how the label is defined and what it ran
+ * on (bodies LabelMeta, from `detail`, the card's own copy of the label, else the board's list's). */
 export function CardLabels({ cell, detail }: { cell: Cell; detail?: Concept | null }) {
   const ctx = useContext(CanvasContext)
   const ids = labelsShown(cell, ctx.concepts)
@@ -214,10 +213,7 @@ export function CardLabels({ cell, detail }: { cell: Cell; detail?: Concept | nu
     <>
       {named && (
         <div className="bcell-labels bcell-label-row">
-          <span className="bcell-label-who">
-            <LabelKindTag />
-            {tag(own)}
-          </span>
+          <span className="bcell-label-who">{tag(own)}</span>
           {self && <LabelMeta label={self} />}
         </div>
       )}

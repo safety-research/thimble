@@ -653,8 +653,7 @@ def evidence_part(c: str, answers: list[dict[str, Any]], turns: list[_Turn] | No
 
 
 def canvas(c: str) -> str:
-    """Every card by group, in the tree's order: its ref, kind and question, its takeaway or a plan's steps, and the open
-    comments on it and its steps."""
+    """Every card by group, in the tree's order: its ref, kind and question, its takeaway, and the open comments on it."""
     from . import canvas_comments, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -684,9 +683,6 @@ def canvas(c: str) -> str:
             takeaway = " ".join(cite.canon_text(str(cell.get("takeaway") or "")).split())
             if takeaway:
                 lines.append(f"  takeaway: {takeaway}")
-            if follows := (cell.get("payload") or {}).get(notebook.PLAN_FOLLOWS) if kind == notebook.PLAN_KIND else None:
-                lines.append(f"  follows: card:{follows}")
-            lines += [f"  {line}" for line in notebook.plan_lines(cell)]
             lines += [f"  {n}" for n in notes.get(str(cell["id"]), [])]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) or _hint("context-no-cards")

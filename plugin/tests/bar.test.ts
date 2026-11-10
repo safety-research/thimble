@@ -1,5 +1,7 @@
 // The bar above the prompt, through the whole hooks module: after an answer it names v, coverage and the labels, and r
-// opens the coverage pane drawn from `thimble coverage --json`. All data is made up. `claude plugin test plugin`.
+// opens the coverage pane drawn from `thimble coverage --json` (Coverage and Claims, off by default, turned on here),
+// whose keys act at the empty prompt also after the prompt box held text. All data is made up.
+// `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { test } from './kit'
@@ -68,7 +70,7 @@ function world(on: Any, coverage: string) {
   return { clock, opens }
 }
 
-test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', async ($, on) => {
+test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', { options: { coverage: true } }, async ($, on) => {
   const w = world(on, JSON.stringify(COVERAGE))
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
@@ -108,6 +110,47 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   await pane.unmount()
 })
 
+/** An edit of the prompt box by the person: `inputText` in place of [start, end) of the box `text`. */
+const edit = (text: string, start: number, end: number, inputText: string, key: string) => ({ origin: { kind: 'composer' }, key: { key }, text, cursor: end, start, end, inputText }) as never
+
+// Claude Code hands a pane its keys only while the pane holds the keyboard, and moves the keyboard to the prompt box
+// once a letter goes in. So once the box held text, the pane's keys reach thimble's key hook at the empty prompt
+// (core/pane.ts paneKey)
+test("after the prompt box held text, the coverage pane's keys act again at the empty prompt, and the pane takes the keyboard back; a word that starts with one is typed whole", { options: { coverage: true } }, async ($, on) => {
+  const w = world(on, JSON.stringify(COVERAGE))
+  // a key no hook takes is typed into the box, as Claude Code types it
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  expect(((await $.prompt.edit(edit('', 0, 0, 'r', 'r'))) as Any).text).toBe('')
+  await w.clock.advance(400)
+  const pane = await $.ui.mount(PANE)
+  const before = w.opens.length
+  await pane.press({ key: 'file:runs/r1.jsonl' })
+  expect(await pane.find({ type: 'Text', text: /in Claude's context +5\/10 records +50%/ })).toBeDefined()
+  // a press on a row asks for the keyboard too: Claude Code stops a click at the Button it lands on
+  expect(w.opens.slice(before)).toEqual([expect.objectContaining({ id: 'thimble', focus: true })])
+
+  // a letter goes into the box, and the person deletes it
+  expect(((await $.prompt.edit(edit('', 0, 0, 'x', 'x'))) as Any).text).toBe('x')
+  expect(((await $.prompt.edit(edit('x', 0, 1, '', 'backspace'))) as Any).text).toBe('')
+  const opened = w.opens.length
+  // j at the empty prompt is the pane's: once no letter followed it, the selection moves down, and the pane asks for the
+  // keyboard, which Claude Code gives it while the box is empty
+  expect(((await $.prompt.edit(edit('', 0, 0, 'j', 'j'))) as Any).text).toBe('')
+  await w.clock.advance(400)
+  expect(await pane.find({ type: 'Text', text: /in Claude's context +0\/10 records/ })).toBeDefined()
+  expect(w.opens.slice(opened).some(e => e.id === 'thimble' && e.focus === true)).toBe(true)
+  // k with a letter right after it is a word: both are typed, and the selection stays
+  expect(((await $.prompt.edit(edit('', 0, 0, 'k', 'k'))) as Any).text).toBe('')
+  expect(((await $.prompt.edit(edit('', 0, 0, 'i', 'i'))) as Any).text).toBe('ki')
+  await w.clock.advance(400)
+  expect(await pane.find({ type: 'Text', text: /in Claude's context +0\/10 records/ })).toBeDefined()
+  await pane.unmount()
+})
+
 /** The node of a drawing whose key is `key`, or null. */
 function byKey(n: Any, key: string): Any {
   if (!n || typeof n !== 'object') return null
@@ -118,7 +161,7 @@ function byKey(n: Any, key: string): Any {
 
 // A bar too narrow for one row: the counts give way so that it keeps one row. Where it takes a second row anyway, for
 // the right's items, they come back on that row when they fit there, and stay gone where they would take one more row
-test("a bar that takes a second row for the right's items anyway gives the counts that gave way their room on it; where they would take one more row, they stay gone", async ($, on) => {
+test("a bar that takes a second row for the right's items anyway gives the counts that gave way their room on it; where they would take one more row, they stay gone", { options: { coverage: true, claimsMode: 'auto' } }, async ($, on) => {
   const w = world(on, JSON.stringify(COVERAGE))
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
   // the look at the answer has not answered: the bar names w for the claims it will find

@@ -413,7 +413,7 @@ async def card_pictures(c: str, cards: list[str], *, draw: bool) -> tuple[dict[s
 
 
 def _bundled_installed() -> bool:
-    root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
+    root = headless.browsers_dir()
     return any(root.glob("chromium_headless_shell-*")) or any(root.glob("chromium-*"))
 
 

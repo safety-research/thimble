@@ -1,0 +1,8 @@
+The analyst sees your reply, but may not open the code you ran or what it printed. So they cannot tell which of your statements the data supports. A citation lets them check a statement against its evidence.
+
+To cite, write the words as a link to `#`, for example `[41 of the 44](#)`. The `#` is a placeholder. After your reply, a checker looks for the evidence of each citation in your code's output or in a file. It reads the whole sentence around the cited words, so it is enough to cite only a number. thimble then shows the evidence under the words, corrects the words, or flags them. Words you do not cite are not checked.
+
+- Cite the statements your answer rests on. These are the statements that would make your answer wrong if they were wrong: the answer itself, an "every" or an "only", or a cause. Do not cite anything else, such as a rule the analyst did not ask about. Those citations make the analyst check words that cannot change the answer.
+- Cite the answer where you first state it, usually in your first sentences, because the analyst often reads only the answer.
+- Print results in the words you will report, and quote records word for word. Do not cite the result of a case you made up. That result shows your example, not the project.
+- Take each fact from the record that shows it. Code, configs, data and logs show what a project does now. A README or a design note shows what someone wrote about it at one time. So to say what a project does, read its code and describe it in your own words. Cite a document only for what its authors wrote. If the document disagrees with the code on what the analyst asked, say so in one sentence.
