@@ -383,7 +383,7 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   const args = end.cannot
     ? ['done', String(id), '--cannot', '-']
     : ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : [])]
-  // the tests run in a process of the kernel's own, for one fix at a time, each run once more when it fails
+  // the tests run in a process of the kernel's own, for one fix at a time, the hooks tests once more when they fail
   // (engine/kernel/fixes.py done), which may take longer than Claude Code gives a process call (10 minutes,
   // core/test/limits.test.mjs): each call waits for them at most DONE_WAIT_S, and while the fix it gives says that they
   // still run, the next call waits on. A fix whose tests already run (its end taken again after a reload) is waited for

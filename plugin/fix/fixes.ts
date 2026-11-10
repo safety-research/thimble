@@ -371,7 +371,7 @@ export async function checkUpdate($: Engine): Promise<void> {
 }
 
 /** How long the kernel may take to check the fixes an update set aside: the quick tests of the release with their
- *  changes, once for them all, then once for each fix when they fail together, each run twice when it fails
+ *  changes, once for them all, then once for each fix when they fail together, the hooks tests twice when they fail
  *  (engine/kernel/fixes.py _carry_check). */
 const CARRY_MS = 1_800_000
 
