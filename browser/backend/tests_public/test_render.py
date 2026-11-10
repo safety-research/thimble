@@ -1,8 +1,9 @@
 """app.render: the theme the harness draws a card in (what the analyst's browser last reported, its figure style among
-it), and the request it sends the render page. The browser is never launched here: the pool is stood in for. All data
-is made up."""
+it), the request it sends the render page, and the files it makes of a figure's drawing. The browser is never launched
+here: the pool is stood in for. All data is made up."""
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -139,3 +140,57 @@ async def test_the_page_says_when_a_figure_draws_nothing_and_the_picture_is_stil
         await pool._render_on(page, {"figure": {"style": "paper", "part": "legend"}}, res)
         assert res.empty is empty and res.png == b"made-up png"
         assert page.shots == [{"x": 16, "y": 16, "width": out["box"]["width"], "height": out["box"]["height"]}]
+
+
+async def test_render_figure_names_the_files_to_make_of_the_drawing_and_refuses_one_it_does_not_know(drawn):
+    cell = {"id": "c1", "kind": "plot", "title": "Runs per day?"}
+    await render.render_figure(CORPUS, cell, style="blog", files=("webp", "pdf", "webp"))
+    assert drawn[-1]["figure"] == {"style": "blog", "part": "figure", "files": ["webp", "pdf"]}
+    with pytest.raises(ValueError, match="files"):
+        await render.render_figure(CORPUS, cell, style="blog", files=("gif",))
+
+
+async def test_a_figures_files_come_from_the_drawing_its_picture_shows():
+    """The page puts the chart's SVG and a legend's entries in its result; the harness encodes the picture as WebP in the
+    page, and prints the figure alone on one page of the picture's size, edge to edge, in the page's screen styles,
+    setting the page back after. A request that names no files makes none. The page is stood in for."""
+
+    class FakePage:
+        def __init__(self):
+            self.calls = []
+
+        async def evaluate(self, script, *args):
+            self.calls.append((script, args))
+            if "render(" in script:
+                return {"box": {"x": 16, "y": 16, "width": 800, "height": 519.5}, "fonts": True, "entries": 3,
+                        "svg": "<svg>the chart</svg>"}
+            if "webp(" in script:
+                assert base64.b64decode(args[0]) == b"made-up png"
+                return base64.b64encode(b"made-up webp").decode("ascii")
+            return None if "print(" in script else False
+
+        async def screenshot(self, **kw):
+            return b"made-up png"
+
+        async def emulate_media(self, *, media):
+            self.calls.append(("media", media))
+
+        async def pdf(self, **kw):
+            self.calls.append(("pdf", kw))
+            return b"%PDF made-up"
+
+    page, res = FakePage(), render.Rendered()
+    await render.Pool(pages=1)._render_on(page, {"figure": {"style": "blog", "part": "figure",
+                                                            "files": ["webp", "pdf", "svg"]}}, res)
+    assert (res.png, res.webp, res.pdf, res.svg, res.entries) == (b"made-up png", b"made-up webp", b"%PDF made-up",
+                                                                  "<svg>the chart</svg>", 3)
+    clip = {"x": 16, "y": 16, "width": 800, "height": 520}
+    printing = [c for c in page.calls if c[0] in ("media", "pdf") or "print(" in c[0]]
+    assert printing == [("(box) => window.__thimbleRender.print(box)", (clip,)), ("media", "screen"),
+                        ("pdf", {"width": "800px", "height": "520px", "print_background": True,
+                                 "margin": render.NO_MARGIN, "page_ranges": "1"}),
+                        ("media", "null"), ("() => window.__thimbleRender.print(null)", ())]
+    page, res = FakePage(), render.Rendered()
+    await render.Pool(pages=1)._render_on(page, {"figure": {"style": "blog", "part": "figure"}}, res)
+    assert res.png == b"made-up png" and (res.webp, res.pdf) == (None, None)
+    assert not [c for c in page.calls if c[0] in ("media", "pdf") or "webp(" in c[0]]
