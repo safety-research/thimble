@@ -309,16 +309,18 @@ function Raster({ src }: { src: string }) {
 
 /**
  * A figure's SVG inlined (lib/svg: made safe, its ids its own, its text in the page's faces and its colours the
- * theme's), as wide as the room up to its own width, its text mended where the paper made it hard to read on what is
- * drawn under it (lib/ink). A document that does not parse is shown as an image.
+ * theme's, and in the Blog figure style no smaller than a Vega chart's ticks, --viz-size), as wide as the room up to
+ * its own width, its text mended where the paper made it hard to read on what is drawn under it (lib/ink). A document
+ * that does not parse is shown as an image.
  */
 function InlineSvg({ svg }: { svg: string }) {
   const id = useId().replace(/[^A-Za-z0-9_-]/g, '')
-  const fig = useMemo(() => inlineSvg(svg, `f${id}-`), [svg, id])
+  const { key, figures } = useTheme()
+  const minText = figures === 'blog' ? parseFloat(token('--viz-size')) || undefined : undefined
+  const fig = useMemo(() => inlineSvg(svg, `f${id}-`, { minText }), [svg, id, minText])
   // one object per figure: React writes the markup again whenever it gets a new one, which would drop the mended ink
   const inner = useMemo(() => ({ __html: fig?.markup ?? '' }), [fig])
   const box = useRef<HTMLDivElement>(null)
-  const { key } = useTheme()
   // the inks a pass gives, read when the paper or the accent changes; as text, so a change that leaves them as they
   // were runs no pass
   const inks = useMemo(() => JSON.stringify(paperInks(token)), [key])
