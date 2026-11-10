@@ -60,7 +60,7 @@ macOS or Linux (on Windows, WSL 2), with Claude Code, Python and Node.js.
 
 ## Security
 
-thimble is a research prototype and may have security vulnerabilities; use it at your own risk. Report security issues privately to [@mjoerke](https://github.com/mjoerke).
+thimble is a research prototype and may have security vulnerabilities. Report security issues privately to [@mjoerke](https://github.com/mjoerke).
 
 ## Contributing
 
