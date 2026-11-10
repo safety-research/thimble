@@ -1,0 +1,104 @@
+/* A card as a figure (figures/Figure.tsx), what the card harness draws for an export or a report. Each figure is a
+   white sheet in its style's own inks and faces, whatever the paper: Blog's panel is blogpost-figure's (figure.css
+   .fig, .fig-title, .fig-sub), Paper's chart and legend paper-figure's. */
+.figure-blog {
+  box-sizing: border-box;
+  width: 800px;
+  padding: 36px 40px 32px;
+  background: #ffffff;
+  color: #1f1f1e;
+  font-family: 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+}
+/* the headline, the takeaway, under a 44 x 5 px accent bar 18 px above it */
+.figure-blog .figure-title {
+  max-width: 78%;
+  margin: 0;
+  color: #1f1f1e;
+  font: 700 26px / 1.18 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+  letter-spacing: -0.005em;
+}
+.figure-blog .figure-title::before {
+  content: '';
+  display: block;
+  width: 44px;
+  height: 5px;
+  margin-bottom: 18px;
+  background: #b86046;
+}
+/* the subtitle, the question */
+.figure-blog .figure-sub {
+  max-width: 82%;
+  margin: 8px 0 0;
+  color: #8a8a86;
+  font: 400 16px / 1.35 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+}
+.figure-blog .figure-chart {
+  margin-top: 28px;
+}
+.figure-paper {
+  margin: 0;
+  background: #ffffff;
+  color: #262626;
+  font-family: 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+}
+/* the chart at its size, nothing scrolled */
+.figure .figure-chart .outputs-vega {
+  overflow: visible;
+}
+.figure-caption {
+  margin: 6px 0 0;
+  font: 400 12px / 1.35 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+}
+.figure-caption b {
+  font-weight: 700;
+}
+.figure-legend {
+  position: relative;
+  display: inline-block;
+  padding: 2px;
+  background: #ffffff;
+  color: #262626;
+}
+/* the chart the legend reads its scales from, drawn out of sight */
+.figure-legend-chart {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.figure-legend-entries {
+  display: inline-grid;
+  align-items: center;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.figure-legend-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 10.67px / 1.2 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+  white-space: nowrap;
+}
+.figure-swatch {
+  flex: none;
+  display: block;
+}
+/* a legend of amounts: its title, its colors from end to end, its ends' amounts under them */
+.figure-legend-ramp {
+  width: 120px;
+  font: 400 10.67px / 1.2 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+}
+.figure-legend-title {
+  margin-bottom: 3px;
+}
+.figure-legend-bar {
+  height: 10px;
+}
+.figure-legend-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+}

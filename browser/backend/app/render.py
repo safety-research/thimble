@@ -1,5 +1,6 @@
 """The card harness: a card drawn offscreen with the app's own card face and shot as a PNG, so the card check
-(card_check.py) sees the card as the analyst will.
+(card_check.py) sees the card as the analyst will; or drawn as a figure in a figure style (render_figure), for an export
+or a report.
 
 One headless Chromium keeps POOL_PAGES pages loaded on `render.html` (frontend/src/render.tsx), which mounts CardFace
 with a stub canvas context. Each request carries everything the page needs (the card, its resolved refs, card and
@@ -55,6 +56,7 @@ THEMES_FILE = "render-theme.json"  # workspaces/<c>/: the theme the analyst's br
 PAPERS = ("warm", "neutral", "dark")  # frontend/src/lib/theme.ts
 ACCENTS = ("pink", "orange", "yellow", "lime", "blue", "iris", "graphite")
 FIGURES = ("thimble", "blog", "paper")  # the figure styles (theme.ts FigureStyle); one it does not name reads as thimble
+FIGURE_PARTS = ("figure", "legend")  # what a figure request draws: the chart, or a Paper figure's legend alone
 DEFAULT_THEME = {"paper": "warm", "accent": "iris", "figures": "thimble"}
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", urlsplit(RENDER_ORIGIN).hostname})  # what the page may reach
 _TAKEAWAY_REF = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]|]+?)\]\]")
@@ -555,10 +557,11 @@ def card_libs_part(c: str, cell: dict[str, Any]) -> dict[str, Any]:
     return {"cardLibs": {card_libs.key(payload["libs"]): card_libs.head(c, payload["libs"])}}
 
 
-def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> dict[str, Any]:
+def request_for(c: str, cell: dict[str, Any], *, width: int | None = None,
+                figure: dict[str, Any] | None = None) -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
-    resolved, the cards they name, the theme and the width, for a label card its label (label_data), and for a custom
-    card the libraries it names (card_libs_part)."""
+    resolved, the cards they name, the theme and the width, for a label card its label (label_data), for a custom card
+    the libraries it names (card_libs_part), and the figure to draw it as when one is asked for (render_figure)."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     w = width or cell.get("width") or CARD_W
@@ -575,6 +578,7 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
         "width": int(w) if isinstance(w, (int, float)) and w > 0 else CARD_W,
         **({"label": label} if label else {}),
         **card_libs_part(c, cell),
+        **({"figure": figure} if figure else {}),
     }
 
 
@@ -585,6 +589,29 @@ async def render_card(c: str, cell: dict[str, Any], *, width: int | None = None,
     if not enabled():
         raise Unavailable("THIMBLE_RENDER is off")
     req = await asyncio.to_thread(request_for, c, cell, width=width)
+    return await pool().render(req, timeout_s=timeout_s, still=still)
+
+
+async def render_figure(c: str, cell: dict[str, Any], *, style: str | None = None, part: str = "figure",
+                        columns: int | None = None, caption: int | None = None,
+                        timeout_s: float = RENDER_TIMEOUT_S, still: bool = True) -> Rendered:
+    """One card of workspace `c` drawn now as a figure (frontend figures/Figure.tsx), as render_card returns a card
+    (Unavailable when the harness cannot run): `style` one of FIGURES, None for the one the analyst's browser last
+    reported; `part` the chart ("figure") or a Paper figure's legend alone ("legend"), in `columns` columns, all in one
+    row when None; `caption` the figure's number in a report, for the caption under a Paper figure. The picture is the
+    figure's own box. A style or part the harness does not know is a ValueError."""
+    if not enabled():
+        raise Unavailable("THIMBLE_RENDER is off")
+    if style is not None and style not in FIGURES:
+        raise ValueError(f"a figure's style is one of {', '.join(FIGURES)}, not {style!r}")
+    if part not in FIGURE_PARTS:
+        raise ValueError(f"a figure's part is one of {', '.join(FIGURE_PARTS)}, not {part!r}")
+    figure: dict[str, Any] = {"style": style or (await asyncio.to_thread(theme, c))["figures"], "part": part}
+    if columns:
+        figure["columns"] = int(columns)
+    if caption is not None:
+        figure["caption"] = int(caption)
+    req = await asyncio.to_thread(request_for, c, cell, figure=figure)
     return await pool().render(req, timeout_s=timeout_s, still=still)
 
 

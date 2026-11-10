@@ -1,8 +1,9 @@
 // The card harness's page (render.html; backend/app/render.py keeps a few open in headless Chromium): one card drawn
 // with the canvas's own CardFace, width, theme and stylesheet, so the picture the card check reads is what the analyst
-// sees. The page calls no API: each request carries the card with its refs resolved, cited calls, card and label names
-// (and a label card's `label` data, a custom card's libraries), and a fetch stub answers the page's
-// requests from them, listing any it could not.
+// sees; or, when the request names a figure, the card as a figure in a figure style (figures/Figure), on a white sheet,
+// whose own box is the picture. The page calls no API: each request carries the card with its refs resolved, cited
+// calls, card and label names (and a label card's `label` data, a custom card's libraries), and a fetch stub answers
+// the page's requests from them, listing any it could not.
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import './styles/index.css'
@@ -12,6 +13,7 @@ import { CardFace } from './canvas/CardFace'
 import { CARD_PAD_X } from './canvas/Cell'
 import { CanvasContext, type CanvasCtx } from './canvas/context'
 import { kindOf } from './canvas/layout'
+import { Figure, type FigurePart } from './figures/Figure'
 import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { readFigures, setAccent, setFigures, setPaper, type Accent, type FigureStyle, type Paper } from './lib/theme'
@@ -33,6 +35,10 @@ export interface RenderRequest {
   label?: LabelData | null
   /** a custom card's libraries by its `libs` query, as GET /ws/{c}/card-libs returns them */
   cardLibs?: Record<string, { head: string; problems: string[] }>
+  /** the card as a figure (figures/Figure) in `style`: its chart (`part` 'figure', the default) or a Paper figure's
+   * legend, in `columns` columns (all in one row when not given), with a report's caption when `caption` numbers it;
+   * thimble's figure is the card face. Without it the page draws the card face. */
+  figure?: { style: FigureStyle; part?: FigurePart; columns?: number; caption?: number }
 }
 
 export interface LabelData {
@@ -63,6 +69,8 @@ const QUIET_MS = 60
 /** where the card sits on the page: clear of the edges, so its hairline ring is in the picture */
 const MARGIN = 16
 const FACES = ['400 13px "Hanken Grotesk"', '500 13px "Hanken Grotesk"', '400 12px "Geist Mono"']
+/** the faces of a card drawn in the Blog figure style, its charts' and its figure's headline */
+const BLOG_FACES = ['400 12px "DM Sans"', '600 13px "DM Sans"', '700 26px "DM Sans"']
 
 let current: RenderRequest | null = null
 let unanswered: string[] = []
@@ -133,10 +141,10 @@ async function settled(el: HTMLElement): Promise<boolean> {
 }
 
 /** Whether the faces the card is drawn in are loaded (a fallback face would change every width on the card). */
-async function fontsLoaded(): Promise<boolean> {
+async function fontsLoaded(faces: readonly string[]): Promise<boolean> {
   try {
-    await Promise.all(FACES.map((f) => document.fonts.load(f)))
-    return FACES.every((f) => document.fonts.check(f))
+    await Promise.all(faces.map((f) => document.fonts.load(f)))
+    return faces.every((f) => document.fonts.check(f))
   } catch {
     return false
   }
@@ -151,10 +159,15 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   // differently after an edit
   const ws = `render-${n}`
   history.replaceState(null, '', `?ws=${ws}`)
-  if (req.theme?.paper) setPaper(req.theme.paper)
+  // thimble's figure is the card face; a figure of another style is a white sheet, its charts in a light paper's inks
+  const figure = req.figure && req.figure.style !== 'thimble' ? req.figure : null
+  if (figure) setPaper('neutral')
+  else if (req.theme?.paper) setPaper(req.theme.paper)
   if (req.theme?.accent) setAccent(req.theme.accent)
-  // the page is kept for the next card, so a request without a figure style draws in thimble's, not the last card's
-  setFigures(readFigures(req.theme?.figures ?? null))
+  // the charts in the figure's style, else the reported one; the page is kept for the next card, so a request that
+  // names no style draws in thimble's, not the last card's
+  const figures = readFigures(req.figure?.style ?? req.theme?.figures ?? null)
+  setFigures(figures)
   registerCells((req.names ?? []).map((c) => ({ id: c.id, title: c.title })))
   registerConcepts(req.labels ?? [])
   const cell: Cell = req.card
@@ -181,9 +194,13 @@ async function render(req: RenderRequest): Promise<RenderResult> {
       root.render(
         <CanvasContext.Provider value={ctx}>
           <ChipContext.Provider value={{ workspace: ws, broken: new Set(), anchor: true }}>
-            <div className={`bcell bcell-kind-${kindOf(cell)}`} style={{ position: 'relative', width }}>
-              <CardFace cell={cell} width={width - CARD_PAD_X} label={{ concept, error: null } as never} />
-            </div>
+            {figure ? (
+              <Figure cell={cell} style={figure.style} part={figure.part} columns={figure.columns} caption={figure.caption} label={{ concept, error: null } as never} />
+            ) : (
+              <div className={`bcell bcell-kind-${kindOf(cell)}`} style={{ position: 'relative', width }}>
+                <CardFace cell={cell} width={width - CARD_PAD_X} label={{ concept, error: null } as never} />
+              </div>
+            )}
           </ChipContext.Provider>
         </CanvasContext.Provider>,
       ),
@@ -191,11 +208,13 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   } catch (e) {
     return { box: null, fonts: false, requests: unanswered, error: `the card did not render: ${(e as Error).message}`, ms: { settle: 0 } }
   }
-  const card = host.querySelector<HTMLElement>('article.canvas-card')
+  const card = host.querySelector<HTMLElement>(figure ? '.figure' : 'article.canvas-card')
   if (!card) return { box: null, fonts: false, requests: unanswered, error: 'the card did not render', ms: { settle: 0 } }
   // a card still drawing after SETTLE_MAX_MS is shot as it stands
   await settled(card)
-  const fonts = await fontsLoaded()
+  const fonts = await fontsLoaded(figures === 'blog' ? [...FACES, ...BLOG_FACES] : FACES)
+  // a figure is measured by its own box alone: no body past what it shows, nothing wider than its room
+  if (figure) return { box: boxOf(card), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
   const wide = bodyWidth(card)
   return { box: boxOf(card), body: bodyHeight(card), ...(wide ? { wide } : {}), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
 }

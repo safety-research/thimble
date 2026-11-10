@@ -77,3 +77,40 @@ async def test_render_card_draws_the_card_face_as_the_canvas_does(drawn):
     r = await render.render_card(CORPUS, cell)
     assert r.ok and r.png == b"made-up png"
     assert drawn[0]["card"]["id"] == "c1" and "figure" not in drawn[0]
+
+
+async def test_render_figure_asks_the_page_for_the_card_as_a_figure_in_the_style_named_else_the_reported_one(drawn):
+    cell = {"id": "c1", "kind": "plot", "title": "Runs per day?", "takeaway": "Most runs end on day 2."}
+    report(paper="dark", accent="pink", figures="blog")
+    r = await render.render_figure(CORPUS, cell)
+    assert r.ok
+    assert drawn[-1]["figure"] == {"style": "blog", "part": "figure"}
+    # the card, the theme and the rest of the request are a card's, so the page reads the card as it would
+    assert drawn[-1]["card"]["id"] == "c1" and drawn[-1]["theme"]["paper"] == "dark"
+    await render.render_figure(CORPUS, cell, style="paper", part="legend", columns=2)
+    assert drawn[-1]["figure"] == {"style": "paper", "part": "legend", "columns": 2}
+    await render.render_figure(CORPUS, cell, style="paper", caption=3)
+    assert drawn[-1]["figure"] == {"style": "paper", "part": "figure", "caption": 3}
+    # a legend in one row: no columns named
+    await render.render_figure(CORPUS, cell, style="paper", part="legend")
+    assert "columns" not in drawn[-1]["figure"]
+
+
+async def test_render_figure_refuses_a_style_or_part_it_does_not_know_and_says_when_the_harness_is_off(drawn, monkeypatch):
+    cell = {"id": "c1", "kind": "plot", "title": "Runs per day?"}
+    with pytest.raises(ValueError, match="style"):
+        await render.render_figure(CORPUS, cell, style="neon")
+    with pytest.raises(ValueError, match="part"):
+        await render.render_figure(CORPUS, cell, part="caption")
+    assert not drawn
+    monkeypatch.setattr(render, "enabled", lambda: False)
+    with pytest.raises(render.Unavailable):
+        await render.render_figure(CORPUS, cell, style="blog")
+
+
+def test_a_figure_request_carries_the_figure_beside_what_a_card_request_carries():
+    cell = {"id": "c1", "kind": "plot", "title": "Runs per day?", "takeaway": ""}
+    plain = render.request_for(CORPUS, cell)
+    asked = render.request_for(CORPUS, cell, figure={"style": "paper", "part": "legend"})
+    assert asked.pop("figure") == {"style": "paper", "part": "legend"}
+    assert asked == plain
