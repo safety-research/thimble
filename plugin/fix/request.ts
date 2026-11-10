@@ -99,7 +99,8 @@ export async function request($: Engine, form: string, asked: string): Promise<R
   if (!fix) return { text: `× thimble could not make a copy of itself to change${cur ? ` “${fixName(cur)}”` : ''}: ${cut(r.err || 'thimble fix gave nothing', 240)}`, fix: null, failed: true, round }
   if (round && (await fixLineNow($))?.id === fix.id) await setFixLine($, null)
   await refreshFixes($)
-  const bad = await startFixer($, fix, null, screen)
+  // a fix an update set aside starts in a new copy of the new release: its fixer reads where its change from before is
+  const bad = await startFixer($, fix, cur?.state === 'pending' ? cur.error || 'an update set it aside' : null, screen)
   if (bad) {
     await kernelFix($, ['done', String(fix.id), '--request', '--no-tests', '--summary', '-'], { stdin: bad })
     await refreshFixes($)

@@ -439,3 +439,30 @@ test("the line after the session's start put back the fixes an update set aside 
   await carriedLine(s.$, { to: '1.0.1', back: [1], had: [], aside: [2, 3] })
   expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1 · 1 fix on again · 2 of your fixes are off: they do not fit 1.0.1 · in a shell: thimble reapply')
 })
+
+test("more words for a fix an update set aside: its fixer works in a new copy and reads where the fix's change from before the update is", async () => {
+  const s = setup()
+  const COPY = `${HOME}/fixes/work/2`
+  const EARLIER = `${HOME}/fixes/tmp/2/earlier.patch`
+  const aside: Any = { id: 2, title: 'resume finds the sessions', words: ['resume should find the sessions'], rounds: 1, made_in: 'terminal', state: 'pending', work: null, commit: 'c0ffee2', error: 'it does not fit 1.0.1' }
+  // the kernel's list holds the fix set aside; its round of it is a new copy, whose answer names the old change's patch
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    const r = await run(argv, o)
+    const verb = argv.includes('fix') ? argv[argv.indexOf('fix') + 1] : ''
+    if (verb === 'list') return { ...r, stdout: JSON.stringify({ ...JSON.parse(r.stdout), fixes: [aside] }) }
+    if (verb !== 'round') return r
+    Object.assign(aside, { state: 'working', work: COPY, error: null, rounds: 2, words: [...aside.words, o.stdin] })
+    return { ...r, stdout: JSON.stringify({ ...aside, earlier: EARLIER }) }
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const r = await ask(s, '2 port it to 1.0.1')
+  expect(String(r.text)).toContain('changes the person\'s fix "resume finds the sessions" in the background')
+  expect(s.verbs().filter(v => /^(new|round|redo)\b/.test(v))).toEqual(['round 2'])
+  expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('port it to 1.0.1')
+  expect(s.spawns.length).toBe(1)
+  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: COPY })
+  const first = String(s.spawns[0].prompt)
+  expect(first).toContain('Round 1: resume should find the sessions\nRound 2: port it to 1.0.1')
+  expect(first).toContain(`Your working folder is the copy: ${COPY}.\nAn earlier change for this request, which thimble did not use, is in ${EARLIER}; start from it when it helps.`)
+})
