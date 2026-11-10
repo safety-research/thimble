@@ -12,6 +12,9 @@ size (vector, its fonts embedded, no margin), the SVG the chart's own (a Vega ch
 How many entries a Paper legend has, and so which of its files there are, is known once the harness drew it. Without
 the harness's browser each file is listed with ok false and the reason, as exports.py lists PDF.
 
+A Blog figure opens with a headline and a subtitle: the first sentence of the card's takeaway and its question, or what
+main's export_card gives as its `title` and `subtitle` (heads_of).
+
 Two ways out. The card's Export menu lists the files of the figure style the analyst's browser reported and saves the
 one picked (GET /ws/{c}/cards/{card}/figure, GET …/figure/{id}). Main's export_card writes all of them into a folder
 of the corpus (tool_export_card), never through a link there (nofollow), and not while the analyst's Settings keep the
@@ -35,6 +38,7 @@ router = APIRouter()
 
 STEM_CHARS = 60  # of a file's name before its ending
 FOLDER = "figures"  # export_card's folder in the corpus when the call names none
+HEADS = ("title", "subtitle")  # export_card's words for a Blog figure's headline and subtitle (render.render_figure's)
 EXPORT_TIMEOUT_S = 30.0  # a figure drawn and its files made, at most
 STYLE_NAMES = {"thimble": "thimble", "blog": "Blog", "paper": "Paper"}  # as the theme popover names them (theme.ts)
 # what each style makes of its figure, in the menu's order; the SVG only for a card with a chart (has_chart)
@@ -139,12 +143,12 @@ def _no_file(cell: dict[str, Any], style: str, file_id: str) -> HTTPException:
 
 
 async def _draw(c: str, cell: dict[str, Any], style: str, part: str, columns: int | None,
-                made: tuple[str, ...]) -> render.Rendered:
-    """The figure (or its legend) drawn with the files `made` besides its PNG. HTTPException 409 with the reason when
-    the harness cannot draw here or the card did not draw."""
+                made: tuple[str, ...], heads: dict[str, str] | None = None) -> render.Rendered:
+    """The figure (or its legend) drawn with the files `made` besides its PNG, a Blog figure under `heads` (heads_of).
+    HTTPException 409 with the reason when the harness cannot draw here or the card did not draw."""
     try:
         r = await render.render_figure(c, cell, style=style, part=part, columns=columns, files=made,
-                                       timeout_s=EXPORT_TIMEOUT_S)
+                                       timeout_s=EXPORT_TIMEOUT_S, **(heads or {}))
     except render.Unavailable as e:
         raise HTTPException(409, f"Needs a browser: {e}") from e
     if not r.ok:
@@ -168,14 +172,14 @@ async def make(c: str, cell: dict[str, Any], style: str, f: dict[str, Any]) -> b
     return data
 
 
-async def make_all(c: str, cell: dict[str, Any], style: str,
-                   listed: list[dict[str, Any]]) -> list[tuple[dict[str, Any], bytes | None]]:
-    """Every listed file (files), the figure's from one drawing and each legend layout from its own: (file, its content,
-    None when the drawing made none)."""
+async def make_all(c: str, cell: dict[str, Any], style: str, listed: list[dict[str, Any]],
+                   heads: dict[str, str] | None = None) -> list[tuple[dict[str, Any], bytes | None]]:
+    """Every listed file (files), the figure's from one drawing, a Blog figure under `heads` (heads_of), and each legend
+    layout from its own: (file, its content, None when the drawing made none)."""
     figure = [f for f in listed if f["part"] == "figure"]
     out: list[tuple[dict[str, Any], bytes | None]] = []
     if figure:
-        r = await _draw(c, cell, style, "figure", None, tuple(f["ext"] for f in figure if f["ext"] != "png"))
+        r = await _draw(c, cell, style, "figure", None, tuple(f["ext"] for f in figure if f["ext"] != "png"), heads)
         out += [(f, _content(r, f["ext"])) for f in figure]
     for f in listed:
         if f["part"] == "legend":
@@ -198,10 +202,18 @@ def folder_of(raw: Any) -> str:
     return "/".join(parts) or "."
 
 
+def heads_of(args: dict[str, Any]) -> dict[str, str]:
+    """export_card's headline and subtitle for a Blog figure (HEADS) as render_figure takes them: each one given as
+    text, without the spaces around it; one not given is left out, so the figure takes the first sentence of the card's
+    takeaway and its question. Pure."""
+    return {k: args[k].strip() for k in HEADS if isinstance(args.get(k), str) and args[k].strip()}
+
+
 async def tool_export_card(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `export_card` tool: every file of the card's figure in the figure style the analyst's browser reported,
-    written into `folder` of the corpus (made when missing), each through no link there; the result names the style
-    and each path written, relative to the corpus folder."""
+    """The `export_card` tool: every file of the card's figure in the figure style the analyst's browser reported, a
+    Blog figure headed by the call's `title` and `subtitle` (heads_of), written into `folder` of the corpus (made when
+    missing), each through no link there; the result names the style and each path written, relative to the corpus
+    folder."""
     from . import ledger, notebook, runtime_tools  # noqa: PLC0415 — notebook imports the kernel machinery
 
     cid = tools._cell_id_of(args.get("card"))
@@ -224,7 +236,7 @@ async def tool_export_card(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(f"export_card: the card's figure is drawn by the card harness. {listed[0]['why']}")
     written: list[str] = []
     missing: dict[str, list[str]] = {}  # the paths not written, by why
-    for f, data in await make_all(ctx.c, cell, style, listed):
+    for f, data in await make_all(ctx.c, cell, style, listed, heads_of(args)):
         path = f["file"] if rel == "." else f"{rel}/{f['file']}"
         if not data:
             missing.setdefault(f"card:{cid} made no {MISSING[f['ext']]}", []).append(path)

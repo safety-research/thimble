@@ -16,6 +16,7 @@ import { CARD_PAD_X } from './canvas/Cell'
 import { CanvasContext, type CanvasCtx } from './canvas/context'
 import { kindOf } from './canvas/layout'
 import { Figure, type FigurePart } from './figures/Figure'
+import { figureText, headline } from './figures/figure'
 import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { readFigures, setAccent, setFigures, setPaper, type Accent, type FigureStyle, type Paper } from './lib/theme'
@@ -40,9 +41,10 @@ export interface RenderRequest {
   cardLibs?: Record<string, { head: string; problems: string[] }>
   /** the card as a figure (figures/Figure) in `style`: its chart (`part` 'figure', the default) or a Paper figure's
    * legend, in `columns` columns (all in one row when not given), with a report's caption when `caption` numbers it;
-   * thimble's figure is the card face. `files`: what to make of the drawing besides its picture, `svg` here and the
-   * others by the harness after its shot. Without it the page draws the card face. */
-  figure?: { style: FigureStyle; part?: FigurePart; columns?: number; caption?: number; files?: FigureFile[] }
+   * a Blog figure headed by `title` and `subtitle` when given, in place of the takeaway's first sentence and the
+   * question; thimble's figure is the card face. `files`: what to make of the drawing besides its picture, `svg` here
+   * and the others by the harness after its shot. Without it the page draws the card face. */
+  figure?: { style: FigureStyle; part?: FigurePart; columns?: number; caption?: number; title?: string; subtitle?: string; files?: FigureFile[] }
 }
 
 /** A figure's file besides its picture (backend render.FIGURE_FILES). */
@@ -213,7 +215,16 @@ async function render(req: RenderRequest): Promise<RenderResult> {
         <CanvasContext.Provider value={ctx}>
           <ChipContext.Provider value={{ workspace: ws, broken: new Set(), anchor: true }}>
             {figure ? (
-              <Figure cell={cell} style={figure.style} part={figure.part} columns={figure.columns} caption={figure.caption} label={{ concept, error: null } as never} />
+              <Figure
+                cell={cell}
+                style={figure.style}
+                part={figure.part}
+                columns={figure.columns}
+                caption={figure.caption}
+                headline={headline(figure.title) || undefined}
+                subtitle={figureText(figure.subtitle) || undefined}
+                label={{ concept, error: null } as never}
+              />
             ) : (
               <div className={`bcell bcell-kind-${kindOf(cell)}`} style={{ position: 'relative', width }}>
                 <CardFace cell={cell} width={width - CARD_PAD_X} label={{ concept, error: null } as never} />

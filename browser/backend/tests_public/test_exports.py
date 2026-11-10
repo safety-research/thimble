@@ -79,18 +79,19 @@ def figures(workspaces_tmp):
 
 @pytest.fixture()
 def harness(monkeypatch):
-    """The card harness stood in for: each picture asked of it as (call, card id, takeaway, style, part, columns), a
-    made-up picture back, and a legend that draws nothing for a card whose question names no groups."""
+    """The card harness stood in for: each picture asked of it as (call, card id, takeaway, style, part, columns, the
+    headline given), a made-up picture back, and a legend that draws nothing for a card whose question names no
+    groups."""
     from app import render
 
     calls: list[tuple] = []
 
     async def render_card(c, cell, **kw):
-        calls.append(("card", cell["id"], cell.get("takeaway"), None, None, None))
+        calls.append(("card", cell["id"], cell.get("takeaway"), None, None, None, None))
         return render.Rendered(png=b"card", box={"width": 720, "height": 400})
 
-    async def render_figure(c, cell, *, style=None, part="figure", columns=None, **kw):
-        calls.append(("figure", cell["id"], cell.get("takeaway"), style, part, columns))
+    async def render_figure(c, cell, *, style=None, part="figure", columns=None, title=None, **kw):
+        calls.append(("figure", cell["id"], cell.get("takeaway"), style, part, columns, title))
         empty = part == "legend" and "day" not in str(cell.get("title"))
         width = {"blog": 800, "paper": 240}[style] if part == "figure" else 120
         return render.Rendered(png=b"figure", box={"width": width, "height": 200}, empty=empty)
@@ -119,13 +120,24 @@ async def test_a_blog_export_draws_each_figure_as_a_blog_figure_whose_headline_i
     assert "--font-body:'DM Sans'" in html and "h1::before" in html and "'Hanken Grotesk',system-ui" in html
     assert html.count('class="fig-blog"') == 2 and 'width="800"' in html
     # the caption is the headline, in plain words; a figure written without one, whose caption is its card's question,
-    # is headed by its card's takeaway
-    assert ("figure", a, "Most runs come on Monday.", "blog", "figure", None) in harness
-    assert ("figure", b, "A run takes four minutes?", "blog", "figure", None) in harness
+    # is headed as the card's takeaway heads a Blog figure, by its first sentence, which the page cuts
+    assert ("figure", a, "Monday has the most runs.", "blog", "figure", None, "Most runs come on Monday.") in harness
+    assert ("figure", b, "A run takes four minutes?", "blog", "figure", None, None) in harness
     assert not [c for c in harness if c[0] == "card"]
     assert 'alt="Most runs come on Monday."' in html and "Figure 1." not in html
     # a Blog figure cites nothing, as a post's figures do not: the notes are the text's citations alone
     assert "<figcaption>" not in html and html.count('<li id="note-') == 1 and f"card:{b}</span>" in html
+
+
+async def test_a_blog_figure_whose_caption_is_its_cards_takeaway_word_for_word_is_headed_as_the_takeaway(
+        figures, harness):
+    a, b = figures
+    text = (f"# Runs over the week\n\n## When runs happen\n\nRuns peak early.\n\n"
+            f"![Monday has the most runs.](card:{a})\n")
+    r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": text}, actor="analyst")
+    assert not r.is_error, r.text
+    TestClient(app).get(f"{BASE}/report/export/html?figures=blog")
+    assert harness == [("figure", a, "Monday has the most runs.", "blog", "figure", None, None)]
 
 
 async def test_a_paper_export_numbers_each_figure_and_puts_its_legend_and_caption_under_the_chart(figures, harness):
@@ -133,8 +145,8 @@ async def test_a_paper_export_numbers_each_figure_and_puts_its_legend_and_captio
     await _write_figures(a, b)
     html = TestClient(app).get(f"{BASE}/report/export/html?figures=paper").text
     assert "--font-body:'Source Serif 4'" in html and "text-align:justify" in html
-    assert ("figure", a, "Monday has the most runs.", "paper", "figure", None) in harness
-    assert ("figure", a, "Monday has the most runs.", "paper", "legend", 2) in harness
+    assert ("figure", a, "Monday has the most runs.", "paper", "figure", None, None) in harness
+    assert ("figure", a, "Monday has the most runs.", "paper", "legend", 2, None) in harness
     # a chart with no legend of colors gets no legend under it
     assert html.count('class="fig-legend"') == 1
     first = html.index('<span class="fig-n">Figure 1.</span> <strong>Most runs come on Monday.</strong> Which day has')

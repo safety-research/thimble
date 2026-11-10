@@ -95,6 +95,14 @@ async def test_render_figure_asks_the_page_for_the_card_as_a_figure_in_the_style
     # a legend in one row: no columns named
     await render.render_figure(CORPUS, cell, style="paper", part="legend")
     assert "columns" not in drawn[-1]["figure"]
+    # a Blog figure's own headline and subtitle, in place of the takeaway's first sentence and the question; one that
+    # is only spaces is none
+    await render.render_figure(CORPUS, cell, style="blog", title=" Runs end early ", subtitle="Day each run ended")
+    assert drawn[-1]["figure"] == {"style": "blog", "part": "figure", "title": "Runs end early",
+                                   "subtitle": "Day each run ended"}
+    await render.render_figure(CORPUS, cell, style="blog", title="  ", subtitle=None)
+    assert drawn[-1]["figure"] == {"style": "blog", "part": "figure"}
+    assert drawn[-1]["card"]["takeaway"] == "Most runs end on day 2.", "the card's takeaway is the page's to cut"
 
 
 async def test_render_figure_refuses_a_style_or_part_it_does_not_know_and_says_when_the_harness_is_off(drawn, monkeypatch):
