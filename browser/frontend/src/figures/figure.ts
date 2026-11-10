@@ -7,6 +7,7 @@
 // no legend in it (paperSpec), and the legend as a figure of its own; in a report its caption goes under it
 // (captionParts).
 import { isVegaLite } from '../components/Outputs'
+import { chartDefaults } from '../lib/chartDefaults'
 import { plainInline } from '../report/diffModel'
 import type { Cell, MimeBundle } from '../lib/types'
 
@@ -19,8 +20,11 @@ export const BLOG_CHART_W = BLOG_FIGURE.width - 2 * BLOG_FIGURE.padX
 /** a Paper figure's size, px at 96 per inch: 2.5 in square for one column, 5.3 in by 2.5 in for two */
 export const PAPER_ONE = { width: 240, height: 240 }
 export const PAPER_TWO = { width: 509, height: 240 }
-/** the most categories along x a one-column Paper figure holds */
+/** the most categories along an axis a one-column Paper figure holds */
 export const PAPER_CATEGORIES = 6
+/** the characters of the longest category name down the y axis (a horizontal bar chart's) from which a Paper figure
+ * takes two columns: the names' column would leave a one-column plot too narrow to read */
+export const PAPER_NAME = 10
 /** the width over the height from which a drawn figure takes two columns: a matplotlib figure of thimble's size (7.2 in
  * by 4, backend matplotlibrc) does */
 const WIDE_DRAWING = 1.75
@@ -89,18 +93,36 @@ export function chartOf(cell: Pick<Cell, 'outputs'>): { spec: Spec; mime: string
 const COMPOSITE = ['facet', 'hconcat', 'vconcat', 'concat', 'repeat']
 const isComposite = (s: Spec): boolean => COMPOSITE.some((k) => k in s) || ['row', 'column', 'facet'].some((c) => !!obj(obj(s.encoding)?.[c]))
 
-/** The categories a chart sets along its x axis: the distinct values of a discrete x field among its rows (its own, or
- * a layer's); 0 for a chart whose x is not discrete. */
-function categoriesAcross(s: Spec, inherited: unknown[] | null = null): number {
-  const rows = Array.isArray(obj(s.data)?.values) ? (obj(s.data)!.values as unknown[]) : inherited
-  const x = obj(obj(s.encoding)?.x)
-  let n = 0
-  if (x && typeof x.field === 'string' && (x.type === 'nominal' || x.type === 'ordinal') && rows) {
-    const field = x.field.replace(/\\(.)/g, '$1')
-    n = new Set(rows.map((r) => JSON.stringify(obj(r)?.[field] ?? null))).size
+/** The rows a view draws: its data's own values, or the dataset of the chart's it names (as Altair writes a chart), else
+ * the rows of the view around it; null for rows the spec does not hold (a URL's). */
+function rowsOf(s: Spec, root: Spec, inherited: unknown[] | null): unknown[] | null {
+  const data = obj(s.data)
+  if (!data) return inherited
+  if (Array.isArray(data.values)) return data.values
+  const named = typeof data.name === 'string' ? obj(root.datasets)?.[data.name] : null
+  return Array.isArray(named) ? named : null
+}
+
+/** The categories a chart sets along an axis: the distinct values of a discrete field on it among its rows (its own, or
+ * a layer's), how many, and the characters of the longest; none for an axis that is not discrete. */
+function categories(s: Spec, axis: 'x' | 'y', root: Spec = s, inherited: unknown[] | null = null): { count: number; longest: number } {
+  const rows = rowsOf(s, root, inherited)
+  const def = obj(obj(s.encoding)?.[axis])
+  let count = 0
+  let longest = 0
+  if (def && typeof def.field === 'string' && (def.type === 'nominal' || def.type === 'ordinal') && rows) {
+    const field = def.field.replace(/\\(.)/g, '$1')
+    const names = new Map(rows.map((r) => [JSON.stringify(obj(r)?.[field] ?? null), obj(r)?.[field] ?? null]))
+    count = names.size
+    for (const v of names.values()) longest = Math.max(longest, v == null ? 0 : String(v).length)
   }
-  for (const l of Array.isArray(s.layer) ? s.layer : []) if (obj(l)) n = Math.max(n, categoriesAcross(obj(l)!, rows))
-  return n
+  for (const l of Array.isArray(s.layer) ? s.layer : []) {
+    if (!obj(l)) continue
+    const got = categories(obj(l)!, axis, root, rows)
+    count = Math.max(count, got.count)
+    longest = Math.max(longest, got.longest)
+  }
+  return { count, longest }
 }
 
 /** A drawn figure's own size, px, from its SVG's root (matplotlib writes it in pt); null for no SVG or no size. Pure. */
@@ -115,12 +137,19 @@ export function drawingSize(cell: Pick<Cell, 'outputs'>): { width: number; heigh
   return width > 0 && height > 0 ? { width, height } : null
 }
 
-/** The size a Paper figure of this chart takes: two columns' for a chart faceted or set side by side with others, or with
- * more than PAPER_CATEGORIES categories along x, else one column's. A drawing (an SVG figure) takes two columns when it
- * is wide (WIDE_DRAWING) and keeps its own height for the width. Pure. */
+/** The size a Paper figure of this chart takes: two columns' for a chart faceted or set side by side with others, for
+ * one with more than PAPER_CATEGORIES categories along either axis, and for one whose category names down its y axis
+ * run to PAPER_NAME characters (a horizontal bar chart's); else one column's. The chart is read as a card draws it
+ * (lib/chartDefaults), which lays a bar chart of long names on its side. A drawing (an SVG figure) takes two columns
+ * when it is wide (WIDE_DRAWING) and keeps its own height for the width. Pure. */
 export function paperSize(cell: Pick<Cell, 'outputs'>): { width: number; height: number } {
   const chart = chartOf(cell)
-  if (chart) return isComposite(chart.spec) || categoriesAcross(chart.spec) > PAPER_CATEGORIES ? PAPER_TWO : PAPER_ONE
+  if (chart) {
+    if (isComposite(chart.spec)) return PAPER_TWO
+    const drawn = obj(chartDefaults(chart.spec)) ?? chart.spec
+    const [across, down] = [categories(drawn, 'x'), categories(drawn, 'y')]
+    return Math.max(across.count, down.count) > PAPER_CATEGORIES || down.longest >= PAPER_NAME ? PAPER_TWO : PAPER_ONE
+  }
   const drawing = drawingSize(cell)
   return drawing && drawing.width / drawing.height >= WIDE_DRAWING ? PAPER_TWO : PAPER_ONE
 }

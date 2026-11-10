@@ -15,6 +15,14 @@ const bars = (n: number, more: Record<string, unknown> = {}) => ({
   encoding: { x: { field: 'size', type: 'ordinal' }, y: { field: 'accuracy', type: 'quantitative' } },
   ...more,
 })
+// a horizontal bar chart of runs by name, as thimble.chart draws text categories
+const lying = (names: string[], more: Record<string, unknown> = {}) => ({
+  $schema: SCHEMA,
+  data: { values: names.map((run, i) => ({ run, merged: 14 - i })) },
+  mark: 'bar',
+  encoding: { y: { field: 'run', type: 'nominal' }, x: { field: 'merged', type: 'quantitative' } },
+  ...more,
+})
 
 test("a takeaway as a headline: each cited value its words, each bare ref gone, the markdown its words", () => {
   expect(figureText('The [[ensemble|card:a1]] answers **88%** of `prompts` [[card:a1#out]], more than [the baseline](https://x.test).')).toBe('The ensemble answers 88% of prompts, more than the baseline.')
@@ -54,11 +62,37 @@ test('a Paper figure takes one column, or two for a chart in panels, side by sid
   expect(paperSize(card(bars(7)))).toBe(PAPER_TWO)
   expect(paperSize(card({ ...bars(3), encoding: { ...bars(3).encoding, row: { field: 'size', type: 'nominal' } } }))).toBe(PAPER_TWO)
   expect(paperSize(card({ $schema: SCHEMA, hconcat: [bars(2), bars(2)] }))).toBe(PAPER_TWO)
-  // categories set along y (a horizontal bar chart) take one column
-  const across = bars(9)
-  expect(paperSize(card({ ...across, encoding: { y: across.encoding.x, x: across.encoding.y } }))).toBe(PAPER_ONE)
   // a layer's categories count
   expect(paperSize(card({ $schema: SCHEMA, data: bars(8).data, layer: [{ mark: 'bar', encoding: bars(8).encoding }, { mark: 'rule' }] }))).toBe(PAPER_TWO)
+})
+
+test('a horizontal bar chart takes two Paper columns for long category names or more than six of them, in the export and the report alike', () => {
+  expect(paperSize(card(lying(['a', 'b', 'c', 'd'])))).toBe(PAPER_ONE)
+  expect(paperSize(card(lying(['run 1', 'run 22', 'abcdefghi'])))).toBe(PAPER_ONE)
+  // a name of ten characters or more leaves too little room for the plot in one column
+  expect(paperSize(card(lying(['abcdefghij', 'b'])))).toBe(PAPER_TWO)
+  expect(paperSize(card(lying(['emergent_prs', 'emergent_prs_issues', 'managed_prs', 'managed_prs_issues'])))).toBe(PAPER_TWO)
+  // more than six categories down y, short names and all
+  const sizes = bars(9)
+  expect(paperSize(card({ ...sizes, encoding: { y: sizes.encoding.x, x: sizes.encoding.y } }))).toBe(PAPER_TWO)
+  expect(paperSize(card(lying(['a', 'b', 'c', 'd', 'e', 'f'])))).toBe(PAPER_ONE)
+  // a layered chart (a bar's value beside it), whose layers take the chart's rows
+  const labelled = lying(['emergent_prs', 'managed_prs'])
+  expect(paperSize(card({ $schema: SCHEMA, data: labelled.data, encoding: labelled.encoding, layer: [{ mark: 'bar' }, { mark: 'text' }] }))).toBe(PAPER_TWO)
+  // a vertical bar chart of long names, which a card draws lying down (lib/chartDefaults)
+  const upright = lying(['emergent_prs_issues', 'managed_prs_issues'])
+  expect(paperSize(card({ ...upright, encoding: { x: upright.encoding.y, y: upright.encoding.x } }))).toBe(PAPER_TWO)
+  // grouped bars as Altair writes them, the rows in a named dataset
+  const rows = ['emergent_prs', 'managed_prs'].flatMap((run) => ['open', 'merged'].map((state) => ({ run, state, PRs: 10 })))
+  const altair = {
+    $schema: SCHEMA,
+    data: { name: 'data-1a2b' },
+    datasets: { 'data-1a2b': rows },
+    mark: { type: 'bar' },
+    encoding: { y: { field: 'run', type: 'nominal' }, x: { field: 'PRs', type: 'quantitative' }, yOffset: { field: 'state', type: 'nominal' }, color: { field: 'state', type: 'nominal' } },
+  }
+  expect(paperSize(card(altair))).toBe(PAPER_TWO)
+  expect(paperSize(card({ ...altair, datasets: { 'data-1a2b': rows.map((r) => ({ ...r, run: r.run.slice(0, 3) })) } }))).toBe(PAPER_ONE)
 })
 
 test("a drawn figure's size is read from its SVG, and a wide one takes two Paper columns", () => {
