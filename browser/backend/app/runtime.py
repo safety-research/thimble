@@ -648,7 +648,8 @@ class Space:
             effort = str(conv.values.get("effort") or role.get("effort") or "")
             writes = [*agent_writes(self.c, conv), tmp]
             edits = None  # writers, view builds and reviews, and checks keep the corpus read-only
-            fast = subagents.fast_for(self.c, conv.role)  # the fast mode of its row in Settings (the dev row's)
+            # the fast mode of its row in Settings: the dev row's, which is main's until the analyst sets the row's own
+            fast = subagents.fast_for(self.c, conv.role)
             with contextlib.suppress(Exception):
                 for d in writes:
                     nofollow.makedirs(d)
