@@ -9,6 +9,8 @@
 //   - ids are prefixed per figure, so figures never share clip paths or glyphs;
 //   - fonts become the chart's faces (--viz-font and --viz-font-label, the page's own in thimble's style and a figure
 //     style's in Blog and Paper) and thimble's matplotlibrc colours the page's tokens; a white background is dropped;
+//   - a matplotlib figure's text is at least `minText` px at the figure's own width when the caller names one (the Blog
+//     figure style's tick size, components/Outputs), so its smallest text reads like a Vega chart's ticks;
 //   - in a matplotlib figure (its group figure_1) whose root declares no fill, black that it leaves unwritten (a text's
 //     or a shape's fill, which SVG paints black) takes the paper's ink from the root, so a black name on the figure's
 //     own background reads on every paper. Its fills keep their colors, white among them: a black name on a white or a
@@ -53,11 +55,18 @@ const WHITE = new Set(['#ffffff', '#fff', 'white'])
  * leaves its black. */
 export const ROOT_FILL = 'fill: var(--text-primary)'
 
+/** A text size in px raised to `least` when it is smaller; as it is without `least` or when it is no size in px. */
+function atLeast(size: string, least: number | undefined): string {
+  const m = /^([\d.]+)px$/.exec(size)
+  return least && m && parseFloat(m[1]) < least ? `${Math.round(least * 100) / 100}px` : size
+}
+
 /**
  * A figure element's style attribute rewritten for the page (module note): the families in the chart's faces, the
- * matplotlibrc colours as theme tokens, and when `background` (a figure or axes patch) white fill dropped. Pure.
+ * matplotlibrc colours as theme tokens, when `background` (a figure or axes patch) white fill dropped, and a text size
+ * under `minSize` (in the figure's own units) raised to it. Pure.
  */
-export function restyle(style: string, background = false): string {
+export function restyle(style: string, background = false, minSize?: number): string {
   return style
     .split(';')
     .map((decl) => {
@@ -71,12 +80,17 @@ export function restyle(style: string, background = false): string {
         if (SANS_FIRST.test(value)) return ` font-family: var(--viz-font)`
         return decl
       }
+      if (prop === 'font-size') {
+        const size = atLeast(value, minSize)
+        return size === value ? decl : ` font-size: ${size}`
+      }
       if (prop === 'font') {
-        // the shorthand `font: 10px 'DejaVu Sans'`: its family part in the chart's face
-        const m = /^((?:[\w.%-]+\s+)*?[\d.]+(?:px|pt|em|rem|%)(?:\/[\w.%]+)?)\s+(.+)$/.exec(value)
-        if (m && MONO_FIRST.test(m[2])) return ` font: ${m[1]} var(--viz-font-label)`
-        if (m && SANS_FIRST.test(m[2])) return ` font: ${m[1]} var(--viz-font)`
-        return decl
+        // the shorthand `font: 10px 'DejaVu Sans'`: its family part in the chart's face, its size at least minSize
+        const m = /^((?:[\w.%-]+\s+)*?)([\d.]+(?:px|pt|em|rem|%))((?:\/[\w.%]+)?)\s+(.+)$/.exec(value)
+        const size = m ? `${m[1]}${atLeast(m[2], minSize)}${m[3]}` : ''
+        if (m && MONO_FIRST.test(m[4])) return ` font: ${size} var(--viz-font-label)`
+        if (m && SANS_FIRST.test(m[4])) return ` font: ${size} var(--viz-font)`
+        return m && size !== m[1] + m[2] + m[3] ? ` font: ${size} ${m[4]}` : decl
       }
       if (prop === 'fill' && background && WHITE.has(v)) return ' fill: none'
       if ((prop === 'fill' || prop === 'stroke') && COLOURS[v]) return ` ${prop}: ${COLOURS[v][prop]}`
@@ -123,11 +137,16 @@ function px(v: string | null): number | null {
   return m[2] === 'pt' ? (n * 4) / 3 : n
 }
 
+export interface InlineOptions {
+  /** the least size of a matplotlib figure's text, px at the figure's own width (module note) */
+  minText?: number
+}
+
 /**
  * The figure's markup made safe and fitted to the page (module note), with every id prefixed by `prefix`; null when
  * it is not an SVG document or there is no DOM to make it safe with. Needs a DOMParser.
  */
-export function inlineSvg(text: string, prefix: string): { markup: string; width: number | null; height: number | null } | null {
+export function inlineSvg(text: string, prefix: string, opts: InlineOptions = {}): { markup: string; width: number | null; height: number | null } | null {
   if (typeof DOMParser === 'undefined') return null
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
   const svg = doc.documentElement
@@ -142,7 +161,8 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
   for (const st of styles) st.remove()
   // a matplotlib figure, known by its group figure_1 before the ids are prefixed, takes the paper's ink only when its
   // root declares no fill of its own (module note)
-  const paper = Array.from(svg.getElementsByTagName('g')).some((g) => g.getAttribute('id') === 'figure_1') && !svg.hasAttribute('fill') && !declaresFill(svg.getAttribute('style')) && !declaresFill(inherited)
+  const matplotlib = Array.from(svg.getElementsByTagName('g')).some((g) => g.getAttribute('id') === 'figure_1')
+  const paper = matplotlib && !svg.hasAttribute('fill') && !declaresFill(svg.getAttribute('style')) && !declaresFill(inherited)
   const rootStyle = [paper ? ROOT_FILL : '', svg.getAttribute('style'), inherited].filter(Boolean).join('; ')
   if (rootStyle) svg.setAttribute('style', rootStyle)
   // links keep their content, not their target
@@ -159,6 +179,12 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
   }
   // read before the ids are prefixed, as a parent's id is before its children are reached below
   const backgrounds = new Set(all.filter(isBackground))
+  const width = px(svg.getAttribute('width'))
+  const height = px(svg.getAttribute('height'))
+  // the least text size in the figure's own units, which its viewBox scales to its width in px (matplotlib's are pt)
+  const box = (svg.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number)
+  const unit = box.length === 4 && box[2] > 0 && width ? box[2] / width : 1
+  const minSize = matplotlib && opts.minText ? opts.minText * unit : undefined
   const ref = (s: string) => s.replace(/url\(\s*#([^)\s]+)\s*\)/g, (_, id: string) => (ids.has(id) ? `url(#${prefix}${id})` : 'none'))
   for (const el of all) {
     for (const attr of Array.from(el.attributes)) {
@@ -176,12 +202,10 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
         continue
       }
       if (name === 'id') el.setAttribute('id', prefix + attr.value)
-      else if (name === 'style') el.setAttribute('style', ref(restyle(attr.value, backgrounds.has(el))))
+      else if (name === 'style') el.setAttribute('style', ref(restyle(attr.value, backgrounds.has(el), minSize)))
       else if (attr.value.includes('url(')) el.setAttribute(attr.name, ref(attr.value))
     }
   }
-  const width = px(svg.getAttribute('width'))
-  const height = px(svg.getAttribute('height'))
   if (!svg.getAttribute('viewBox') && width && height) svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
   // its size in px, which the stylesheet scales to the room (width 100%, height from the viewBox), so a measure of
   // the drawing reads the figure's own px

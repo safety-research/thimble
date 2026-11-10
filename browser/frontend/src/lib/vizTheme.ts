@@ -15,7 +15,7 @@
 // A figure style (lib/theme FigureStyle, named by --viz-figures) gives the tokens its own values and the config its own
 // axes, legends and type (vegaConfig): Blog draws blogpost-figure's horizontal gridlines over a darker x baseline, no
 // ticks, gray tick labels and near-black category names, in DM Sans; Paper draws paper-figure's left and bottom axes
-// with ticks and light gridlines both ways, in a plain sans. lib/figureSpec changes thimble.chart's charts for each.
+// with ticks and light gridlines both ways, in a plain sans. lib/figureSpec changes the charts it reads for each.
 import type { FigureStyle } from './theme'
 
 const FALLBACK: Record<string, string> = {
@@ -154,7 +154,7 @@ const PAPER_TICK = 4
 const PAPER_STROKE = 1
 
 /** Blog's config over thimble's (module note): every text in the chart face; a gray baseline under the x axis and no other
- * axis line; gridlines across from the y axis only (a horizontal bar's are thimble.chart's to turn, lib/figureSpec); no
+ * axis line; gridlines across from the y axis only (a horizontal bar chart's are lib/figureSpec's to turn); no
  * ticks, a few round ones on a scale; category names in ink, tick labels gray; bars narrower than their slot and rows of
  * a discrete y axis taller; dots a little larger and whiskers a little heavier than thimble's. A bar chart's legend
  * becomes a row of names in their colors in lib/figureSpec. */
