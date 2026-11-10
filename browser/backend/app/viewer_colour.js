@@ -754,6 +754,8 @@
       used[map[k]] = true
       n++
     }
+    // a field that keeps as many values as it may keeps no more: the values past them are not counted and sorted again
+    if (n >= MAX_KEPT) return
     // the declared values' places are theirs whether or not they have shown yet
     for (var d = 0; d < declared.length; d++) used[f.slots[d]] = true
     var c = this.choice()
