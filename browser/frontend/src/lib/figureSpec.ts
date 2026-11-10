@@ -3,8 +3,8 @@
 // config (lib/vizTheme vegaConfig) cannot make alone. It is keyed on the style, so a style switch redraws every chart
 // without running a card again. Pure.
 //
-// Blog (blogpost-figure's labels, not legends): a bar carries its value at its end, in its series color and semibold,
-// past the end of its interval when it has one; the lines of a line chart are named at their right ends in their colors
+// Blog (blogpost-figure's labels, not legends): a bar carries its value at its end, in its series color (a darker tone
+// of a pale one) and semibold, past the end of its interval when it has one; the lines of a line chart are named at their right ends in their colors
 // in place of a legend, and a single line carries its last value there; a bar chart's legend is a row over the chart,
 // untitled, its names in their colors; a horizontal bar chart's gridlines run down from its x axis; a heatmap's cells
 // carry their values in place of a color bar, white on a dark cell and ink on a light one. Paper (paper-figure's): the
@@ -35,6 +35,10 @@ export const END_LINES = 7
 const PLOT_HEIGHT = 300
 /** the room a line's name keeps above and below it, px, so names of lines that end close together do not overprint */
 const NAME_ROOM = 17
+/** the luminance from which a bar's color is pale, and the share of its lightness a value over a pale bar keeps
+ * (blogpost-figure writes a pale tint bar's value in a mid tone of its hue) */
+const PALE_BAR = 0.35
+const DARKER_TONE = 0.77
 /** the most cells of a heatmap that carry their values */
 export const CELL_VALUES = 80
 /** the luminance of a cell's color above which its value is in ink, under it white; the ink, blogpost-figure's, on a
@@ -139,11 +143,15 @@ export function valueFormat(def: Spec, rows: readonly unknown[]): string {
   return `,.${Math.min(MAX_DECIMALS, Math.max(0, needs), has)}f`
 }
 
+/** The expression of the color a value over a bar is written in, from `of`, an expression of the bar's color: the bar's
+ * own, or a darker tone of its hue when the bar is pale. */
+export const valueTone = (of: string): string => `luminance(${of}) > ${PALE_BAR} ? hsl(hsl(${of}).h, hsl(${of}).s, hsl(${of}).l * ${DARKER_TONE}) : ${of}`
+
 /** A color channel's legend as Blog draws one that stays: a row over the chart, untitled, square swatches, each name in
- * its color at the size of a direct label; what the spec names itself stands. */
+ * its color (a darker tone of a pale one, valueTone) at the size of a direct label; what the spec names itself stands. */
 function legendRow(color: Spec): Spec {
   if (color.legend === null) return color
-  const row = { title: null, orient: 'top', direction: 'horizontal', symbolType: 'square', labelFontSize: BLOG_TYPE.label, labelFontWeight: 500, labelColor: { expr: "scale('color', datum.value)" } }
+  const row = { title: null, orient: 'top', direction: 'horizontal', symbolType: 'square', labelFontSize: BLOG_TYPE.label, labelFontWeight: 500, labelColor: { expr: valueTone("scale('color', datum.value)") } }
   return { ...color, legend: { ...row, ...(obj(color.legend) ?? {}) } }
 }
 
@@ -182,16 +190,16 @@ function blogBars(unit: Spec, siblings: readonly Spec[], rows: unknown[] | null,
   const place = horizontal
     ? { align: { expr: `${below} ? 'right' : 'left'` }, baseline: 'middle', dx: { expr: `${below} ? -5 : 5` } }
     : { align: 'center', baseline: { expr: `${below} ? 'top' : 'bottom'` }, dy: { expr: `${below} ? 5 : -5` } }
+  // each value in its bar's color, read from the bars' scale (so it adds no legend of its own), else the first series'
+  const of = color ? `scale('color', ${read(color.field)})` : opts.palette?.[0] ? JSON.stringify(opts.palette[0]) : null
   const label: Spec = {
-    mark: { type: 'text', ...place, fontSize: BLOG_TYPE.value, fontWeight: 600, ...(color ? {} : { color: opts.palette?.[0] }) },
+    mark: { type: 'text', ...place, fontSize: BLOG_TYPE.value, fontWeight: 600, ...(of ? { color: { expr: valueTone(of) } } : {}) },
     encoding: {
       [c]: cat,
       // the value's channel as the bars have it (its axis, scale and title), so the layers share one axis
       [v]: { ...obj(next[v])!, field: transform ? LABEL_AT : value.field },
       text: { field: value.field, type: 'quantitative', format: valueFormat(value, rows!) },
       ...(offset ? { [off]: offset } : {}),
-      // the bars' color as they have it, legend and all, so the two layers' legends are one
-      ...(color ? { color: next.color } : {}),
     },
     ...(transform ? { transform } : {}),
   }

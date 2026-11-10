@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, expect, test } from 'vitest'
 import { chartDefaults } from '../../src/lib/chartDefaults.ts'
-import { figureSpec, LABEL_AT, LABEL_TEXT, spreadNames, valueFormat, VALUE_ROWS } from '../../src/lib/figureSpec.ts'
+import { figureSpec, LABEL_AT, LABEL_TEXT, spreadNames, valueFormat, VALUE_ROWS, valueTone } from '../../src/lib/figureSpec.ts'
 import { FIGURE_FACES, pageFaces } from '../../src/lib/frame.ts'
 import { restyle } from '../../src/lib/svg.ts'
 import { figureStyle, vegaConfig, VIZ_SERIES } from '../../src/lib/vizTheme.ts'
@@ -153,7 +153,7 @@ test('in Blog a bar carries its value at its end in its color, semibold, all wit
   const [bars, values] = s.layer
   expect(bars.mark).toBe('bar')
   expect(bars.encoding.x.axis).toEqual({ grid: true })
-  expect(values.mark).toMatchObject({ type: 'text', fontWeight: 600, fontSize: 13, color: '#b86046', baseline: 'middle' })
+  expect(values.mark).toMatchObject({ type: 'text', fontWeight: 600, fontSize: 13, baseline: 'middle', color: { expr: valueTone('"#b86046"') } })
   expect(values.mark.align.expr).toContain('datum["honest %"] < 0')
   expect(values.encoding.text).toEqual({ field: 'honest %', type: 'quantitative', format: ',.1f' })
   // the same axis as the bars', so the layers share it
@@ -170,8 +170,10 @@ test('in Blog a bar carries its value at its end in its color, semibold, all wit
 test("in Blog bars side by side carry their values in their groups' colors under one legend, a row over the chart", () => {
   const s = blog(groupedUp())
   const [bars, values] = s.layer
-  expect(bars.encoding.color.legend).toMatchObject({ title: null, orient: 'top', direction: 'horizontal', symbolType: 'square', labelColor: { expr: "scale('color', datum.value)" } })
-  expect(values.encoding.color).toEqual(bars.encoding.color)
+  expect(bars.encoding.color.legend).toMatchObject({ title: null, orient: 'top', direction: 'horizontal', symbolType: 'square', labelColor: { expr: valueTone("scale('color', datum.value)") } })
+  // each value in its bar's color from the bars' scale, which adds no legend beside theirs
+  expect(values.mark.color).toEqual({ expr: valueTone(`scale('color', datum["model"])`) })
+  expect(values.encoding.color).toBeUndefined()
   expect(values.encoding.xOffset).toEqual(bars.encoding.xOffset)
   expect(values.mark.dy.expr).toContain('datum["honest %"] < 0')
   // four bars need 4 x VALUE_ROOM px across: in less, no values
