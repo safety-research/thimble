@@ -858,10 +858,9 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, then thimble's config. Every role resolves to a model id (exact_model) and an
 # effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
 # (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
-# and only for ROLES_WITH_FAST: the classifiers, and the dev row for `thimble fix`, the one `claude -p` job of the
-# server (dev.py). thimble's agents are subagents of main, which have no fast mode of their own (Claude Code's agent
-# definition has none), so a view build, a review and a code ticket's agent run without the dev row's (chosen leaves it
-# out).
+# and only for ROLES_WITH_FAST: the classifiers, and the dev row, for `thimble fix`, the one `claude -p` job of the
+# server (dev.py), and for the row's agents, which the server runs itself: a view build, a review and a code ticket's
+# agent run with the row's fast mode (subagents.fast_for). A writer and a check have none.
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
@@ -869,7 +868,7 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's frontmatter
     "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
-    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
+    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for its agents and `thimble fix`
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
     "suggest": {"model": "claude-opus-5-5", "effort": "medium", "fast": False},
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
@@ -881,11 +880,9 @@ ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the ana
 MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 # The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES).
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}
-# the classifiers, each a call the server makes, which runs at its own speed, and the dev row's `thimble fix`, the one
-# `claude -p` job of the server, which keeps the fast mode it had (on by default)
+# the classifiers, each a call the server makes, which runs at its own speed, and the dev row: its agents (a view's
+# builder and reviewer, a code ticket's agent) and `thimble fix`, the one `claude -p` job of the server (on by default)
 ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
-# the rows whose fast mode reaches only some of their runs: the dev row's, `thimble fix`'s alone (chosen)
-FAST_OF_TICKETS = ("dev",)
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)
 # efforts earlier builds stored, read as the level they ran at: Ultracode ran at xhigh (cc_settings.ULTRACODE_EFFORT)
 LEGACY_EFFORTS = {"ultracode": "xhigh"}
@@ -1035,11 +1032,10 @@ def _configured(c: str | None) -> dict[str, dict[str, Any]]:
 
 def chosen(c: str | None, role: str) -> set[str]:
     """The fields of a role (model, effort, fast) set for workspace `c` in thimble's config or with
-    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them. The dev row's fast mode is `thimble fix`'s alone
-    (FAST_OF_TICKETS), so it is never a field a subagent takes from it."""
+    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them."""
     out = set(_configured(c).get(role) or {})
     env = {f for f in ("model", "effort", "fast") if os.environ.get(f"THIMBLE_{role.upper()}_{f.upper()}", "").strip()}
-    return (out | env) - ({"fast"} if role in FAST_OF_TICKETS else set())
+    return out | env
 
 
 def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:

@@ -368,8 +368,10 @@ def _tidy(cwd: Path) -> None:
 def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | None = None) -> dict[str, Any]:
     """The session's inline settings: its effort as 0.8's calls pinned it and its fast mode as its Spec has it
     (sdk.cli_settings), as the Messages API runtime sends them (runtime_api.request): main's and its thread forks' the
-    composer's choice, off until the analyst turns it on, and none for thimble's agents, whatever speed thimble's own
-    calls default to (config.model_speed); the sandbox for Bash
+    composer's choice, off until the analyst turns it on, and an agent's that of its row in Settings
+    (subagents.fast_for: the dev row's for a view's builder and reviewer and a code ticket's agent, none for a writer or
+    a check), whatever speed thimble's own calls default to (config.model_speed), and Claude Code runs a session at
+    standard speed itself where the account has no fast mode; the sandbox for Bash
     (required: a sandbox that cannot start refuses the call, module note), the PATH Bash has on the Messages API
     (runtime_tools.shell_path) and the variables that keep its programs from writing caches beside what they read
     (kernel_wrap.NO_SIDE_WRITES), edits only in the write folders, and no reads of thimble's private files. `tmp` is

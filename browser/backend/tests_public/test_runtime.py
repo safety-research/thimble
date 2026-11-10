@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-from app import (agents, claude_access, config, events, ledger, llm, report_types, runtime, runtime_cc, session,
-                 subagents, write_session)
+from app import (agents, claude_access, config, events, ledger, llm, report_types, runtime, runtime_api, runtime_cc,
+                 session, subagents, userconf, write_session)
 
 CORPUS = "mini"
 
@@ -55,15 +55,23 @@ class FakeStream:
 
 
 class FakeClient:
-    """The Messages API: each request takes the next scripted reply (a list of blocks, or a function of the request)."""
+    """The Messages API: each request takes the next scripted reply (a list of blocks, or a function of the request,
+    which may raise the API's error). `options` holds the options each request's client was given (with_options)."""
 
     def __init__(self, replies: list[Any]) -> None:
-        self.replies, self.bodies = list(replies), []
+        self.replies, self.bodies, self.options = list(replies), [], []
         self.beta = self
         self.messages = self
+        self.given: dict[str, Any] = {}
+
+    def with_options(self, **options: Any) -> "FakeClient":
+        self.given = options  # the SDK gives a copy of the client; here they are the next request's
+        return self
 
     def stream(self, **body: Any) -> FakeStream:
         self.bodies.append(json.loads(json.dumps(body, default=str)))
+        self.options.append(self.given)
+        self.given = {}
         reply = self.replies.pop(0) if self.replies else [Block(type="text", text="(no more)")]
         reply = reply(body) if callable(reply) else reply
         stop = "tool_use" if any(b.type == "tool_use" for b in reply) else "end_turn"
@@ -589,6 +597,99 @@ async def test_main_s_choices_show_at_once_and_fast_mode_comes_on_only_from_its_
     await events.fast_route(CORPUS, events.MainChoice(fast=True))
     assert await runtime._spaces[CORPUS].switch(None)
     assert main_choices() == {"model_choice": "claude-opus-5-5", "effort_choice": "low", "fast_choice": True}
+
+
+# --------------------------------------------------------------------------- an agent's fast mode
+
+
+def agent_of(role: str, **values: str) -> runtime.Conv:
+    """One of thimble's agents of `role`, as the runtime makes it at its start (runtime._spawn_agent), not yet run."""
+    return runtime.Conv(runtime.ensure(CORPUS), f"a-{role}", "agent", agent_id=f"a-{role}",
+                        agent_type=subagents.type_name(role), role=role, values=dict(values))
+
+
+def speeds(role: str, **values: str) -> tuple[Any, Any]:
+    """What an agent of `role` runs at on each engine: (the `speed` of its requests on the Messages API, the `fastMode`
+    of its Claude Code session)."""
+    spec = agent_of(role, **values).spec()
+    return runtime_api.request(spec, []).get("speed"), runtime_cc.settings(spec, False)["fastMode"]
+
+
+async def test_an_agent_of_the_dev_row_runs_in_the_row_s_fast_mode_on_both_engines(on, monkeypatch):
+    """Settings' row "View builds and code tickets" has fast mode on by default, and its agents run as the row shows: a
+    view's builder, its reviewer and a code ticket's agent ask for fast mode on the Messages API (`speed`) and in a
+    Claude Code session (`fastMode`). A writer and a check, whose rows have no fast mode, run at standard speed, and so
+    does a run that names a model without fast mode. THIMBLE_DEV_FAST and the row's switch turn it off for the agents
+    too."""
+    monkeypatch.delenv("THIMBLE_DEV_FAST", raising=False)
+    for role in ("view-builder", "view-reviewer", "dev-ticket"):
+        assert speeds(role) == ("fast", True), role
+    for role in ("writer", "check"):
+        assert speeds(role) == (None, False), role
+    assert speeds("view-builder", model="claude-sonnet-5-5") == (None, False)
+    monkeypatch.setenv("THIMBLE_DEV_FAST", "off")
+    for role in ("view-builder", "view-reviewer", "dev-ticket"):
+        assert speeds(role) == (None, False), f"{role}: the environment turned the row's fast mode off"
+    monkeypatch.delenv("THIMBLE_DEV_FAST")
+    assert speeds("view-builder") == ("fast", True)
+    userconf.save(CORPUS, userconf.pane_patch({"dev": {"fast": False}}, None))  # the row's switch in Settings
+    for role in ("view-builder", "view-reviewer", "dev-ticket"):
+        assert speeds(role) == (None, False), f"{role}: the row's switch is off"
+
+
+async def test_a_view_build_s_claude_code_session_opens_in_the_dev_row_s_fast_mode(on, monkeypatch):
+    """On the Claude Code sign-in the agent's Spec reaches its session's settings: a view build's session opens with
+    `fastMode` on, and its next run's with it off once THIMBLE_DEV_FAST turns the row's off. Claude Code runs the
+    session at standard speed itself where the account has no fast mode."""
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
+
+    seen: dict[str, Any] = {}
+    fake_sdk(monkeypatch, [
+        SystemMessage(subtype="init", data={"session_id": "sess-1"}),
+        AssistantMessage(content=[TextBlock(text="Built.")], model="claude-opus-5-5"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                      session_id="sess-1"),
+    ], seen)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    monkeypatch.setattr(runtime, "_ended", lambda conv, status, report: None)
+    monkeypatch.delenv("THIMBLE_DEV_FAST", raising=False)
+    got = await runtime.module_op(CORPUS, "spawn", {"role": "view-builder", "prompt": "Build the view."})
+    conv = runtime._spaces[CORPUS].convs[got["agentId"]]
+    await conv.task
+    assert json.loads(seen["options"].settings)["fastMode"] is True
+    monkeypatch.setenv("THIMBLE_DEV_FAST", "off")
+    await runtime.module_op(CORPUS, "send", {"agent": conv.id, "text": "Make the bars thinner."})
+    await conv.task
+    assert json.loads(seen["options"].settings)["fastMode"] is False
+
+
+async def test_an_agent_s_turn_goes_on_at_standard_speed_when_the_api_does_not_serve_fast_mode(on, monkeypatch):
+    """An account without fast mode, or one over fast mode's own rate limit, gets a 429 for a request in fast mode,
+    with the time to wait. The request goes without the client's retries, which would wait that long each, and is sent
+    again at once at standard speed; the rest of the turn stays at standard speed. So the build loses one request and
+    does not fail, and its next turn asks for fast mode again."""
+    import anthropic
+    import httpx2
+
+    def refused(body: dict[str, Any]) -> list[Block]:
+        answer = httpx2.Response(429, headers={"retry-after": "600"},
+                                 request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"))
+        raise anthropic.RateLimitError("fast mode is not available", response=answer, body=None)
+
+    ended: list[str] = []
+    monkeypatch.setattr(runtime, "_ended", lambda conv, status, report: ended.append(status))
+    monkeypatch.delenv("THIMBLE_DEV_FAST", raising=False)
+    client = api_key(monkeypatch, [refused, call("Glob", {"pattern": "*"}), text("Built."), text("Changed.")])
+    got = await runtime.module_op(CORPUS, "spawn", {"role": "view-builder", "prompt": "Build the view."})
+    conv = runtime._spaces[CORPUS].convs[got["agentId"]]
+    await conv.task
+    assert [b.get("speed") for b in client.bodies] == ["fast", None, None], "one request refused, the rest standard"
+    assert client.options == [{"max_retries": 0}, {}, {}], "only the request in fast mode goes without retries"
+    assert all("fast-mode" not in " ".join(b.get("betas") or []) for b in client.bodies[1:])
+    assert ended == ["done"] and conv.last_text == "Built."
+    await runtime.module_op(CORPUS, "send", {"agent": conv.id, "text": "Make the bars thinner."})
+    await conv.task
+    assert client.bodies[3].get("speed") == "fast" and ended == ["done", "done"]
 
 
 # --------------------------------------------------------------------------- rewind

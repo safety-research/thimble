@@ -10,7 +10,7 @@ start_writing or run_check the server starts with the fork's call (tools._fork_s
 analyst's browser cookie (hook_auth.analyst), never the server's token alone.
 
 Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for), which the runtime
-runs it with.
+runs it with, in fast mode where its row in Settings has it on (fast_for).
 
 The files. subagents.json and callers.jsonl, in the workspace's `trusted` folder, hold the pending requests, the agents
 and which agent made each thimble call (subagent_files.py). Kernels see the folder read-only (kernel_wrap.TRUSTED_DIR).
@@ -197,6 +197,14 @@ def values_for(c: str, role: str, args: dict[str, Any] | None = None) -> dict[st
     if not config.has_effort(model):
         effort = ""
     return {"model": model, "effort": effort}
+
+
+def fast_for(c: str, role: str) -> bool:
+    """Whether a run of `role` runs in fast mode: as Settings' row for the role has it (config.models_for), which is on
+    only for a row that takes fast mode, on a model that has it. So a view's builder, its reviewer and a code ticket's
+    agent run with the dev row's, and a writer and a check with none."""
+    t = TYPES.get(role)
+    return bool(t and config.models_for(c)[t.row].get("fast"))
 
 
 def _agent_conf(c: str, agent: str) -> dict[str, Any]:

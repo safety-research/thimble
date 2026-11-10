@@ -76,8 +76,8 @@ thimble's config. `thimble fix`'s session runs with the dev agent's `agents.dev`
 the dev row's fast mode; agent_session's module note says what the config adds. Its Bash runs in the sandbox where it
 can run, and its sandbox also writes what a commit in its worktree writes into the checkout's git folder (ticket_fence).
 A ticket's agent and a view builder run as main's subagents, on the dev agent's model and effort unless their run names
-its own, and without web tools while the dev agent's `web` is off (subagents.roles); Claude Code gives a subagent no
-fast mode of its own.
+its own, in the dev row's fast mode too (subagents.fast_for), and without web tools while the dev agent's `web` is off
+(subagents.roles).
 """
 from __future__ import annotations
 
