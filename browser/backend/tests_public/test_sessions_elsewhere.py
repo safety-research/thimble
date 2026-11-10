@@ -17,9 +17,9 @@ import pytest
 from app import cli
 
 CMD = "THIMBLE_WORKSPACES_DIR=~/.thimble/workspaces thimble-browser --resume"
-ONE = ("an earlier session of this folder is in ~/.thimble/workspaces (2 days ago, 0 turns, 1 card); to open it, "
+ONE = ("an earlier session of this folder is in ~/.thimble/workspaces (WHEN, 0 turns, 1 card); to open it, "
        f"run {CMD}")
-TWO = ("2 earlier sessions of this folder are in ~/.thimble/workspaces (the latest 2 days ago; 0 turns, 2 cards in "
+TWO = ("2 earlier sessions of this folder are in ~/.thimble/workspaces (the latest WHEN; 0 turns, 2 cards in "
        f"all); to open one, run {CMD}")
 QUIT = "quit thimble-browser (Ctrl-C), then run"
 
@@ -36,8 +36,8 @@ def _a_card(monkeypatch, folder: Path, c: str = "mini") -> None:
 
 
 def _but_when(line: str) -> str:
-    """`line` without how long ago, which a start reads from the clock."""
-    return re.sub(r"\d+ \w+ ago|just now", "WHEN", line)
+    """`line` with WHEN for the date and time of the latest session, which is the clock's at the test's run."""
+    return re.sub(r"[A-Z][a-z]{2} \d{1,2}(?: \d{4})? \d\d:\d\d", "WHEN", line)
 
 
 def _files(folder: Path) -> dict[str, tuple[int, int]]:
@@ -69,13 +69,13 @@ def test_a_start_says_where_the_folders_earlier_sessions_are(other, home, data, 
     """One session there, then two, the second one set aside: the line counts them and names the folder and the
     command. While a server of this home runs, the command comes after quitting thimble-browser, since a start uses the
     running server with the folder it started with. `--resume` that finds no session here says it too, and starts no
-    server; a new start says it before the link. Nothing there changes."""
+    server; a new start says it last, after the link. Nothing there changes."""
     cwd, now = data / "mini", time.time() + 2 * 86400 + 600
-    assert cli.elsewhere_line(cwd, data, now=now) == ONE
+    assert _but_when(cli.elsewhere_line(cwd, data, now=now)) == ONE
     shutil.copytree(other / "mini", other / ".archive" / "mini-2026-01-02-030405")
     before = _files(other)
-    assert cli.elsewhere_line(cwd, data, now=now) == TWO
-    assert cli.elsewhere_line(cwd, data, "mini", now=now) == TWO, "by the name the start opened the folder as"
+    assert _but_when(cli.elsewhere_line(cwd, data, now=now)) == TWO
+    assert _but_when(cli.elsewhere_line(cwd, data, "mini", now=now)) == TWO, "by the name the start opened the folder as"
 
     started: list[float] = []
     monkeypatch.setattr(cli, "ensure_running", lambda wait_s: started.append(wait_s) or True)
@@ -99,9 +99,9 @@ def test_a_start_says_where_the_folders_earlier_sessions_are(other, home, data, 
     monkeypatch.setattr(claude_access, "start_line", lambda: "signed in")
     assert cli.cmd_browser(argparse.Namespace(cwd=str(cwd), session="new")) == 0
     said = [_but_when(ln) for ln in capsys.readouterr().out.splitlines()]
-    assert said == [cli.BROWSER_LINE.format(what=_but_when(TWO.replace("run", QUIT, 1))),
-                    cli.BROWSER_LINE.format(what=cli.ui_url("mini")), cli.BROWSER_LINE.format(what="signed in")]
-    assert cli.elsewhere_line(cwd, data, now=now) == TWO.replace("run", QUIT, 1)
+    assert said == [cli.BROWSER_LINE.format(what=cli.ui_url("mini")), cli.BROWSER_LINE.format(what="signed in"),
+                    cli.BROWSER_LINE.format(what=_but_when(TWO.replace("run", QUIT, 1)))]
+    assert _but_when(cli.elsewhere_line(cwd, data, now=now)) == TWO.replace("run", QUIT, 1)
     assert _files(other) == before, "the start read the other folder and changed nothing in it"
 
 

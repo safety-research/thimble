@@ -2664,9 +2664,9 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
 
 # elsewhere_line's words. {then} is ELSEWHERE_QUIT while a server of this home runs: a start that names another
 # workspaces folder uses that server as it is, with the folder it started with
-ELSEWHERE_LINE = {False: "an earlier session of this folder is in {folder} ({ago}, {turns}, {cards}); to open it, "
+ELSEWHERE_LINE = {False: "an earlier session of this folder is in {folder} ({when}, {turns}, {cards}); to open it, "
                          "{then}run {cmd}",
-                  True: "{n} earlier sessions of this folder are in {folder} (the latest {ago}; {turns}, {cards} in "
+                  True: "{n} earlier sessions of this folder are in {folder} (the latest {when}; {turns}, {cards} in "
                         "all); to open one, {then}run {cmd}"}
 ELSEWHERE_QUIT = "quit thimble-browser (Ctrl-C), then "
 ELSEWHERE_CMD = "THIMBLE_WORKSPACES_DIR={folder} thimble-browser --resume"
@@ -2697,8 +2697,8 @@ def elsewhere_line(cwd: Path, data_dir: Path, name: str | None = None, *, new: b
     (folder_sessions.listing), and the workspaces folder in the terminal plugin's home (fixes.plugin_home) holds one for
     its workspace: `name`, else the one the folder is registered as (known_corpus), which is how a start with that
     folder finds it. A workbench that ran with that folder as THIMBLE_WORKSPACES_DIR kept its sessions there, and a
-    start without it moved none of them. The line says how many there are, how long ago the latest was and what they
-    hold, as the picker does, then the command that lists them.
+    start without it moved none of them. The line says how many there are, when the latest was last written and what
+    they hold, as resume_line does, then the command that lists them.
 
     None too when the match is not sure or the command is not safe: that home's own registry gives the name to another
     folder; this start registered the folder (`new`), so only that registry can say the name was this folder's; a
@@ -2736,7 +2736,7 @@ def elsewhere_line(cwd: Path, data_dir: Path, name: str | None = None, *, new: b
     turns = _counted(sum(int(r["turns"]) for r in rows), "turn")
     cards = _counted(sum(int(r["cards"]) for r in rows), "card")
     return ELSEWHERE_LINE[len(rows) > 1].format(
-        n=len(rows), folder=_tilde(shown), ago=_ago(rows[0]["at"], now), turns=turns, cards=cards,
+        n=len(rows), folder=_tilde(shown), when=_when(rows[0]["at"], now), turns=turns, cards=cards,
         then=ELSEWHERE_QUIT if running is not None else "", cmd=ELSEWHERE_CMD.format(folder=_shell_word(shown)))
 
 
@@ -2790,16 +2790,17 @@ def cmd_browser(args: argparse.Namespace) -> int:
         with server_dirs():
             if not open_session(url, name, cwd, chosen):
                 return 1
-    if line := elsewhere_line(cwd, data_dir, name, new=opened):
-        print(BROWSER_LINE.format(what=line), flush=True)
     link = ui_url(name, pair=to_terminal())
     print(BROWSER_LINE.format(what=link), flush=True)
     print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)
-    if not opened and chosen.get("new"):
+    # the start's last line is about the folder's earlier sessions: where they are when another workspaces folder
+    # holds them, else how to resume the latest one when this start is a new session
+    earlier = elsewhere_line(cwd, data_dir, name, new=opened)
+    if earlier is None and not opened and chosen.get("new"):
         with server_dirs():
-            resume = resume_line(name)
-        if resume:
-            print(BROWSER_LINE.format(what=resume), flush=True)
+            earlier = resume_line(name)
+    if earlier:
+        print(BROWSER_LINE.format(what=earlier), flush=True)
     if not env["dev"] and not has_ui_build():
         print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):
