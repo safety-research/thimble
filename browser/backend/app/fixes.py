@@ -458,6 +458,10 @@ plugin's tests. So run only a test that you added or changed, and the test file 
 </page>"""
 EARLIER = ("\n\nAn earlier change for this request, which did not pass, is in {patch}; start from it when it helps. "
            "It did not pass because {why}.")
+# more words for a fix that an update set aside: its old change is what the new copy starts from (the kernel's round,
+# a redo for it; plugin/fix/fixer.ts beforeText)
+SET_ASIDE = ("\n\nAn earlier change for this request, which thimble did not use, is in {patch}; start from it when it "
+             "helps.")
 # another try in the fix's copy, which held work no check took (the kernel's redo, same_copy; plugin/fix/fixer.ts
 # beforeText)
 KEPT = ("\n\nThe last try did not pass because {why}. Your copy holds the change of that try, and the changes that were "
@@ -480,7 +484,8 @@ def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
     asked = "\n".join(f"Round {i + 1}: {w}" for i, w in enumerate(words)) if len(words) > 1 else (
         words[0] if words else rec.get("title", ""))
     why = str(rec.get("error") or "its checks failed").rstrip(".")
-    more = "" if not earlier else KEPT.format(why=why) if rec.get("same_copy") else EARLIER.format(
+    before = SET_ASIDE if rec.get("set_aside") else EARLIER
+    more = "" if not earlier else KEPT.format(why=why) if rec.get("same_copy") else before.format(
         patch=rec["earlier"], why=why) if rec.get("earlier") else ""
     refused = rec.get("refused") or {}
     if earlier and refused.get("tests"):
@@ -1124,6 +1129,8 @@ async def change(c: str, fid: int, words: str, page: str = "", *, said: str | No
     if _phase.get(fid) in ("testing", "applying", "restarting"):
         raise HTTPException(409, f"thimble is {'checking' if _phase[fid] == 'testing' else 'putting on'} this fix; "
                                  "say it again once its notice shows")
+    # a fix that an update set aside: the round starts in a new copy, and the fixer starts from the old change
+    aside = (await asyncio.to_thread(record, fid)).get("state") == "pending"
     rec = _json(await asyncio.to_thread(kernel, ["round", str(fid)], stdin=words, timeout=180), "round")
     conv = _fixers.get(fid)
     if conv is not None and conv.running:
@@ -1137,7 +1144,8 @@ async def change(c: str, fid: int, words: str, page: str = "", *, said: str | No
         conv.queue.append(round_text(rec, words))
         live = True
     else:
-        await start_fixer(c, rec, page, said=said, asked=words, announce=announce, tell=tell)
+        await start_fixer(c, {**rec, "set_aside": aside}, page, earlier=aside, said=said, asked=words,
+                          announce=announce, tell=tell)
         live = False
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state"), "round": True,
                     "change": bool(rec.get("prev")), "live": live}}
@@ -1157,8 +1165,10 @@ def fixes_context(recs: list[dict[str, Any]]) -> str:
 
     def word(r: dict[str, Any]) -> str:
         prev = r.get("prev") or {}
-        return f"on, being changed ({r.get('state')})" if prev.get("state") == "on" and r.get("state") != "on" else \
-            str(r.get("state"))
+        state = str(r.get("state"))
+        if prev.get("state") == "on" and state != "on":
+            return f"on, being changed ({state})"
+        return "off, set aside at an update" if state == "pending" else state
 
     lines = []
     for r in shown:

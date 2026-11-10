@@ -268,6 +268,30 @@ async def _started_again() -> None:
     runtime.ensure(CORPUS)
 
 
+async def test_more_words_for_a_fix_that_an_update_set_aside_start_its_fixer_from_the_old_change(fixing, monkeypatch):
+    """An update set fix 1 aside (pending). Main reads it as off, in the terminal's words, and a round of it starts a
+    fixer in the new copy that is told where the old change is, as the terminal's fixer is (plugin/fix/fixer.ts)."""
+    _has_fix(fixing)
+    patch = str(fixing.home / "fixes" / "tmp" / "1" / "earlier.patch")
+    fixing.recs[1].update(state="pending", earlier=patch)
+    assert fixes.fixes_context(list(fixing.recs.values())) == '1  "Card counts rows" (off, set aside at an update)'
+
+    client = api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts its rows.")])
+    await fixes.change(CORPUS, 1, "port it to the new release", "")
+    await _ended()
+    assert [c[0] for c in fixing.calls][:2] == ["show", "round"]
+    first = client.bodies[0]["messages"][-1]["content"]
+    assert (f"An earlier change for this request, which thimble did not use, is in {patch}; start from it when it "
+            "helps.") in first
+    assert "which did not pass" not in first and "The last try did not pass" not in first
+
+    # a round of a fix that no update set aside names no earlier change
+    client = api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: It counts the empty rows too.")])
+    await fixes.change(CORPUS, 1, "count the empty rows too", "")
+    await _ended()
+    assert "An earlier change for this request" not in client.bodies[0]["messages"][-1]["content"]
+
+
 async def test_a_fix_is_one_line_in_main_per_fixer_that_runs_until_its_checks_end_also_after_restarts(fixing,
                                                                                                      monkeypatch):
     """Main's chat shows each fixer once, as a side thread's line, whose chat runs while the fixer works and while the
