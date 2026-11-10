@@ -84,11 +84,11 @@ Another try at a failed fix (redo: y on its line, or /thimble-fix N alone) goes 
 work that no check took, such as the change Claude made there in the person's session, so that the check takes it;
 else it starts in a new copy cut from mine, with the earlier change to start from. The quick tests are the checks that
 can see the files the fix changes (_checks). They run with no network, for one fix at a time, each as a command of its
-own, the copy's launcher first; the hooks tests, which can fail for their timing alone, run once more when they fail,
-and any other check fails the fix at its first run (_run_tests). They run in a process of their own (the
-runner), apart from the call that checks the fix, so that they may take longer than Claude Code lets a call run: the
-record stays working, with `testing`, until the runner writes what came of them, and done waits for that
-(_start_tests).
+own, the copy's launcher first, and the page's type check and its build at the same time; the hooks tests, which can
+fail for their timing alone, run once more when they fail, and any other check fails the fix at its first run
+(_run_tests). They run in a process of their own (the runner), apart from the call that checks the fix, so that they may
+take longer than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what
+came of them, and done waits for that (_start_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -1049,10 +1049,12 @@ def _has_pytest(py: str) -> bool:
 class Check(NamedTuple):
     """One of the checks of a change (_checks): its name in the log, and the shell command that runs it in the copy, in
     the sandbox. `again`: it can fail for its timing alone, so a run that fails runs once more before the check counts
-    as failed (_run_tests)."""
+    as failed. `beside`: it and the check before it use nothing of each other, so the two run at the same time
+    (_run_tests)."""
     name: str
     cmd: str
     again: bool = False
+    beside: bool = False
 
 
 QUICK_TESTS = "claude plugin test plugin"
@@ -1087,11 +1089,12 @@ LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess 
                   "chk plugin/bin/thimble plugin/bin/thimble && "
                   "chk plugin/engine/thimble.py \"$THIMBLE_PYTHON\" plugin/engine/thimble.py)")
 # the page's checks, each in its folder: its type check and its build, as its package.json runs them (the build into
-# the sandbox's temp folder), then the unit tests of what changed since the commit the change was made on ({base})
+# the sandbox's temp folder), at the same time, since the build reads the sources and not what the type check writes;
+# then the unit tests of what changed since the commit the change was made on ({base})
 PAGE_CHECKS = (
     Check("the page's type check", "cd browser/frontend && node_modules/.bin/tsc -b"),
     Check("the page's build", 'cd browser/frontend && node_modules/.bin/vite build --logLevel warn --outDir "$TMPDIR/page" '
-                              "--emptyOutDir"),
+                              "--emptyOutDir", beside=True),
     Check("the page's unit tests", "cd browser/frontend && node_modules/.bin/vitest run --changed {base} --passWithNoTests"),
 )
 # the server's checks, in its folder: its code loads (app.main imports the module of each of its routes, as the server's
@@ -1129,9 +1132,10 @@ def _checks(wt: Path, paths: list[str], base: str) -> tuple[list[Check], list[st
     the kernel's Python files alone (KERNEL_ONLY), and the kernel's tests of the fix flow and of the privacy scan, for
     a change to none of what they see (_kernel_tests). The kernel's tests, which stop at the first that fails, go
     before the hooks tests when the change has Python files. Only the hooks tests fail for their timing alone, so only
-    they run once more when they fail (Check.again). The page's and the server's run with the browser workbench's
-    packages, which the copy borrows (_borrow): with none (the workbench is not installed), they are left out.
-    THIMBLE_FIX_TESTS, a shell command, replaces them all, as one check that runs once more when it fails."""
+    they run once more when they fail (Check.again). The page's type check and its build run at the same time
+    (Check.beside). The page's and the server's run with the browser workbench's packages, which the copy borrows
+    (_borrow): with none (the workbench is not installed), they are left out. THIMBLE_FIX_TESTS, a shell command,
+    replaces them all, as one check that runs once more when it fails."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if cmd:
         return [Check("the tests", cmd, again=True)], []
@@ -1208,26 +1212,27 @@ PASSED_AGAIN = "passed only the second time"
 def _run_tests(box: list[str], checks: list[Check], fid: int | str) -> tuple[bool, str]:
     """The checks of a change (_checks) in the copy, with no network, each as a command of its own in the sandbox
     (`box`, the start of that command, which the runner gets from the call that checks the fix), in their order, until
-    one fails. They run for one fix at a time, since two runs at once make the hooks tests run out of time, and a check
+    one fails; a check that runs beside the one before it (`beside`) starts with it, and both end before the next
+    starts. They run for one fix at a time, since two runs at once make the hooks tests run out of time, and a check
     that can fail for its timing alone (`again`) runs once more before it counts as failed; any other fails at its
     first run. Together they have TESTS_LIMIT seconds, of which a run that is repeated takes none. The whole log, each
-    run under a line that names its check, is in tmp/<id>/tests.log. (passed, the end of the log of the last check
-    that ran, or, when all passed, of the first run of one that passed only the second time)"""
+    run under a line that names its check, is in tmp/<id>/tests.log. (passed, the end of the log of the first check
+    that failed, else of the last that ran, or, when all passed, of the first run of one that passed only the second
+    time)"""
     log: list[str] = []
     ok, tail, twice = True, "", ""
     with Lock("tests.lock"):
         left = float(TESTS_LIMIT)
-        for c in checks:
-            ok, took, said = _check_once(box, c, fid, left)
-            log.append(said)
-            if not ok and c.again:
-                first = _end(said)
-                ok, took, said = _check_once(box, c, fid, left, again=True)
-                log.append(said)
-                if ok and not twice:
-                    twice = f"{c.name} {PASSED_AGAIN}; the first run ended:\n{first}"
-            left -= took
-            tail = _end(said)
+        for group in _beside(checks):
+            got = _at_once(box, group, fid, left)
+            for c, (passed, _, runs) in zip(group, got):
+                log += runs
+                if ok:
+                    tail = _end(runs[-1])
+                if passed and len(runs) > 1 and not twice:
+                    twice = f"{c.name} {PASSED_AGAIN}; the first run ended:\n{_end(runs[0])}"
+                ok = ok and passed
+            left -= max(took for _, took, _ in got)
             if not ok:
                 break
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
@@ -1236,6 +1241,38 @@ def _run_tests(box: list[str], checks: list[Check], fid: int | str) -> tuple[boo
     except OSError:
         pass  # the log's last lines go on the record either way
     return ok, twice if ok and twice else tail
+
+
+def _beside(checks: list[Check]) -> list[list[Check]]:
+    """The checks in the groups that run at the same time: each one with those after it that run beside it."""
+    groups: list[list[Check]] = []
+    for c in checks:
+        if c.beside and groups:
+            groups[-1].append(c)
+        else:
+            groups.append([c])
+    return groups
+
+
+def _at_once(box: list[str], group: list[Check], fid: int | str, limit: float) -> list[tuple[bool, float, list[str]]]:
+    """The checks of one group (_beside) in the copy, at the same time when they are several, each in a thread that
+    waits for its command: what _check gives for each, in their order, once all ended."""
+    if len(group) == 1:
+        return [_check(box, group[0], fid, limit)]
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    with ThreadPoolExecutor(len(group)) as pool:
+        return list(pool.map(lambda c: _check(box, c, fid, limit), group))
+
+
+def _check(box: list[str], c: Check, fid: int | str, limit: float) -> tuple[bool, float, list[str]]:
+    """The check `c` in the copy, each run for at most `limit` seconds: one run, and one more when that fails and the
+    check can fail for its timing alone. (passed, the seconds of its last run, the log of each run)"""
+    ok, took, said = _check_once(box, c, fid, limit)
+    if ok or not c.again:
+        return ok, took, [said]
+    ok, took, again = _check_once(box, c, fid, limit, again=True)
+    return ok, took, [said, again]
 
 
 def _check_once(box: list[str], c: Check, fid: int | str, limit: float, again: bool = False) -> tuple[bool, float, str]:

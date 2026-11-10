@@ -398,6 +398,8 @@ def test_a_change_gets_each_check_that_can_see_its_files(monkeypatch):
     assert checks("browser/frontend/src/chat/Notice.tsx") == page
     assert [c.name for c in page] == ["the page's type check", "the page's build", "the page's unit tests"]
     assert page[2].cmd.endswith("vitest run --changed c0ffee0 --passWithNoTests") and not any(c.again for c in page)
+    # the page's build runs at the same time as its type check, and its unit tests after the two
+    assert [c.beside for c in page] == [False, True, False]
     assert checks("browser/backend/app/labels.py", "browser/prompts/main.md") == server
     assert checks("browser/README.md") == []
     assert checks("plugin/engine/kernel/coverage.py", "browser/frontend/src/App.tsx") == [start, kernel, *page]
@@ -430,6 +432,37 @@ def test_only_a_check_that_can_fail_for_its_timing_runs_again_and_a_failure_name
     assert r["state"] == "ready" and ran.read_text().split() == ["start", "hooks", "hooks", "build"]
     assert r["tests_tail"].startswith("the hooks tests passed only the second time; the first run ended:\n"
                                       "### the hooks tests: failed in ")
+
+
+def test_checks_that_run_beside_each_other_run_at_the_same_time_and_the_log_keeps_them_apart(world, monkeypatch):
+    here = world["tmp"]
+
+    def meets(mine: str, other: str) -> str:
+        # a made-up check that passes only while the other one runs: it says that it started, then waits until the
+        # other said so, for at most 20 seconds
+        return (f"echo made-up {mine} output; touch '{here}/{mine}'; for i in $(seq 200); do "
+                f"test -e '{here}/{other}' && exit 0; sleep 0.1; done; exit 1")
+
+    made_up = [FX.Check("the page's type check", meets("types", "build")),
+               FX.Check("the page's build", meets("build", "types"), beside=True),
+               FX.Check("the page's unit tests", f"test -e '{here}/types' -a -e '{here}/build' && echo made-up unit output")]
+    monkeypatch.setattr(FX, "_checks", lambda wt, paths, base: (made_up, []))
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    # the two met, and the unit tests ran after both; the log has the output of each under its own line
+    assert r["state"] == "ready" and r["tests_tail"].splitlines()[1:] == ["made-up unit output"]
+    log = (FX.tmp_dir(r["id"]) / "tests.log").read_text().splitlines()
+    assert [line.split(" in ")[0] if line.startswith("### ") else line for line in log] == [
+        "### the page's type check: passed", "made-up types output", "### the page's build: passed", "made-up build output",
+        "### the page's unit tests: passed", "made-up unit output"]
+    # one of the two fails: the other still ends, the record keeps the end of the one that failed, and no check follows
+    made_up[:] = [FX.Check("the page's type check", "echo made-up type error; false"),
+                  FX.Check("the page's build", f"sleep 0.3; touch '{here}/built'; echo made-up build output", beside=True),
+                  FX.Check("the page's unit tests", f"touch '{here}/unit'")]
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    assert r["state"] == "failed" and (here / "built").exists() and not (here / "unit").exists()
+    head, *lines = r["tests_tail"].splitlines()
+    assert head.startswith("### the page's type check: failed in ") and lines == ["made-up type error"]
+    assert "### the page's build: passed in " in Path(r["refused"]["log"]).read_text()
 
 
 def as_github(w) -> Path:
