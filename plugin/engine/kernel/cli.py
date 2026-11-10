@@ -619,7 +619,7 @@ After an update by thimble 0.10.5 or before, which set every fix aside, thimble 
 fits at your next thimble update, thimble fixes or thimble reapply, at a Claude Code session's start, or when
 thimble-browser starts.
 
-Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
+Afterwards: /reload-plugins in Claude Code, and restart thimble-browser with --continue.
 
 A dev install (scripts/install.sh --local in a git clone) follows your own checkout instead of the releases: after
 `git pull`, thimble update moves thimble and your fixes onto the commit you checked out. It never pulls: it fetches

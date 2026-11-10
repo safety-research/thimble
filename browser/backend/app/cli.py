@@ -2527,7 +2527,8 @@ PICK_ASK = "Number to resume (Enter to cancel): "
 # pick_session's answer for a new session, which alone moves the open one aside (open_session): a session picked that
 # holds no chat of main with a turn gets chat "new" too, and stays
 NEW_SESSION = {"archive": None, "chat": "new", "new": True}
-SET_ASIDE_FAILED_LINE = ("the last session was not moved aside ({why}), so the page opens it with a new chat; "
+SET_ASIDE_LINE = "the last session here is set aside; thimble-browser --continue brings it back"
+SET_ASIDE_FAILED_LINE =("the last session was not moved aside ({why}), so the page opens it with a new chat; "
                          "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
 
@@ -2625,7 +2626,9 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
         ws = Path(resolve_env()["workspaces_dir"]) / name
         if ws.is_dir() and folder_sessions.holds(folder_sessions.summary(ws)):
             answered, moved = archive_workspace(url, name)
-            if not moved:
+            if moved:
+                print(BROWSER_LINE.format(what=SET_ASIDE_LINE))
+            else:
                 why = "the server found no workspace to move" if answered else "the server did not move it"
                 print(BROWSER_LINE.format(what=SET_ASIDE_FAILED_LINE.format(why=why, log=log_path())))
     status, resp = _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True,

@@ -87,11 +87,12 @@ def test_a_detached_browser_start_starts_the_server_once_and_stop_ends_it(home, 
                 os.kill(q, 9)
 
 
-def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, data, monkeypatch):
+def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, data, monkeypatch, capsys):
     """`thimble-browser --continue`, and `--resume` of the session open now, keep that session when it holds a card, a
     label, a document or a side thread but no chat of main with a turn, as a session of an earlier thimble or one with
     a card made by hand does: the page opens a new chat in it. Only a new session moves the open one aside
-    (pick_session, open_session). The server's routes are faked."""
+    (pick_session, open_session), and it says so with the command that brings it back. The server's routes are
+    faked."""
     from app import config, notebook  # noqa: PLC0415
 
     with cli.server_dirs():
@@ -112,6 +113,8 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
             assert cli.open_session("http://127.0.0.1:1", "mini", cwd, cli.pick_session(cwd, data, how))
         assert [route for route, _ in asked] == routes, how
         assert asked[-1][1]["chat"] == "new"
+        said = capsys.readouterr().out.splitlines()
+        assert said == ([cli.BROWSER_LINE.format(what=cli.SET_ASIDE_LINE)] if how == "new" else []), how
 
 
 @pytest.mark.timeout(120)
