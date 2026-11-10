@@ -18,8 +18,10 @@ call rather than lead outside.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import fnmatch
+import io
 import itertools
 import json
 import os
@@ -40,6 +42,12 @@ RESULT_CHARS = 30_000
 BASH_TIMEOUT_S = 120
 BASH_TIMEOUT_MAX_S = 600
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", ".mypy_cache", ".pytest_cache"}
+# the pictures a tool result carries, by Pillow's name of their format: the media types the Messages API takes
+PICTURES = {"PNG": "image/png", "JPEG": "image/jpeg", "GIF": "image/gif", "WEBP": "image/webp"}
+# px of a picture's longer edge at most: the longest the model reads at full resolution, and within the size the API
+# takes in a request of many pictures
+PICTURE_EDGE = 2576
+PICTURE_BYTES = 5 * 1024 * 1024 * 3 // 4  # of a picture at most: 5 MB as base64 text, which every platform takes
 
 WEB_SEARCH = {"type": "web_search_20250305", "name": "web_search", "max_uses": 8}
 WEB_FETCH = {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 8}
@@ -49,7 +57,8 @@ SERVER_NAMES = {"web_search": "WebSearch", "web_fetch": "WebFetch"}  # as a tran
 DEFS: dict[str, dict[str, Any]] = {
     "Read": {
         "description": ("Reads a file from the local filesystem. file_path is absolute, or relative to the corpus "
-                        "folder. Reads up to 2000 lines from `offset` (1-based), each line numbered as `cat -n` does."),
+                        "folder. Reads up to 2000 lines from `offset` (1-based), each line numbered as `cat -n` does. "
+                        "A PNG, JPEG, GIF or WebP file comes back as a picture."),
         "input_schema": {"type": "object", "properties": {
             "file_path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
             "required": ["file_path"]},
@@ -162,8 +171,23 @@ class Box:
 
 @dataclass
 class Out:
-    text: str
+    text: str | list[dict[str, Any]]  # Read of a picture: the blocks of a tool result, its text and then the picture
     is_error: bool = False
+
+
+@dataclass
+class Picture:
+    """A picture as a tool result carries it: its base64 text, its media type, its size in px, and the size it had when
+    it was scaled down to fit (None for a picture sent as it is)."""
+    data: str
+    mime: str
+    size: tuple[int, int]
+    was: tuple[int, int] | None = None
+
+    @property
+    def scaled(self) -> str:
+        """What a tool's text says after its words of a picture that was scaled down, '' for one sent as it is."""
+        return f", scaled down to {self.size[0]} x {self.size[1]} px" if self.was else ""
 
 
 def _cut(text: str) -> str:
@@ -201,6 +225,39 @@ def _window(q: Path, root: Path, offset: int, limit: int) -> tuple[list[str], in
         lines = _lines(f)
         shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
         return shown, sum(1 for _ in lines)
+
+
+def picture(f: BinaryIO) -> Picture | None:
+    """The open file `f` as a picture the model takes (PICTURES); None for any other file, and for one that does not
+    decode. A picture over PICTURE_EDGE or PICTURE_BYTES is scaled down until it fits, as a JPEG when it was one and
+    else as a PNG."""
+    try:
+        from PIL import Image, ImageOps  # noqa: PLC0415 — Pillow comes with matplotlib
+
+        f.seek(0)
+        im = Image.open(f, formats=list(PICTURES))
+        # MPO is Pillow's name of a JPEG with more pictures after its first, as some cameras write one
+        mime = PICTURES["JPEG" if im.format == "MPO" else str(im.format)]
+        im.load()  # a picture that does not decode would fail every later request of the conversation that holds it
+        f.seek(0)
+        raw = f.read()
+        if max(im.size) <= PICTURE_EDGE and len(raw) <= PICTURE_BYTES:
+            return Picture(base64.b64encode(raw).decode("ascii"), mime, im.size)
+        jpeg = mime == "image/jpeg"
+        # the copy keeps no orientation tag, so it is turned the way the tag says
+        im = ImageOps.exif_transpose(im).convert("RGB" if jpeg else "RGBA")
+        was = im.size
+        k = PICTURE_EDGE / max(was) if max(was) > PICTURE_EDGE else 0.75
+        while True:
+            size = (max(1, round(was[0] * k)), max(1, round(was[1] * k)))
+            out = io.BytesIO()
+            im.resize(size, Image.LANCZOS).save(out, format="JPEG" if jpeg else "PNG")
+            if out.tell() <= PICTURE_BYTES or max(size) == 1:
+                return Picture(base64.b64encode(out.getvalue()).decode("ascii"), mime if jpeg else "image/png", size,
+                               was)
+            k *= 0.75
+    except Exception:  # noqa: BLE001 — Pillow raises more than OSError for a file it cannot decode
+        return None
 
 
 def _files(base: Path, root: Path) -> Iterator[tuple[Path, int, str]]:
@@ -280,7 +337,8 @@ async def call(box: Box, name: str, args: dict[str, Any]) -> Out:
         got = await fn(box, args)
     except (ValueError, OSError) as e:
         return Out(f"{name} failed: {e}", True)
-    got.text = _cut(got.text)
+    if isinstance(got.text, str):
+        got.text = _cut(got.text)
     return got
 
 
@@ -294,7 +352,16 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
     limit = max(1, min(int(a.get("limit") or READ_LINES), READ_LINES))
     got = await asyncio.to_thread(_window, q, box.root(q), offset, limit)
     if got is None:
-        return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
+        def shown() -> Picture | None:
+            with _opened(q, box.root(q)) as f:
+                return picture(f)
+
+        pic = await asyncio.to_thread(shown)
+        if pic is None:
+            return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
+        w, h = pic.was or pic.size
+        return Out([{"type": "text", "text": f"{a.get('file_path')} is a picture of {w} x {h} px{pic.scaled}"},
+                    {"type": "image", "source": {"type": "base64", "media_type": pic.mime, "data": pic.data}}])
     lines, more = got
     out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines, offset)]
     if more > 0:

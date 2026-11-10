@@ -11,8 +11,8 @@ in rounds, through two thimble tools (view_tools.py):
 1. view_pictures: the overview as the Views bar opens it, then the states it asks for, up to EXTRA_SHOTS more a round
    (EXTRA_STATES, such as a control clicked or another pane width), shot into views-work/<slug>/review/<round>/ with
    what the checks found, how the page's text fits (views.layout_notes), the controls the first picture shows and a
-   sample of the records the pages fetched. It reads the pictures with Read. Without the headless browser there are no
-   pictures, and it is told so.
+   sample of the records the pages fetched. The pictures come with the tool's answer. Without the headless browser
+   there are no pictures, and it is told so.
 2. If it finds problems, it edits the view's files, checks them with view_check, and calls finish_review with what it
    revised and what it leaves. The gate runs: a pass keeps the revision (views.mark_built) and counts a round, and
    before ROUNDS rounds it is told to take the pictures again; a failure puts the view back as it was before the round
@@ -501,10 +501,13 @@ def _wanted(states: Any, left: int) -> list[dict[str, Any]]:
     return more[:max(0, left)]
 
 
-async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str]:
+async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, list[Any]]:
     """view_pictures for the reviewer `agent_id`: in a round's first call the overview, then the states asked for, up
     to EXTRA_SHOTS a round, into views-work/<slug>/review/<round>/. (The pictures' lines, each its number, path and
-    what it shows, then what the checks found; the records the pages fetched.) NoPictures for none."""
+    what it shows, then what the checks found; the records the pages fetched; the pictures as the tool's answer carries
+    them, in their lines' order: view_tools.picture.) NoPictures for none."""
+    from . import view_tools  # noqa: PLC0415
+
     prop = views.read_proposal(c, slug)
     view = views.read_view(c, slug)
     if prop is None or view is None:
@@ -529,14 +532,17 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
         raise NoPictures(why)
     extra = sum(1 for w in wanted if w["state"] != "overview")
     _set(c, slug, pictured=rnd, extra_left=left - extra, shots=done + sum(1 for s in shots if s.get("png")))
-    lines = [f"{i}: {s['png']} ({_about(s)})" for i, s in enumerate(shots, done + 1) if s.get("png")]
+    taken = [(i, s) for i, s in enumerate(shots, done + 1) if s.get("png")]
+    pics = await asyncio.to_thread(lambda: [view_tools.picture(s["png"]) for _, s in taken])
+    lines = [f"{i}: {s['png']}{pic.scaled if pic else ', which did not load'} ({_about(s)})"
+             for (i, s), pic in zip(taken, pics)]
     if shots and shots[0].get("controls") and shots[0].get("state") == "overview":
         lines.append(f"The controls picture {done + 1} shows, by their text: "
                      + "; ".join(str(x) for x in shots[0]["controls"]))
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-"
+    return "\n".join(lines), records_text(shots) or "-", [pic for pic in pics if pic]
 
 
 def _about(s: dict[str, Any]) -> str:
