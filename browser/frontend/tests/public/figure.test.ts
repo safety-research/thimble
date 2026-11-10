@@ -1,7 +1,7 @@
 // A card as a figure (src/figures/figure.ts, the pure parts of figures/Figure.tsx): the headline's plain text and its
 // first sentence, a Paper figure's size and chart, the body a figure draws and a report's caption. All data is made up.
 import { expect, test } from 'vitest'
-import { BLOG_CHART_W, captionParts, chartOf, drawingSize, figureCell, figureText, firstSentence, headline, PAPER_ONE, PAPER_TWO, paperSize, paperSpec, takeawayHeadline } from '../../src/figures/figure.ts'
+import { BLOG_CHART_W, captionParts, chartOf, drawingSize, figureCell, figureText, firstSentence, headline, PAPER_ONE, PAPER_TWO, paperFit, paperSize, paperSpec, takeawayHeadline } from '../../src/figures/figure.ts'
 import type { Cell } from '../../src/lib/types.ts'
 
 const MIME = 'application/vnd.vegalite.v6.json'
@@ -132,4 +132,11 @@ test("a Paper figure's caption in a report: Figure N., the takeaway in plain wor
   expect(captionParts(1, '', 'When do runs end?')).toEqual({ lead: 'Figure 1.', takeaway: '', question: 'When do runs end?' })
   // a takeaway that ends in its own question mark takes no period after it
   expect(captionParts(2, 'Do most runs end on day 2?', 'When do runs end?').takeaway).toBe('Do most runs end on day 2?')
+})
+
+test('a Paper figure wider than its column is drawn at the share that fits it, whole', () => {
+  expect(paperFit(398, PAPER_TWO.width)).toBeCloseTo(398 / 509)
+  expect(paperFit(800, PAPER_TWO.width)).toBe(1)
+  expect(paperFit(240, PAPER_ONE.width)).toBe(1)
+  expect(paperFit(0, PAPER_TWO.width)).toBe(1)
 })

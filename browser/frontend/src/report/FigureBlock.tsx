@@ -22,7 +22,7 @@ import { chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primar
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { Figure as StyledFigure } from '../figures/Figure'
-import { BLOG_FIGURE, captionParts, headline, takeawayHeadline } from '../figures/figure'
+import { BLOG_FIGURE, captionParts, headline, paperFit, paperSize, takeawayHeadline } from '../figures/figure'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
@@ -457,6 +457,8 @@ function FigureInStyle({ ws, cell, style, width, label, caption, table, body, ed
     )
   const said = readableText(caption) === readableText(cell.takeaway ?? '') ? takeawayHeadline(caption) : headline(caption)
   const parts = captionParts(0, caption, cell.title)
+  // a Paper figure wider than the column (two columns' 509 px in a narrow text column) is drawn smaller, whole
+  const fit = style === 'paper' && !table ? paperFit(width, paperSize(cell).width) : 1
   return (
     <CanvasContext.Provider value={ctx}>
       <GlyphCites.Provider value={true}>
@@ -467,7 +469,7 @@ function FigureInStyle({ ws, cell, style, width, label, caption, table, body, ed
             {table ? (
               <div className="wu-fig-art wu-fig-art-table">{body}</div>
             ) : (
-              <div className="wu-fig-art">
+              <div className="wu-fig-art" style={fit < 1 ? { zoom: fit } : undefined}>
                 <StyledFigure cell={cell} style="paper" label={label} />
                 <StyledFigure cell={cell} style="paper" part="legend" columns={2} label={label} />
               </div>

@@ -1721,7 +1721,7 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .wu-fig-paper .wu-fig-art {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: safe center;
   gap: 6px;
   max-width: 100%;
   overflow-x: auto;

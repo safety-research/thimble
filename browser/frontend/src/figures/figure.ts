@@ -154,6 +154,13 @@ export function paperSize(cell: Pick<Cell, 'outputs'>): { width: number; height:
   return drawing && drawing.width / drawing.height >= WIDE_DRAWING ? PAPER_TWO : PAPER_ONE
 }
 
+/** The scale a Paper figure takes in a column `width` px wide: 1 while the figure's own `figure` px fit, else the share
+ * that fits it, so a report's text column narrower than a two-column figure shows it whole rather than clipped. 1 before
+ * the column is measured (0). Pure. */
+export function paperFit(width: number, figure: number): number {
+  return width > 0 && figure > width ? width / figure : 1
+}
+
 /** A chart as a Paper figure draws it: no title, no legend (the legend is a figure of its own), and a single or layered
  * chart fitted whole, its axes included, to `size`; a composite keeps its views' heights and is fitted to the width
  * when drawn. Pure. */
