@@ -8,8 +8,10 @@
 import { expect } from 'claude-code/testing'
 
 import { refusedText } from '../fix/fixer'
+import { carriedLine, fixLineNow } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, registerFix, wordsOfSkill } from '../fix/register'
+import { fixesContext, namedFix } from '../fix/request'
 import { promptStub } from './stubs'
 import { test } from './kit'
 
@@ -423,4 +425,17 @@ test("Claude's fix-thimble skill starts no fix without the person's /thimble-fix
   await s.end('Title: Legend shows every row\nWhat it does: The legend wraps.')
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Legend shows every row · tests pass')
   expect(await toldOf(s)).toBe(`thimble's fixer finished the fix "Legend shows every row"; it waits for the person's y. Nothing for you to do.`)
+})
+
+test("words for a fix an update set aside name that fix, never a new one, and Claude reads it in the list as set aside", () => {
+  const fixes: Any[] = [{ id: 2, title: 'resume finds the sessions', state: 'pending', words: [] }, { id: 3, title: 'a note', state: 'on', words: [] }]
+  expect(namedFix('2 port it to 1.0.1', '', fixes)).toEqual({ target: 2, fresh: false })
+  expect(namedFix('port fix 2 to 1.0.1', '2', fixes)).toEqual({ target: 2, fresh: false })
+  expect(fixesContext(fixes)).toContain('2  "resume finds the sessions" (off, set aside at an update)')
+})
+
+test("the line after the session's start put back the fixes an update set aside says how many of the person's fixes stay off, and the command that brings them back", async () => {
+  const s = setup()
+  await carriedLine(s.$, { to: '1.0.1', back: [1], had: [], aside: [2, 3] })
+  expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1 · 1 fix on again · 2 of your fixes are off: they do not fit 1.0.1 · in a shell: thimble reapply')
 })

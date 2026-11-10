@@ -2528,6 +2528,9 @@ PICK_ASK = "Number to resume (Enter to cancel): "
 # holds no chat of main with a turn gets chat "new" too, and stays
 NEW_SESSION = {"archive": None, "chat": "new", "new": True}
 SET_ASIDE_LINE = "the last session here is set aside; thimble-browser --continue brings it back"
+# a new session whose open one was empty already, as the start after the one that set the last session aside leaves it
+EARLIER_LINE = ("this session is new; your latest session here, {ago} with {turns} and {cards}, is set aside: "
+                "thimble-browser --continue brings it back")
 SET_ASIDE_FAILED_LINE =("the last session was not moved aside ({why}), so the page opens it with a new chat; "
                          "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
@@ -2609,7 +2612,8 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
 def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool:
     """Put the session pick_session chose in place in workspace `name`, then open its chat of main (the register
     route's `chat`). A new session (NEW_SESSION) moves the open one aside when it holds anything (`POST
-    /api/ws/{c}/archive`); an earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going
+    /api/ws/{c}/archive`), and when the open one is empty already, says that the latest earlier one is set aside
+    (EARLIER_LINE); an earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going
     there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
     says why, when the session was not brought back; a session that was not moved aside stays open, with a new chat and
     a line that says so."""
@@ -2631,6 +2635,10 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
             else:
                 why = "the server found no workspace to move" if answered else "the server did not move it"
                 print(BROWSER_LINE.format(what=SET_ASIDE_FAILED_LINE.format(why=why, log=log_path())))
+        elif earlier := folder_sessions.listing(name):
+            r = earlier[0]
+            print(BROWSER_LINE.format(what=EARLIER_LINE.format(ago=_ago(r["at"]), turns=_counted(r["turns"], "turn"),
+                                                               cards=_counted(r["cards"], "card"))))
     status, resp = _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True,
                                                                      "chat": chat})
     if status not in (200, 201):

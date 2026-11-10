@@ -117,6 +117,43 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
         assert said == ([cli.BROWSER_LINE.format(what=cli.SET_ASIDE_LINE)] if how == "new" else []), how
 
 
+def test_a_new_session_that_finds_the_open_one_empty_names_the_earlier_one_and_continue_brings_it_back(home, data,
+                                                                                                       monkeypatch, capsys):
+    """A plain thimble-browser start whose open session is empty, as the start after the one that set the last session
+    aside leaves it, says that an earlier session is set aside, what it holds, and that --continue brings it back. The
+    server's routes are faked; its archive moves the folder as ledger.archive_workspace does."""
+    from app import config, ledger, notebook  # noqa: PLC0415
+
+    with cli.server_dirs():
+        nb = notebook.create_notebook(config.workspace_dir("mini"), "G")
+        notebook.insert_cell("mini", nb["id"], notebook.new_cell("note", "test", "By hand", nb["id"],
+                                                                 payload={"text": "made by hand"}))
+
+    def answer(method, url, body=None, timeout=5.0):
+        if url.endswith("/archive"):
+            ws = config.workspace_path("mini")
+            to = ledger.archive_path("mini")
+            to.parent.mkdir(parents=True, exist_ok=True)
+            ws.rename(to)
+            config.workspace_dir("mini")
+            return 200, {"archived": to.name}
+        return 200, {"name": "mini"}
+
+    monkeypatch.setattr(cli, "_request", answer)
+    cwd = data / "mini"
+    said = []
+    for _ in range(2):
+        with cli.server_dirs():
+            assert cli.open_session("http://127.0.0.1:1", "mini", cwd, cli.pick_session(cwd, data, "new"))
+        said.append(capsys.readouterr().out.splitlines())
+    assert said[0] == [cli.BROWSER_LINE.format(what=cli.SET_ASIDE_LINE)]
+    # the second start sets nothing aside, and says what is there to bring back
+    assert len(said[1]) == 1 and "thimble-browser --continue brings it back" in said[1][0], said[1]
+    assert "0 turns and 1 card" in said[1][0], said[1]
+    with cli.server_dirs():
+        assert cli.pick_session(cwd, data, "continue")["archive"]
+
+
 @pytest.mark.timeout(120)
 def test_a_quit_leaves_the_server_running_while_another_thimble_browser_holds_it(home, monkeypatch, capsys):
     """One server serves every folder, so the thimble-browser of a second folder uses the server the first one started.

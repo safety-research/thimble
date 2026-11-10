@@ -54,7 +54,8 @@ export function namedFix(asked: string, form: string, fixes: Fix[]): { target: n
 export function fixesContext(fixes: Fix[]): string {
   const shown = fixes.filter(f => CHANGEABLE.includes(f.state)).slice(0, 20)
   if (!shown.length) return ''
-  const word = (f: Fix) => (f.prev?.state === 'on' && f.state !== 'on' ? `on, being changed (${f.state})` : f.state)
+  const word = (f: Fix) => (f.prev?.state === 'on' && f.state !== 'on' ? `on, being changed (${f.state})`
+    : f.state === 'pending' ? 'off, set aside at an update' : f.state)
   return [
     "The person's thimble fixes (start the fix-thimble skill with `N` to change fix N, `new` for a new fix):",
     ...shown.map(f => `${f.id}  "${fixName(f, 80)}" (${word(f)})${f.summary ? `: ${cut(f.summary.replace(/\s+/g, ' '), 160)}` : ''}`),

@@ -3,6 +3,6 @@
 // so it stays on one line, in double quotes. Pure: no `$`, no Node.
 
 /** The states of the fixes the person has whose number takes more words, `/thimble-fix N <words>`, as a round of fix N
- *  (the kernel's round_): any in the list, at work or not, and a request with no code, whose next round starts in a new
- *  copy. Claude reads these fixes beside the person's /thimble-fix. */
-export const CHANGEABLE = ["on", "off", "ready", "working", "failed", "redo", "request"]
+ *  (the kernel's round_): any in the list, at work or not, a request with no code, and a fix an update set aside
+ *  (pending), whose next round starts in a new copy. Claude reads these fixes beside the person's /thimble-fix. */
+export const CHANGEABLE = ["on", "off", "ready", "working", "failed", "redo", "pending", "request"]
