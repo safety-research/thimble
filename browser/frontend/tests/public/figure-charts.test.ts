@@ -153,7 +153,7 @@ test('in Blog a bar carries its value at its end in its color, semibold, all wit
   const [bars, values] = s.layer
   expect(bars.mark).toBe('bar')
   expect(bars.encoding.x.axis).toEqual({ grid: true })
-  expect(values.mark).toMatchObject({ type: 'text', fontWeight: 600, fontSize: 13, baseline: 'middle', color: { expr: valueTone('"#b86046"') } })
+  expect(values.mark).toMatchObject({ type: 'text', fontWeight: 600, fontSize: 15, baseline: 'middle', color: { expr: valueTone('"#b86046"') } })
   expect(values.mark.align.expr).toContain('datum["honest %"] < 0')
   expect(values.encoding.text).toEqual({ field: 'honest %', type: 'quantitative', format: ',.1f' })
   // the same axis as the bars', so the layers share it

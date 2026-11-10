@@ -285,7 +285,7 @@ function blogCells(unit: Spec, rows: unknown[] | null, opts: FigureSpecOptions):
   if (!discrete(x) || !discrete(y) || !quantitative(color) || rows!.length > CELL_VALUES || distinct(rows!, x.field) * VALUE_ROOM > (opts.width ?? 0)) return null
   const at = read(color.field)
   const label: Spec = {
-    mark: { type: 'text', fontSize: BLOG_TYPE.value, fontWeight: 600, color: { expr: `luminance(scale('color', ${at})) > ${LIGHT_CELL} ? '${CELL_INK}' : '#ffffff'` } },
+    mark: { type: 'text', fontSize: BLOG_TYPE.label, fontWeight: 600, color: { expr: `luminance(scale('color', ${at})) > ${LIGHT_CELL} ? '${CELL_INK}' : '#ffffff'` } },
     encoding: { x, y, text: { field: color.field, type: 'quantitative', format: valueFormat(color, rows!) } },
     transform: [{ filter: `isValid(${at}) && isFinite(${at})` }],
   }

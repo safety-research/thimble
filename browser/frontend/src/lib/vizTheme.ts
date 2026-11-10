@@ -140,8 +140,9 @@ export function vegaConfig(style: FigureStyle = figureStyle()): Record<string, u
   return style === 'blog' ? blogConfig(own) : style === 'paper' ? paperConfig(own) : own
 }
 
-/** the sizes of a Blog chart's text that are not its ticks', px: blogpost-figure's at a card's width, never under 12 */
-export const BLOG_TYPE = { title: 13, label: 13, value: 13 }
+/** the sizes of a Blog chart's text that are not its ticks', px: blogpost-figure's at a card's width, never under 12; a
+ * bar's value is the loudest text after the headline, well above the 12 px ticks (blogpost-figure: 17 over 13) */
+export const BLOG_TYPE = { title: 13, label: 13, value: 15 }
 /** the air beside a Blog bar, a share of its slot, and a row's height on a discrete y axis, px: blogpost-figure's bars,
  * about 0.6 of their slot, and its rows, which leave a category name air above and below */
 const BLOG_BAR_PADDING = 0.35
