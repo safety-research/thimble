@@ -433,3 +433,30 @@ def test_a_page_with_no_build_to_take_is_built_without_a_second_type_check(monke
     del ran[:]
     monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
     assert "Node" in fixes.prepare(root) and not ran
+
+
+def test_the_fixer_of_another_try_reads_how_the_last_try_s_tests_ended_and_where_their_whole_output_is(tmp_path):
+    # the kernel's refusal of a change whose tests failed stays on the fix's record: the next fixer reads the failure
+    # in its first message and does not run the tests again to see it
+    log = tmp_path / "tests.log"
+    log.write_text("all of it")
+    tests = "page: unit tests (failed after 11 s)\n FAIL  tests/public/bar.test.ts > the bar says rows"
+    rec = {"id": 3, "title": "Bar says rows", "words": ["make the bar say rows"], "work": "/made-up/fixes/work/3",
+           "same_copy": True, "error": "its tests failed in the sandbox",
+           "refused": {"why": "its tests failed in the sandbox", "files": [], "tests": tests, "log": str(log)}}
+    again = fixes.first_message(rec, "the page", earlier=True)
+    assert "The last try did not pass because its tests failed in the sandbox." in again
+    assert f"The end of the output of the last try's tests:\n\n{tests}\n\n" in again
+    assert f"Their whole output is in {log}. Fix what fails." in again
+    # a log that is gone is not named, and a first try is told of no tests
+    log.unlink()
+    assert "whole output" not in fixes.first_message(rec, "the page", earlier=True)
+    assert "last try" not in fixes.first_message(rec, "the page")
+
+
+def test_the_end_of_a_fix_s_tests_keeps_the_line_that_names_the_check_when_it_is_cut():
+    head = "page: unit tests (failed after 11 s)"
+    cut = fixes.tail_of(head + "\n" + "a line the tests printed\n" * 400 + "the last line")
+    assert cut.startswith(head + "\n…") and cut.endswith("the last line")
+    assert len(cut) <= fixes.TAIL_CHARS + 2
+    assert fixes.tail_of(head + "\nthe last line\n") == head + "\nthe last line"

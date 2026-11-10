@@ -462,13 +462,17 @@ EARLIER = ("\n\nAn earlier change for this request, which did not pass, is in {p
 # beforeText)
 KEPT = ("\n\nThe last try did not pass because {why}. Your copy holds the change of that try, and the changes that were "
         "made in the copy after it. Start from them.")
+# how the tests of the try before ended, so that the fixer of another try reads the failure and does not run the tests
+# again to see it (the kernel's refusal of a change whose tests failed; plugin/fix/fixer.ts refusedText)
+FAILED = "\n\nThe end of the output of the last try's tests:\n\n{tests}\n\n{log}Fix what fails."
+LOG = "Their whole output is in {path}. "
 
 
 def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
     """The fixer's first message: the registry's fixer text as the workbench reads it (prompts.py), the person's words
     (each round), where it works, what thimble checks after it ends (the kernel's `done`), so which tests it runs
     itself, what the try before left it, for another try (`earlier`: the kernel's redo says where, and the record why
-    that try did not pass), and the page."""
+    that try did not pass and how its tests ended), and the page."""
     from . import prompts  # noqa: PLC0415
 
     prompt = prompts.load(FIXER_TEXT).strip()
@@ -478,6 +482,11 @@ def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
     why = str(rec.get("error") or "its checks failed").rstrip(".")
     more = "" if not earlier else KEPT.format(why=why) if rec.get("same_copy") else EARLIER.format(
         patch=rec["earlier"], why=why) if rec.get("earlier") else ""
+    refused = rec.get("refused") or {}
+    if earlier and refused.get("tests"):
+        log = str(refused.get("log") or "")
+        more += FAILED.format(tests=tail_of(str(refused["tests"])),
+                              log=LOG.format(path=log) if log and Path(log).is_file() else "")
     return FIRST.format(prompt=prompt, id=rec["id"], asked=asked, work=rec.get("work"), earlier=more,
                         page=(page or "(nothing)").strip()[:PAGE_CHARS])
 
@@ -697,7 +706,8 @@ async def settle(fid: int, answer: str) -> None:
         # the checks build the page into the fix's temp folder, which its fixer writes too: what is there once they end
         # is their build (checks_page)
         await asyncio.to_thread(shutil.rmtree, checks_page(fid), True)
-        # the tests run for one fix at a time, and once more when they fail (the kernel's _run_tests)
+        # the checks run for one fix at a time, each as a command of its own, and one that can fail for its timing
+        # alone runs once more (the kernel's _run_tests)
         r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way
@@ -1369,7 +1379,8 @@ async def redo(c: str, fid: int) -> dict[str, Any]:
     before = await asyncio.to_thread(record, fid)
     rec = _json(await asyncio.to_thread(kernel, ["redo", str(fid)], timeout=180), "redo")
     dismiss(fid)
-    await start_fixer(c, {**rec, "error": before.get("error")}, earlier=True, announce=False)
+    await start_fixer(c, {**rec, "error": before.get("error"), "refused": before.get("refused")}, earlier=True,
+                      announce=False)
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state")}}
 
 
@@ -1379,6 +1390,16 @@ async def redo_route(c: str, fid: int, http: Request) -> dict[str, Any]:
     _clicked(http)
     config.workspace_dir(c)
     return await redo(c, fid)
+
+
+def tail_of(tests: str) -> str:
+    """The end of a fix's tests' output as the kernel keeps it (its _end: a line that names the check, then the end of
+    what the check printed), in about TAIL_CHARS: cut after that first line, which says which check failed."""
+    tests = tests.strip()
+    head, nl, rest = tests.partition("\n")
+    if len(tests) <= TAIL_CHARS or not nl or len(head) > TAIL_CHARS // 4:
+        return tests[-TAIL_CHARS:]
+    return f"{head}\n…{rest[len(head) - TAIL_CHARS:]}"
 
 
 def tried(fid: int) -> dict[str, str]:
@@ -1391,8 +1412,8 @@ def tried(fid: int) -> dict[str, str]:
         diff = diff[: diff.rfind("\n", 0, TRIED_CHARS) + 1 or TRIED_CHARS] + "…\n"
     tail = ""
     with contextlib.suppress(HTTPException):
-        tail = str(record(fid).get("tests_tail") or "").strip()
-    return {"diff": diff, "tests": tail[-TAIL_CHARS:]}
+        tail = str(record(fid).get("tests_tail") or "")
+    return {"diff": diff, "tests": tail_of(tail)}
 
 
 @router.get("/fixes/{fid}/tried")
