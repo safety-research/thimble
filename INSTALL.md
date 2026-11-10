@@ -38,8 +38,8 @@ Take the two-minute tour at any time: `thimble tour` in a shell, or `/thimble:to
 
     thimble update
 
-Run it in a shell, then type `/reload-plugins` in Claude Code and start `thimble-browser` again. It keeps your fixes;
-a fix that does not fit the new release is set aside until `thimble reapply`.
+Run it in a shell, then type `/reload-plugins` in Claude Code and start `thimble-browser --continue` again. It keeps
+your fixes; a fix that does not fit the new release is set aside until `thimble reapply`.
 
 ## Uninstall
 

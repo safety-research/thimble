@@ -87,6 +87,76 @@ def test_a_detached_browser_start_starts_the_server_once_and_stop_ends_it(home, 
                 os.kill(q, 9)
 
 
+def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, data, monkeypatch, capsys):
+    """`thimble-browser --continue`, and `--resume` of the session open now, keep that session when it holds a card, a
+    label, a document or a side thread but no chat of main with a turn, as a session of an earlier thimble or one with
+    a card made by hand does: the page opens a new chat in it. Only a new session moves the open one aside
+    (pick_session, open_session), and it says so with the command that brings it back. The server's routes are
+    faked."""
+    from app import config, notebook  # noqa: PLC0415
+
+    with cli.server_dirs():
+        nb = notebook.create_notebook(config.workspace_dir("mini"), "G")
+        notebook.insert_cell("mini", nb["id"], notebook.new_cell("note", "test", "By hand", nb["id"],
+                                                                 payload={"text": "made by hand"}))
+    asked: list[tuple[str, dict]] = []
+
+    def answer(method, url, body=None, timeout=5.0):
+        asked.append((url.split("/api/", 1)[1], body or {}))
+        return 200, ({"archived": "aside"} if url.endswith("/archive") else {"name": "mini"})
+
+    monkeypatch.setattr(cli, "_request", answer)
+    cwd = data / "mini"
+    for how, routes in (("continue", ["corpora/register"]), ("new", ["ws/mini/archive", "corpora/register"])):
+        asked.clear()
+        with cli.server_dirs():
+            assert cli.open_session("http://127.0.0.1:1", "mini", cwd, cli.pick_session(cwd, data, how))
+        assert [route for route, _ in asked] == routes, how
+        assert asked[-1][1]["chat"] == "new"
+        said = capsys.readouterr().out.splitlines()
+        assert said == ([cli.BROWSER_LINE.format(what=cli.SET_ASIDE_LINE)] if how == "new" else []), how
+
+
+@pytest.mark.timeout(120)
+def test_a_quit_leaves_the_server_running_while_another_thimble_browser_holds_it(home, monkeypatch, capsys):
+    """One server serves every folder, so the thimble-browser of a second folder uses the server the first one started.
+    Ctrl-C in one of them, before its link or after it, stops the server only when no other thimble-browser holds it
+    (hold_server, last_holder), and says so when it keeps running. Once the other one has ended, however it ended, the
+    next quit stops the server. The other thimble-browser is a process of its own; the stop is faked."""
+    import argparse  # noqa: PLC0415
+
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop", lambda **kw: stops.append(1) or ["server: pid 1 stopped (1 process)"])
+    monkeypatch.setattr(cli, "HELD", {})
+
+    def quit_now(_s: float) -> None:
+        raise KeyboardInterrupt
+
+    def hold_again() -> None:  # this terminal's next thimble-browser
+        os.close(cli.HELD.pop("fd"))
+        cli.hold_server()
+
+    other = subprocess.Popen([sys.executable, "-c", "from app import cli; cli.hold_server(); print('holding', flush=True); "
+                              "import time; time.sleep(100)"], cwd=BACKEND, env={**os.environ, "THIMBLE_HOME": str(home)},
+                             stdout=subprocess.PIPE, text=True)
+    try:
+        assert other.stdout.readline().strip() == "holding"
+        cli.hold_server()
+        cli.hold_until_quit(sleep=quit_now)
+        assert stops == [] and capsys.readouterr().out.splitlines()[-1] == cli.KEPT_LINE
+        hold_again()
+        monkeypatch.setattr(cli, "LAST_START", {"pid": other.pid})  # a server this run started, stand-in
+        assert cli.interrupted(argparse.Namespace(cmd="browser", detach=False)) == 130
+        assert stops == [] and capsys.readouterr().out.splitlines()[-1] == cli.KEPT_LINE
+    finally:
+        other.kill()
+        other.wait(timeout=10)
+    hold_again()
+    cli.hold_until_quit(sleep=quit_now)
+    assert stops == [1] and cli.STOPPING_LINE in capsys.readouterr().out.splitlines()
+    os.close(cli.HELD.pop("fd"))
+
+
 def test_stop_ends_a_server_that_a_restart_started_in_another_tree(tmp_path, monkeypatch):
     """A fix that goes on starts the server again from the checkout of the person's fixes, under the same pid
     (fixes.restart, dev._do_restart). The server records the tree it runs from as it starts, so that the launcher's
