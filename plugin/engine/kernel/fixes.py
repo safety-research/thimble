@@ -1555,7 +1555,8 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
     no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
-    fits, starts again in a new copy (redo), and so does a request with no code (a round that ended with `Request:`,
+    fits, or that an update set aside (pending: its old change is what the new copy starts from), starts again in a new
+    copy (redo), and so does a request with no code (a round that ended with `Request:`,
     such as the fixer's question back to the person, whose copy went): its words, and the person's answer, go on in its
     next round, also for a request stored by an earlier thimble. `asked`: the person's own words, as in new."""
     words = (words or "").strip()
@@ -1565,7 +1566,7 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
             return _in_copy(rec, [words], session, asked)
     if rec.get("state") == "request" and not words:
         raise FixError("say what should work differently in this fix")
-    if rec.get("state") in ("failed", "redo", "request"):
+    if rec.get("state") in ("failed", "redo", "pending", "request"):
         return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off, ready or failed, or a request, "

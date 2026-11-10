@@ -638,3 +638,27 @@ def test_words_an_older_thimble_kept_with_the_fixer_s_closing_fence_show_without
     assert FX.get(r["id"])["summary"] == FX.records()[r["id"]]["summary"] == "The bar's coverage item says read."
     shown = FX.show_lines(r["id"], 100)
     assert "  Claude did    The bar's coverage item says read." in shown and "```" not in "\n".join(shown), shown
+
+
+def test_more_words_for_a_fix_an_update_set_aside_change_that_fix_and_make_no_new_one(world, upstream, monkeypatch):
+    """`/thimble-fix N <words>` on fix N, which an update set aside because it does not fit the release, is a round of
+    fix N (round_): a new copy cut from the release, with its old change to start from, and once the person's y puts
+    it on, fix N is on and the list holds no new fix of the same title. The terminal's and the workbench's list of the
+    fixes more words can change (plugin/fix/changeable.mjs) names such a fix too."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a, b, c = three_fixes(world)
+    upstream({"plugin/notes.md": "made-up note\n", "plugin/legend.ts": "const legend = `quiet ${n} files`\n"},
+             "v0.10.3", version="0.10.3")
+    assert FX.update()["aside"] == [c] and FX.get(c)["state"] == "pending"
+    changeable = (Path(FX.__file__).resolve().parents[2] / "fix" / "changeable.mjs").read_text()
+    assert '"pending"' in changeable.split("export const CHANGEABLE = ", 1)[1].splitlines()[0]
+    r = FX.round_(c, "bring the untouched count back on 0.10.3")
+    assert r["id"] == c and r["state"] == "working" and Path(r["work"]).is_dir()
+    assert "untouched ${n}" in Path(r["earlier"]).read_text()  # its old change, to start from
+    (Path(r["work"]) / "plugin" / "legend.ts").write_text("const legend = `quiet ${n} files · untouched ${m}`\n")
+    FX.done(c, "Legend counts untouched", "The coverage legend says how many files are untouched.")
+    FX.apply(c, press(c))
+    assert FX.get(c)["state"] == "on" and "untouched ${m}" in live_file("plugin/legend.ts")
+    assert sorted(FX.records()) == [a, b, c]
+    with pytest.raises(FX.FixError, match="no fixes are set aside"):
+        FX.reapply_argv()

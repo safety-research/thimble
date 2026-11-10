@@ -394,8 +394,9 @@ export async function carryFixes($: Engine, list: FixList | null): Promise<void>
   if (c) await carriedLine($, c)
 }
 
-/** What carry did, in one line (`↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit 0.10.6`), and the load
- *  of the fixes it put back: at once, or at the end of Claude's turn while one runs (turn.complete runs reloadIfDue). */
+/** What carry did, in one line (`↑ thimble 0.10.6 · 2 fixes on again · 1 of your fixes is off: it does not fit 0.10.6
+ *  · in a shell: thimble reapply`, the command that brings it back), and the load of the fixes it put back: at once, or
+ *  at the end of Claude's turn while one runs (turn.complete runs reloadIfDue). */
 export async function carriedLine($: Engine, c: Carried): Promise<void> {
   const n = c.back.length
   const m = c.aside.length
@@ -404,7 +405,7 @@ export async function carriedLine($: Engine, c: Carried): Promise<void> {
       ...(n ? [`${n} fix${n === 1 ? '' : 'es'} ${c.off ? `kept, off as you had ${n === 1 ? 'it' : 'them'}` : 'on again'}`] : []),
       ...(c.had.length ? [`${c.had.length} already in it`] : []),
       ...(m && c.unchecked ? [`${m} off: thimble could not check ${m === 1 ? 'it' : 'them'} (${cut(c.unchecked, 100)})`] : []),
-      ...(m && !c.unchecked ? [`${m} off: ${m === 1 ? 'it does' : 'they do'} not fit ${c.to}`] : []),
+      ...(m && !c.unchecked ? [`${m} of your fixes ${m === 1 ? 'is off: it does' : 'are off: they do'} not fit ${c.to} · in a shell: thimble reapply`] : []),
       ...(c.browser === 'stale' ? ['restart thimble-browser'] : [])].join(' · ')
     await setFixLine($, { id: 0, kind: 'update', said, loads: !!c.reload })
   }
