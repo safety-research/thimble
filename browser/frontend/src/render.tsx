@@ -3,7 +3,9 @@
 // sees; or, when the request names a figure, the card as a figure in a figure style (figures/Figure), on a white sheet,
 // whose own box is the picture. The page calls no API: each request carries the card with its refs resolved, cited
 // calls, card and label names (and a label card's `label` data, a custom card's libraries), and a fetch stub answers
-// the page's requests from them, listing any it could not.
+// the page's requests from them, listing any it could not. A figure's files besides the picture (backend card_export.py)
+// come from the same drawing: its chart as an SVG file of its own (chartSvg, in the result), the picture as WebP
+// (webp) and the page set for the harness's print of the figure alone as a PDF (print).
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import './styles/index.css'
@@ -18,6 +20,7 @@ import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { readFigures, setAccent, setFigures, setPaper, type Accent, type FigureStyle, type Paper } from './lib/theme'
 import type { Cell, Concept, ConceptDetail } from './lib/types'
+import { drawnView } from './lib/vegaDraw'
 
 export interface RenderRequest {
   ws: string
@@ -37,9 +40,13 @@ export interface RenderRequest {
   cardLibs?: Record<string, { head: string; problems: string[] }>
   /** the card as a figure (figures/Figure) in `style`: its chart (`part` 'figure', the default) or a Paper figure's
    * legend, in `columns` columns (all in one row when not given), with a report's caption when `caption` numbers it;
-   * thimble's figure is the card face. Without it the page draws the card face. */
-  figure?: { style: FigureStyle; part?: FigurePart; columns?: number; caption?: number }
+   * thimble's figure is the card face. `files`: what to make of the drawing besides its picture, `svg` here and the
+   * others by the harness after its shot. Without it the page draws the card face. */
+  figure?: { style: FigureStyle; part?: FigurePart; columns?: number; caption?: number; files?: FigureFile[] }
 }
+
+/** A figure's file besides its picture (backend render.FIGURE_FILES). */
+export type FigureFile = 'webp' | 'pdf' | 'svg'
 
 export interface LabelData {
   concept: ConceptDetail
@@ -61,6 +68,11 @@ export interface RenderResult {
   error?: string
   /** a figure that draws nothing: a Paper legend of a chart with no legend of colors (figures/Figure `data-empty`) */
   empty?: boolean
+  /** a Paper legend's entries, 0 for a legend of amounts (figures/Figure `data-entries`) */
+  entries?: number
+  /** the chart as an SVG file of its own, when the request's figure names `svg` (chartSvg); null for a card with no
+   * chart */
+  svg?: string | null
   ms: { settle: number }
 }
 
@@ -73,6 +85,8 @@ const MARGIN = 16
 const FACES = ['400 13px "Hanken Grotesk"', '500 13px "Hanken Grotesk"', '400 12px "Geist Mono"']
 /** the faces of a card drawn in the Blog figure style, its charts' and its figure's headline */
 const BLOG_FACES = ['400 12px "DM Sans"', '600 13px "DM Sans"', '700 26px "DM Sans"']
+/** a figure's WebP: the quality its picture is encoded at */
+const WEBP_QUALITY = 0.92
 
 let current: RenderRequest | null = null
 let unanswered: string[] = []
@@ -109,7 +123,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 
 const stage = document.createElement('div')
 stage.className = 'board-stage render-stage'
-stage.style.cssText = `position:absolute;left:0;top:0;overflow:visible;display:block;flex:none;padding:${MARGIN}px;min-width:100%;box-sizing:border-box`
+const STAGE = `position:absolute;left:0;top:0;overflow:visible;display:block;flex:none;padding:${MARGIN}px;min-width:100%;box-sizing:border-box`
+stage.style.cssText = STAGE
 document.body.appendChild(stage)
 const host = document.createElement('div')
 stage.appendChild(host)
@@ -216,17 +231,91 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   // a card still drawing after SETTLE_MAX_MS is shot as it stands
   await settled(card)
   const fonts = await fontsLoaded(figures === 'blog' ? [...FACES, ...BLOG_FACES] : FACES)
+  // the chart as a file of its own when the figure's files name it, thimble's figure (the card face) among them
+  const svg = req.figure?.files?.includes('svg') ? { svg: await chartSvg(card) } : {}
   // a figure is measured by its own box alone: no body past what it shows, nothing wider than its room
-  if (figure) return { box: boxOf(card), fonts, requests: [...unanswered], ...(card.hasAttribute('data-empty') ? { empty: true } : {}), ms: { settle: Math.round(now() - t0) } }
+  if (figure) {
+    const entries = card.getAttribute('data-entries')
+    return { box: boxOf(card), fonts, requests: [...unanswered], ...(card.hasAttribute('data-empty') ? { empty: true } : {}), ...(entries != null ? { entries: Number(entries) } : {}), ...svg, ms: { settle: Math.round(now() - t0) } }
+  }
   const wide = bodyWidth(card)
-  return { box: boxOf(card), body: bodyHeight(card), ...(wide ? { wide } : {}), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
+  return { box: boxOf(card), body: bodyHeight(card), ...(wide ? { wide } : {}), fonts, requests: [...unanswered], ...svg, ms: { settle: Math.round(now() - t0) } }
+}
+
+/** The color an element is drawn on: the background of the nearest box under it that has one; null for none. */
+function backgroundOf(el: Element): string | null {
+  for (let at: Element | null = el; at; at = at.parentElement) {
+    const color = getComputedStyle(at).backgroundColor
+    if (color && !/^(?:transparent|rgba\(.*,\s*0\))$/.test(color)) return color
+  }
+  return null
+}
+
+/** An SVG document with a rect of `color` under all it draws; as it is for no color. */
+function onColor(svg: string, color: string | null): string {
+  return color ? svg.replace(/<svg\b[^>]*>/, (open) => `${open}<rect width="100%" height="100%" fill="${color}"/>`) : svg
+}
+
+/** A drawn card's or figure's chart as an SVG file of its own, on the color it is drawn on (a chart itself is
+ * transparent): a Vega chart's own (its view's toSVG), else the figure the card drew as SVG (a matplotlib figure,
+ * lib/svg) with each of the page's tokens it names written as its value. null for a card with no chart. */
+async function chartSvg(el: HTMLElement): Promise<string | null> {
+  const box = el.querySelector('.outputs-vega')
+  const view = box ? drawnView(box) : null
+  if (box && view) return onColor(await view.toSVG(), backgroundOf(box))
+  const fig = el.querySelector<SVGSVGElement>('svg.outputs-svg-figure')
+  if (!fig) return null
+  const style = getComputedStyle(fig)
+  const values = (text: string) => text.replace(/var\(\s*(--[\w-]+)\s*(?:,([^()]*))?\)/g, (all, name: string, fallback?: string) => style.getPropertyValue(name).trim() || fallback?.trim() || all)
+  const copy = fig.cloneNode(true) as SVGSVGElement
+  for (const node of [copy, ...Array.from(copy.querySelectorAll('*'))])
+    for (const attr of Array.from(node.attributes)) if (attr.value.includes('var(')) node.setAttribute(attr.name, values(attr.value))
+  copy.removeAttribute('class')
+  copy.removeAttribute('role')
+  return onColor(new XMLSerializer().serializeToString(copy), backgroundOf(fig))
+}
+
+/** The last render's picture (a PNG, base64) as WebP at WEBP_QUALITY, base64; null when this browser cannot encode
+ * WebP. */
+async function webp(png: string): Promise<string | null> {
+  const image = await createImageBitmap(new Blob([Uint8Array.from(atob(png), (ch) => ch.charCodeAt(0))], { type: 'image/png' }))
+  const canvas = document.createElement('canvas')
+  canvas.width = image.width
+  canvas.height = image.height
+  canvas.getContext('2d')?.drawImage(image, 0, 0)
+  image.close()
+  const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, 'image/webp', WEBP_QUALITY))
+  // a browser that cannot encode WebP gives a PNG
+  if (!blob || blob.type !== 'image/webp') return null
+  const url = await new Promise<string>((done, fail) => {
+    const reader = new FileReader()
+    reader.onload = () => done(String(reader.result))
+    reader.onerror = () => fail(reader.error)
+    reader.readAsDataURL(blob)
+  })
+  return url.slice(url.indexOf(',') + 1)
+}
+
+/** The page set for the harness's print of the last picture alone as a PDF (render.py), or set back with null: the
+ * picture's box (CSS px, as the shot clipped it) is the whole page, the stage laid out to start at the box and to end
+ * with it, all else clipped. By layout, not a transform: the print breaks pages and fits the page's width by where boxes
+ * are laid out, so a figure laid out past the page's edge would lose what crosses it, or be shrunk to fit. */
+function print(box: Box | null): void {
+  if (!box) {
+    stage.style.cssText = STAGE
+    return
+  }
+  // where the picture is in the stage's content
+  const x = box.x - MARGIN
+  const y = box.y - MARGIN
+  stage.style.cssText = `position:absolute;left:${-x}px;top:${-y}px;overflow:hidden;display:block;flex:none;padding:0;width:${x + box.width}px;height:${y + box.height}px;box-sizing:border-box`
 }
 
 declare global {
   interface Window {
-    __thimbleRender: { ready: boolean; render: typeof render; settled: typeof settled }
+    __thimbleRender: { ready: boolean; render: typeof render; settled: typeof settled; webp: typeof webp; print: typeof print }
   }
 }
 
 // `settled` is there for the harness's parity test, which waits for the canvas's own card the same way
-window.__thimbleRender = { ready: true, render, settled }
+window.__thimbleRender = { ready: true, render, settled, webp, print }

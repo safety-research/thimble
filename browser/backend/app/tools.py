@@ -197,6 +197,8 @@ REGISTRY: dict[str, Spec] = {
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
         Spec("delete_thread", (ANALYST,), "app.threads:tool_delete_thread", sessions=MAIN_ONLY),
         Spec("screenshot", (ANALYST,), _H + "screenshot"),
+        # a card's figure written as files into a folder of the corpus, as its Export menu saves them (card_export.py)
+        Spec("export_card", (ANALYST,), "app.card_export:tool_export_card"),
         Spec("start_writing", (ANALYST,), "app.write_session:tool_start_writing"),
         # a report check made or run from the chat; main's alone
         Spec("run_check", (ANALYST,), "app.checks:tool_run_check", sessions=MAIN_ONLY),

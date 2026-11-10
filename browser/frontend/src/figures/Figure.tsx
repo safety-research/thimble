@@ -201,7 +201,8 @@ function Swatch({ entry, mark }: { entry: LegendEntry; mark: Mark }) {
 
 /** Paper's legend alone (module note), in `columns` columns, all in one row when not given, or a heatmap's ramp: the
  * chart is drawn out of sight at the figure's size and its scales read, so each swatch is as the chart draws it. A card
- * with no legend of colors draws an empty legend (`data-empty`). */
+ * with no legend of colors draws an empty legend (`data-empty`). It says how many entries it drew (`data-entries`, 0 for
+ * a ramp), from which an export names its legend's files (backend card_export.py). */
 function PaperLegend({ cell, columns }: { cell: Cell; columns?: number }) {
   const { concepts } = useContext(CanvasContext)
   const chart = useMemo(() => chartOf(cell), [cell])
@@ -239,7 +240,7 @@ function PaperLegend({ cell, columns }: { cell: Cell; columns?: number }) {
   const ramp = legend?.ramp ?? null
   const across = Math.max(1, Math.min(columns && columns > 0 ? columns : Infinity, entries.length || 1))
   return (
-    <div className="figure figure-legend" data-figure="paper" data-body="" data-settled={legend ? 'true' : 'false'} data-empty={legend && !entries.length && !ramp ? '' : undefined}>
+    <div className="figure figure-legend" data-figure="paper" data-body="" data-settled={legend ? 'true' : 'false'} data-empty={legend && !entries.length && !ramp ? '' : undefined} data-entries={legend ? entries.length : undefined}>
       {/* out of sight, around the element vega-embed draws in, which its own sheet sets in the flow */}
       <div className="figure-legend-chart" aria-hidden="true">
         <div ref={hidden} style={{ width: size.width }} />
