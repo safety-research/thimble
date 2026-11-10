@@ -134,8 +134,8 @@ export const askedWords = (f: Pick<Fix, 'id' | 'words' | 'asked'>): string[] =>
   (f.words || []).map((w, i) => ownWords(f.asked?.[i] ?? '', n => n === f.id) || w)
 
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
- *  the tests' output when they failed. */
-export type Refusal = { why: string; files: string[]; tests?: string }
+ *  the tests' output when they failed, and the file that holds all of it (log). */
+export type Refusal = { why: string; files: string[]; tests?: string; log?: string }
 /** What the kernel did with the fixes an update set aside (engine/kernel/fixes.py carry, `thimble fix carry --json`,
  *  once after each update): the fixes that fit the new release (`to`: their change applies, and the release passes a
  *  fix's checks with them) on again, or kept off as the person had every fix (off); those it has already (had); those

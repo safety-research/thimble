@@ -77,16 +77,16 @@ fix show does; a fix that thimble update --continue turns on again, with no key 
 before (continue_), and one that an update puts back on its own (carry) is the very change the person had on. A file
 moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
 prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
-refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
-to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
-cannot be done (done with `cannot`), which is the failure the person sees. Another try at a failed fix (redo: y on its
-line, or /thimble-fix N alone) goes on in its copy while the copy holds work that no check took, such as the change
-Claude made there in the person's session, so that the check takes it; else it starts in a new copy cut from mine, with
-the earlier change to start from. The quick tests run with no network, for one
-fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (_run_tests).
-They run in a process of their own (the runner), apart from the call that checks the fix, so that they may take longer
-than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what came of them,
-and done waits for that (_start_tests).
+refusal on the record (refused: why, the files, the end of the tests' output and the log that holds all of it) until
+the next check, and the plugin gives it back to a fixer in the same copy (again): the fixer puts the change elsewhere
+or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is the failure the person sees.
+Another try at a failed fix (redo: y on its line, or /thimble-fix N alone) goes on in its copy while the copy holds
+work that no check took, such as the change Claude made there in the person's session, so that the check takes it;
+else it starts in a new copy cut from mine, with the earlier change to start from. The quick tests run with no
+network, for one fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix
+fails (_run_tests). They run in a process of their own (the runner), apart from the call that checks the fix, so that
+they may take longer than Claude Code lets a call run: the record stays working, with `testing`, until the runner
+writes what came of them, and done waits for that (_start_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -1179,18 +1179,26 @@ PASSED_AGAIN = "The tests passed only the second time"
 
 
 def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
-    """One run of the quick tests in the copy: (passed, the log's last lines); the whole log in tmp/<id>/tests.log."""
+    """One run of the quick tests in the copy: (passed, the log's last lines); the whole log in tmp/<id>/tests.log,
+    which is this run's also when the run was stopped for its time."""
     try:
         p = subprocess.run(argv, cwd=home() / "work" / str(fid), capture_output=True, text=True, timeout=540)
+        ok, log = p.returncode == 0, (p.stdout + p.stderr).strip()
     except subprocess.TimeoutExpired:
-        return False, "the tests ran longer than 9 minutes"
-    log = (p.stdout + p.stderr).strip()
+        ok, log = False, "the tests ran longer than 9 minutes"
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
     try:
         _write_new(home() / "tmp" / str(fid) / "tests.log", log + "\n")
     except OSError:
         pass  # the log's last lines go on the record either way
-    return p.returncode == 0, "\n".join(log.splitlines()[-12:])
+    return ok, "\n".join(log.splitlines()[-12:])
+
+
+def _tests_log(fid: int | str) -> str | None:
+    """The whole log of the last run of the quick tests in the copy of `fid` (tmp/<id>/tests.log, _tests_once), which
+    the refusal of a change whose tests failed names for the next fixer; None when thimble could not write it."""
+    p = home() / "tmp" / str(fid) / "tests.log"
+    return str(p) if p.is_file() and not p.is_symlink() else None
 
 
 def _write_new(p: Path, text: str) -> None:
@@ -1305,7 +1313,7 @@ def tests_runner() -> None:
         if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
             return
         rec.pop("testing")
-        rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
+        rec = _tested({**rec, "unshown": True}, ok, tail, job["title"], None if ok else _tests_log(job["id"]))
         if rec.get("prev") and rec["state"] == "ready":
             try:
                 settle(rec, job["testing"])
@@ -1347,13 +1355,14 @@ def shown(fid: int | str) -> dict[str, Any]:
         return put(rec)
 
 
-def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict[str, Any]:
+def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None, log: str | None = None) -> dict[str, Any]:
     """The record with what came of its tests: ready, named by the fixer's title, or failed, with the refusal that the
-    next fixer in the copy is told (the end of the tests' output)."""
+    next fixer in the copy is told (the end of the tests' output, and `log`, the file that holds all of it, when the
+    tests ran)."""
     rec.update(tests="passed" if ok else "failed", tests_tail=tail, state="ready" if ok else "failed",
                error=None if ok else TESTS_FAILED)
     if not ok:
-        rec["refused"] = {"why": TESTS_FAILED, "files": [], "tests": tail}
+        rec["refused"] = {"why": TESTS_FAILED, "files": [], "tests": tail, **({"log": log} if log else {})}
     elif named:
         rec["title"] = named
     return rec

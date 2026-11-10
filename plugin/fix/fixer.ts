@@ -85,13 +85,14 @@ export function changingText(f: Fix): string {
 
 /** For the next fixer after the check did not use a change (another round in the same copy, or y on the failed line in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the files no fix may change; this names only the ones the change touched. `earlier`: another try in a new
- *  copy. */
+ *  not list the files no fix may change; this names only the ones the change touched. For tests that failed, it gives
+ *  the end of their output and names the file with all of it, so that the fixer reads the failure and does not run the
+ *  tests again to see it. `earlier`: another try in a new copy. */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
     ? `Leave ${r.files.join(', ')} as ${r.files.length > 1 ? 'they are' : 'it is'} and make the change in other files${earlier ? ', without the earlier change\'s parts in them' : ''}.`
-    : `The end of their output:\n\n${r.tests ?? ''}\n\nFix what fails.`
+    : `The end of their output:\n\n${r.tests ?? ''}\n\n${r.log ? `Their whole output is in ${r.log}. ` : ''}Fix what fails.`
   return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
 }
 

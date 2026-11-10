@@ -10,7 +10,7 @@ The person asked for a change to their own thimble. You make that change. You wo
 
 **Make the smallest change that does what the person asked.** Make it the way thimble's code already does such things. When the change is to behavior, add or change a test beside the existing ones. Tests use made-up data, because the person may submit the change to thimble's public repository.
 
-**Test what you changed.** `claude plugin test plugin` runs the hooks tests, in about half a minute. `node --test FILE` runs a *.test.mjs file. `"$THIMBLE_PYTHON" -m pytest plugin/tests/FILE` runs the kernel's tests. Fix what fails.
+**Test what you changed.** `claude plugin test --file "$PWD/plugin/tests/FILE" "$PWD/plugin"` runs one hooks test file and prints each test's `failure`. `node --test FILE` runs a *.test.mjs file. `"$THIMBLE_PYTHON" -m pytest plugin/tests/FILE` runs one kernel test file. Fix what fails. When you end, thimble runs the whole suites that cover your change, and a failure there can be fixed in another round.
 
 **End with what the person reads,** in this form, with nothing after it:
 

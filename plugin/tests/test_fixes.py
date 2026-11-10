@@ -348,6 +348,19 @@ def test_a_fix_may_not_change_the_way_back_and_its_record_names_the_safety_files
     assert "notice" not in FX.done(d["id"], "Bar says read", "") and FX.notice_said(FX.get(d["id"])) == ""
 
 
+def test_a_change_whose_tests_fail_keeps_the_end_of_their_output_and_names_the_log_for_the_next_fixer(world, monkeypatch):
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "for n in $(seq 1 20); do echo made-up line $n; done; exit 1")
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "")
+    assert r["state"] == "failed" and r["tests"] == "failed" and r["error"] == "its tests failed in the sandbox"
+    # the record keeps the last lines, and the refusal names the file that holds them all, which the next fixer reads
+    log = FX.tmp_dir(r["id"]) / "tests.log"
+    assert r["tests_tail"].splitlines()[0] == "made-up line 9" and "made-up line 1\n" in log.read_text()
+    assert r["refused"] == {"why": "its tests failed in the sandbox", "files": [], "tests": r["tests_tail"], "log": str(log)}
+    # another round in the same copy keeps the refusal for its fixer
+    assert FX.again(r["id"])["refused"]["log"] == str(log)
+
+
 def as_github(w) -> Path:
     """The install as a GitHub one: Claude Code's own clone of the marketplace, at the installed commit. A release
     update is for GitHub installs; a clone install follows the person's checkout (test_dev_install_*)."""
