@@ -56,6 +56,9 @@ export interface ChartOptions {
   labels?: readonly (readonly LabelClassColour[])[]
   /** the inks a value no label defines takes in turn, read per theme (lib/vizTheme VIZ_NEUTRAL) */
   neutral?: readonly string[]
+  /** where a legend goes when the spec names no side: 'top' over the chart, as a row (the Blog figure style's), else
+   * under a chart narrower than LEGEND_BOTTOM_BELOW and beside a wider one */
+  legend?: 'top'
 }
 
 /** A class of a label, with the colour the label gives it (files/labels, the token's value); `none` when that colour is
@@ -762,7 +765,8 @@ export function chartDefaults(spec: unknown, opts: ChartOptions = {}): unknown {
   s = namedTicksHeight(walk(s, s0, new Set(), null, opts), s0)
   const config = obj(s.config) ?? {}
   const legend = obj(config.legend) ?? {}
-  if (opts.width && opts.width > 0 && opts.width < LEGEND_BOTTOM_BELOW && !('orient' in legend)) s = { ...s, config: { ...config, legend: { ...legend, orient: 'bottom' } } }
+  if (opts.legend === 'top' && !('orient' in legend)) s = { ...s, config: { ...config, legend: { ...legend, orient: 'top' } } }
+  else if (opts.width && opts.width > 0 && opts.width < LEGEND_BOTTOM_BELOW && !('orient' in legend)) s = { ...s, config: { ...config, legend: { ...legend, orient: 'bottom' } } }
   return s
 }
 

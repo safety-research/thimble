@@ -36,9 +36,11 @@ export function withFrameStyle(html: string, style: string): string {
 
 /** The chart style (tokens.css, lib/vizTheme) a frame's html can draw a chart in: the series in order, the sequential and
  * diverging ramps, the muted "other" and the highlight, the inks, the chrome, the faces and sizes, a bar's round end,
- * and a label's colors for a chart colored by a label. A custom card's scripts also get the colors as thimble.colors
+ * a label's colors for a chart colored by a label, and the figure style's name, which a view's charts are drawn in
+ * (lib/vizTheme figureStyle; none for thimble's own). A custom card's scripts also get the colors as thimble.colors
  * (chartScript). */
 export const CHART_TOKENS = [
+  '--viz-figures',
   ...VIZ_SERIES,
   ...VIZ_SEQ,
   ...VIZ_DIV,
@@ -48,7 +50,9 @@ export const CHART_TOKENS = [
   '--viz-grid',
   '--viz-axis',
   '--viz-label',
+  '--viz-axis-title',
   '--viz-annotation',
+  '--viz-rule',
   '--viz-font',
   '--viz-font-label',
   '--viz-size',

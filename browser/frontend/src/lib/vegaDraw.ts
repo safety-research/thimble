@@ -1,15 +1,16 @@
 // How thimble draws a Vega-Lite chart, in one place for every surface that draws one: the canvas's charts
 // (components/Outputs Vega) and a view's charts (lib/kitChart, which vite build writes as the script a view's page
 // inlines for the view kit's thimble.chart, backend/app/viewer_chart.js). drawChart gives the spec a card's defaults
-// (lib/chartDefaults), fits it to its box (responsive, fitComposite, fitAfterCompile), puts it on the paper (onPaper),
-// embeds it in the chart style (lib/vizTheme vegaConfig, its bars' ends mended by lib/barEnds) with no URL loaded but a
-// data: one (lib/vegaLoader), and once drawn measures it against its box and embeds it again to fit: wide legends wrap
-// into columns, wide composites narrow, squeezed plots get shorter labels, dense x axes get labels on end (xLabelsFit),
-// and overflowing labels get padding.
+// (lib/chartDefaults) and the figure style's changes (lib/figureSpec), fits it to its box (responsive, fitComposite,
+// fitAfterCompile), puts it on the paper (onPaper), embeds it in the chart style (lib/vizTheme vegaConfig, its bars'
+// ends mended by lib/barEnds) with no URL loaded but a data: one (lib/vegaLoader), and once drawn measures it against
+// its box and embeds it again to fit: wide legends wrap into columns, wide composites narrow, squeezed plots get shorter
+// labels, dense x axes get labels on end (xLabelsFit), and overflowing labels get padding.
 import { barEnds } from './barEnds'
 import { chartDefaults, legendAtRight, type LabelClassColour } from './chartDefaults'
+import { figureSpec } from './figureSpec'
 import { dataOnly, withoutEmbedOptions } from './vegaLoader'
-import { token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES, withTokens } from './vizTheme'
+import { figureStyle, token, vegaConfig, VIZ_NEUTRAL, VIZ_SERIES, withTokens } from './vizTheme'
 
 type Spec = Record<string, unknown>
 const obj = (v: unknown): Spec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Spec) : null)
@@ -718,8 +719,13 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
   // `step`: the width and the overflow of the embed before a composite was narrowed, so the next narrowing can go as
   // far as the last one's effect says it must (a part's legend or title that does not narrow with its view)
   const embed = async (w: number | undefined, fit: Refit, tries: number, step?: { w: number; over: number }): Promise<void> => {
-    // the palette is read per theme, so a folded group's grey and the kept groups' colours are the theme's
-    const shown = chartDefaults(withTokens(spec), { width: fitWidth ?? el.clientWidth, card, palette: VIZ_SERIES.map(token), other: token('--viz-other'), labels: opts.labels, neutral: VIZ_NEUTRAL.map(token) })
+    // the palette is read per theme, so a folded group's grey and the kept groups' colours are the theme's; the figure
+    // style's changes come after a card's defaults (lib/figureSpec)
+    const style = figureStyle()
+    const room = fitWidth ?? el.clientWidth
+    const palette = VIZ_SERIES.map(token)
+    const defaults = chartDefaults(withTokens(spec), { width: room, card, palette, other: token('--viz-other'), labels: opts.labels, neutral: VIZ_NEUTRAL.map(token), legend: style === 'blog' ? 'top' : undefined })
+    const shown = figureSpec(defaults, style, { width: room, palette })
     const sized = onPaper(applyRefit(responsive(shown, w, w === fitWidth ? undefined : MIN_VIEW_REFIT), fit))
     const m = await load()
     if (!alive()) return
@@ -728,7 +734,7 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     // the spec's embed options are dropped and Vega fetches no URL but a data: one (lib/vegaLoader)
     const compiled = fitAfterCompile(withoutEmbedOptions(sized))
     const patch = (vg: Spec) => barEnds(labelTooltips(compiled.patch(vg)))
-    const r = await m.default(el, compiled.spec as any, { actions: false, config: vegaConfig() as any, patch, loader: dataOnly(m.vega.loader()) })
+    const r = await m.default(el, compiled.spec as any, { actions: false, config: vegaConfig(style) as any, patch, loader: dataOnly(m.vega.loader()) })
     if (!alive()) return r.finalize()
     const container = usesContainerWidth(sized)
     const scene = (r.view as { scenegraph?: () => { root?: unknown } }).scenegraph?.()

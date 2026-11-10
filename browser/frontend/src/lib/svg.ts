@@ -7,7 +7,8 @@
 //     what it draws;
 //   - no <style>, which would restyle every svg on the page; a `*` rule's stroke and fill move to the root;
 //   - ids are prefixed per figure, so figures never share clip paths or glyphs;
-//   - fonts and thimble's matplotlibrc colours become the page's tokens; a white background is dropped;
+//   - fonts become the chart's faces (--viz-font and --viz-font-label, the page's own in thimble's style and a figure
+//     style's in Blog and Paper) and thimble's matplotlibrc colours the page's tokens; a white background is dropped;
 //   - in a matplotlib figure (its group figure_1) whose root declares no fill, black that it leaves unwritten (a text's
 //     or a shape's fill, which SVG paints black) takes the paper's ink from the root, so a black name on the figure's
 //     own background reads on every paper. Its fills keep their colors, white among them: a black name on a white or a
@@ -17,7 +18,7 @@
 // The DOM half needs a browser (DOMParser); restyle and rootDecls are pure.
 import { purifySvg } from './sanitize'
 
-/** matplotlib's default families, and the ones thimble's matplotlibrc names, as the page's own faces */
+/** matplotlib's default families, and the ones thimble's matplotlibrc names, as the chart's faces */
 const SANS_FIRST = /^\s*['"]?(?:DejaVu Sans|Bitstream Vera Sans|Hanken Grotesk|Arial|Helvetica|sans-serif)['"]?\s*(?:,|$)/i
 const MONO_FIRST = /^\s*['"]?(?:DejaVu Sans Mono|Bitstream Vera Sans Mono|Geist Mono|monospace)['"]?\s*(?:,|$)/i
 
@@ -53,7 +54,7 @@ const WHITE = new Set(['#ffffff', '#fff', 'white'])
 export const ROOT_FILL = 'fill: var(--text-primary)'
 
 /**
- * A figure element's style attribute rewritten for the page (module note): the families in the page's faces, the
+ * A figure element's style attribute rewritten for the page (module note): the families in the chart's faces, the
  * matplotlibrc colours as theme tokens, and when `background` (a figure or axes patch) white fill dropped. Pure.
  */
 export function restyle(style: string, background = false): string {
@@ -66,15 +67,15 @@ export function restyle(style: string, background = false): string {
       const value = decl.slice(at + 1).trim()
       const v = value.toLowerCase()
       if (prop === 'font-family') {
-        if (MONO_FIRST.test(value)) return ` font-family: var(--font-mono)`
-        if (SANS_FIRST.test(value)) return ` font-family: var(--font-body)`
+        if (MONO_FIRST.test(value)) return ` font-family: var(--viz-font-label)`
+        if (SANS_FIRST.test(value)) return ` font-family: var(--viz-font)`
         return decl
       }
       if (prop === 'font') {
-        // the shorthand `font: 10px 'DejaVu Sans'`: its family part in the page's face
+        // the shorthand `font: 10px 'DejaVu Sans'`: its family part in the chart's face
         const m = /^((?:[\w.%-]+\s+)*?[\d.]+(?:px|pt|em|rem|%)(?:\/[\w.%]+)?)\s+(.+)$/.exec(value)
-        if (m && MONO_FIRST.test(m[2])) return ` font: ${m[1]} var(--font-mono)`
-        if (m && SANS_FIRST.test(m[2])) return ` font: ${m[1]} var(--font-body)`
+        if (m && MONO_FIRST.test(m[2])) return ` font: ${m[1]} var(--viz-font-label)`
+        if (m && SANS_FIRST.test(m[2])) return ` font: ${m[1]} var(--viz-font)`
         return decl
       }
       if (prop === 'fill' && background && WHITE.has(v)) return ' fill: none'

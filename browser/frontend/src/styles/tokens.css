@@ -462,7 +462,11 @@
   --viz-grid: rgba(var(--ink-rgb), 0.08);
   --viz-axis: rgba(var(--ink-rgb), 0.28);
   --viz-label: var(--ink-500);
+  /* an axis's and a legend's title, in the labels' ink; a rule mark (an interval's line, a line across the chart), in
+     the annotation ink. A figure style gives each its own (below) */
+  --viz-axis-title: var(--viz-label);
   --viz-annotation: var(--viz-ink-2);
+  --viz-rule: var(--viz-annotation);
   /* the chart's faces and sizes: axis and legend labels in mono, titles and text marks in the body face, all at 11 px;
      a chart's own title at 13 px; a line 1.5 px (backend/app/matplotlibrc holds the same in points); a bar's end, away
      from its baseline, round at 2 px (a stacked bar's whole stack) */
@@ -593,4 +597,117 @@
     --dur-fast: 0ms;
     --dur-base: 0ms;
   }
+}
+
+/* -------- the figure styles (lib/theme FigureStyle), set as `data-figures` on <html>: Blog (blogpost-figure's) and
+   Paper (paper-figure's) give the charts their own series, ramps, chrome, face and sizes, over the paper and the accent,
+   which keep their jobs for the page; thimble, the default, sets nothing here. --viz-figures names the style for
+   lib/vizTheme, which draws each style's axes, legends and labels, and travels with the chart tokens into a frame
+   (lib/frame CHART_TOKENS). On Dark the chrome keeps the paper's inks and the series stay as they are; the ramps run
+   from near the paper to strong, as Dark's own do, so on Dark they run dark to light. -------- */
+:root[data-figures='blog'] {
+  --viz-figures: blog;
+  /* the hero, the baseline, then the further families, in blogpost-figure's order (blogfig SERIES) */
+  --viz-1: #b86046;
+  --viz-2: #40668c;
+  --viz-3: #0e6b54;
+  --viz-4: #6258d2;
+  --viz-5: #b58c60;
+  --viz-6: #585850;
+  --viz-7: #47267f;
+  --viz-highlight: #b86046;
+  --viz-seq-1: #f7e9e3;
+  --viz-seq-2: #e0baaf;
+  --viz-seq-3: #c7816c;
+  --viz-seq-4: #b86046;
+  --viz-seq-5: #8f4a35;
+  --viz-div-1: #40668c;
+  --viz-div-2: #9db1c6;
+  --viz-div-3: #eae9e5;
+  --viz-div-4: #e0baaf;
+  --viz-div-5: #b86046;
+  /* DM Sans for every text of a chart, labels included (styles/fonts.css); ticks and legends at 12 px, axis titles,
+     direct labels and values at 13 px, which blogpost-figure's sizes come to at a card's width; lines heavier and bars
+     square, as its figures draw them */
+  --viz-font: 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+  --viz-font-label: var(--viz-font);
+  --viz-size: 12px;
+  --viz-size-title: 13px;
+  --viz-line: 2.5px;
+  --viz-bar-radius: 0px;
+}
+:root[data-figures='blog']:not([data-paper='dark']) {
+  /* blogpost-figure's chrome: gridlines, the x baseline a step darker, gray tick labels, softer axis titles, near-black
+     text and titles, dark whiskers, a light gray for context */
+  --viz-grid: #eae9e5;
+  --viz-axis: #afafab;
+  --viz-label: #8a8a86;
+  --viz-axis-title: #5a5a57;
+  --viz-ink-1: #1f1f1e;
+  --viz-ink-2: #5a5a57;
+  --viz-ink-3: #aaaaa7;
+  --viz-annotation: #5a5a57;
+  --viz-rule: #2b2b2a;
+}
+:root[data-figures='blog'][data-paper='dark'] {
+  --viz-seq-1: #8f4a35;
+  --viz-seq-2: #b86046;
+  --viz-seq-3: #c7816c;
+  --viz-seq-4: #e0baaf;
+  --viz-seq-5: #f7e9e3;
+  --viz-div-1: #9db1c6;
+  --viz-div-2: #40668c;
+  --viz-div-3: var(--viz-ink-4);
+  --viz-div-4: #b86046;
+  --viz-div-5: #e0baaf;
+}
+:root[data-figures='paper'] {
+  --viz-figures: paper;
+  /* Okabe-Ito, in paper-figure's order; single-hue blues; a diverging ramp through a light gray */
+  --viz-1: #0072b2;
+  --viz-2: #e69f00;
+  --viz-3: #009e73;
+  --viz-4: #cc79a7;
+  --viz-5: #56b4e9;
+  --viz-6: #d55e00;
+  --viz-7: #f0e442;
+  --viz-highlight: #0072b2;
+  --viz-seq-1: #deebf7;
+  --viz-seq-2: #9ecae1;
+  --viz-seq-3: #4292c6;
+  --viz-seq-4: #2171b5;
+  --viz-seq-5: #08519c;
+  --viz-div-1: #d55e00;
+  --viz-div-2: #f4a582;
+  --viz-div-3: #e5e5e5;
+  --viz-div-4: #92c5de;
+  --viz-div-5: #0072b2;
+  /* a plain sans, the system's; text at 9 pt (12 px), ticks at 8 pt; bars square */
+  --viz-font: 'Helvetica Neue', Arial, 'Liberation Sans', sans-serif;
+  --viz-font-label: var(--viz-font);
+  --viz-size: 10.67px;
+  --viz-size-title: 12px;
+  --viz-bar-radius: 0px;
+}
+:root[data-figures='paper']:not([data-paper='dark']) {
+  /* ink near black for text, axis lines and ticks; light gray gridlines */
+  --viz-grid: #e5e5e5;
+  --viz-axis: #262626;
+  --viz-label: #262626;
+  --viz-axis-title: #262626;
+  --viz-ink-1: #1a1a1a;
+  --viz-annotation: #262626;
+  --viz-rule: #262626;
+}
+:root[data-figures='paper'][data-paper='dark'] {
+  --viz-seq-1: #08519c;
+  --viz-seq-2: #2171b5;
+  --viz-seq-3: #4292c6;
+  --viz-seq-4: #9ecae1;
+  --viz-seq-5: #deebf7;
+  --viz-div-1: #f4a582;
+  --viz-div-2: #d55e00;
+  --viz-div-3: var(--viz-ink-4);
+  --viz-div-4: #0072b2;
+  --viz-div-5: #92c5de;
 }

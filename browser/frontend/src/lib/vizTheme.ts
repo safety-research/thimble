@@ -11,11 +11,20 @@
 // (tokens.css). Rules and text marks (notes, values) are --viz-annotation, an ink. Axis and legend labels are mono,
 // titles and text marks the body face, all at --viz-size; a chart's own title at --viz-size-title. A bar's end, away
 // from its baseline, is round by --viz-bar-radius (lib/barEnds mends what Vega-Lite draws wrong).
+//
+// A figure style (lib/theme FigureStyle, named by --viz-figures) gives the tokens its own values and the config its own
+// axes, legends and type (vegaConfig): Blog draws blogpost-figure's horizontal gridlines over a darker x baseline, no
+// ticks, gray tick labels and near-black category names, in DM Sans; Paper draws paper-figure's left and bottom axes
+// with ticks and light gridlines both ways, in a plain sans. lib/figureSpec changes thimble.chart's charts for each.
+import type { FigureStyle } from './theme'
+
 const FALLBACK: Record<string, string> = {
   '--viz-annotation': '#6b675f',
   '--viz-axis': 'rgba(27, 26, 24, 0.28)',
+  '--viz-axis-title': '#64625b',
   '--viz-grid': 'rgba(27, 26, 24, 0.08)',
   '--viz-label': '#64625b',
+  '--viz-rule': '#6b675f',
   '--font-body': 'Hanken Grotesk, ui-sans-serif, system-ui, sans-serif',
   '--font-mono': 'Geist Mono, ui-monospace, SF Mono, Menlo, monospace',
   '--viz-font': 'Hanken Grotesk, ui-sans-serif, system-ui, sans-serif',
@@ -111,14 +120,100 @@ export function token(name: string): string {
   return unquote(v) || (FALLBACK[name] ?? '')
 }
 
-/** A size token in px, `fallback` when it does not read as one. */
+/** A size token in px, `fallback` when it does not read as one (a bar's radius may be 0). */
 function px(name: string, fallback: number): number {
   const n = parseFloat(token(name))
-  return Number.isFinite(n) && n > 0 ? n : fallback
+  return Number.isFinite(n) && n >= 0 ? n : fallback
 }
 
-/** A Vega-Lite config in the chart style, merged under a spec's own config by vega-embed. */
-export function vegaConfig(): Record<string, unknown> {
+/** The figure style the charts are drawn in, as --viz-figures names it (tokens.css; a frame has it with the chart
+ * tokens): thimble's own when it names none. */
+export function figureStyle(): FigureStyle {
+  const v = token('--viz-figures')
+  return v === 'blog' || v === 'paper' ? v : 'thimble'
+}
+
+/** A Vega-Lite config in the chart style, merged under a spec's own config by vega-embed: thimble's, or the figure
+ * style's (module note) over it. */
+export function vegaConfig(style: FigureStyle = figureStyle()): Record<string, unknown> {
+  const own = thimbleConfig()
+  return style === 'blog' ? blogConfig(own) : style === 'paper' ? paperConfig(own) : own
+}
+
+/** the sizes of a Blog chart's text that are not its ticks', px: blogpost-figure's at a card's width, never under 12 */
+export const BLOG_TYPE = { title: 13, label: 13, value: 13 }
+/** the air beside a Blog bar, a share of its slot, and a row's height on a discrete y axis, px: blogpost-figure's bars,
+ * about 0.6 of their slot, and its rows, which leave a category name air above and below */
+const BLOG_BAR_PADDING = 0.35
+const BLOG_ROW = 28
+/** the air between groups of bars side by side, a share of a group's slot: about one bar of two */
+const BLOG_GROUP_PADDING = 0.3
+/** the length of a Paper chart's ticks, px, and of its axis lines' and ticks' stroke */
+const PAPER_TICK = 4
+const PAPER_STROKE = 1
+
+/** Blog's config over thimble's (module note): every text in the chart face; a gray baseline under the x axis and no other
+ * axis line; gridlines across from the y axis only (a horizontal bar's are thimble.chart's to turn, lib/figureSpec); no
+ * ticks, a few round ones on a scale; category names in ink, tick labels gray; bars narrower than their slot and rows of
+ * a discrete y axis taller; dots a little larger and whiskers a little heavier than thimble's. A bar chart's legend
+ * becomes a row of names in their colors in lib/figureSpec. */
+function blogConfig(own: Record<string, any>): Record<string, unknown> {
+  const font = token('--viz-font')
+  const size = px('--viz-size', 12)
+  const label = token('--viz-label')
+  const title = token('--viz-axis-title')
+  const ink = token('--viz-ink-1')
+  const text = { labelFont: font, labelFontSize: size, labelColor: label, titleFont: font, titleFontSize: BLOG_TYPE.title, titleFontWeight: 400, titleColor: title }
+  return {
+    ...own,
+    font,
+    axis: { ...own.axis, ...text, ticks: false, domain: false, labelPadding: 6, titlePadding: 8 },
+    axisX: { grid: false, domain: true, domainColor: token('--viz-axis') },
+    axisY: { grid: true },
+    axisXDiscrete: { ...own.axisXDiscrete, labelColor: ink, labelFontSize: BLOG_TYPE.label },
+    axisYDiscrete: { grid: false, labelColor: ink, labelFontSize: BLOG_TYPE.label },
+    axisQuantitative: { ...own.axisQuantitative, tickCount: 5 },
+    legend: { ...own.legend, labelFont: font, labelFontSize: size, labelColor: label, titleFont: font, titleFontSize: size, titleFontWeight: 400, titleColor: title, symbolSize: 100, columnPadding: 18 },
+    header: { ...own.header, labelFont: font, labelFontSize: BLOG_TYPE.label, labelColor: ink, titleFont: font, titleFontSize: size, titleColor: title },
+    title: { ...own.title, font, fontSize: BLOG_TYPE.title, color: ink },
+    view: { ...own.view, discreteHeight: { step: BLOG_ROW } },
+    scale: { ...own.scale, barBandPaddingInner: BLOG_BAR_PADDING, bandWithNestedOffsetPaddingInner: BLOG_GROUP_PADDING },
+    bar: { cornerRadiusEnd: px('--viz-bar-radius', 0) },
+    point: { ...own.point, size: 40 },
+    rule: { color: token('--viz-rule'), strokeWidth: 1.5 },
+    text: { ...own.text, font, fontSize: BLOG_TYPE.label },
+  }
+}
+
+/** Paper's config over thimble's (module note): the left and bottom axes drawn with ticks out, gridlines both ways from
+ * a scale's axis, every text in the plain sans at 9 pt and the ticks' at 8 pt; legends of the mark's own symbols. */
+function paperConfig(own: Record<string, any>): Record<string, unknown> {
+  const font = token('--viz-font')
+  const size = px('--viz-size', 10.67)
+  const titleSize = px('--viz-size-title', 12)
+  const label = token('--viz-label')
+  const title = token('--viz-axis-title')
+  const axisInk = token('--viz-axis')
+  const text = { labelFont: font, labelFontSize: size, labelColor: label, titleFont: font, titleFontSize: titleSize, titleFontWeight: 400, titleColor: title }
+  const { symbolType: _square, ...legend } = own.legend
+  return {
+    ...own,
+    font,
+    axis: { ...own.axis, ...text, domain: true, domainColor: axisInk, domainWidth: PAPER_STROKE, ticks: true, tickColor: axisInk, tickWidth: PAPER_STROKE, tickSize: PAPER_TICK, grid: true },
+    axisX: { grid: true },
+    axisXDiscrete: { ...own.axisXDiscrete, grid: false },
+    axisYDiscrete: { grid: false },
+    legend: { ...legend, labelFont: font, labelFontSize: size, labelColor: label, titleFont: font, titleFontSize: titleSize, titleFontWeight: 400, titleColor: title },
+    header: { ...own.header, labelFont: font, labelFontSize: titleSize, labelFontWeight: 400, labelColor: token('--viz-ink-1'), titleFont: font, titleFontSize: titleSize, titleColor: title },
+    title: { ...own.title, font, fontSize: titleSize },
+    bar: { cornerRadiusEnd: px('--viz-bar-radius', 0) },
+    rule: { color: token('--viz-rule') },
+    text: { ...own.text, font, fontSize: size },
+  }
+}
+
+/** thimble's own chart style (module note). */
+function thimbleConfig(): Record<string, unknown> {
   const label = token('--viz-label')
   const font = token('--viz-font')
   const mono = token('--viz-font-label')
