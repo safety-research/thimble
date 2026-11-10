@@ -2478,7 +2478,9 @@ SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
 SESSION_UNKNOWN_LINE = "no session with chat {id} in {cwd} (thimble-browser --resume lists the sessions)."
 PICK_HEAD = "Sessions in {cwd}, the latest first:"
 PICK_ASK = "Number to resume (Enter to cancel): "
-NEW_SESSION = {"archive": None, "chat": "new"}  # pick_session's answer for a new session
+# pick_session's answer for a new session, which alone moves the open one aside (open_session): a session picked that
+# holds no chat of main with a turn gets chat "new" too, and stays
+NEW_SESSION = {"archive": None, "chat": "new", "new": True}
 SET_ASIDE_FAILED_LINE = ("the last session was not moved aside ({why}), so the page opens it with a new chat; "
                          "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
@@ -2519,8 +2521,8 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
     """The session of the folder thimble-browser opens (folder_sessions.py): NEW_SESSION for `new`; else the latest
     (`continue`), one picked by number from a list printed here (`pick`), or the one that holds the chat of main with
     that id (or the start of one), as {archive: the name of its folder in the archive, None for the session open now;
-    chat: the chat of main to open}. None, with a line that says why, when there is no such session or the pick was
-    cancelled."""
+    chat: the chat of main to open, "new" for a session with no chat of main that holds a turn}. None, with a line that
+    says why, when there is no such session or the pick was cancelled."""
     from . import folder_sessions  # noqa: PLC0415
 
     if how == "new":
@@ -2559,10 +2561,11 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
 
 def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool:
     """Put the session pick_session chose in place in workspace `name`, then open its chat of main (the register
-    route's `chat`). A new session moves the open one aside when it holds anything (`POST /api/ws/{c}/archive`); an
-    earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going there. False, with a line
-    that says why, when the session was not brought back; a session that was not moved aside stays open, with a new
-    chat and a line that says so."""
+    route's `chat`). A new session (NEW_SESSION) moves the open one aside when it holds anything (`POST
+    /api/ws/{c}/archive`); an earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going
+    there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
+    says why, when the session was not brought back; a session that was not moved aside stays open, with a new chat and
+    a line that says so."""
     from . import folder_sessions  # noqa: PLC0415
 
     chat = str(chosen.get("chat") or "new")
@@ -2572,7 +2575,7 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
             print(BROWSER_LINE.format(what=BACK_FAILED_LINE.format(why=body.get("detail") or status or "no answer",
                                                                     log=log_path())))
             return False
-    elif chat == "new":
+    elif chosen.get("new"):
         ws = Path(resolve_env()["workspaces_dir"]) / name
         if ws.is_dir() and folder_sessions.holds(folder_sessions.summary(ws)):
             answered, moved = archive_workspace(url, name)
