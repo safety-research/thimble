@@ -14,7 +14,7 @@ const conf = (model: string, effort: string, fast = false) => ({ model, effort, 
 const SETTINGS: Settings = {
   models: {
     writer: conf('claude-opus-5-5', 'xhigh'),
-    dev: conf('claude-opus-5-5', 'high', true),
+    dev: { ...conf('claude-opus-5-5', 'high'), fast_follows: 'main' }, // no fast mode of its own: main's, which is off
     checks: conf('claude-opus-5-5', 'high'),
     labels: conf('claude-opus-5-5', 'low'),
     verify: conf('claude-opus-5-5', 'high', true),
@@ -78,7 +78,7 @@ test("an agent's pick is saved at once, in thimble's config: its model, its effo
   await click(row('labels').querySelector('.fast-bolt'))
   expect(puts.slice(1)).toEqual([
     ['/api/ws/mini/settings', { models: { checks: { model: 'claude-sonnet-5-5' } } }],
-    ['/api/ws/mini/settings', { models: { dev: { fast: false } } }],
+    ['/api/ws/mini/settings', { models: { dev: { fast: true } } }],
     ['/api/ws/mini/settings', { models: { labels: { fast: true } } }],
   ])
   expect(toasts).toEqual([])

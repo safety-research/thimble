@@ -1105,6 +1105,8 @@ export interface ModelConf {
   fast: boolean
   /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
   follows?: string
+  /** the row whose fast mode this one shows and runs with while the analyst has set none (the dev row: `main`) */
+  fast_follows?: string
   /** the refusal row: no second call when a classifier's model refuses */
   off?: boolean
 }

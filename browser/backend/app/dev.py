@@ -73,11 +73,12 @@ the ticket stopped with its branch kept. Where the box can't run, the ticket run
 outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no stops it before its worktree exists.
 
 thimble's config. `thimble fix`'s session runs with the dev agent's `agents.dev` settings (userconf.py, dev_config) and
-the dev row's fast mode; agent_session's module note says what the config adds. Its Bash runs in the sandbox where it
-can run, and its sandbox also writes what a commit in its worktree writes into the checkout's git folder (ticket_fence).
-A ticket's agent and a view builder run as main's subagents, on the dev agent's model and effort unless their run names
-its own, in the dev row's fast mode too (subagents.fast_for), and without web tools while the dev agent's `web` is off
-(subagents.roles).
+the dev row's fast mode where the analyst set it; it runs outside a workspace, so an unset row leaves fast mode to the
+analyst's Claude Code settings (config.models_for). agent_session's module note says what the config adds. Its Bash
+runs in the sandbox where it can run, and its sandbox also writes what a commit in its worktree writes into the
+checkout's git folder (ticket_fence). A ticket's agent and a view builder run as main's subagents, on the dev agent's
+model and effort unless their run names its own, in the dev row's fast mode (subagents.fast_for), which is main's until
+the analyst sets the row's own, and without web tools while the dev agent's `web` is off (subagents.roles).
 """
 from __future__ import annotations
 
@@ -1470,10 +1471,11 @@ class Sessions:
                fence: dict[str, Any] | None = None, models: dict[str, Any] | None = None,
                env: dict[str, str] | None = None) -> list[str]:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
-        settings), else the dev role's, `--add-dir` folders, the `fence` settings and thimble's config for the dev agent
-        (dev_config). Its environment goes in the settings' `env` (config.session_env, without this server's THIMBLE_*
-        values): the fence's, `env`, its key as THIMBLE_SESSION, and no ceiling on --print's wait for its background
-        work (agent_session.BG_WAIT_ENV).
+        settings), else the dev role's (its fast mode None while nothing sets it and there is no workspace, whose main
+        it would follow: config.models_for), `--add-dir` folders, the `fence` settings and thimble's config for the dev
+        agent (dev_config). Its environment goes in the settings' `env` (config.session_env, without this server's
+        THIMBLE_* values): the fence's, `env`, its key as THIMBLE_SESSION, and no ceiling on --print's wait for its
+        background work (agent_session.BG_WAIT_ENV).
         Nobody can answer its requests (module note, `thimble fix`), so it keeps UNHOSTED_TOOLS and gets no web tools.
         It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later turn
         (agent_session.LATER_TOOLS), since its process ends with its turn, and, when fenced, not FENCED_OFF_TOOLS.
