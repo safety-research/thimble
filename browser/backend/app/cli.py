@@ -43,6 +43,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -2639,6 +2640,84 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
     return True
 
 
+# elsewhere_line's words. {then} is ELSEWHERE_QUIT while a server of this home runs: a start that names another
+# workspaces folder uses that server as it is, with the folder it started with
+ELSEWHERE_LINE = {False: "an earlier session of this folder is in {folder} ({ago}, {turns}, {cards}); to open it, "
+                         "{then}run {cmd}",
+                  True: "{n} earlier sessions of this folder are in {folder} (the latest {ago}; {turns}, {cards} in "
+                        "all); to open one, {then}run {cmd}"}
+ELSEWHERE_QUIT = "quit thimble-browser (Ctrl-C), then "
+ELSEWHERE_CMD = "THIMBLE_WORKSPACES_DIR={folder} thimble-browser --resume"
+
+
+def _shell_word(path: Path) -> str:
+    """`path` as one word of a shell command, with the home folder written `~` when the rest needs no quotes."""
+    shown = _tilde(path)
+    return shown if shown.startswith("~") and shlex.quote(shown[1:]) == shown[1:] else shlex.quote(str(path))
+
+
+def _server_folder(home_dir: Path) -> Path | None:
+    """The workspaces folder of the server that server.json in the home `home_dir` records, when that server runs now.
+    None when none does."""
+    try:
+        st = json.loads((home_dir / server_json().name).read_text("utf-8"))
+        if not is_server(st.get("pid"), int(st.get("port") or 0), st.get("repo")):
+            return None
+        return Path(st["env"]["workspaces_dir"]).expanduser().resolve()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def elsewhere_line(cwd: Path, data_dir: Path, name: str | None = None, *, new: bool = False,
+                   now: float | None = None) -> str | None:
+    """What a start says when the folder's earlier sessions are in another workspaces folder than the one it uses, None
+    when it has nothing to say. The workbench's own folder holds no session with anything in it for the folder `cwd`
+    (folder_sessions.listing), and the workspaces folder in the terminal plugin's home (fixes.plugin_home) holds one for
+    its workspace: `name`, else the one the folder is registered as (known_corpus), which is how a start with that
+    folder finds it. A workbench that ran with that folder as THIMBLE_WORKSPACES_DIR kept its sessions there, and a
+    start without it moved none of them. The line says how many there are, how long ago the latest was and what they
+    hold, as the picker does, then the command that lists them.
+
+    None too when the match is not sure or the command is not safe: that home's own registry gives the name to another
+    folder; this start registered the folder (`new`), so only that registry can say the name was this folder's; a
+    server runs with that folder now, which a second server must not open. Reads only."""
+    from . import fixes, folder_sessions  # noqa: PLC0415
+
+    here, registry = cwd.resolve(), data_dir.resolve()
+    if name is None:
+        known = known_corpus(here, registry)
+        if known is None or not (known[1] == here or known[1].parent == registry):  # pick_session's `mine`
+            return None
+        name = known[0]
+    theirs = fixes.plugin_home().expanduser()
+    shown = theirs / "workspaces"  # as the launcher names a home's workspaces folder
+    folder = shown.resolve()
+    if folder == Path(resolve_env()["workspaces_dir"]).resolve():
+        return None
+    try:
+        rows = folder_sessions.elsewhere(name, folder)
+    except Exception as e:  # noqa: BLE001 — a folder this workbench did not write never stops a start
+        _log(f"the sessions of {name} in {folder} were not read: {e}")
+        return None
+    if not rows:
+        return None
+    with server_dirs():
+        if folder_sessions.listing(name):
+            return None
+    rec = config.read_sidecar(name, theirs / "data")
+    hit = config.sidecar_match(here, [rec]) if rec is not None else None
+    if (new or rec is not None) and not (hit is not None and hit[1] == here):
+        return None
+    running = _server_folder(home())
+    if folder in (running, _server_folder(theirs)):
+        return None
+    turns = _counted(sum(int(r["turns"]) for r in rows), "turn")
+    cards = _counted(sum(int(r["cards"]) for r in rows), "card")
+    return ELSEWHERE_LINE[len(rows) > 1].format(
+        n=len(rows), folder=_tilde(shown), ago=_ago(rows[0]["at"], now), turns=turns, cards=cards,
+        then=ELSEWHERE_QUIT if running is not None else "", cmd=ELSEWHERE_CMD.format(folder=_shell_word(shown)))
+
+
 def cmd_browser(args: argparse.Namespace) -> int:
     """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server unless this install's own server
     answers (ensure_running, own_server), open the folder as a workspace, print the page's sign-in link to that server
@@ -2649,7 +2728,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
     chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets the new
     link there once `thimble-browser --unpair` changed its key (watch_links). With `--detach` it returns once the link is printed and
-    the server keeps running."""
+    the server keeps running. A start that finds no session with anything in it for the folder says where another
+    workspaces folder holds some (elsewhere_line)."""
     from . import claude_access  # noqa: PLC0415
 
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
@@ -2663,6 +2743,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     with server_dirs():
         chosen = pick_session(cwd, data_dir, getattr(args, "session", None) or "new")
     if chosen is None:
+        if line := elsewhere_line(cwd, data_dir):
+            print(BROWSER_LINE.format(what=line))
         return 1
     if refuse_foreign(api_url()):
         return 1
@@ -2686,6 +2768,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
         with server_dirs():
             if not open_session(url, name, cwd, chosen):
                 return 1
+    if line := elsewhere_line(cwd, data_dir, name, new=opened):
+        print(BROWSER_LINE.format(what=line), flush=True)
     link = ui_url(name, pair=to_terminal())
     print(BROWSER_LINE.format(what=link), flush=True)
     print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)

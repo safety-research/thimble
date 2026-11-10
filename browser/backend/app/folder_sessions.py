@@ -9,6 +9,10 @@ bringing one back moves it into place again (ledger.restore_workspace), the open
 workspace keeps its one name for every route, agent and tab (a tab drops what it kept for the workspace when the
 workspace's instance changes, App.tsx), and a workspace from before sessions is its folder's first session. Main's chats
 inside a session are runtime.py's.
+
+A workbench that ran with another workspaces folder (THIMBLE_WORKSPACES_DIR) left its sessions there, and a start with
+this one finds none of them. `elsewhere` reads a workspace's sessions in such a folder, so that the start says where
+they are (cli.elsewhere_line).
 """
 from __future__ import annotations
 
@@ -67,3 +71,18 @@ def listing(c: str) -> list[dict[str, Any]]:
         if ws.is_dir() and holds(s := summary(ws)):
             rows.append({**s, "archive": archive})
     return sorted(rows, key=lambda r: r["at"], reverse=True)
+
+
+def elsewhere(c: str, folder: Path) -> list[dict[str, Any]]:
+    """listing, of the workspaces folder `folder` in place of the server's: the sessions of workspace `c` that a
+    workbench which ran with that folder left there. Reads only, and a folder that is not there costs one look."""
+    if not folder.is_dir():
+        return []
+    from . import config  # noqa: PLC0415
+
+    held = config.WORKSPACES_DIR
+    config.WORKSPACES_DIR = folder
+    try:
+        return listing(c)
+    finally:
+        config.WORKSPACES_DIR = held
