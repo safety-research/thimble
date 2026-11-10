@@ -1233,11 +1233,13 @@
   background: var(--surface-card);
   container-type: inline-size;
 }
+/* a bar too narrow for the tabs and what follows them wraps: the mode switch goes on a second line, under the tabs */
 .reader-bar {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
-  height: 34px;
+  min-height: 34px;
   background: var(--files-side-bg);
   box-shadow: inset 0 -1px 0 var(--files-rule);
   color: var(--text-tertiary);
@@ -1255,14 +1257,20 @@
 /* the file tabs take the bar's free room (the spacer after them gives way); tabs that do not fit narrow, names cut with
    an ellipsis, all but the open one, whose name shows up to its max-width; past their narrowest the last ones go in the
    menu at the strip's end (FilesTab ReaderTabs); clipped, so the hidden copy of the strip, wider than the bar when many
-   tabs are open, leaves the panes around it nothing to scroll */
+   tabs are open, leaves the panes around it nothing to scroll. The strip is never narrower than a tab at its narrowest
+   (FilesTab TAB_MIN_PX), so the open tab keeps about ten characters of its name; the bar wraps what does not fit beside it */
 .reader-tabs-wrap {
   position: relative;
   display: flex;
   flex: 1 1 0;
   align-items: stretch;
-  min-width: 0;
+  height: 34px;
+  min-width: 132px;
   overflow: clip;
+}
+/* with more than one tab open, room for the open tab at its narrowest and the menu's "N more" after it */
+.reader-tabs-wrap.is-many {
+  min-width: 196px;
 }
 .reader-tabs-wrap + .reader-spacer {
   display: none;
@@ -1379,12 +1387,13 @@
 }
 /* the File browser's mode row: the built-in modes and the file-type viewers; a viewer not picked that is built or
    updated and not opened since (`is-fresh`) wears the view chip's accent text, tint and edge, as the views bar draws a
-   fresh view */
+   fresh view; as tall as the bar, for when it wraps to a line of its own under the tabs */
 .reader-modes {
   align-self: center;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 34px;
   padding: 0 8px;
 }
 .reader-modes .seg-opt.is-fresh:not(.active) {
@@ -1758,28 +1767,38 @@
 }
 /* -------- Color by in the Transcript and Table modes (ColorBy.tsx): thimble's bordered button with the choice, then a key chip per
    value (a square swatch of its color, its name, its count, in a small bordered box; the view kit's .chip-key) that
-   turns its records off and on. A record carries the color as a bar on its left edge. -------- */
+   turns its records off and on. A record carries the color as a bar on its left edge. A row too narrow for Filter by,
+   Color by's button and Collapse all wraps: Collapse all goes on a line of its own, at the row's end. -------- */
 .reader-colorbar {
   flex: none;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 8px;
   min-width: 0;
   padding: 6px 14px;
   border-bottom: 1px solid var(--border-hairline);
   background: var(--surface-card);
 }
+/* Color by takes the row's free room, and no less than its button's width; its values go on a line of their own under
+   the button when the room beside the button is narrower than their least (.colorby-chips) */
 .colorby {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 0;
   max-width: 100%;
 }
 .colorby-trigger.btn {
   flex: none;
   gap: 5px;
   font-weight: 400;
+}
+/* Color by's button cuts its choice's name with an ellipsis only in a row narrower than the button */
+.colorby > .colorby-trigger.btn {
+  flex-shrink: 1;
+  min-width: 0;
 }
 .colorby-trigger .btn-label {
   display: inline-flex;
@@ -1818,14 +1837,17 @@
   color: var(--text-secondary);
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
 }
-/* the values on one line: those that do not fit go behind "N more" (ColorBy fit) */
+/* the values on one line: those that do not fit go behind "N more" (ColorBy fit). Their room is at least that of "N more"
+   with three digits, and their own width never sizes the row (contain), so hiding a value or showing it never moves the
+   row's lines */
 .colorby-chips {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  min-width: 80px;
   overflow: hidden;
+  contain: inline-size;
 }
 .colorby-chip[hidden],
 .colorby-more[hidden] {
@@ -2070,7 +2092,8 @@
 }
 /* -------- Filter by in the Transcript mode (FilterBy.tsx), before Color by: the same bordered button, then a toggle
    per value (a box ticked while its records show, its name and its count, in the small bordered box) with no color,
-   which is Color by's alone; at most a little under half the row, as the view kit's (viewer_parts.css) -------- */
+   which is Color by's alone; at most a little under half the row, as the view kit's (viewer_parts.css), and 14px from
+   Color by with the row's gap -------- */
 .filterby {
   display: flex;
   align-items: center;
@@ -2078,7 +2101,7 @@
   flex: 0 1 auto;
   min-width: 0;
   max-width: 45%;
-  margin-right: 14px;
+  margin-right: 6px;
 }
 .filterby-chips {
   display: flex;
@@ -2148,7 +2171,7 @@
 /* Collapse all and Expand all, at the row's end */
 .reader-foldall.btn {
   flex: none;
-  margin-left: 8px;
+  margin-left: auto;
   color: var(--text-secondary);
 }
 /* a record's Color by colors on its left edge, as a slice of the tracks (views/common EdgeBands): a band per choice,
