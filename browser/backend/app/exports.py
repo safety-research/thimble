@@ -6,6 +6,12 @@ a card a sentence names as a noun is written as the card's title (report_types.c
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
 the citations as numbered notes linked from the text; PDF is that HTML printed by the browser.
 
+HTML and PDF are drawn in a figure style (render.FIGURES), the page's (frontend lib/theme FigureStyle, report.css):
+thimble's own, each figure the card as the canvas draws it; Blog (blogpost-figure's), the text in DM Sans under an
+accent bar, each figure the card as a Blog figure headed by its caption, citing nothing, as a post's figures do not;
+Paper (paper-figure's), the text in Source Serif 4, each figure the chart with its legend under it and the caption
+`Figure N. Takeaway. Question`. Markdown is the same in every style.
+
 The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
 own Chromium when it is installed. Pictures of cards come from the card harness (render.py); without a browser a card is
 its title, its table or its text, and PDF is offered disabled with the reason.
@@ -16,11 +22,12 @@ import asyncio
 import base64
 import contextlib
 import html as _html
+import itertools
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -102,7 +109,7 @@ def _sentence(x: dict[str, Any], notes: Notes) -> dict[str, Any]:
     return {"text": text, "notes": notes.of(_sentence_refs(x)), "bullet": bool(x.get("bullet"))}
 
 
-def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
+def _figure(f: Any, notes: Notes, cite: bool = True) -> dict[str, Any] | None:
     if isinstance(f, str):
         f = {"cell": f}
     if not isinstance(f, dict):
@@ -119,12 +126,14 @@ def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
     from .report_types import card_nouns  # noqa: PLC0415
 
     raw_caption = str(f.get("caption") or "")
-    return {"card": cid, "caption": plain_text(card_nouns(raw_caption, notes.cites)),
-            "after": f.get("after_paragraph"), "notes": notes.of([f"card:{cid}", *refs.extract_refs(raw_caption)])}
+    return {"card": cid, "caption": plain_text(card_nouns(raw_caption, notes.cites)), "lead": bool(f.get("lead")),
+            "after": f.get("after_paragraph"),
+            "notes": notes.of([f"card:{cid}", *refs.extract_refs(raw_caption)]) if cite else []}
 
 
-def read_model(c: str, doc: dict[str, Any]) -> dict[str, Any]:
-    """The document as every format reads it (module note)."""
+def read_model(c: str, doc: dict[str, Any], *, cite_figures: bool = True) -> dict[str, Any]:
+    """The document as every format reads it (module note); with `cite_figures` false its figures cite nothing, as a
+    Blog post's figures do not, so the notes are the text's citations alone."""
     from . import report_types  # noqa: PLC0415
 
     notes = Notes(c)
@@ -134,7 +143,7 @@ def read_model(c: str, doc: dict[str, Any]) -> dict[str, Any]:
     for u in report_types.units(doc):
         paras = [{"id": p.get("id"), "sentences": [_sentence(x, notes) for x in p.get("sentences") or [] if isinstance(x, dict)]}
                  for p in u.get("paragraphs") or [] if isinstance(p, dict)]
-        figs = [f for f in (_figure(x, notes) for x in u.get("figures") or []) if f]
+        figs = [f for f in (_figure(x, notes, cite_figures) for x in u.get("figures") or []) if f]
         units.append({"heading": _collapse(u.get("heading")), "level": report_types._level(u.get("level")),
                       "tldr": report_types._is_tldr(u.get("heading")), "paragraphs": [p for p in paras if p["sentences"]],
                       "figures": figs})
@@ -185,29 +194,42 @@ def _note_text(r: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- HTML
 
 
-def font_faces() -> str:
-    """@font-face rules for Hanken Grotesk and Geist Mono as data URLs: the frontend's packages, else the built UI's
-    files, else the TrueType faces the kernels use (page_fonts)."""
+_MONO = [("Geist Mono", "geist-mono", w, "normal") for w in ("400", "500")]
+# the faces each figure style's file is set in (frontend styles/fonts.css), as (family, package, weight, style):
+# thimble's Hanken Grotesk; Blog's DM Sans, with Source Serif 4 for the records its notes quote; Paper's Source Serif 4.
+# Geist Mono sets code and the notes' refs in every style.
+FACES = {
+    "thimble": [("Hanken Grotesk", "hanken-grotesk", w, s)
+                for w, s in (("400", "normal"), ("500", "normal"), ("600", "normal"), ("400", "italic"))] + _MONO,
+    "blog": [("DM Sans", "dm-sans", w, "normal") for w in ("400", "500", "600", "700")]
+            + [("Source Serif 4", "source-serif-4", "400", s) for s in ("normal", "italic")] + _MONO,
+    "paper": [("Source Serif 4", "source-serif-4", w, s)
+              for w, s in (("400", "normal"), ("600", "normal"), ("400", "italic"))] + _MONO,
+}
+BODY_FACE = {"thimble": "Hanken Grotesk", "blog": "DM Sans", "paper": "Source Serif 4"}  # what a style's text is set in
+
+
+def font_faces(style: str = "thimble") -> str:
+    """@font-face rules for the faces of figure style `style` (FACES) as data URLs: the frontend's packages, else the
+    built UI's files, else, for Hanken Grotesk and Geist Mono, the TrueType faces the kernels use (page_fonts)."""
     rules: list[str] = []
-    faces = [("Hanken Grotesk", "hanken-grotesk", w, s) for w, s in (("400", "normal"), ("500", "normal"), ("600", "normal"), ("400", "italic"))]
-    faces += [("Geist Mono", "geist-mono", w, "normal") for w in ("400", "500")]
     fontsource = config.REPO_ROOT / "frontend" / "node_modules" / "@fontsource"
     assets = config.FRONTEND_DIST / "assets"
     ttf = Path(__file__).with_name("fonts")
-    for family, pkg, w, style in faces:
-        name = f"{pkg}-latin-{w}-{style}"
+    for family, pkg, w, slant in FACES.get(style, FACES["thimble"]):
+        name = f"{pkg}-latin-{w}-{slant}"
         found = fontsource / pkg / "files" / f"{name}.woff2"
         if not found.is_file():
             found = next(iter(sorted(assets.glob(f"{name}-*.woff2"))), None) if assets.is_dir() else None
         fmt, mime = "woff2", "font/woff2"
         if found is None or not found.is_file():
             stem = {"400": "Regular", "500": "Medium"}.get(w)
-            found = ttf / f"{family.replace(' ', '')}-{stem}.ttf" if stem and style == "normal" else None
+            found = ttf / f"{family.replace(' ', '')}-{stem}.ttf" if stem and slant == "normal" else None
             fmt, mime = "truetype", "font/ttf"
         if found is None or not found.is_file():
             continue
         data = base64.b64encode(found.read_bytes()).decode("ascii")
-        rules.append(f"@font-face{{font-family:'{family}';font-style:{style};font-weight:{w};font-display:block;"
+        rules.append(f"@font-face{{font-family:'{family}';font-style:{slant};font-weight:{w};font-display:block;"
                      f"src:url(data:{mime};base64,{data}) format('{fmt}')}}")
     return "".join(rules)
 
@@ -248,6 +270,48 @@ figcaption{font-size:14px;color:var(--ink-500);margin-top:8px}
 .meta{font-size:13px;color:var(--ink-500);margin:-12px 0 28px}
 @media print{html,body{background:#fff}main{padding:0 0 24px}a{text-decoration:none}}
 """
+# Blog (blogpost-figure's): white, its inks, DM Sans at 17 px; the title under a 44 x 5 accent bar; links and citations
+# in the accent; the quoted records in Source Serif 4. A figure is 800 px wide at most, and the text stands in from its
+# edges by the share its padding takes (40 of 800 px), where the figure's own headline and chart start.
+BLOG_CSS = """
+:root{--paper-0:#fff;--white:#fff;--ink-900:#1f1f1e;--ink-700:#5a5a57;--ink-500:#8a8a86;--ink-rgb:31,31,30;
+--accent:#b86046;--font-body:'DM Sans','Helvetica Neue',Arial,sans-serif;--font-quote:'Source Serif 4',Georgia,serif}
+html{font-size:17px;line-height:1.55}
+main{max-width:848px}
+main>:not(figure){margin-left:5%;margin-right:5%}
+h1{font-size:34px;line-height:1.15;font-weight:700;letter-spacing:-.01em}
+h1::before{content:'';display:block;width:44px;height:5px;margin-bottom:18px;background:var(--accent)}
+h2{font-size:24px;line-height:1.25;font-weight:600;margin-top:40px}
+h3,h4{font-size:19px;line-height:1.35;font-weight:600}
+strong{font-weight:600}
+a,sup.cite a,sup.cite a:hover{color:var(--accent)}
+figure.fig-blog img{border-radius:0}
+.notes q{font-family:var(--font-quote);font-size:14px}
+"""
+# Paper (paper-figure's): white, Source Serif 4 at a paper's sizes, the title centered and the paragraphs justified; a
+# figure centered at its own size, its legend under it and its caption under both, as wide as the text.
+PAPER_CSS = """
+:root{--paper-0:#fff;--white:#fff;--ink-900:#1a1a1a;--ink-700:#3d3d3d;--ink-500:#5c5c5c;--ink-rgb:26,26,26;
+--font-body:'Source Serif 4','Times New Roman',Times,serif}
+html{font-size:16px;line-height:1.5}
+h1{font-size:26px;line-height:1.25;font-weight:600;letter-spacing:0;text-align:center;margin-bottom:28px}
+h2{font-size:19px;line-height:1.3;font-weight:600;margin-top:32px}
+h3,h4{font-size:16px;line-height:1.4;font-weight:600}
+strong{font-weight:600}
+p{text-align:justify;hyphens:auto}
+figure.fig-paper{margin:24px 0 28px;text-align:center}
+.fig-paper img{display:block;margin:0 auto;max-width:100%;border-radius:0}
+.fig-paper img.fig-legend{margin-top:6px}
+.fig-paper figcaption{margin-top:10px;text-align:left;font-size:14px;line-height:1.45;color:var(--ink-900)}
+.fig-n{margin-right:.15em}
+.fig-table{overflow-x:auto}
+.fig-table table{margin:0 auto;border-collapse:collapse;font-size:14px;border-top:1px solid var(--ink-900);
+border-bottom:1px solid var(--ink-900)}
+.fig-table th,.fig-table td{padding:3px 12px;text-align:left}
+.fig-table thead th{font-weight:600;border-bottom:1px solid var(--ink-900)}
+.notes{font-size:14px}
+"""
+STYLE_CSS = {"thimble": "", "blog": BLOG_CSS, "paper": PAPER_CSS}
 
 
 def _esc(s: Any) -> str:
@@ -289,19 +353,60 @@ def _para_html(p: dict[str, Any]) -> str:
     return f"<p>{' '.join(_sentence_html(s) for s in p['sentences'])}</p>"
 
 
-def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]]) -> str:
-    pic = pics.get(f["card"]) or {}
-    cap = (f'<figcaption>{inline_html(f["caption"])}{_cites_html(f["notes"])}</figcaption>' if f["caption"]
+def _pic_key(f: dict[str, Any], style: str) -> str:
+    """The picture a figure shows, by its card; by its caption too in Blog, whose headline the caption is."""
+    return f"{f['card']}\n{f['caption']}" if style == "blog" else f["card"]
+
+
+def _said(f: dict[str, Any], pic: dict[str, Any]) -> str:
+    """What a figure says in Blog and Paper: its caption, else its card's takeaway. A caption that only repeats the
+    card's question, which a figure written without one keeps, says nothing of its own."""
+    own = f["caption"] if _collapse(f["caption"]) != _collapse(pic.get("question")) else ""
+    return own or pic.get("takeaway") or ""
+
+
+def paper_caption(n: int, takeaway: str, question: str) -> str:
+    """A Paper figure's caption as HTML, `Figure N. Takeaway. Question` (frontend figures/figure captionParts): the
+    takeaway in bold, ending in one period or in its own question or exclamation mark."""
+    said = re.sub(r"[.\s]+$", "", takeaway or "")
+    if said and not re.search(r"[?!…]$", said):
+        said += "."
+    parts = [f'<span class="fig-n">Figure {n}.</span>']
+    if said:
+        parts.append(f"<strong>{inline_html(said)}</strong>")
+    if question:
+        parts.append(inline_html(question))
+    return " ".join(parts)
+
+
+def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]], style: str = "thimble",
+                 n: int | None = None) -> str:
+    """A figure in its style: thimble's the card's picture with the caption under it; Blog's the figure's picture,
+    headed by what the figure says (_said); Paper's, numbered `n`, the chart's picture with its legend's under it, or a
+    table card's table as text, and the caption (paper_caption). A figure without a picture is its card's table or
+    text, with its caption."""
+    pic = pics.get(_pic_key(f, style)) or {}
+    cites = _cites_html(f["notes"])
+    fid = _esc(f["card"])
+    if style == "blog" and pic.get("png"):
+        return f'<figure id="card-{fid}" class="fig-blog">{card_html(pic)}</figure>'
+    if style == "paper" and n is not None:
+        art = card_html(pic) if pic.get("png") or not pic.get("table") else f'<div class="fig-table">{pic["table"]}</div>'
+        legend = card_html(pic["legend"], cls="fig-legend") if pic.get("legend") else ""
+        cap = paper_caption(n, _said(f, pic), pic.get("question") or "")
+        return f'<figure id="card-{fid}" class="fig-paper">{art}{legend}<figcaption>{cap}{cites}</figcaption></figure>'
+    cap = (f'<figcaption>{inline_html(f["caption"])}{cites}</figcaption>' if f["caption"]
            else "")
-    return f'<figure id="card-{_esc(f["card"])}">{card_html(pic)}{cap}</figure>'
+    return f'<figure id="card-{fid}">{card_html(pic)}{cap}</figure>'
 
 
-def card_html(pic: dict[str, Any]) -> str:
+def card_html(pic: dict[str, Any], *, cls: str = "") -> str:
     """A card as the export shows it: its picture, else its table, else its title and text."""
     if pic.get("png"):
         w = pic.get("width")
         size = f' width="{int(w)}"' if w else ""
-        return f'<img alt="{_esc(pic.get("title"))}"{size} src="data:image/png;base64,{pic["png"]}">'
+        klass = f' class="{cls}"' if cls else ""
+        return f'<img{klass} alt="{_esc(pic.get("title"))}"{size} src="data:image/png;base64,{pic["png"]}">'
     body = pic.get("table") or (f"<pre>{_esc(pic['text'])}</pre>" if pic.get("text") else "")
     return f'<div class="card"><div class="card-title">{_esc(pic.get("title") or "Card")}</div>{body}</div>'
 
@@ -319,25 +424,39 @@ def _notes_html(m: dict[str, Any]) -> str:
     return f'<section class="notes"><h2>Sources</h2><ol>{"".join(items)}</ol></section>'
 
 
-def _unit_body(u: dict[str, Any], pics: dict[str, dict[str, Any]]) -> str:
-    """A section's paragraphs with each figure after the paragraph it follows, the rest at the end."""
-    placed: dict[Any, list[str]] = {}
-    tail: list[str] = []
+def _unit_body(u: dict[str, Any], pics: dict[str, dict[str, Any]], style: str = "thimble",
+               count: Iterator[int] | None = None) -> str:
+    """A section's figures that lead it, then its paragraphs with each figure after the paragraph it follows, the rest
+    at the end, as the page places them (frontend report/model blocksFromDoc). A Paper figure takes the next number of
+    `count` in that order, unless its card is gone."""
+    lead: list[dict[str, Any]] = []
+    placed: dict[Any, list[dict[str, Any]]] = {}
+    tail: list[dict[str, Any]] = []
     ids = {p["id"] for p in u["paragraphs"]}
     for f in u["figures"]:
-        (placed.setdefault(f["after"], []) if f["after"] in ids and f["after"] is not None else tail).append(_figure_html(f, pics))
-    out = []
+        if f.get("lead"):
+            lead.append(f)
+        else:
+            (placed.setdefault(f["after"], []) if f["after"] in ids and f["after"] is not None else tail).append(f)
+
+    def figure(f: dict[str, Any]) -> str:
+        numbered = style == "paper" and count is not None and not (pics.get(_pic_key(f, style)) or {}).get("gone")
+        return _figure_html(f, pics, style, next(count) if numbered else None)
+
+    out = [figure(f) for f in lead]
     for p in u["paragraphs"]:
         out.append(_para_html(p))
-        out += placed.get(p["id"], [])
-    return "".join(out + tail)
+        out += [figure(f) for f in placed.get(p["id"], [])]
+    return "".join(out + [figure(f) for f in tail])
 
 
-def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | None = None) -> str:
-    """The document as one self-contained HTML file."""
-    faces = font_faces() if faces is None else faces
+def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | None = None,
+            style: str = "thimble") -> str:
+    """The document as one self-contained HTML file, in figure style `style` (module note); a page in thimble's."""
     if m["page_html"] is not None:
-        return _page_html(m, faces)
+        return _page_html(m, font_faces() if faces is None else faces)
+    faces = font_faces(style) if faces is None else faces
+    count = itertools.count(1)
     parts = [f"<h1>{inline_html(m['title'])}</h1>"]
     if m["claims"]:
         parts.append("<ul>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in m["claims"]) + "</ul>")
@@ -345,9 +464,9 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
         if u["heading"]:
             lvl = min(4, max(2, u["level"]))
             parts.append(f"<h{lvl}>{inline_html(u['heading'])}</h{lvl}>")
-        parts.append(_unit_body(u, pics))
+        parts.append(_unit_body(u, pics, style, count))
     parts.append(_notes_html(m))
-    return _document(m["title"], faces, BASE_CSS, "<main>" + "".join(parts) + "</main>")
+    return _document(m["title"], faces, BASE_CSS + STYLE_CSS.get(style, ""), "<main>" + "".join(parts) + "</main>")
 
 
 def _document(title: str, faces: str, css: str, body: str) -> str:
@@ -382,30 +501,59 @@ def _card_text(cell: dict[str, Any]) -> tuple[str, str]:
     return "", text[:TEXT_CHARS] + ("…" if len(text) > TEXT_CHARS else "")
 
 
-async def card_pictures(c: str, cards: list[str], *, draw: bool) -> tuple[dict[str, dict[str, Any]], str]:
-    """Each card as the export shows it (card_html's input), and why cards are not pictures when they are not."""
-    from . import notebook, render  # noqa: PLC0415
+def _picture(r: Any, title: str) -> dict[str, Any] | None:
+    """A drawn card or figure as card_html shows it; None when it drew nothing."""
+    if not (r.ok and r.png) or r.empty:
+        return None
+    return {"title": title, "png": base64.b64encode(r.png).decode("ascii"), "width": r.box.get("width")}
+
+
+async def card_pictures(c: str, figures: list[dict[str, Any]], *, draw: bool,
+                        style: str = "thimble") -> tuple[dict[str, dict[str, Any]], str]:
+    """Each figure as the export shows it in figure style `style` (card_html's input), by _pic_key, and why figures are
+    not pictures when they are not. thimble's picture is the card as the canvas draws it (render_card); Blog's is the
+    card as a Blog figure headed by what the figure says (_said), and Paper's the chart alone with its legend as a
+    picture of its own (`legend`, none for a chart with none), both drawn by render_figure; a table card's Paper figure
+    is its table, set as text. A card with no picture is its table or its text; each keeps its question and takeaway
+    for a Paper caption."""
+    from . import material, notebook, render  # noqa: PLC0415
 
     out: dict[str, dict[str, Any]] = {}
     why = "" if draw else "the browser is off"
-    for cid in dict.fromkeys(cards):
-        cell = await asyncio.to_thread(notebook.get_cell, c, cid)
-        if cell is None:
-            out[cid] = {"title": f"card:{cid} (deleted)"}
+    cells: dict[str, dict[str, Any] | None] = {}
+    for f in figures:
+        key, cid = _pic_key(f, style), f["card"]
+        if key in out:
             continue
-        pic: dict[str, Any] = {"title": _collapse(cell.get("title")) or f"card:{cid}"}
-        if draw and not why:
+        if cid not in cells:
+            cells[cid] = await asyncio.to_thread(notebook.get_cell, c, cid)
+        cell = cells[cid]
+        if cell is None:
+            out[key] = {"title": f"card:{cid} (deleted)", "gone": True}
+            continue
+        title = _collapse(cell.get("title")) or f"card:{cid}"
+        pic: dict[str, Any] = {"title": title, "question": plain_text(str(cell.get("title") or "")),
+                               "takeaway": plain_text(str(cell.get("takeaway") or ""))}
+        if draw and not why and not (style == "paper" and material.figure_kind(cell) == "table"):
             try:
-                r = await render.render_card(c, cell)
+                if style == "blog":
+                    said = _said(f, pic)
+                    shown = {**cell, "takeaway": said}
+                    got = _picture(await render.render_figure(c, shown, style="blog"), said or title)
+                elif style == "paper":
+                    got = _picture(await render.render_figure(c, cell, style="paper"), title)
+                    if got:
+                        legend = await render.render_figure(c, cell, style="paper", part="legend", columns=2)
+                        got["legend"] = _picture(legend, "Legend")
+                else:
+                    got = _picture(await render.render_card(c, cell), title)
             except render.Unavailable as e:
                 why = str(e)
             else:
-                if r.ok and r.png:
-                    pic["png"] = base64.b64encode(r.png).decode("ascii")
-                    pic["width"] = r.box.get("width")
+                pic.update(got or {})
         if "png" not in pic:
             pic["table"], pic["text"] = _card_text(cell)
-        out[cid] = pic
+        out[key] = pic
     return out, why
 
 
@@ -461,18 +609,18 @@ async def _offline(route: Any) -> None:
         await route.fallback()
 
 
-async def fonts_loaded(page: Any) -> bool:
+async def fonts_loaded(page: Any, face: str = "Hanken Grotesk") -> bool:
     return bool(await page.evaluate(
-        "async () => { await document.fonts.ready; await document.fonts.load('16px \"Hanken Grotesk\"').catch(() => []);"
-        " return document.fonts.check('16px \"Hanken Grotesk\"') }"))
+        "async (face) => { const f = `16px \"${face}\"`; await document.fonts.ready;"
+        " await document.fonts.load(f).catch(() => []); return document.fonts.check(f) }", face))
 
 
-async def print_pdf(html_text: str) -> bytes:
-    """The HTML printed by the browser, on A4 pages."""
+async def print_pdf(html_text: str, face: str = "Hanken Grotesk") -> bytes:
+    """The HTML printed by the browser, on A4 pages, once its text's face (`face`) loaded."""
     async with browser_page(1280, 900) as page:
         await page.set_content(html_text, wait_until="load")
-        if not await fonts_loaded(page):
-            log.warning("pdf export: Hanken Grotesk did not load; the fallback face is printed")
+        if not await fonts_loaded(page, face):
+            log.warning("pdf export: %s did not load; the fallback face is printed", face)
         await page.emulate_media(media="print")
         return await page.pdf(print_background=True, prefer_css_page_size=True, format="A4",
                               margin={"top": "18mm", "bottom": "18mm", "left": "16mm", "right": "16mm"})
@@ -501,9 +649,18 @@ def _filename(title: str, slug: str, ext: str) -> str:
     return f"{base}.{ext}"
 
 
-async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, str]:
-    """(content, file name, mime) of the document in format `fmt`. HTTPException 404 for no document or no such format,
-    409 for a format that cannot run here, with the reason."""
+def figure_style(c: str, asked: str | None = None) -> str:
+    """The figure style an export is drawn in: the one asked for (the page's, report/ExportMenu.tsx), else the one the
+    analyst's browser last reported (render.theme); one the harness does not know reads as thimble's."""
+    from . import render  # noqa: PLC0415
+
+    return render.figures_of(asked) if asked else render.theme(c)["figures"]
+
+
+async def export(c: str, inv_id: str, slug: str, fmt: str, figures: str | None = None) -> tuple[bytes, str, str]:
+    """(content, file name, mime) of the document in format `fmt`, HTML and PDF in figure style `figures`
+    (figure_style). HTTPException 404 for no document or no such format, 409 for a format that cannot run here, with
+    the reason."""
     from . import report_types  # noqa: PLC0415
 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
@@ -515,18 +672,19 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
     if not f["ok"]:
         raise HTTPException(409, f["why"])
-    m = await asyncio.to_thread(read_model, c, doc)
+    style = "thimble" if fmt == "markdown" else await asyncio.to_thread(figure_style, c, figures)
+    m = await asyncio.to_thread(read_model, c, doc, cite_figures=style != "blog")
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
     if fmt == "markdown":
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
     kind, _why = browser()
-    cards = [x["card"] for u in m["units"] for x in u["figures"]]
-    pics, _ = await card_pictures(c, cards, draw=kind != "off")
-    html_text = await asyncio.to_thread(to_html, m, pics)
+    figs = [x for u in m["units"] for x in u["figures"]]
+    pics, _ = await card_pictures(c, figs, draw=kind != "off", style=style)
+    html_text = await asyncio.to_thread(to_html, m, pics, style=style)
     if fmt == "html":
         return html_text.encode("utf-8"), name("html"), FORMAT_INFO["html"]["mime"]
     try:
-        return await print_pdf(html_text), name("pdf"), FORMAT_INFO["pdf"]["mime"]
+        return await print_pdf(html_text, BODY_FACE[style]), name("pdf"), FORMAT_INFO["pdf"]["mime"]
     except RuntimeError as e:
         raise HTTPException(409, f"PDF needs a browser: {e}") from e
 
@@ -553,8 +711,8 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")
-async def export_route(c: str, inv_id: str, slug: str, fmt: str) -> Response:
+async def export_route(c: str, inv_id: str, slug: str, fmt: str, figures: str | None = None) -> Response:
     slug = _slug(c, inv_id, slug)
-    data, name, mime = await export(c, inv_id, slug, fmt)
+    data, name, mime = await export(c, inv_id, slug, fmt, figures)
     return Response(content=data, media_type=mime,
                     headers={"Content-Disposition": f'attachment; filename="{name}"', "X-Export-Name": name})

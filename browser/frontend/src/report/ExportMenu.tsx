@@ -1,6 +1,7 @@
 // Export: the formats the server offers for the document shown (GET …/exports), each saved as a file (GET
-// …/export/{fmt}). A format this machine cannot make (no browser for PDF) stays in the menu,
-// disabled, with the server's reason as its tip. A page's HTML is the page as it is shown, built here as before.
+// …/export/{fmt}) in the figure style the page shows (lib/theme FigureStyle). A format this machine cannot make (no
+// browser for PDF) stays in the menu, disabled, with the server's reason as its tip. A page's HTML is the page as it is
+// shown, built here as before.
 import { useState } from 'react'
 import { Menu, type MenuItem } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
@@ -9,7 +10,7 @@ import { apiBase } from '../lib/browserKey'
 import { frameFonts } from '../lib/frame'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import { getResolved } from '../lib/theme'
+import { getFigures, getResolved } from '../lib/theme'
 import { commentsApi } from './commentsApi'
 import { pageFile, pageTokens } from './pageFrame'
 
@@ -51,7 +52,7 @@ async function download(ws: string, slug: string, f: ExportFormat, page: boolean
     const { html, title } = await commentsApi.exportDoc(ws, slug)
     if (html) return save(new Blob([pageFile(html, title ?? '', getResolved(), pageTokens(), await frameFonts())], { type: 'text/html' }), `${ws}-${slug}.html`)
   }
-  const res = await fetch(`${base(ws, slug)}/export/${encodeURIComponent(f.id)}`)
+  const res = await fetch(`${base(ws, slug)}/export/${encodeURIComponent(f.id)}?figures=${getFigures()}`)
   if (!res.ok) await fail(res)
   save(await res.blob(), res.headers.get('x-export-name') || `${ws}-${slug}.${f.ext}`)
 }

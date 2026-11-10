@@ -72,4 +72,6 @@ test("a figure's body is the card's chart alone: a card of code shows no code, a
 test("a Paper figure's caption in a report: Figure N., the takeaway in plain words ending in one period, then the question", () => {
   expect(captionParts(3, 'Most runs end on [[day 2|card:c1]].', 'When do runs end?')).toEqual({ lead: 'Figure 3.', takeaway: 'Most runs end on day 2.', question: 'When do runs end?' })
   expect(captionParts(1, '', 'When do runs end?')).toEqual({ lead: 'Figure 1.', takeaway: '', question: 'When do runs end?' })
+  // a takeaway that ends in its own question mark takes no period after it
+  expect(captionParts(2, 'Do most runs end on day 2?', 'When do runs end?').takeaway).toBe('Do most runs end on day 2?')
 })

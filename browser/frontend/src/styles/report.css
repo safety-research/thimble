@@ -1611,6 +1611,176 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   padding: 8px;
 }
 
+/* -------- the page in a figure style (lib/theme FigureStyle, `data-figures`), for a document that leaves the
+   workbench, as its export draws it (backend exports.py). Blog (blogpost-figure's): the text in DM Sans, the title
+   under a 44 x 5 accent bar, links and citations in the accent, quoted records in Source Serif 4. Paper
+   (paper-figure's): the text in Source Serif 4 at a paper's sizes, the title centered, paragraphs justified. On Warm
+   and Neutral the page is white and its text near black; on Dark it keeps the paper and its inks, and a figure takes
+   the page's ground. Each figure is the style's figure (FigureBlock FigureInStyle). thimble, the default, sets nothing
+   here. -------- */
+:root[data-figures='blog'] .wu-page {
+  --font-prose: 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
+  --type-report-body: 400 17px / 1.55 var(--font-prose);
+  --type-report-h1: 700 34px / 1.15 var(--font-prose);
+  --type-report-h2: 600 24px / 1.25 var(--font-prose);
+  --tracking-report-h1: -0.01em;
+  --text-link: #b86046;
+  --cite-line: #b86046;
+  --cite-tint: rgba(184, 96, 70, 0.12);
+}
+:root[data-figures='blog']:not([data-paper='dark']) .wu-page {
+  --surface-card: #ffffff;
+  --text-primary: #1f1f1e;
+}
+/* on Dark, blogpost-figure's brighter terracotta, which reads on the paper */
+:root[data-figures='blog'][data-paper='dark'] .wu-page {
+  --text-link: #d97757;
+  --cite-line: #d97757;
+  --cite-tint: rgba(217, 119, 87, 0.22);
+}
+:root[data-figures='paper'] .wu-page {
+  --font-prose: 'Source Serif 4', 'Times New Roman', Times, serif;
+  --type-report-body: 400 16px / 1.5 var(--font-prose);
+  --type-report-h1: 600 26px / 1.25 var(--font-prose);
+  --type-report-h2: 600 19px / 1.3 var(--font-prose);
+  --tracking-report-h1: 0;
+}
+:root[data-figures='paper']:not([data-paper='dark']) .wu-page {
+  --surface-card: #ffffff;
+  --text-primary: #1a1a1a;
+}
+:root[data-figures='blog'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading']:is([data-level='3'], [data-level='4'], [data-level='5'], [data-level='6']) {
+  font: 600 19px / 1.35 var(--font-prose);
+}
+:root[data-figures='paper'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading']:is([data-level='3'], [data-level='4'], [data-level='5'], [data-level='6']) {
+  font: 600 16px / 1.4 var(--font-prose);
+}
+:root:is([data-figures='blog'], [data-figures='paper']) .wu-root .wu-editor :is(strong, b) {
+  font-weight: 600;
+}
+/* Blog's title under the accent bar, 18 px above its first line */
+:root[data-figures='blog'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading']:not([data-level]) {
+  --wu-first: 27px;
+  padding-top: 27px;
+  background: linear-gradient(#b86046, #b86046) 0 4px / 44px 5px no-repeat;
+}
+:root[data-figures='paper'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='heading']:not([data-level]) {
+  justify-content: center;
+  text-align: center;
+}
+:root[data-figures='paper'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='paragraph'] {
+  text-align: justify;
+  hyphens: auto;
+}
+/* a citation's glyph in Blog's text, in the accent */
+:root[data-figures='blog'] .wu-page .bn-inline-content {
+  --chip-evidence-edge: color-mix(in oklab, var(--text-link) 40%, transparent);
+  --chip-evidence-edge-hover: var(--text-link);
+  --chip-evidence-text: var(--text-link);
+  --chip-evidence-text-hover: var(--text-link);
+}
+/* a quoted record in a Blog figure (an example card), in Source Serif 4 */
+.wu-fig-blog .bcell-q-text {
+  font: 400 15px / 1.5 'Source Serif 4', Georgia, serif;
+}
+/* in a column narrower than its own 800 px, a Blog figure's headline and subtitle shrink with it, as its picture would
+   in a post, to 20 and 14 px at the least */
+.wu-fig-blog .figure-blog {
+  container-type: inline-size;
+}
+.wu-fig-blog .figure-blog .figure-title {
+  font-size: clamp(20px, 3.6cqi, 26px);
+}
+.wu-fig-blog .figure-blog .figure-sub {
+  font-size: clamp(14px, 2.2cqi, 16px);
+}
+/* a figure in a figure style is the style's own figure with no card around it: Blog's panel as wide as the column, at
+   most its own 800 px; Paper's chart and legend centered over the caption, as wide as the text. The block's actions
+   stand in the gutter beside it, as a paragraph's do, and so does its lock */
+:root[data-figures='blog'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'] {
+  width: 100%;
+  max-width: 800px;
+}
+:root[data-figures='paper'] .wu-root .wu-page-col .wu-editor .bn-editor .bn-block-content[data-content-type='figure'] {
+  width: 100%;
+  max-width: var(--w-card);
+}
+:root:is([data-figures='blog'], [data-figures='paper']) .wu-root .wu-editor .bn-block-outer.wu-locked > .bn-block > .react-renderer > .bn-block-content[data-content-type='figure']::after {
+  top: 5px;
+  left: calc(100% + var(--wu-acts-gap) + 2 * var(--h-control) + 5px);
+  right: auto;
+}
+.wu-fig.wu-fig-blog,
+.wu-fig.wu-fig-paper {
+  gap: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.wu-fig-paper .wu-fig-art {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.wu-fig-paper .figure-legend[data-empty] {
+  display: none;
+}
+/* Paper's table, centered in the text's width, in the text's face */
+.wu-fig-paper .wu-fig-art-table {
+  align-items: stretch;
+}
+.wu-root .wu-editor .bn-editor .wu-fig-paper .wu-fig-table table {
+  margin: 0 auto;
+}
+.wu-fig-paper .wu-fig-table :is(table, th, td) {
+  font-family: var(--font-prose);
+}
+/* Paper's caption, `Figure N. Takeaway. Question`, N the figure's place among the page's figures */
+:root[data-figures='paper'] .wu-root .wu-editor .bn-editor {
+  counter-reset: wu-figure;
+}
+.wu-fig-cap {
+  counter-increment: wu-figure;
+  margin: 10px 0 0;
+  font: 400 14px / 1.45 var(--font-prose);
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+.wu-fig-cap::before {
+  content: 'Figure ' counter(wu-figure) '.';
+  margin-right: 0.3em;
+}
+/* the caption, or Blog's headline, which a click edits in place in the same type */
+.wu-fig-said {
+  cursor: text;
+  outline: none;
+}
+.wu-fig-said:focus-visible {
+  border-radius: var(--radius-hl);
+  box-shadow: 0 0 0 2px var(--accent-wash);
+}
+.wu-fig-cap .wu-fig-said.refedit {
+  display: block;
+  margin-top: 2px;
+}
+/* on Dark a figure takes the page's ground and inks, which its charts are drawn in */
+:root[data-paper='dark'] .wu-fig-blog .figure-blog,
+:root[data-paper='dark'] .wu-fig-paper .figure-paper,
+:root[data-paper='dark'] .wu-fig-paper .figure-legend {
+  background: transparent;
+  color: var(--text-primary);
+}
+:root[data-paper='dark'] .wu-fig-blog .figure-title {
+  color: var(--text-primary);
+}
+:root[data-paper='dark'] .wu-fig-blog .figure-sub {
+  color: var(--text-tertiary);
+}
+
 /* -------- the figure picker: one Card row per card -------- */
 .wu-picker {
   display: flex;
