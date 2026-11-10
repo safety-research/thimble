@@ -123,6 +123,7 @@ SIBLING_SAMPLE = 200  # of a claimed folder's paths, those looked for in a folde
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
+SWEEP_STATES = 7  # the states whose time a state that tries every choice of the kit's controls takes beside its own
 # the view's pane: in a 1440×900 window beside the chat, as it opens and with the Labels pane open beside it, and in a
 # 1920×1080 window as it opens
 PANE_SIZE, PANE_NARROW, PANE_WIDE = (1048, 676), (798, 676), (1528, 856)
@@ -3393,8 +3394,8 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                     results = [{"ok": False, "errors": [launch_error.splitlines()[0][:400]]} for _ in states]
                 return
 
-    # a state that tries every choice of the kit's controls (`sweep`) takes the time of another two
-    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * (len(states) + 2 * sum(1 for s in states if s.get("sweep")))
+    # a state that tries every choice of the kit's controls (`sweep`) waits for its page after each of them
+    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * (len(states) + SWEEP_STATES * sum(1 for s in states if s.get("sweep")))
     talk = asyncio.ensure_future(converse())
     start = time.monotonic()
     timed_out = ""
@@ -3581,7 +3582,9 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
     Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
-    (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
+    (unlisted_derived). A view that passes these has every choice of its controls tried (shoot_choices) and is run on a
+    damaged copy of its files (robust_check), both at the same time; one that does not gets a note that these two are
+    left (CHECKS_LEFT). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
     checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
     or sampled line opens passes the rest. Returns {ok, view, index, checks, page, shots, coverage, unread, problems,
     notes}."""
@@ -3605,6 +3608,13 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
                               need_locators=need_locators)
     finally:
         _checking.reset(token)
+
+
+# the note of a report whose view did not pass the checks before the last two (_checked), with a page and without one
+CHECKS_LEFT = ("Two checks did not run yet: every choice of the view's controls, and the view with one file missing and "
+               "one line cut short. They run once the checks above pass.")
+CHECK_LEFT = ("One check did not run yet: the view with one file missing and one line cut short. It runs once the "
+              "checks above pass.")
 
 
 async def _checked(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]], of: int | None,
@@ -3723,20 +3733,45 @@ async def _checked(c: str, slug: str, view: dict[str, Any], files: list[tuple[st
     else:
         report["shots"], report["page"] = shots, _page_of(shots)
     problems, notes = label_problems(view, files, shots, switch=label_controls(view))
-    report["problems"] += problems + self_label_problems(shots) + choice_problems(shots)
+    report["problems"] += problems + self_label_problems(shots)
     report["notes"] += notes
-    page = report["page"]
-    if not report["problems"] and all(r["ok"] for r in report["checks"]) and (page.get("ok") or page.get("unavailable")):
-        overview = next((s for s in shots if s.get("state") == "overview"), {})
-        problems, notes = await robust_check(c, slug, view, files, overview.get("shown"))
-        report["problems"] += problems
-        report["notes"] += notes
     await _derived_check(c, view, shots, report)
     report["notes"] += layout_notes(shots)
     page = report["page"]
+    # the choices of the controls and the damaged copy take the longest, and what they find cannot count before the
+    # rest passes: they are tried once it does, both at the same time
+    if not report["problems"] and all(r["ok"] for r in report["checks"]) and (page.get("ok") or page.get("unavailable")):
+        overview = next((s for s in shots if s.get("state") == "overview"), {})
+        damaged = robust_check(c, slug, view, files, overview.get("shown"))
+        if page.get("unavailable"):
+            problems, notes = await damaged
+        else:
+            choices, (problems, notes) = await _together(shoot_choices(c, slug, files), damaged)
+            # without the browser by now, the choices go untried, as the damaged copy's page goes unloaded
+            if not choices.get("unavailable"):
+                report["shots"] = [*shots, choices]
+                report["page"] = page = _page_of(report["shots"])
+                report["problems"] += self_label_problems([choices]) + choice_problems([choices])
+        report["problems"] += problems
+        report["notes"] += notes
+    else:
+        report["notes"].append(CHECK_LEFT if page.get("unavailable") else CHECKS_LEFT)
     report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"])
                     and bool(page.get("ok") or page.get("unavailable")))
     return report
+
+
+async def _together(*work: Any) -> list[Any]:
+    """The results of the coroutines `work`, run at the same time, in their order. When one fails, or the caller is
+    cancelled, the others are cancelled, once each, and waited for, so that none goes on by itself and each cleans up."""
+    tasks = [asyncio.ensure_future(w) for w in work]
+    try:
+        return list(await asyncio.gather(*tasks))
+    finally:
+        for t in tasks:
+            if not t.cancelling():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any]], report: dict[str, Any]) -> None:
@@ -3752,7 +3787,7 @@ async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any
 # the states the checks load the page in: with the test label on, in the pane beside the Labels pane, the page as the
 # Views bar opens it, the same filtered to the test label, and the first place that resolved; then with no label, the
 # page as it opens in its pane and in the pane of a 1920 px window
-CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide", "choices")
+CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide")
 LABELLED_STATES = ("overview", "filtered", "detail")
 ANSWERS_KEPT = 2  # reader answers per state the checks keep, for unlisted_derived and the review
 
@@ -3770,12 +3805,11 @@ async def first_place(c: str, slug: str, checks: list[dict[str, Any]]) -> dict[s
 
 async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
                        checks: list[dict[str, Any]], base: Path, stem: str, *, picture: bool = False) -> list[dict[str, Any]]:
-    """The page loaded in CHECK_STATES: with the test label on, at PANE_NARROW, the overview, opened on its first claimed
-    file as the Views bar opens it, the same filtered to the test label, and the detail, the first place that resolved;
-    then with no label the overview at PANE_SIZE and at PANE_WIDE; then with the test label on, at PANE_SIZE, every
-    choice of the view kit's controls the page mounted tried in turn (`choices`, choice_problems), whose page is no state
-    the other checks read. Only with `picture` is anything pictured: the overview at PANE_SIZE, as the review's first
-    picture shows it. Each result carries its `state` name."""
+    """The page loaded in CHECK_STATES, in one headless run: with the test label on, at PANE_NARROW, the overview,
+    opened on its first claimed file as the Views bar opens it, the same filtered to the test label, and the detail, the
+    first place that resolved; then with no label the overview at PANE_SIZE and at PANE_WIDE. Only with `picture` is
+    anything pictured: the overview at PANE_SIZE, as the review's first picture shows it. Each result carries its
+    `state` name."""
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     detail = await first_place(c, slug, checks) or overview
     states = [{"out": None, "open": overview, "labels": probe_context(), "size": PANE_NARROW},
@@ -3783,17 +3817,18 @@ async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tupl
               {"out": None, "open": detail, "labels": probe_context(), "size": PANE_NARROW},
               {"out": base / f"{stem}-overview.png" if picture else None, "open": overview, "labels": NO_LABELS,
                "size": PANE_SIZE},
-              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE},
-              # every choice of the kit's controls the page mounted, in turn (choice_problems)
-              {"out": None, "open": overview, "labels": probe_context(), "size": PANE_SIZE, "sweep": True}]
+              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE}]
     shots = await shoot_states(c, slug, states, answers=ANSWERS_KEPT)
-    out = [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
-    # what the page shows after the last choice is no state of its own: the other checks read the states before it
-    for s in out:
-        if s["state"] == "choices":
-            for k in ("shown", "layout", "painted", "label_controls", "controls"):
-                s.pop(k, None)
-    return out
+    return [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
+
+
+async def shoot_choices(c: str, slug: str, files: list[tuple[str, int, int]]) -> dict[str, Any]:
+    """The `choices` state, in a headless run of its own: the overview with the test label on, at PANE_SIZE, in which
+    every choice of the view kit's controls the page mounted is tried in turn (view_shot.mjs `sweep`, choice_problems).
+    What its page shows after the last choice is no state the other checks read, so it reports none of their counts."""
+    overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
+    states = [{"out": None, "open": overview, "labels": probe_context(), "size": PANE_SIZE, "sweep": True}]
+    return {**(await shoot_states(c, slug, states))[0], "state": "choices"}
 
 
 CHOICE_ERRORS_NAMED = 3  # the choices with a script error a check names

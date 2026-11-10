@@ -7,6 +7,7 @@ accepts `board.jsonl#L<n>` (the post) and gives the unit `view:threads/<thread>`
 this process (the `inproc` fixture replaces views._runner with an exec of the same snippet the kernel gets)."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
@@ -191,6 +192,49 @@ async def test_a_builder_s_draft_check_of_a_view_over_many_files_reads_a_sample_
     read.clear()
     rep = await views.gate(CORPUS, "logs", [named])
     assert max(read) == 20 and rep["index"]["files"] == 20 and "of" not in rep["index"]
+
+
+async def test_a_check_tries_the_choices_and_a_damaged_copy_only_once_the_rest_passes_and_then_both_at_once(
+        ws, inproc, bound, monkeypatch):
+    """The choices of a view's controls and its run on a damaged copy took most of a check's time, and a check a
+    locator had failed paid for both, though neither could count before the locator opened: a check that fails loads
+    the page in its five states alone and notes the two checks that are left, and one that passes so far runs the
+    two at the same time."""
+    runs: list[tuple[list[dict], dict]] = []
+    both = asyncio.Event()
+
+    def last(states, kw) -> bool:
+        return any(s.get("sweep") for s in states) or kw.get("prepared") is not None
+
+    async def page(c, slug, states, **kw):
+        runs.append((states, kw))
+        if last(states, kw):
+            if sum(1 for r in runs if last(*r)) == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), 5)  # each of the two waits here until the other has begun
+        return [{"ok": True, "errors": [], "fetches": 0, **({"choices": []} if s.get("sweep") else {})} for s in states]
+
+    monkeypatch.setattr(views, "shoot_states", page)
+    failed = await views.gate(CORPUS, "threads", ["board.jsonl#L99"])
+    lines = views.gate_lines(failed)
+    assert not failed["ok"] and views.first_failure(failed).startswith("bad board.jsonl#L99")
+    assert [(len(states), last(states, kw)) for states, kw in runs] == [(len(views.CHECK_STATES), False)]
+    assert [ln for ln in lines if ln.startswith("page: ")] == [f"page: {state}, 0 records and 0 units shown"
+                                                               + (", 0 of the 0 the test label marks drawn marked"
+                                                                  if state in views.LABELLED_STATES else "")
+                                                               + (", 0 records shown that the filter drops"
+                                                                  if state == "filtered" else "")
+                                                               for state in views.CHECK_STATES]
+    assert lines.count("note: " + views.CHECKS_LEFT) == 1
+    runs.clear()
+    passed = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    lines = views.gate_lines(passed)
+    assert passed["ok"], lines
+    assert [(len(states), last(states, kw)) for states, kw in runs] == [(len(views.CHECK_STATES), False), (1, True), (1, True)]
+    assert sorted((any(s.get("sweep") for s in states), kw.get("prepared") is not None) for states, kw in runs[1:]) == [
+        (False, True), (True, False)]
+    assert [s["state"] for s in passed["shots"]] == [*views.CHECK_STATES, "choices"]
+    assert "page: choices, 0 records and 0 units shown" in lines and not any(views.CHECKS_LEFT in ln for ln in lines)
 
 
 def test_a_view_s_page_loads_in_a_frame_that_blocks_every_host_before_any_script(ws, tmp_path, monkeypatch):
