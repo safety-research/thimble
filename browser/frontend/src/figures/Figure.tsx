@@ -1,11 +1,11 @@
 // A card as a figure for a document that leaves the workbench, in a figure style (lib/theme FigureStyle): what the card
 // harness draws for an export or a report when its request names a figure (render.tsx, backend render.render_figure).
-// Blog: a white panel with an accent bar, the takeaway as its headline, the question as the gray subtitle and the chart
-// under them, none of the card's chrome. Paper: the chart alone at one column's size or two columns', with no title and
-// no legend; the legend as a figure of its own (part 'legend'), its swatches as the chart draws them, a line's dash and
-// marker included; a caption under the chart in a report (`caption`, the figure's number). thimble: the card face, as
-// the canvas draws it. The chart takes the figure style the page is in, which the harness sets for the request (the
-// pure parts are figures/figure.ts).
+// Blog: a white panel with an accent bar, the takeaway's first sentence as its headline, the question as the gray
+// subtitle (either one given instead when asked) and the chart under them, none of the card's chrome. Paper: the chart
+// alone at one column's size or two columns', with no title and no legend; the legend as a figure of its own (part
+// 'legend'), its swatches as the chart draws them, a line's dash and marker included; a caption under the chart in a
+// report (`caption`, the figure's number). thimble: the card face, as the canvas draws it. The chart takes the figure
+// style the page is in, which the harness sets for the request (the pure parts are figures/figure.ts).
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CardBody } from '../canvas/bodies'
 import { CardFace } from '../canvas/CardFace'
@@ -20,7 +20,7 @@ import type { FigureStyle } from '../lib/theme'
 import type { Cell } from '../lib/types'
 import { drawChart, type DrawnChart } from '../lib/vegaDraw'
 import { token } from '../lib/vizTheme'
-import { BLOG_FIGURE, captionParts, chartOf, figureCell, figureText, headline, paperSize, paperSpec } from './figure'
+import { BLOG_FIGURE, captionParts, chartOf, figureCell, figureText, paperSize, paperSpec, takeawayHeadline } from './figure'
 import './figure.css'
 
 export type FigurePart = 'figure' | 'legend'
@@ -38,12 +38,15 @@ export interface FigureProps {
   label: ConceptDetailState
   /** a Blog figure's width, px, BLOG_FIGURE's when not given: a report's column may be narrower */
   width?: number
-  /** a Blog figure's headline in place of the card's takeaway: a report's caption, or the field that edits it */
+  /** a Blog figure's headline in place of the takeaway's first sentence: a report's caption or the field that edits it,
+   * or an export's own */
   headline?: ReactNode
+  /** a Blog figure's subtitle in place of the card's question: an export's own */
+  subtitle?: ReactNode
 }
 
-export function Figure({ cell, style, part = 'figure', columns, caption, label, width, headline }: FigureProps) {
-  if (style === 'blog') return <BlogFigure cell={cell} label={label} width={width} title={headline} />
+export function Figure({ cell, style, part = 'figure', columns, caption, label, width, headline, subtitle }: FigureProps) {
+  if (style === 'blog') return <BlogFigure cell={cell} label={label} width={width} title={headline} subtitle={subtitle} />
   if (style === 'paper') return part === 'legend' ? <PaperLegend cell={cell} columns={columns} /> : <PaperFigure cell={cell} caption={caption} label={label} />
   return (
     <div className={`figure figure-thimble bcell bcell-kind-${kindOf(cell)}`} data-figure="thimble" style={{ position: 'relative', width: CARD_W }}>
@@ -52,16 +55,18 @@ export function Figure({ cell, style, part = 'figure', columns, caption, label, 
   )
 }
 
-/** Blog's figure (module note): the headline is `title` when given, else the takeaway, or the question when the card
- * has none; the chart takes the panel's width less its padding. */
-function BlogFigure({ cell, label, width = BLOG_FIGURE.width, title }: { cell: Cell; label: ConceptDetailState; width?: number; title?: ReactNode }) {
-  const takeaway = headline(cell.takeaway)
+/** Blog's figure (module note): the headline is `title` when given, else the takeaway's first sentence, or the question
+ * when the card has no takeaway; the subtitle is `subtitle` when given, else the question under any other headline. The
+ * chart takes the panel's width less its padding. */
+function BlogFigure({ cell, label, width = BLOG_FIGURE.width, title, subtitle }: { cell: Cell; label: ConceptDetailState; width?: number; title?: ReactNode; subtitle?: ReactNode }) {
+  const takeaway = takeawayHeadline(cell.takeaway)
   const question = figureText(cell.title)
   const shown = useMemo(() => figureCell(cell), [cell])
+  const sub = subtitle ?? ((title != null || takeaway) && question ? question : null)
   return (
     <div className="figure figure-blog" data-figure="blog" style={width !== BLOG_FIGURE.width ? { width } : undefined}>
       <h1 className="figure-title">{title ?? (takeaway || question)}</h1>
-      {(title != null || takeaway) && question ? <p className="figure-sub">{question}</p> : null}
+      {sub ? <p className="figure-sub">{sub}</p> : null}
       <div className="figure-chart">
         <CardBody cell={shown} width={width - 2 * BLOG_FIGURE.padX} label={label} />
       </div>

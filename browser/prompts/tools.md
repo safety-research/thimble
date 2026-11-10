@@ -377,14 +377,16 @@ Get a picture of what the analyst sees in the browser. It is slow. Use it only w
 
 ## export_card
 
-Write a card's figure as files into a folder of the corpus, in the figure style the analyst chose, as the card's Export menu saves them. Use it when the analyst asks for a card as a figure or as files.
+Write a card's figure as files into a folder of the corpus, in the figure style the analyst chose, as the card's Export menu saves them. Use it when the analyst asks for a card as a figure or as files. A Blog figure opens with a headline and a subtitle. Write the headline as one sentence that states the finding. In the subtitle, say what is measured and on what.
 
 ```json
 {
   "type": "object",
   "properties": {
     "card": {"type": "string", "description": "card:<id>"},
-    "folder": {"type": "string", "description": "The folder for the files, relative to the corpus folder. Default figures."}
+    "folder": {"type": "string", "description": "The folder for the files, relative to the corpus folder. Default figures."},
+    "title": {"type": "string", "description": "The headline of a Blog figure. Default the first sentence of the card's takeaway."},
+    "subtitle": {"type": "string", "description": "The subtitle of a Blog figure. Default the card's question."}
   },
   "required": ["card"]
 }

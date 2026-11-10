@@ -1,10 +1,11 @@
 // A card as a figure (figures/Figure.tsx), for a document that leaves the workbench: its parts that need no page. Pure.
 //
-// A Blog figure (blogpost-figure's) is a white panel FIGURE_W px wide: an accent bar, the card's takeaway as its headline
-// in plain text (figureText), the card's question under it as the gray subtitle, then the card's chart at the panel's
-// inner width. A Paper figure (paper-figure's) is the chart alone at one column's size or two columns' (paperSize),
-// with no title and no legend in it (paperSpec), and the legend as a figure of its own; in a report its caption goes
-// under it (captionParts).
+// A Blog figure (blogpost-figure's) is a white panel FIGURE_W px wide: an accent bar, the first sentence of the card's
+// takeaway as its headline in plain text (takeawayHeadline), the card's question under it as the gray subtitle, then
+// the card's chart at the panel's inner width; an export or a report may give the headline and the subtitle instead. A
+// Paper figure (paper-figure's) is the chart alone at one column's size or two columns' (paperSize), with no title and
+// no legend in it (paperSpec), and the legend as a figure of its own; in a report its caption goes under it
+// (captionParts).
 import { isVegaLite } from '../components/Outputs'
 import { plainInline } from '../report/diffModel'
 import type { Cell, MimeBundle } from '../lib/types'
@@ -28,6 +29,18 @@ const WIDE_DRAWING = 1.75
 const MARKUP = /\[\[([^[\]|]*)\|[^[\]]*\]\]|\[\[[^[\]]*\]\]/g
 // a space a bare ref left before punctuation, but not before a period that starts a word (".gov.uk")
 const BEFORE_PUNCT = /\s+([,;:!?)]|\.(?!\w))/g
+// a headline's period at its end, not an ellipsis's
+const END_PERIOD = /(?<!\.)\.$/
+// where a sentence may end: its stop (a period, a question or exclamation mark, an ellipsis) and any closing quotes or
+// brackets after it, then a space and the next word
+const SENTENCE_END = /[.!?…]+["'”’)\]]*(?=\s+(\S+))/gu
+// a word whose period ends no sentence, as in "e.g. Python", "14 vs. 7" or "Fig. 2"
+const ABBREVIATION = /(?:^|[\s(])(?:e\.g|i\.e|vs|cf|approx|ca|fig|figs|eq|eqs|no|nos|al|vol|pp?|dr|mrs?|prof|st|jr|sr|incl|resp|esp)\.$/i
+// a word in lowercase that may still start a sentence: a name from the data, which holds an underscore, a digit or a
+// capital (emergent_prs, run3)
+const LOWER_NAME = /^\p{Ll}\S*[_\d\p{Lu}]/u
+/** the words a first sentence has at the least: a shorter one ("Yes.") takes the next sentence with it */
+const SENTENCE_WORDS = 3
 
 /** A takeaway as a figure's headline writes it: each cited value its words, each bare ref gone, the markdown its words
  * (report/diffModel plainInline). Pure. */
@@ -35,10 +48,31 @@ export function figureText(text: string | null | undefined): string {
   return plainInline(String(text ?? '').replace(MARKUP, (_, value?: string) => value ?? '')).replace(BEFORE_PUNCT, '$1')
 }
 
-/** A takeaway as a Blog figure's headline writes it: its plain text (figureText) with no period at its end, as
+/** A text as a Blog figure's headline writes it: its plain text (figureText) with no period at its end, as
  * blogpost-figure's titles have none. Pure. */
 export function headline(text: string | null | undefined): string {
-  return figureText(text).replace(/(?<!\.)\.$/, '')
+  return figureText(text).replace(END_PERIOD, '')
+}
+
+/** The first sentence of a plain text, or all of it when it is one sentence. A sentence ends at a stop followed by a
+ * space and a word that does not start in lowercase, or does as a name from the data (LOWER_NAME); the period of a
+ * number (2.5) or of an abbreviation (e.g., vs.) ends none, and a sentence of fewer than SENTENCE_WORDS words goes on
+ * into the next. Pure. */
+export function firstSentence(text: string): string {
+  const s = text.trim()
+  for (const m of s.matchAll(SENTENCE_END)) {
+    const head = s.slice(0, (m.index ?? 0) + m[0].length)
+    const next = m[1] ?? ''
+    if (ABBREVIATION.test(head) || (/^\p{Ll}/u.test(next) && !LOWER_NAME.test(next))) continue
+    if ((head.match(/\S+/g) ?? []).length >= SENTENCE_WORDS) return head
+  }
+  return s
+}
+
+/** A card's takeaway as a Blog figure's headline when none is given for it: its first sentence (firstSentence) in plain
+ * words, with no period at its end, so the figure opens with one line of finding rather than the whole answer. Pure. */
+export function takeawayHeadline(takeaway: string | null | undefined): string {
+  return firstSentence(figureText(takeaway)).replace(END_PERIOD, '')
 }
 
 /** The Vega-Lite spec a card's chart draws from, and its bundle's mime; null for a card whose chart is none. */

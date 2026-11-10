@@ -22,7 +22,7 @@ import { chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primar
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { Figure as StyledFigure } from '../figures/Figure'
-import { BLOG_FIGURE, captionParts, headline } from '../figures/figure'
+import { BLOG_FIGURE, captionParts, headline, takeawayHeadline } from '../figures/figure'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
@@ -336,7 +336,7 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
   }
   // in a figure style a card that stands drawn is the style's figure, which says its caption, else the card's takeaway:
   // a caption that only repeats the card's question, which a figure written without one keeps, says nothing of its own
-  // (backend exports._said). A figure being made, still read or whose card is gone stays as the report draws it
+  // (backend exports._own). A figure being made, still read or whose card is gone stays as the report draws it
   if (figures !== 'thimble' && !pending && cell) {
     const said = take && readableText(take) !== readableText(cell.title ?? '') ? take : takeaway
     return (
@@ -428,8 +428,9 @@ interface FigureInStyleProps {
 }
 
 /** A figure in a figure style, as the export draws it (figures/Figure): Blog's panel at the column's width, at most its
- * own, with the caption as its headline in plain words and the question under it; Paper's chart with its legend under
- * it in two columns, as paper-figure's LaTeX places its legend file, or a table as wide as the text, then the caption
+ * own, with the caption as its headline in plain words and the question under it, or the first sentence of a caption
+ * that is the card's takeaway, as any Blog figure heads with its card's takeaway; Paper's chart with its legend under it
+ * in two columns, as paper-figure's LaTeX places its legend file, or a table as wide as the text, then the caption
  * `Figure N. Takeaway. Question`, its number the page's count of figures (report.css). A click on the headline or the
  * caption edits the caption in place, as on a figure in thimble's style. */
 function FigureInStyle({ ws, cell, style, width, label, caption, table, body, editing, onEdit, onDone }: FigureInStyleProps) {
@@ -454,7 +455,7 @@ function FigureInStyle({ ws, cell, style, width, label, caption, table, body, ed
     ) : (
       shown
     )
-  const said = headline(caption)
+  const said = readableText(caption) === readableText(cell.takeaway ?? '') ? takeawayHeadline(caption) : headline(caption)
   const parts = captionParts(0, caption, cell.title)
   return (
     <CanvasContext.Provider value={ctx}>

@@ -1,7 +1,7 @@
-// A card as a figure (src/figures/figure.ts, the pure parts of figures/Figure.tsx): the headline's plain text, a Paper
-// figure's size and chart, the body a figure draws and a report's caption. All data is made up.
+// A card as a figure (src/figures/figure.ts, the pure parts of figures/Figure.tsx): the headline's plain text and its
+// first sentence, a Paper figure's size and chart, the body a figure draws and a report's caption. All data is made up.
 import { expect, test } from 'vitest'
-import { BLOG_CHART_W, captionParts, chartOf, drawingSize, figureCell, figureText, headline, PAPER_ONE, PAPER_TWO, paperSize, paperSpec } from '../../src/figures/figure.ts'
+import { BLOG_CHART_W, captionParts, chartOf, drawingSize, figureCell, figureText, firstSentence, headline, PAPER_ONE, PAPER_TWO, paperSize, paperSpec, takeawayHeadline } from '../../src/figures/figure.ts'
 import type { Cell } from '../../src/lib/types.ts'
 
 const MIME = 'application/vnd.vegalite.v6.json'
@@ -23,6 +23,30 @@ test("a takeaway as a headline: each cited value its words, each bare ref gone, 
   expect(headline('Most runs end on day 2.')).toBe('Most runs end on day 2')
   expect(headline('Did the method help?')).toBe('Did the method help?')
   expect(headline('It goes on...')).toBe('It goes on...')
+})
+
+test("a Blog figure's headline is the takeaway's first sentence, which ends where a sentence ends and not before", () => {
+  // a period inside a number, or after an abbreviation followed by a capital or a number, ends no sentence
+  expect(firstSentence('Most PRs stayed open in every run: 156, 151, 139 and 148. The managed runs closed 35 and 25.')).toBe('Most PRs stayed open in every run: 156, 151, 139 and 148.')
+  expect(firstSentence('The ensemble scores 0.91 vs. 0.84, e.g. on GPT-style prompts, see Fig. 2. It costs less.')).toBe('The ensemble scores 0.91 vs. 0.84, e.g. on GPT-style prompts, see Fig. 2.')
+  expect(firstSentence('Runs merged 14 vs. 7 on approx. 30 PRs. The rest stayed open.')).toBe('Runs merged 14 vs. 7 on approx. 30 PRs.')
+  // a unit ends a sentence as any word does
+  expect(firstSentence('Median latency was 30 ms. The slowest run took 120 ms.')).toBe('Median latency was 30 ms.')
+  // a sentence may start with a name from the data in lowercase, but not with a plain word
+  expect(firstSentence('All four runs climbed fast, then slowed. emergent_prs climbed again later.')).toBe('All four runs climbed fast, then slowed.')
+  expect(firstSentence('Each run took 6 hrs. less than planned, and none failed.')).toBe('Each run took 6 hrs. less than planned, and none failed.')
+  // a question, and a stop inside quotes or brackets
+  expect(firstSentence('Did the manager help? Not much: 2 merges against 14.')).toBe('Did the manager help?')
+  expect(firstSentence('The agents wrote "done." Then they stopped.')).toBe('The agents wrote "done."')
+  expect(firstSentence('Run b merged most (14 PRs.) Run a merged 7.')).toBe('Run b merged most (14 PRs.)')
+  // a first sentence too short to state a finding goes on into the next; one sentence is all of it
+  expect(firstSentence('Yes. The managed runs merged more.')).toBe('Yes. The managed runs merged more.')
+  expect(firstSentence('  Most runs end on day 2.  ')).toBe('Most runs end on day 2.')
+  expect(firstSentence('')).toBe('')
+  // the headline: the first sentence in plain words, with no period at its end
+  expect(takeawayHeadline('The emergent_prs run merged the most PRs, [14](#). The others merged [7](#) and [[2|card:c1]].')).toBe('The emergent_prs run merged the most PRs, 14')
+  expect(takeawayHeadline('Did **the manager** help? Not much.')).toBe('Did the manager help?')
+  expect(takeawayHeadline(null)).toBe('')
 })
 
 test('a Paper figure takes one column, or two for a chart in panels, side by side with others, or of more than six categories across', () => {

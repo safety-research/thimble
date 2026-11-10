@@ -171,6 +171,34 @@ async def test_export_card_writes_every_file_of_the_reported_style_into_a_folder
     assert (data_tmp / CORPUS / "paper" / "fig" / f"{STEM}_legend_2col.pdf").read_bytes() == b"legend pdf 2"
 
 
+def test_export_cards_headline_and_subtitle_are_the_ones_given_else_none_so_the_figure_takes_its_own():
+    assert card_export.heads_of({"card": "card:c1"}) == {}
+    assert card_export.heads_of({"title": " Alpha leads on parse ", "subtitle": "Score by task, 2 models"}) == {
+        "title": "Alpha leads on parse", "subtitle": "Score by task, 2 models"}
+    # an empty word, or one that is not text, is not given
+    assert card_export.heads_of({"title": "   ", "subtitle": 3}) == {}
+
+
+async def test_export_card_heads_a_blog_figure_with_the_words_main_gives_else_the_takeaway_and_question(
+        cards, harness, data_tmp):
+    report("blog")
+    card = f"card:{cards['chart']}"
+    r = await tools.call(CORPUS, "export_card", {"card": card, "title": "Alpha leads on parse",
+                                                 "subtitle": "Score per task, two models"}, actor="analyst")
+    assert not r.is_error, r.text
+    figure = harness.requests[-1]["figure"]
+    assert (figure["title"], figure["subtitle"]) == ("Alpha leads on parse", "Score per task, two models")
+    # left out, the page heads the figure with the takeaway's first sentence and the question (frontend figures/Figure)
+    r = await tools.call(CORPUS, "export_card", {"card": card, "folder": "plain"}, actor="analyst")
+    assert not r.is_error, r.text
+    assert "title" not in harness.requests[-1]["figure"] and "subtitle" not in harness.requests[-1]["figure"]
+    assert harness.requests[-1]["card"]["takeaway"] == "alpha leads on parse."
+    # the menu's files take the figure's own
+    report("blog")
+    TestClient(app).get(f"/api/ws/{CORPUS}/cards/{cards['chart']}/figure/png")
+    assert harness.requests[-1]["figure"] == {"style": "blog", "part": "figure"}
+
+
 async def test_export_card_writes_only_inside_the_corpus_and_only_while_the_analyst_lets_claude_edit_it(
         cards, harness, data_tmp, tmp_path):
     report("blog")

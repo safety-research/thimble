@@ -358,11 +358,16 @@ def _pic_key(f: dict[str, Any], style: str) -> str:
     return f"{f['card']}\n{f['caption']}" if style == "blog" else f["card"]
 
 
+def _own(f: dict[str, Any], pic: dict[str, Any]) -> str:
+    """A figure's caption when it says something of its own: not one that only repeats the card's question, which a
+    figure written without one keeps, nor the card's takeaway word for word; else ''."""
+    said = _collapse(f["caption"])
+    return f["caption"] if said and said not in (_collapse(pic.get("question")), _collapse(pic.get("takeaway"))) else ""
+
+
 def _said(f: dict[str, Any], pic: dict[str, Any]) -> str:
-    """What a figure says in Blog and Paper: its caption, else its card's takeaway. A caption that only repeats the
-    card's question, which a figure written without one keeps, says nothing of its own."""
-    own = f["caption"] if _collapse(f["caption"]) != _collapse(pic.get("question")) else ""
-    return own or pic.get("takeaway") or ""
+    """What a figure says in Blog and Paper: its own caption (_own), else its card's takeaway."""
+    return _own(f, pic) or pic.get("takeaway") or ""
 
 
 def paper_caption(n: int, takeaway: str, question: str) -> str:
@@ -382,7 +387,7 @@ def paper_caption(n: int, takeaway: str, question: str) -> str:
 def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]], style: str = "thimble",
                  n: int | None = None) -> str:
     """A figure in its style: thimble's the card's picture with the caption under it; Blog's the figure's picture,
-    headed by what the figure says (_said); Paper's, numbered `n`, the chart's picture with its legend's under it, or a
+    headed as card_pictures drew it; Paper's, numbered `n`, the chart's picture with its legend's under it, or a
     table card's table as text, and the caption (paper_caption). A figure without a picture is its card's table or
     text, with its caption."""
     pic = pics.get(_pic_key(f, style)) or {}
@@ -512,10 +517,11 @@ async def card_pictures(c: str, figures: list[dict[str, Any]], *, draw: bool,
                         style: str = "thimble") -> tuple[dict[str, dict[str, Any]], str]:
     """Each figure as the export shows it in figure style `style` (card_html's input), by _pic_key, and why figures are
     not pictures when they are not. thimble's picture is the card as the canvas draws it (render_card); Blog's is the
-    card as a Blog figure headed by what the figure says (_said), and Paper's the chart alone with its legend as a
-    picture of its own (`legend`, none for a chart with none), both drawn by render_figure; a table card's Paper figure
-    is its table, set as text. A card with no picture is its table or its text; each keeps its question and takeaway
-    for a Paper caption."""
+    card as a Blog figure headed by the figure's own caption (_own), else by the first sentence of the card's takeaway,
+    as on the page (frontend report/FigureBlock FigureInStyle), and Paper's the chart alone with its legend as a picture
+    of its own (`legend`, none for a chart with none), both drawn by render_figure; a table card's Paper figure is its
+    table, set as text. A card with no picture is its table or its text; each keeps its question and takeaway for a
+    Paper caption."""
     from . import material, notebook, render  # noqa: PLC0415
 
     out: dict[str, dict[str, Any]] = {}
@@ -537,9 +543,8 @@ async def card_pictures(c: str, figures: list[dict[str, Any]], *, draw: bool,
         if draw and not why and not (style == "paper" and material.figure_kind(cell) == "table"):
             try:
                 if style == "blog":
-                    said = _said(f, pic)
-                    shown = {**cell, "takeaway": said}
-                    got = _picture(await render.render_figure(c, shown, style="blog"), said or title)
+                    drawn = await render.render_figure(c, cell, style="blog", title=_own(f, pic) or None)
+                    got = _picture(drawn, _said(f, pic) or title)
                 elif style == "paper":
                     got = _picture(await render.render_figure(c, cell, style="paper"), title)
                     if got:

@@ -629,14 +629,16 @@ async def render_card(c: str, cell: dict[str, Any], *, width: int | None = None,
 
 
 async def render_figure(c: str, cell: dict[str, Any], *, style: str | None = None, part: str = "figure",
-                        columns: int | None = None, caption: int | None = None, files: tuple[str, ...] = (),
+                        columns: int | None = None, caption: int | None = None, title: str | None = None,
+                        subtitle: str | None = None, files: tuple[str, ...] = (),
                         timeout_s: float = RENDER_TIMEOUT_S, still: bool = True) -> Rendered:
     """One card of workspace `c` drawn now as a figure (frontend figures/Figure.tsx), as render_card returns a card
     (Unavailable when the harness cannot run): `style` one of FIGURES, None for the one the analyst's browser last
     reported; `part` the chart ("figure") or a Paper figure's legend alone ("legend"), in `columns` columns, all in one
-    row when None; `caption` the figure's number in a report, for the caption under a Paper figure; `files` what of
-    FIGURE_FILES to make from the same drawing besides the PNG (Rendered.webp, pdf, svg). The picture is the figure's
-    own box. A style, part or file the harness does not know is a ValueError."""
+    row when None; `caption` the figure's number in a report, for the caption under a Paper figure; `title` and
+    `subtitle` a Blog figure's headline and subtitle, the takeaway's first sentence and the card's question when None;
+    `files` what of FIGURE_FILES to make from the same drawing besides the PNG (Rendered.webp, pdf, svg). The picture is
+    the figure's own box. A style, part or file the harness does not know is a ValueError."""
     if not enabled():
         raise Unavailable("THIMBLE_RENDER is off")
     if style is not None and style not in FIGURES:
@@ -650,6 +652,9 @@ async def render_figure(c: str, cell: dict[str, Any], *, style: str | None = Non
         figure["columns"] = int(columns)
     if caption is not None:
         figure["caption"] = int(caption)
+    for key, text in (("title", title), ("subtitle", subtitle)):
+        if text and str(text).strip():
+            figure[key] = str(text).strip()
     if files:
         figure["files"] = list(dict.fromkeys(files))
     req = await asyncio.to_thread(request_for, c, cell, figure=figure)

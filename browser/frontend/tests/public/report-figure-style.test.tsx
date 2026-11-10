@@ -3,9 +3,11 @@
 // always has; Blog's is the Blog figure, headed by the caption in plain words over the card's question; Paper's is the
 // chart with its caption `Figure N. Takeaway. Question` under it. A caption that only repeats the card's question, as a
 // figure written without one keeps, gives way to the card's takeaway, and opening its field and leaving it unchanged
-// saves nothing. All data is made up.
+// saves nothing. A Blog figure heads with the takeaway's first sentence (src/figures/Figure.tsx), or with the headline
+// and subtitle an export gives it. All data is made up.
 import { act } from 'react'
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
+import { Figure } from '../../src/figures/Figure.tsx'
 import { api } from '../../src/lib/api'
 import { setFigures, type FigureStyle } from '../../src/lib/theme'
 import type { Cell } from '../../src/lib/types'
@@ -87,4 +89,24 @@ test("a caption that only repeats the card's question gives way to its takeaway,
 
   const paper = await figure('paper', 'How many runs end early?')
   expect(paper.el.querySelector('figcaption.wu-fig-cap b')?.textContent).toBe('Most runs end on day 2.')
+})
+
+test("a Blog figure heads with the takeaway's first sentence, or the headline and subtitle given, and so does a caption that is the takeaway", async () => {
+  const long: Cell = { ...card, takeaway: 'Most runs end on [[day 2|card:c1]]. The rest end on day 3, e.g. run 7.' }
+  const label = { concept: null, error: null } as never
+  const drawn = await mount(<Figure cell={long} style="blog" label={label} />)
+  expect(drawn.querySelector('.figure-title')?.textContent).toBe('Most runs end on day 2')
+  expect(drawn.querySelector('.figure-sub')?.textContent).toBe('How many runs end early?')
+  // an export's own headline and subtitle (backend card_export export_card's title and subtitle)
+  const given = await mount(<Figure cell={long} style="blog" label={label} headline="Runs end early" subtitle="The day each run ended, 40 runs" />)
+  expect(given.querySelector('.figure-title')?.textContent).toBe('Runs end early')
+  expect(given.querySelector('.figure-sub')?.textContent).toBe('The day each run ended, 40 runs')
+
+  // in a report, a caption that says the card's takeaway word for word heads with its first sentence, as the card's
+  // takeaway does; a caption of its own heads whole
+  vi.spyOn(api, 'resolveRef').mockImplementation(async () => ({ kind: 'cell', record: { ...long } }) as never)
+  const same = await figure('blog', long.takeaway!)
+  expect(same.el.querySelector('.figure-title')?.textContent).toBe('Most runs end on day 2')
+  const own = await figure('blog', 'Early ends cluster in one topic. Day 3 has the rest.')
+  expect(own.el.querySelector('.figure-title')?.textContent).toBe('Early ends cluster in one topic. Day 3 has the rest')
 })
