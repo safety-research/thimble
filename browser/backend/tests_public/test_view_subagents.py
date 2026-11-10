@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, config, dev, session, subagents, tools, view_tools, views
+from app import agents, config, dev, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
@@ -195,3 +195,25 @@ async def test_discard_on_a_view_whose_build_failed_drops_the_view_and_its_propo
     with pytest.raises(HTTPException) as e:
         views.discard(CORPUS, slug)
     assert e.value.status_code == 404
+
+
+async def test_a_view_s_review_runs_at_medium_effort_on_a_dev_row_at_medium_or_above(board, bridge, monkeypatch):
+    """The reviewer takes the dev row's effort up to medium: medium on a row at medium, high, xhigh or max, and the
+    row's own on a row at low. Its definition and its start carry that effort. The builder and a code ticket's agent
+    keep the row's effort, and an effort a run's arguments name stands."""
+    real = config.models_for
+    runs_at = {"low": "low", "medium": "medium", "high": "medium", "xhigh": "medium", "max": "medium"}
+    assert tuple(runs_at) == config.ROLE_EFFORTS
+    for row, review in runs_at.items():
+        dev_row = {"model": "claude-opus-5-5", "effort": row, "fast": False}
+        monkeypatch.setattr(config, "models_for", lambda c=None, dev_row=dev_row: {**real(c), "dev": dict(dev_row)})
+        assert subagents.values_for(CORPUS, "view-reviewer") == {"model": "claude-opus-5-5", "effort": review}, row
+        assert subagents.roles(CORPUS)["view-reviewer"]["effort"] == review, row
+        assert subagents.values_for(CORPUS, "view-builder")["effort"] == row
+        assert subagents.values_for(CORPUS, "dev-ticket")["effort"] == row
+    assert subagents.values_for(CORPUS, "view-reviewer", {"effort": "high"})["effort"] == "high"
+    slug = _propose(asked=True)
+    _draft(slug)
+    assert (await view_review.begin(CORPUS, slug, route=subagents.CLICK)).started
+    [spawn] = bridge.ops("spawn")
+    assert spawn["role"] == "view-reviewer" and spawn["values"] == {"model": "claude-opus-5-5", "effort": "medium"}
