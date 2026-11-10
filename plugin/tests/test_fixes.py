@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from kernel import cli as CLI  # noqa: E402
 from kernel import fixes as FX  # noqa: E402
 from releases_server import Releases  # noqa: E402
 
@@ -346,6 +348,26 @@ def test_a_fix_may_not_change_the_way_back_and_its_record_names_the_safety_files
     # a fix that changes none of them has no notice
     d = made(world)
     assert "notice" not in FX.done(d["id"], "Bar says read", "") and FX.notice_said(FX.get(d["id"])) == ""
+
+
+def test_the_plugin_refuses_the_same_files_at_a_fixers_write_and_a_fixer_that_cannot_do_without_one_blocks_another_try(
+        world, monkeypatch):
+    # the list the plugin reads the fixer's writes against (fix/protected.mjs) is the kernel's: the same kinds in the
+    # same order with the same patterns, and no pattern needs more than the * that the plugin reads
+    text = (FX.PLUGIN / "fix" / "protected.mjs").read_text()
+    theirs = json.loads(re.search(r"^export const PROTECTED_KINDS = (\{.*?^\})", text, re.M | re.S).group(1))
+    assert list(theirs.items()) == [(kind, list(pats)) for kind, pats in FX.PROTECTED_KINDS.items()]
+    assert not [pat for pat in FX.PROTECTED if set(pat) & set("?[")]
+    # a fixer that was refused the write of such a file ends saying why it cannot be done: the plugin names the files
+    # after the fix's number, and the ones no fix may change block another try with no new words
+    r = made(world, edit=False)
+    monkeypatch.setattr(CLI, "stdin_text", lambda *a, **k: "the fix line is drawn by a file no fix may change")
+    assert CLI.main(["fix", "done", str(r["id"]), "plugin/fix/line.ts", "plugin/bar/bar.tsx", "--cannot", "-"]) == 0
+    r = FX.get(r["id"])
+    assert r["state"] == "failed" and r["error"] == "the fix line is drawn by a file no fix may change"
+    assert r["blocked"] == ["plugin/fix/line.ts"]
+    with pytest.raises(FX.FixError, match="needs a change to plugin/fix/line.ts, which no fix may make"):
+        FX.redo(r["id"])
 
 
 def test_a_change_whose_tests_fail_keeps_the_end_of_their_output_and_names_the_log_for_the_next_fixer(world, monkeypatch):

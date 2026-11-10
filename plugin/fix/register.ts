@@ -26,8 +26,8 @@
 //   the fixer's calls      its shell runs in the sandbox runtime (no site but the package registries, reads only the
 //                          system, its tools and the copy, writes only the copy), at most 5 minutes a command, with no
 //                          dialog unless the person's rules deny the command, and never publishes to the registries;
-//                          Write and Edit only in its copy; its other calls go through Claude Code's own permission
-//                          handling, in the person's mode (fixer.ts)
+//                          Write and Edit only in its copy, and never a file no fix may change; its other calls go
+//                          through Claude Code's own permission handling, in the person's mode (fixer.ts)
 //   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused

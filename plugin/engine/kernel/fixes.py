@@ -75,11 +75,13 @@ file and its command hooks, the launcher, thimble's scripts and lock files (a pa
 names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
 fix show does; a fix that thimble update --continue turns on again, with no key press, may change only those it changed
 before (continue_), and one that an update puts back on its own (carry) is the very change the person had on. A file
-moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
-prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
-refusal on the record (refused: why, the files, the end of the tests' output and the log that holds all of it) until
-the next check, and the plugin gives it back to a fixer in the same copy (again): the fixer puts the change elsewhere
-or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is the failure the person sees.
+moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's prompt does not list these
+files. The plugin has the same list (fix/protected.mjs, which a test holds equal to this one) and refuses the fixer's
+write of such a file when it makes it, so that the fixer learns it before its round ends; a change its shell makes is
+refused at its end. A check that refuses a change (these files, a binary file, failing tests) keeps the refusal on the
+record (refused: why, the files, the end of the tests' output and the log that holds all of it) until the next check,
+and the plugin gives it back to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the
+tests, or ends saying why it cannot be done (done with `cannot`), which is the failure the person sees.
 Another try at a failed fix (redo: y on its line, or /thimble-fix N alone) goes on in its copy while the copy holds
 work that no check took, such as the change Claude made there in the person's session, so that the check takes it;
 else it starts in a new copy cut from mine, with the earlier change to start from. The quick tests are the checks that
@@ -127,6 +129,7 @@ PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
 # the files a fix may not change, by what each one is: the way back, which turns fixes off and undoes them, and the scan
 # a shared fix goes through (fnmatch patterns over the repository's paths). The refusal names each file with what it is.
+# The plugin refuses the fixer's writes from the same list (fix/protected.mjs, whose patterns take * alone): change both.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
                      "plugin/prompts/fixer.md",
@@ -1891,7 +1894,7 @@ def _gitlinks(wt: Path, env: dict[str, str], base: str) -> list[str]:
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
          tests: bool = True, session: str | None = None, cannot: str | None = None,
-         within: float | None = None) -> dict[str, Any]:
+         within: float | None = None, without: list[str] | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the checks of the parts
     of thimble it changed in the sandbox (_checks, as carry runs them for the fixes an update set aside). ready, failed
     (with the reason), or a request with no code. A round of a fix changed in place (prev): a ready change becomes the
@@ -1899,6 +1902,7 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
     `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r.
+    `without`: with `cannot`, the files whose write the plugin refused that fixer (fix/fixer.ts fixerCall).
     The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
     most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
     tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
@@ -1914,8 +1918,10 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
-        # a fixer that cannot do without the files no fix may change: another try cannot do it either (blocked)
-        blocked = protected_of((rec.pop("refused", None) or {}).get("files") or [])
+        # a fixer that cannot do without the files no fix may change: another try cannot do it either (blocked). The
+        # check before refused them, or the plugin refused the fixer's write of them
+        refused = (rec.pop("refused", None) or {}).get("files") or []
+        blocked = protected_of(list(dict.fromkeys([*refused, *(without or [])])))
         rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
                    **({"blocked": blocked} if blocked else {}))
         return put(rec)
@@ -4822,7 +4828,9 @@ def cmd(a) -> int:
             out_json(again(a.id, a.session))
         elif verb == "done":
             if a.cannot == "-":
-                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done", within=a.within))
+                # the words after the fix's number: the files whose write the plugin refused the fixer
+                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done", within=a.within,
+                              without=ids[1:]))
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
                 out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session, within=a.within))
