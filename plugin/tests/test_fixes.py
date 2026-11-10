@@ -361,6 +361,43 @@ def test_a_change_whose_tests_fail_keeps_the_end_of_their_output_and_names_the_l
     assert FX.again(r["id"])["refused"]["log"] == str(log)
 
 
+def test_a_change_gets_each_check_that_can_see_its_files(monkeypatch):
+    monkeypatch.delenv("THIMBLE_FIX_TESTS", raising=False)
+    monkeypatch.setenv("THIMBLE_CLAUDE", "/bin/sh")  # Claude Code is installed
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: True)
+    monkeypatch.setattr(FX, "_borrow", lambda wt: {"frontend": ["/made-up/node_modules"], "backend": ["/made-up/.venv"]})
+    fewer = " ".join([FX.PYTESTS, *(f"--ignore=plugin/tests/{t}" for t in FX.FIX_TESTS)])
+    names = {FX.LAUNCHER_SMOKE: "launcher", FX.QUICK_TESTS: "hooks", fewer: "kernel without the fix flow's",
+             FX.PYTESTS: "kernel", FX.PAGE_CHECKS.format(base="c0ffee0"): "page", FX.SERVER_LOADS: "server",
+             FX.SERVER_PROMPTS: "server prompts"}
+
+    def checks(*paths: str) -> list[str]:
+        cmd = FX._checks(Path("/made-up/copy"), list(paths), "c0ffee0")[0]
+        for text, name in names.items():
+            cmd = cmd.replace(text, name)
+        return cmd.split(" && ")
+
+    # hooks code and a text the model reads: the tests of the fix flow and of the privacy scan cannot see them
+    assert checks("plugin/bar/bar.tsx", "plugin/tests/bar.test.ts") == ["launcher", "hooks", "kernel without the fix flow's"]
+    assert checks("plugin/prompts/guidance.md") == ["launcher", "hooks", "kernel without the fix flow's"]
+    # the kernel's Python files alone: no hooks test can see them, and the fix flow's tests import them
+    assert checks("plugin/engine/kernel/coverage.py", "plugin/tests/test_coverage.py") == ["launcher", "kernel"]
+    # Python outside the kernel, and the kernel with hooks code: the hooks tests run, after the kernel's
+    assert checks("plugin/hooks/temp_allow.py") == ["launcher", "kernel", "hooks"]
+    assert checks("plugin/engine/kernel/coverage.py", "plugin/bar/bar.tsx") == ["launcher", "kernel", "hooks"]
+    # what the fix flow's tests read or run, a settings file of their run, a file of the kernel's folder that is not
+    # Python (the hooks tests' runner takes a test file anywhere in the plugin), and a file in no part named here:
+    # every check runs
+    for seen in ("plugin/prompts/reapply.md", "plugin/sandbox/run.mjs", "plugin/.claude-plugin/plugin.json",
+                 "plugin/pytest.ini", "plugin/engine/kernel/extra.test.ts", "scripts/release-file.sh", "README.md"):
+        assert checks(seen) == ["launcher", "hooks", "kernel"], seen
+    # the workbench's page and its server
+    assert checks("browser/frontend/src/chat/Notice.tsx") == ["page"]
+    assert checks("browser/backend/app/labels.py", "browser/prompts/main.md") == ["server", "server prompts"]
+    assert checks("browser/README.md") == ["true"]
+    assert checks("plugin/engine/kernel/coverage.py", "browser/frontend/src/App.tsx") == ["launcher", "kernel", "page"]
+
+
 def as_github(w) -> Path:
     """The install as a GitHub one: Claude Code's own clone of the marketplace, at the installed commit. A release
     update is for GitHub installs; a clone install follows the person's checkout (test_dev_install_*)."""

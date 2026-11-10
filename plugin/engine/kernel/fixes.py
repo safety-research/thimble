@@ -82,11 +82,12 @@ the next check, and the plugin gives it back to a fixer in the same copy (again)
 or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is the failure the person sees.
 Another try at a failed fix (redo: y on its line, or /thimble-fix N alone) goes on in its copy while the copy holds
 work that no check took, such as the change Claude made there in the person's session, so that the check takes it;
-else it starts in a new copy cut from mine, with the earlier change to start from. The quick tests run with no
-network, for one fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix
-fails (_run_tests). They run in a process of their own (the runner), apart from the call that checks the fix, so that
-they may take longer than Claude Code lets a call run: the record stays working, with `testing`, until the runner
-writes what came of them, and done waits for that (_start_tests).
+else it starts in a new copy cut from mine, with the earlier change to start from. The quick tests are the checks that
+can see the files the fix changes (_checks). They run with no network, for one fix at a time, start the copy's launcher
+first, and a suite that fails runs once more before the fix fails (_run_tests). They run in a process of their own (the
+runner), apart from the call that checks the fix, so that they may take longer than Claude Code lets a call run: the
+record stays working, with `testing`, until the runner writes what came of them, and done waits for that
+(_start_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -1046,6 +1047,18 @@ def _has_pytest(py: str) -> bool:
 
 QUICK_TESTS = "claude plugin test plugin"
 PYTESTS = '"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider'
+# the kernel's Python files, which the hooks tests cannot see: their runner takes a test file anywhere in the plugin,
+# but no Python file; a hooks test reads no file and starts no process, and what it imports is the plugin's hooks code,
+# none of it one of these (tests/test_hooks_tests.py holds that)
+KERNEL_ONLY = ("plugin/engine/*.py", "plugin/tests/*.py", "plugin/conftest.py")
+# the kernel's test files of the fix flow and of the privacy scan, whose subjects no fix may change (PROTECTED), and
+# what else of the repository they import, read or run, or their run loads from the plugin (a Python file, a settings
+# file of pytest): all they can see of a change. A path outside the plugin and the browser workbench (thimble's
+# scripts) counts as seen
+FIX_TESTS = ("test_fix_copy_git.py", "test_fix_links.py", "test_fix_nested_git.py", "test_fix_pr.py",
+             "test_fix_share.py", "test_fix_zip.py", "test_fixes.py", "test_privacy.py")
+FIX_TESTS_SEE = ("plugin/engine/*", "plugin/*.py", "plugin/*.ini", "plugin/*.toml", "plugin/*.cfg",
+                 "plugin/.claude-plugin/*", "plugin/prompts/reapply.md", "plugin/sandbox/*")
 # the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
 # no traceback: the launcher, and the kernel run directly, since a launcher that answers --help itself would hide a dead
 # kernel. Each has SMOKE_LIMIT seconds, and then its processes are stopped (exit 124), so that one that hangs does not
@@ -1099,20 +1112,24 @@ def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
     the terminal plugin's (the copy's launcher and the kernel's command, LAUNCHER_SMOKE; the hooks tests when Claude
     Code is installed; the kernel's tests when this Python has pytest); browser/frontend/, the page's (PAGE_CHECKS);
     browser/backend/ and browser/prompts/, the server's (SERVER_LOADS, and SERVER_PROMPTS when its Python has pytest);
-    the rest of browser/, none. The page's and the server's run with the browser workbench's packages, which the copy
-    borrows (_borrow): with none (the workbench is not installed), they are left out. THIMBLE_FIX_TESTS, a shell
-    command, replaces them all."""
+    the rest of browser/, none. Of the terminal plugin's, a check that cannot see the change is left out: the hooks
+    tests, for a change to the kernel's Python files alone (KERNEL_ONLY), and the kernel's tests of the fix flow and of
+    the privacy scan, for a change to none of what they see (_kernel_tests). The kernel's tests, which stop at the
+    first that fails, go before the hooks tests when the change has Python files. The page's and the server's run with
+    the browser workbench's packages, which the copy borrows (_borrow): with none (the workbench is not installed),
+    they are left out. THIMBLE_FIX_TESTS, a shell command, replaces them all."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if cmd:
         return cmd, []
     parts: list[str] = []
     reads: list[str] = []
-    if any(not p.startswith("browser/") for p in paths):
+    mine = [p for p in paths if not p.startswith("browser/")]
+    if mine:
         parts.append(LAUNCHER_SMOKE)
-        if shutil.which(claude()):
-            parts.append(QUICK_TESTS)
-        if _has_pytest(_python()):
-            parts.append(PYTESTS)
+        kernel_only = all(any(fnmatch.fnmatch(p, pat) for pat in KERNEL_ONLY) for p in mine)
+        hooks = [QUICK_TESTS] if shutil.which(claude()) and not kernel_only else []
+        kernel = [_kernel_tests(mine)] if _has_pytest(_python()) else []
+        parts += [*kernel, *hooks] if any(p.endswith(".py") for p in mine) else [*hooks, *kernel]
     page = any(p.startswith("browser/frontend/") for p in paths)
     server = any(p.startswith(("browser/backend/", "browser/prompts/")) for p in paths)
     lent = _borrow(wt) if page or server else {}
@@ -1125,6 +1142,14 @@ def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
             parts.append(SERVER_PROMPTS)
         reads += lent["backend"]
     return " && ".join(parts) or "true", reads
+
+
+def _kernel_tests(paths: list[str]) -> str:
+    """The command of the kernel's tests for a change to `paths`, none of them in browser/: the whole suite, or the
+    suite without the test files of the fix flow and of the privacy scan (FIX_TESTS) when the change has no path that
+    those can see (FIX_TESTS_SEE)."""
+    seen = any(not p.startswith("plugin/") or any(fnmatch.fnmatch(p, pat) for pat in FIX_TESTS_SEE) for p in paths)
+    return PYTESTS if seen else " ".join([PYTESTS, *(f"--ignore=plugin/tests/{t}" for t in FIX_TESTS)])
 
 
 def _borrow(wt: Path) -> dict[str, list[str]]:
