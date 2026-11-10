@@ -1203,6 +1203,28 @@
     // a Reset that gave up its place in a narrow row has it again once it shows, and is fitted again once it hides
     if (b.classList.contains('thimble-reset-gone')) this.fit()
   }
+  // The least number of a row's last chips to hide for the row to fit, which "N more" then stands for: over() says
+  // whether the row is too wide as it stands. A row gets narrower with each chip it hides, so the number is found by
+  // halves, in a few layouts however many chips the row has. Gives the number and leaves the row that way.
+  function hideLast(chips, more, over) {
+    var shown = chips.length
+    var hide = function (hid) {
+      var from = chips.length - hid
+      for (var i = Math.min(from, shown); i < Math.max(from, shown); i++) chips[i].hidden = i >= from
+      shown = from
+      more.innerHTML = hid + ' more' + ico('down')
+    }
+    var lo = Math.min(1, chips.length)
+    var hi = chips.length
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1
+      hide(mid)
+      if (over()) lo = mid + 1
+      else hi = mid
+    }
+    if (shown !== chips.length - lo) hide(lo)
+    return lo
+  }
   // the chips that do not fit the row go behind "N more", which lists every value. Reset is laid out whether it shows
   // or not, so the box the chips fit in is one width in both states
   Control.prototype.fit = function () {
@@ -1229,13 +1251,7 @@
     this.hiddenFrom = chips.length
     if (!over()) return
     more.hidden = false
-    var hid = 0
-    for (var j = chips.length - 1; j >= 0 && over(); j--) {
-      chips[j].hidden = true
-      hid++
-      this.hiddenFrom = j
-      more.innerHTML = hid + ' more' + ico('down')
-    }
+    this.hiddenFrom = chips.length - hideLast(chips, more, over)
     // no chip fits and "N more" not even alone: the unseen Reset gives up its place, which changes no chip that shows
     if (over() && reset && reset.hidden) reset.classList.add('thimble-reset-gone')
   }
@@ -3919,6 +3935,7 @@
     strips: allStrips,
     tip: tip,
     untip: untip,
+    hideLast: hideLast,
     esc: esc,
     num: num,
     secs: secs,

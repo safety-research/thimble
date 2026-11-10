@@ -648,12 +648,7 @@
     more.hidden = true
     if (!over()) return
     more.hidden = false
-    var hid = 0
-    for (var j = chips.length - 1; j >= 0 && over(); j--) {
-      chips[j].hidden = true
-      hid++
-      more.innerHTML = hid + ' more' + ico('down')
-    }
+    shared.hideLast(chips, more, over)
   }
   Filter.prototype.keyAt = function (node) {
     var v = this.shown && this.shown[Number(node.getAttribute('data-i'))]
