@@ -2527,10 +2527,9 @@ PICK_ASK = "Number to resume (Enter to cancel): "
 # pick_session's answer for a new session, which alone moves the open one aside (open_session): a session picked that
 # holds no chat of main with a turn gets chat "new" too, and stays
 NEW_SESSION = {"archive": None, "chat": "new", "new": True}
-SET_ASIDE_LINE = "the last session here is set aside; thimble-browser --continue brings it back"
-# a new session whose open one was empty already, as the start after the one that set the last session aside leaves it
-EARLIER_LINE = ("this session is new; your latest session here, {ago} with {turns} and {cards}, is set aside: "
-                "thimble-browser --continue brings it back")
+# the last start line of a new session in a folder that has an earlier one, in the same words at each start, as Claude
+# Code's start screen lists a folder's recent sessions: the start is a new session and says how to resume the latest
+RESUME_LINE = "to resume your latest session ({when}, {turns}, {cards}) run: thimble-browser --continue"
 SET_ASIDE_FAILED_LINE =("the last session was not moved aside ({why}), so the page opens it with a new chat; "
                          "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
@@ -2548,6 +2547,28 @@ def _ago(at: float, now: float | None = None) -> str:
 
 def _counted(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def _when(at: float, now: float | None = None) -> str:
+    """A time as a local date and time: `Nov 8 14:32`, with its year when that is not this year's."""
+    t = time.localtime(at)
+    year = "" if t.tm_year == time.localtime(now).tm_year else f" {t.tm_year}"
+    return f"{time.strftime('%b', t)} {t.tm_mday}{year} {time.strftime('%H:%M', t)}"
+
+
+def resume_line(name: str) -> str | None:
+    """What a new session's start says last when workspace `name` has an earlier session: when the latest one was last
+    written, what it holds, and the command that resumes it (RESUME_LINE), the session `--continue` picks. None when
+    the folder has no earlier session, and when the latest is the open one, which open_session did not move aside and
+    said so."""
+    from . import folder_sessions  # noqa: PLC0415
+
+    rows = folder_sessions.listing(name)
+    if not rows or rows[0]["archive"] is None:
+        return None
+    r = rows[0]
+    return RESUME_LINE.format(when=_when(r["at"]), turns=_counted(r["turns"], "turn"),
+                              cards=_counted(r["cards"], "card"))
 
 
 def session_lines(rows: list[dict[str, Any]], width: int = 100, now: float | None = None) -> list[str]:
@@ -2612,9 +2633,8 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
 def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool:
     """Put the session pick_session chose in place in workspace `name`, then open its chat of main (the register
     route's `chat`). A new session (NEW_SESSION) moves the open one aside when it holds anything (`POST
-    /api/ws/{c}/archive`), and when the open one is empty already, says that the latest earlier one is set aside
-    (EARLIER_LINE); an earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going
-    there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
+    /api/ws/{c}/archive`), and the start's last line says how to resume it (resume_line); an earlier one comes back
+    from the archive (`POST /api/ws/{c}/restore`), the open one going there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
     says why, when the session was not brought back; a session that was not moved aside stays open, with a new chat and
     a line that says so."""
     from . import folder_sessions  # noqa: PLC0415
@@ -2630,15 +2650,9 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
         ws = Path(resolve_env()["workspaces_dir"]) / name
         if ws.is_dir() and folder_sessions.holds(folder_sessions.summary(ws)):
             answered, moved = archive_workspace(url, name)
-            if moved:
-                print(BROWSER_LINE.format(what=SET_ASIDE_LINE))
-            else:
+            if not moved:
                 why = "the server found no workspace to move" if answered else "the server did not move it"
                 print(BROWSER_LINE.format(what=SET_ASIDE_FAILED_LINE.format(why=why, log=log_path())))
-        elif earlier := folder_sessions.listing(name):
-            r = earlier[0]
-            print(BROWSER_LINE.format(what=EARLIER_LINE.format(ago=_ago(r["at"]), turns=_counted(r["turns"], "turn"),
-                                                               cards=_counted(r["cards"], "card"))))
     status, resp = _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True,
                                                                      "chat": chat})
     if status not in (200, 201):
@@ -2697,6 +2711,11 @@ def cmd_browser(args: argparse.Namespace) -> int:
     link = ui_url(name, pair=to_terminal())
     print(BROWSER_LINE.format(what=link), flush=True)
     print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)
+    if not opened and chosen.get("new"):
+        with server_dirs():
+            resume = resume_line(name)
+        if resume:
+            print(BROWSER_LINE.format(what=resume), flush=True)
     if not env["dev"] and not has_ui_build():
         print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):
