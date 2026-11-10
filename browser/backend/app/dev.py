@@ -44,9 +44,9 @@ its attempts (view_tools.py). Its end (build_ended, _settle) is the backstop: a 
 the gate once; a proposal the analyst did not ask for that still fails gets up to VIEW_REPAIRS new builders started with
 what failed, and then fails with Retry (_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's
 last builder as a message when it can still be reached in main's session, so it keeps its context, else to a new
-builder; a change that fails leaves the view as it was (views.end_revision). A pass starts the view's review
-(view_review.py). The Stop in a build's thread, or on its builder, ends the build failed with Retry
-(views.stop_build, _view_stopped).
+builder; a change that fails leaves the view as it was (views.end_revision). A first build that passes starts the
+view's review (view_review.py); a change that passes starts none once a review of the view has ended. The Stop in a
+build's thread, or on its builder, ends the build failed with Retry (views.stop_build, _view_stopped).
 
 Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
@@ -3358,13 +3358,16 @@ def gate_step(c: str, slug: str, report: dict[str, Any], chat: str | None = None
 
 def register_pass(c: str, slug: str, agent_id: str | None) -> dict[str, Any]:
     """A gate of record passed for the view `slug`: it is registered (views.mark_built, which keeps the copy readers
-    see), the change it carried is done, and main hears the `view` event. The view."""
+    see), the change it carried is done, and main hears the `view` event. The pass of a change to a view built before
+    says so in the proposal's `finish` (`revision`), which the builder's end reads (_settle). The view."""
     from . import views  # noqa: PLC0415
 
+    revision = bool((views.read_proposal(c, slug) or {}).get("revision"))
     view = views.mark_built(c, slug)
     views.update_proposal(c, slug, changed=None, change=None, revision=None, failed_change=None, last_report=None,
                           checks_failed=None, fed_back=None,
-                          finish={"agent": agent_id, "result": "pass", "version": view.get("version")})
+                          finish={"agent": agent_id, "result": "pass", "version": view.get("version"),
+                                  **({"revision": True} if revision else {})})
     views.drop_built_copy(c, slug)
     _view_cleared(c, slug)
     try:
@@ -3412,8 +3415,10 @@ async def _settled(c: str, slug: str, run: Any, status: str, report: str, why: s
 async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: str) -> None:
     """What a builder's end means for its view, the backstop of finish_view:
     - its next run began meanwhile: nothing here, since that run's end settles the view;
-    - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
-      pass is gated again (views.regate: a pass is the new version, a failure puts the version that passed back);
+    - it passed: done, its work folder lets go of its extracts, and a first build starts the review, which a change to
+      a view built before starts only while no review of the view has ended (view_review.after_built); a folder that
+      changed after the pass is gated again (views.regate: a pass is the new version, a failure puts the version that
+      passed back);
     - a change to the built view that left its files as they were built (a message the run answered, or a change it was
       stopped before it wrote): the view is as it was, with nothing to check;
     - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, the analyst's Stop with VIEW_STOPPED, and a
@@ -3445,7 +3450,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             gate_step(c, slug, regated, chat=run.chat)
         work_files.after_run(c, work, "done")
         log.info("the view %s/%s was built", c, slug)
-        view_review.after_built(c, slug)
+        view_review.after_built(c, slug, change=bool(finish.get("revision")))
         return
     if prop.get("revision") and views.unchanged_since_built(c, slug):
         views.end_revision(c, slug)
@@ -3470,7 +3475,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if rep.get("ok"):
             register_pass(c, slug, run.agent_id)
             work_files.after_run(c, work, "done")
-            view_review.after_built(c, slug)
+            view_review.after_built(c, slug, change=bool(prop.get("revision")))
             return
         lines = "\n".join(views.gate_lines(rep))
         prop = views.update_proposal(c, slug, last_report=views.kept_report(rep, ERROR_CHARS)) or prop

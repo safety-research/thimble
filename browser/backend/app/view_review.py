@@ -3,8 +3,10 @@
 and fixes clear problems in how it draws, with a fresh context. The view reaches the analyst at once and the review runs
 beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
 
-dev._settle calls after_built() when a build or a change to a view passes, and the review starts through thimble's
-plugin module as part of the start that asked for the build (a follow-on start); Review again is the analyst's click.
+dev._settle calls after_built() when a build or a change to a view passes. After a view's first build the review
+starts through thimble's plugin module as part of the start that asked for the build (a follow-on start). A change to a
+view built before starts none once a review of the view has ended; Review again is the analyst's click, after a build
+and after a change.
 The reviewer's registered prompt is the `review` section of prompts/view-review.md; its run's prompt names the view
 (prompts/dev-view-review.md, task). It works
 in rounds, through two thimble tools (view_tools.py):
@@ -26,7 +28,8 @@ The state rides on the proposal as `review {state, round, ts, revised, left, not
 and goes out with the `view` event, `shots` counting the pictures the review took. views/.reviewed/<slug>/ keeps the
 view as it was built for Undo until the next build or change passes, and <slug>.last the last version that passed,
 restored when a revision fails. A review run again keeps what the review before it revised, so Undo still reaches the
-view as it was built. A new change to the view stops its review; a view replaced or deleted stops it with no trace
+view as it was built. A new change to the view stops its review; once the change passes, that review keeps its state,
+without what it revised, so its mark still offers Review again. A view replaced or deleted stops it with no trace
 (forget)."""
 from __future__ import annotations
 
@@ -187,13 +190,17 @@ def task(c: str, prop: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- starting and stopping
 
 
-def after_built(c: str, slug: str) -> None:
-    """Start the review of a view that just passed its checks: a first build or a change, which is the new version Undo
-    goes back to. A reviewer of that view that runs goes on, since it drives its own rounds; one that is being stopped
-    is followed by a new review once it ends. A view thimble ships is never reviewed."""
+def after_built(c: str, slug: str, change: bool = False) -> None:
+    """A view just passed its checks, which is the new version Undo goes back to. A first build starts its review. A
+    `change` to a view built before starts none once a review of the view has ended, where its mark offers Review
+    again: that review keeps its state and its time, without what it revised, which is part of the changed view now. A
+    view whose review never ran to an end, with none on the proposal or one that still waits to start, gets it after a
+    change too. A reviewer of that view that runs goes on, since it drives its own rounds; one that is being stopped
+    is followed by a new review once it ends, after a first build alone. With the review off, either pass leaves no
+    review on the proposal. A view thimble ships is never reviewed."""
     run = subagents.current(c, key(slug))
     if run is not None:
-        if (c, run.agent_id) in _stopping:
+        if (c, run.agent_id) in _stopping and not change:
             _restart.add((c, slug))
         return
     view = views.read_view(c, slug)
@@ -205,7 +212,14 @@ def after_built(c: str, slug: str) -> None:
         if prop.get("review"):
             views.update_proposal(c, slug, review=None)
         return
-    start(c, slug)
+    review = review_of(prop)
+    if not change or review.get("state") not in ("done", "failed", "stopped"):
+        start(c, slug)
+        return
+    if review.get("revised"):  # written here and not with _set, which would stamp the time of a review that never ran
+        review["revised"] = []
+        views.update_proposal(c, slug, review=review)
+        views._emit(c, slug, str(prop.get("status") or "built"), review=public(review))
 
 
 def start(c: str, slug: str, again: bool = False, route: str = subagents.FOLLOW_ON) -> bool:
