@@ -22,7 +22,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              person's words as they typed them, never main's, and only in the turn of main's that reads
                              them or the next one (words_read, main_turn_ended), as in the terminal: a later call of
                              main's own starts no fix, nor does one after a rewind of main takes the words back
-                             (taken_back). A fix's number alone tries a fix that failed or no longer fits
+                             (taken_back). Words that main could name no other fix for start their fix at once, with
+                             no turn of main: the person has no fix that words can change, or wrote `new` or a fix's
+                             number before their words. A fix's number alone tries a fix that failed or no longer fits
                              again (tries_again), as its Try again does; anything else alone says how to ask (EMPTY)
     request(c, words, page)  a new fix (`fix new --made-in browser`) and its fixer
     change(c, fid, words)    more words for a fix the person has (fix_thimble's `N <words>`, or a message in the fix's
@@ -1125,31 +1127,38 @@ def tries_again(rec: dict[str, Any]) -> bool:
 
 
 async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
-    """The person's `/thimble-fix <words>` in main's chat: the message shows there as they typed it, and main reads the
-    request with their fixes beside it (prompts/thimble-fix.md), as the terminal's /thimble-fix gives Claude
+    """The person's `/thimble-fix <words>` in main's chat: the message shows there as they typed it. When a turn of
+    main's could name no other fix for the words, the fix starts now, with no turn of main, as Report a problem's does:
+    a new fix when the person has no fix that words can change or wrote `new` themselves, a round of fix N when they
+    wrote its number; main hears of it at the person's next message (start_fixer). Otherwise main reads the request
+    with their fixes beside it (prompts/thimble-fix.md), as the terminal's /thimble-fix gives Claude
     (plugin/prompts/fix-request.md). Main starts the fix with fix_thimble in the turn that reads it or the next one
     (words_read, main_turn_ended), which takes the words and the page as they were now. Posted as main's event, so words
     typed while main works wait for its turn's end. A fix's number alone tries a fix that failed or no longer fits again
-    (redo), as its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try
-    again."""
+    (redo), as its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a fix
+    that started here."""
     from . import agents, events, prompts  # noqa: PLC0415
 
     words = (words or "").strip()
     if not words:
         raise HTTPException(400, EMPTY)
+    if why := problem():
+        raise HTTPException(409, why)
+    recs = await asyncio.to_thread(records)
     head = head_of(words)
     if head is not None and not head[2]:
-        if why := problem():
-            raise HTTPException(409, why)
-        rec = next((r for r in await asyncio.to_thread(records) if head[0] is not None and int(r.get("id") or 0) == head[0]),
-                   None)
+        rec = next((r for r in recs if head[0] is not None and int(r.get("id") or 0) == head[0]), None)
         if rec is None or not tries_again(rec):
             raise HTTPException(400, EMPTY)
         return await redo(c, int(rec["id"]))
-    if why := problem():
-        raise HTTPException(409, why)
-    text = prompts.render(PROMPT, {"words": words, "fixes": fixes_context(await asyncio.to_thread(records))})
     said = f"{COMMAND} {words}"
+    own, target = form_of(words, recs)
+    if target is not None or (head is not None and head[1]) or not any(r.get("state") in changeable() for r in recs):
+        # the person's own `N …` or `new …` names the fix first (named_fix), and with no fix that words can change it
+        # is a new one: main's turn would name the same. Their message shows while the kernel makes the copy
+        agents.mirror(c, "user", by=agents.BROWSER, text=said)
+        return await (request(c, own, page) if target is None else change(c, target, own, page))
+    text = prompts.render(PROMPT, {"words": words, "fixes": fixes_context(recs)})
     eid = secrets.token_hex(4)
     # the words count main's turns from the turn that reads them (words_read): a turn that runs now, and the turns of
     # messages posted before them, are not theirs
@@ -1281,8 +1290,9 @@ async def status_route(every: bool = False) -> dict[str, Any]:
 
 @router.post("/ws/{c}/fixes", status_code=202)
 async def request_route(c: str, body: Asked, http: Request) -> dict[str, Any]:
-    """/thimble-fix in the chat: the person's words and what the page shows go to main, which decides whether they
-    follow up on a fix of theirs (ask). Words typed in fix N's own thread (`fix`) are a round of fix N."""
+    """/thimble-fix in the chat: the person's words and what the page shows start their fix, at once or through main,
+    which decides whether they follow up on a fix of theirs (ask). Words typed in fix N's own thread (`fix`) are a
+    round of fix N."""
     _clicked(http)
     config.workspace_dir(c)
     if body.fix is not None:
