@@ -152,6 +152,15 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
         {"ref": "board.jsonl#L4", "author": "ada", "body": "The build is 3316."}]
 
 
+async def test_a_record_s_own_line_counts_as_literal_text_of_the_record(ws):
+    line = (config.corpus_dir(CORPUS) / "board.jsonl").read_text().splitlines()[2]
+    source = views.source_text(CORPUS, "board.jsonl#L3")
+    assert views.missing_lines(line, source) == []  # the line as the file writes it, not only its decoded strings
+    assert views.missing_lines("Confirmed: 4127 tests pass.\n-- cy", source) == []
+    assert views.missing_lines("cy: 1 post", source) == ["cy: 1 post"]
+    assert views.missing_lines(line, views.source_text(CORPUS, "board.jsonl#L1-L2")) == [line]  # a line not cited
+
+
 @pytest.fixture()
 async def bound():
     """The test's loop is the one reader calls run on, as the server's is (views._lifespan)."""
@@ -191,6 +200,21 @@ async def test_a_builder_s_draft_check_of_a_view_over_many_files_reads_a_sample_
     read.clear()
     rep = await views.gate(CORPUS, "logs", [named])
     assert max(read) == 20 and rep["index"]["files"] == 20 and "of" not in rep["index"]
+
+
+async def test_an_excerpt_that_is_not_the_cited_lines_words_fails_with_the_lines_compared_and_what_to_do(
+        ws, inproc, bound, monkeypatch):
+    async def no_page(c, slug, states, **_kw):
+        return [{"ok": True, "errors": [], "fetches": 0} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    summary = THREADS_READER.replace('"excerpt": "\\n".join(b for _, _, _, b in posts)', '"excerpt": f"{len(posts)} posts"')
+    assert summary != THREADS_READER
+    views.write_view(CORPUS, "threads", reader=summary, html=THREADS_HTML, **VIEW)
+    out = await views.check_answer(CORPUS, "threads", ["view:threads/t1"], picture=False)
+    bad = next(ln for ln in out["lines"] if ln.startswith("bad view:threads/t1: "))
+    assert "the excerpt is not literal text of the records it cites: '3 posts'" in bad
+    assert "is not in board.jsonl#L1, board.jsonl#L3 or 1 more." in bad and "first in `refs`" in bad
 
 
 def test_a_view_s_page_loads_in_a_frame_that_blocks_every_host_before_any_script(ws, tmp_path, monkeypatch):

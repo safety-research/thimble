@@ -3497,8 +3497,8 @@ def _json_strings(path: str, mtime_ns: int, size: int) -> str:
 
 def source_text(c: str, file_ref: str) -> str | None:
     """Every string of the records a file ref cites, joined: what an excerpt's lines must appear in to count as literal
-    source. A .json document's decoded string values count too. '' when the ref does not resolve, None for a binary
-    file."""
+    source. The cited lines as the file writes them count too, so a record's own JSON line is its text, and so do a
+    .json document's decoded string values. '' when the ref does not resolve, None for a binary file."""
     try:
         res = refs.resolve_base(config.corpus_dir(c), file_ref)
     except refs.RefError:
@@ -3509,6 +3509,15 @@ def source_text(c: str, file_ref: str) -> str | None:
     parts: list[str] = []
     for r in res.get("records") or ([{"record": res.get("record")}] if res.get("record") is not None else []):
         _strings(r.get("record"), parts)
+    if res.get("kind") in ("record", "range", "block", "span"):
+        from . import corpus  # noqa: PLC0415
+
+        try:
+            path = config.safe_corpus_path(config.corpus_dir(c), str(res["path"]))
+            last = min(res.get("end_line", res["line"]), res["line"] + refs.RANGE_MAX_RECORDS - 1)
+            parts += [corpus.decode_line(raw) for raw in corpus.read_lines(path, res["line"], last)]
+        except (OSError, ValueError, KeyError):
+            pass
     if suffix == ".json":
         try:
             path = config.safe_corpus_path(config.corpus_dir(c), str(res["path"]))
@@ -3701,7 +3710,11 @@ async def _checked(c: str, slug: str, view: dict[str, Any], files: list[tuple[st
         else:
             gone = missing_lines(res["excerpt"], "\n".join(t for t in texts if t))
             if gone:
-                row["why"] = f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r}"
+                held = res["refs"][:CHECK_KEY_REFS]
+                among = ", ".join(held[:2]) + (f" or {len(held) - 2} more" if len(held) > 2 else "")
+                row["why"] = (f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r} is not in "
+                              f"{among}. Copy the words of those lines, or put the line the words come from first in "
+                              "`refs`. A count, a summary or an added mark goes in `label`")
                 return row
         if res["key"] and res["key"] not in keys and p["kind"] != "view":
             keys.append(res["key"])
