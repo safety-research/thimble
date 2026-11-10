@@ -152,6 +152,15 @@ async def test_a_reader_resolves_a_line_and_a_key_and_its_answer_is_kept(ws, inp
         {"ref": "board.jsonl#L4", "author": "ada", "body": "The build is 3316."}]
 
 
+async def test_a_record_s_own_line_counts_as_literal_text_of_the_record(ws):
+    line = (config.corpus_dir(CORPUS) / "board.jsonl").read_text().splitlines()[2]
+    source = views.source_text(CORPUS, "board.jsonl#L3")
+    assert views.missing_lines(line, source) == []  # the line as the file writes it, not only its decoded strings
+    assert views.missing_lines("Confirmed: 4127 tests pass.\n-- cy", source) == []
+    assert views.missing_lines("cy: 1 post", source) == ["cy: 1 post"]
+    assert views.missing_lines(line, views.source_text(CORPUS, "board.jsonl#L1-L2")) == [line]  # a line not cited
+
+
 @pytest.fixture()
 async def bound():
     """The test's loop is the one reader calls run on, as the server's is (views._lifespan)."""
