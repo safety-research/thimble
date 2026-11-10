@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import agents, config, dev, fixes, runtime, session
+from app import agents, config, dev, events, fixes, runtime, session
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
@@ -177,6 +177,83 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     assert any(r.get("kind") == "fix" and r.get("status") == "ready" for r in _log(CORPUS, chat["id"]))
 
 
+def _shown(c: str) -> list[tuple[str, str]]:
+    """What main's chat shows of a fix's start: the person's messages and each fixer's line."""
+    return [(r["type"], r.get("text") or r.get("chat")) for r in _log(c) if r["type"] in ("user", "agent")]
+
+
+async def test_words_that_no_fix_could_take_start_a_new_fix_at_once_with_no_turn_of_main(fixing, monkeypatch):
+    """/thimble-fix from a person with no fix that words can change: a turn of main's could only name a new fix, so the
+    fix starts from the request itself. Main's chat shows their message, then the fixer's line, and main hears of the
+    fix at their next message."""
+    client = api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
+    got = await fixes.ask(CORPUS, "count the rows", PAGE)
+    assert got == {"fix": {"id": 1, "title": "count the rows", "state": "working"}}
+    assert not fixes._waiting.get(CORPUS) and CORPUS not in fixes._asked, "no words wait for main's fix_thimble"
+    await _ended()
+    # the one request to the model is the fixer's, with the person's words and the page as they sent it
+    [body] = client.bodies
+    first = body["messages"][-1]["content"]
+    assert "count the rows" in first and "Incidents by week" in first
+    assert [c[0] for c in fixing.calls][:2] == ["list", "new"]
+    [chat] = _fixer_chats(CORPUS)
+    assert _shown(CORPUS) == [("user", "/thimble-fix count the rows"), ("agent", chat["id"])]
+    [note] = runtime.ensure(CORPUS).notes[runtime.MAIN]
+    assert "The person asked thimble's fixer for a change to thimble itself" in note
+    assert fixes.status()["fixes"][0]["kind"] == "ready"
+
+
+def _has_fix(fixing: Any) -> None:
+    """The person has fix 1, ready: a fix that more words can change."""
+    work = fixing.home / "fixes" / "work" / "1"
+    (work / "browser").mkdir(parents=True)
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "words": ["count the rows"], "state": "ready",
+                      "work": str(work), "base": "HEAD", "made_in": "browser", "updated": 1.0}
+
+
+async def test_words_that_a_fix_could_take_go_to_main_which_names_the_fix(fixing, monkeypatch):
+    """With a fix the words might follow up on, main decides, as before: its turn reads the words with the person's
+    fixes beside them, and its fix_thimble starts a round of the fix it names, in the person's words."""
+    _has_fix(fixing)
+
+    def then(body: dict[str, Any]) -> list[Any]:
+        # main's request after its call and the fixer's first one run side by side
+        mine = "their thimble (fix 1)" in json.dumps(body["messages"][-1])
+        return text("Title: Card counts rows\nWhat it does: It counts the empty rows too." if mine else "On it.")
+
+    client = api_key(monkeypatch, [call("fix_thimble", {"words": "1"}), then, then])
+    got = await fixes.ask(CORPUS, "count the empty rows too", PAGE)
+    assert list(got) == ["event"] and [c[0] for c in fixing.calls] == ["list"], "nothing starts before main's turn"
+    assert [a.words for a in fixes._waiting[CORPUS].values()] == ["count the empty rows too"]
+    await runtime._spaces[CORPUS].main.task
+    await _ended()
+    read = client.bodies[0]["messages"][-1]["content"]
+    assert "count the empty rows too" in read and '1  "Card counts rows" (ready)' in read
+    verbs = [c[0] for c in fixing.calls]
+    assert "round" in verbs and "new" not in verbs
+    assert fixing.recs[1]["words"] == ["count the rows", "count the empty rows too"]
+
+
+async def test_the_person_s_own_number_or_new_before_their_words_starts_the_fix_with_no_turn_of_main(fixing,
+                                                                                                    monkeypatch):
+    """`/thimble-fix 1 <words>` is a round of fix 1 and `/thimble-fix new <words>` a new fix, whatever main would name:
+    each starts from the request itself, with the words after its head."""
+    _has_fix(fixing)
+    end = text("Title: Card counts rows\nWhat it does: It counts the empty rows too.")
+    client = api_key(monkeypatch, [end, text("Title: Blue bar\nWhat it does: The bar is blue.")])
+    got = await fixes.ask(CORPUS, "1 count the empty rows too", PAGE)
+    assert (got["fix"]["id"], got["fix"]["round"]) == (1, True)
+    await _ended()
+    assert fixing.recs[1]["words"] == ["count the rows", "count the empty rows too"]
+    got = await fixes.ask(CORPUS, "new: make the bar blue", PAGE)
+    assert got["fix"]["id"] == 2 and fixing.recs[2]["words"] == ["make the bar blue"]
+    await _ended(2)
+    assert len(client.bodies) == 2 and not fixes._waiting.get(CORPUS), "the two fixers' requests, none of main's"
+    [one, two] = _fixer_chats(CORPUS)
+    assert _shown(CORPUS) == [("user", "/thimble-fix 1 count the empty rows too"), ("agent", one["id"]),
+                              ("user", "/thimble-fix new: make the bar blue"), ("agent", two["id"])]
+
+
 async def _started_again() -> None:
     """The server starts again (Use it now): its agents stop and the mirror keeps where each transcript stands
     (runtime.stop_all), what it held in memory goes, and the next server attaches main's session again."""
@@ -261,6 +338,40 @@ async def test_only_the_analyst_s_click_puts_a_fix_on_and_undo_takes_it_off(fixi
     assert fixes.status()["fixes"] == []
 
 
+async def test_use_it_now_waits_for_each_running_turn_and_the_fix_s_row_names_the_turn_it_waits_for(
+        fixing, monkeypatch, analyst):
+    """Use it now while main and a side thread work: the server starts again only once both turns ended, and until
+    then the fix's row names the turn the restart waits for, by its workspace and its chat's name in the thread list."""
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows."),
+                          text("Because of the deploy.")])
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    sp = runtime.ensure(CORPUS)
+    fork = next(c for c in sp.convs.values() if c.kind == "fork" and c.role != fixes.FIXER)
+    await fork.task
+    # a turn of main's and a turn of the thread's that run
+    main_ends, thread_ends = asyncio.Event(), asyncio.Event()
+    sp.main.task = asyncio.ensure_future(main_ends.wait())
+    fork.task = asyncio.ensure_future(thread_ends.wait())
+
+    def waits() -> Any:
+        [row] = fixes.status()["fixes"]
+        return row["phase"], row["waits"]
+
+    await fixes.apply_route(1, analyst)
+    await _until(lambda: waits() == ("restarting", {"workspace": CORPUS, "name": "main"}),
+                 "the row never named main's turn")
+    main_ends.set()
+    await _until(lambda: waits() == ("restarting", {"workspace": CORPUS, "name": "main/why"}),
+                 "the row never named the thread's turn")
+    assert fixing.restarts == [], "no restart while a turn runs"
+    thread_ends.set()
+    await _restarted(fixing, "the turns ended")
+    assert waits() == ("restarting", None)
+
+
 async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_and_use_it_starts_it_from_live(
         fixing, analyst):
     # a dev install (scripts/install.sh --local), whose launcher started this server from the clone (this checkout)
@@ -292,3 +403,33 @@ async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_an
 def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():
     end = fixes.end_of("It already is.\n\n```\nTitle: Bar word is bold\nRequest: The bar's word is bold already.\n```")
     assert end == {"title": "Bar word is bold", "summary": "The bar's word is bold already.", "request": True}
+
+
+def test_a_page_with_no_build_to_take_is_built_without_a_second_type_check(monkeypatch, tmp_path):
+    # live's page after the person's click, with no build of its sources to take (prepare): the checks of each fix ran
+    # the type check, so the person waits for the page's build alone
+    root = tmp_path / "browser"
+    fe = root / "frontend"
+    fe.mkdir(parents=True)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes, "page_tree", lambda fe: "")
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: f"/usr/bin/{name}")
+    ran: list[tuple[list[str], Any]] = []
+    ends = [subprocess.CompletedProcess([], 0, "built in 9s\n", "")]
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        ran.append(([str(a) for a in argv], kw.get("cwd")))
+        return ends[0]
+
+    monkeypatch.setattr(fixes.subprocess, "run", run)
+    assert fixes.prepare(root) == ""
+    assert ran == [([str(fe / "node_modules" / ".bin" / "vite"), "build"], fe)]
+    # a page that does not build: the row says what the build said failed, not the heading above it
+    ends[0] = subprocess.CompletedProcess([], 1, "transforming...\n", (
+        'x Build failed in 2s\nerror during build:\nsrc/App.tsx (3:9): "Gone" is not exported by "src/chat/fix.ts", '
+        'imported by "src/App.tsx".\n    at getRollupError (parseAst.js:317:41)\n'))
+    assert '"Gone" is not exported by "src/chat/fix.ts"' in fixes.prepare(root)
+    # no Node to run the build with: the row says so, and nothing ran
+    del ran[:]
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    assert "Node" in fixes.prepare(root) and not ran

@@ -2,10 +2,12 @@
 // thimble. The words go with a text copy of what the page shows now (pageText), so "this card" can name what is open.
 // As in the terminal, main reads the words with the person's fixes beside it and starts the fix with its fix_thimble
 // tool: a round of the fix the words follow up on, or a new fix, or first one short question; the fix takes the words
-// as the person typed them. The fixer works in the background in a thread of its own (`fixing <name>` in the tree), as
-// a side thread does: main's chat shows its line where main started it, with a spinner while the fix works (Rows), and
-// a row of main's chat and of the fix's thread says how it ended, at the time it ended (FixStrip), from GET /api/fixes
-// and the stream's `fix` events. A message in a fix's own thread changes that fix (a round of it, never a new fix).
+// as the person typed them. Words that main could name no other fix for start their fix at once, with no turn of main:
+// the person has no fix that words can change, or wrote `new` or a fix's number before their words. The fixer works in
+// the background in a thread of its own (`fixing <name>` in the tree), as a side thread does: main's chat shows its
+// line where the fix started, with a spinner while the fix works (Rows), and a row of main's chat and of the fix's
+// thread says how it ended, at the time it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. A
+// message in a fix's own thread changes that fix (a round of it, never a new fix).
 // `/thimble-fix` alone opens Your fixes; a fix's number alone tries a fix that did not pass again, as its Try again
 // does (the server's answer, else how to ask). A fix that did not pass offers Ask Claude, once: what it tried, and its
 // failure in main's composer (askClaudeText), with its change and the end of its tests' output, which main's sandbox
@@ -42,6 +44,8 @@ export interface FixRow {
   why?: string | null
   /** what this server does with it now; null once it ended */
   phase: 'fixing' | 'testing' | 'applying' | 'restarting' | null
+  /** the turn the server's restart waits for, while it does: its workspace and its chat's name (backend fixes.restart) */
+  waits?: { workspace: string; name: string } | null
   /** how it ended, until dismissed: ready (it asks the person), fixed (on), failed, request, undone, problem */
   kind: 'ready' | 'fixed' | 'failed' | 'request' | 'undone' | 'problem' | null
   said: string | null
@@ -71,10 +75,15 @@ export interface FixStatus {
 /** Whether the fix goes on now, after the person's click (or comes off after Undo): the server starts again. */
 export const reloading = (r: FixRow): boolean => r.phase === 'applying' || r.phase === 'restarting'
 
-/** What a fix's row says now. Pure. */
-export function fixText(r: FixRow): string {
-  if (reloading(r)) return 'Reloading thimble…'
-  return r.said || r.title
+export const RELOADING = 'Reloading thimble…'
+
+/** What a fix's row says now, on the page of workspace `ws`: while the server's restart waits for a turn to end, whose
+ * turn, with its workspace when that is another one. Pure. */
+export function fixText(r: FixRow, ws = ''): string {
+  if (!reloading(r)) return r.said || r.title
+  const w = r.waits
+  if (!w?.name) return RELOADING
+  return `Reloading thimble when ${w.name}${w.workspace && w.workspace !== ws ? ` in ${w.workspace}` : ''} finishes…`
 }
 
 export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo' | 'ask'

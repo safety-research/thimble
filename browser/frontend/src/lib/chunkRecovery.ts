@@ -96,22 +96,57 @@ export async function recoverStaleBuild(d: RecoverDeps): Promise<'reloaded' | 'p
 
 let loadedBuild: Promise<string | null> | null = null
 
-/** The build the server serves, or null (dev mode, no build, or no answer). */
-export async function servedBuild(): Promise<string | null> {
+/** What the server says of itself (GET /api/health): `boot` names its process, so it is another each time the server
+ * starts, and `ui` is the build it serves. Null is what it does not say, or no answer. */
+async function health(): Promise<{ boot: string | null; ui: string | null }> {
   try {
     const res = await fetch(apiUrl('/api/health'), { cache: 'no-store' })
-    if (!res.ok) return null
-    const body = (await res.json()) as { ui?: unknown }
-    return typeof body.ui === 'string' ? body.ui : null
+    if (!res.ok) return { boot: null, ui: null }
+    const body = (await res.json()) as { boot?: unknown; ui?: unknown }
+    return { boot: typeof body.boot === 'string' ? body.boot : null, ui: typeof body.ui === 'string' ? body.ui : null }
   } catch {
-    return null
+    return { boot: null, ui: null }
   }
+}
+
+/** The build the server serves, or null (dev mode, no build, or no answer). */
+export async function servedBuild(): Promise<string | null> {
+  return (await health()).ui
 }
 
 /** The build this tab loaded: the server's answer when the page first asked, kept for the page's life. */
 export function thisBuild(): Promise<string | null> {
   loadedBuild ??= servedBuild()
   return loadedBuild
+}
+
+/** How often a page that waits for the server to start again asks whether it has (whenRestarted). */
+export const RESTART_POLL_MS = 300
+
+/** Calls `then`, once, when the server has started again: it answers with another boot id than the one it had when the
+ * wait began. The page asks every RESTART_POLL_MS, so it does not wait for its stream to open again, which can take
+ * much longer (lib/sse). Returns the end of the wait. */
+export function whenRestarted(then: () => void): () => void {
+  let before: string | null = null
+  let timer: number | null = null
+  let ended = false
+  const ask = () => {
+    void health().then(({ boot }) => {
+      if (ended) return
+      if (boot && before && boot !== before) {
+        ended = true
+        then()
+        return
+      }
+      before ??= boot
+      timer = window.setTimeout(ask, RESTART_POLL_MS)
+    })
+  }
+  ask()
+  return () => {
+    ended = true
+    if (timer != null) window.clearTimeout(timer)
+  }
 }
 
 /** Whether text typed on the page (a chat draft, a comment, a field) would be lost by a reload. */
