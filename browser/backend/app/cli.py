@@ -2633,13 +2633,11 @@ def cmd_browser(args: argparse.Namespace) -> int:
                 return 1
     link = ui_url(name, pair=to_terminal())
     print(BROWSER_LINE.format(what=link), flush=True)
-    p = claude_access.problem_line()
-    print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")), flush=True)
+    print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)
     if not env["dev"] and not has_ui_build():
         print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):
         return 0
-    print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
     stop = watch_links(name, link)
     try:
         hold_until_quit()
