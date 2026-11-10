@@ -11,7 +11,8 @@
 //                                     or null
 //   shownName(alias)               -> the model's name as Claude Code shows it (`Haiku 5.5`), or the alias itself
 //   modelNamed(name)               -> the model by that name (`Haiku 5.5`: the setting Verifier model saves it so),
-//                                     or null
+//                                     or by its family's word for a name saved before the family moved on
+//                                     (`Fable 5.1`), or null
 //   dollars(alias, input, output)  -> the list price of `input` and `output` tokens, or null
 //   aboutDollars(x)                -> a rough price in words: 'about $4', 'about $0.30', 'under $0.01'
 //   firstParty(flags)              -> whether Claude Code reaches Claude through Anthropic's first-party API, which
@@ -24,7 +25,7 @@ const MODELS = {
   haiku: { name: 'Claude Haiku 5.5', id: 'claude-haiku-5-5', efforts: EFFORTS, input: 0.1, output: 0.5 },
   sonnet: { name: 'Claude Sonnet 5.5', id: 'claude-sonnet-5-5', efforts: EFFORTS, input: 2, output: 10 },
   opus: { name: 'Claude Opus 5.5', id: 'claude-opus-5-5', efforts: EFFORTS, input: 4, output: 20 },
-  fable: { name: 'Claude Fable 5.1', id: 'claude-fable-5-1', efforts: EFFORTS, input: 10, output: 50 },
+  fable: { name: 'Claude Fable 5.2', id: 'claude-fable-5-2', efforts: EFFORTS, input: 10, output: 50 },
 }
 
 export const ALIASES = Object.keys(MODELS)
@@ -43,7 +44,8 @@ export function shownName(alias) {
 }
 
 export function modelNamed(name) {
-  const a = ALIASES.find(x => shownName(x) === String(name ?? '').trim())
+  const n = String(name ?? '').trim()
+  const a = ALIASES.find(x => shownName(x) === n) ?? ALIASES.find(x => shownName(x).split(' ')[0] === n.split(' ')[0])
   return a ? modelOf(a) : null
 }
 

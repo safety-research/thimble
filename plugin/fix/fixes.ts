@@ -134,8 +134,8 @@ export const askedWords = (f: Pick<Fix, 'id' | 'words' | 'asked'>): string[] =>
   (f.words || []).map((w, i) => ownWords(f.asked?.[i] ?? '', n => n === f.id) || w)
 
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
- *  the tests' output when they failed. */
-export type Refusal = { why: string; files: string[]; tests?: string }
+ *  the tests' output when they failed, and the file that holds all of it (log). */
+export type Refusal = { why: string; files: string[]; tests?: string; log?: string }
 /** What the kernel did with the fixes an update set aside (engine/kernel/fixes.py carry, `thimble fix carry --json`,
  *  once after each update): the fixes that fit the new release (`to`: their change applies, and the release passes a
  *  fix's checks with them) on again, or kept off as the person had every fix (off); those it has already (had); those
@@ -371,7 +371,7 @@ export async function checkUpdate($: Engine): Promise<void> {
 }
 
 /** How long the kernel may take to check the fixes an update set aside: the quick tests of the release with their
- *  changes, once for them all, then once for each fix when they fail together, each run twice when it fails
+ *  changes, once for them all, then once for each fix when they fail together, the hooks tests twice when they fail
  *  (engine/kernel/fixes.py _carry_check). */
 const CARRY_MS = 1_800_000
 
@@ -394,8 +394,9 @@ export async function carryFixes($: Engine, list: FixList | null): Promise<void>
   if (c) await carriedLine($, c)
 }
 
-/** What carry did, in one line (`↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit 0.10.6`), and the load
- *  of the fixes it put back: at once, or at the end of Claude's turn while one runs (turn.complete runs reloadIfDue). */
+/** What carry did, in one line (`↑ thimble 0.10.6 · 2 fixes on again · 1 of your fixes is off: it does not fit 0.10.6
+ *  · in a shell: thimble reapply`, the command that brings it back), and the load of the fixes it put back: at once, or
+ *  at the end of Claude's turn while one runs (turn.complete runs reloadIfDue). */
 export async function carriedLine($: Engine, c: Carried): Promise<void> {
   const n = c.back.length
   const m = c.aside.length
@@ -404,7 +405,7 @@ export async function carriedLine($: Engine, c: Carried): Promise<void> {
       ...(n ? [`${n} fix${n === 1 ? '' : 'es'} ${c.off ? `kept, off as you had ${n === 1 ? 'it' : 'them'}` : 'on again'}`] : []),
       ...(c.had.length ? [`${c.had.length} already in it`] : []),
       ...(m && c.unchecked ? [`${m} off: thimble could not check ${m === 1 ? 'it' : 'them'} (${cut(c.unchecked, 100)})`] : []),
-      ...(m && !c.unchecked ? [`${m} off: ${m === 1 ? 'it does' : 'they do'} not fit ${c.to}`] : []),
+      ...(m && !c.unchecked ? [`${m} of your fixes ${m === 1 ? 'is off: it does' : 'are off: they do'} not fit ${c.to} · in a shell: thimble reapply`] : []),
       ...(c.browser === 'stale' ? ['restart thimble-browser'] : [])].join(' · ')
     await setFixLine($, { id: 0, kind: 'update', said, loads: !!c.reload })
   }

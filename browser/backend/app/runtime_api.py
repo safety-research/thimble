@@ -7,7 +7,8 @@ with what the analyst sent main while they ran (Conv.take_waiting), as Claude Co
 the next tool call; go on until the reply calls no tool. The conversation is kept in
 <workspace>/runtime/convs/<id>.api.json, so it goes on after a restart; a fork starts from a copy of main's, up to
 main's last finished turn. A stopped turn gives every call left without a result one that says so, so the conversation
-stays valid.
+stays valid. A request in fast mode (Spec.fast) that the API does not serve is sent again at standard speed, and the
+rest of its turn runs at standard speed, so an account without fast mode loses one request a turn and no turn.
 """
 from __future__ import annotations
 
@@ -174,6 +175,24 @@ async def _call(conv: Any, box: runtime_tools.Box, block: dict[str, Any]) -> tup
     return rec, msg
 
 
+async def _calls(conv: Any, box: runtime_tools.Box,
+                 blocks: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Run the tool calls of one message: what _call returns for each, in the calls' order. The calls run at the same
+    time, but a call that reads what the others may write (tools.Spec.in_order) runs alone, where the message wrote
+    it: a view's check after an edit of the view checks the edited files, as it does in a session of Claude Code,
+    which runs such calls one after another."""
+    from . import tools  # noqa: PLC0415
+
+    done: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    rest = list(blocks)
+    while rest:
+        # the calls up to the next one that runs in order, or that one alone
+        n = next((i for i, b in enumerate(rest) if tools.in_order(str(b["name"]))), len(rest)) or 1
+        done += await asyncio.gather(*(_call(conv, box, b) for b in rest[:n]))
+        rest = rest[n:]
+    return done
+
+
 def _said(conv: Any) -> list[dict[str, Any]]:
     """What the analyst sent main while its tool calls ran, as text blocks after their results (Conv.take_waiting); none
     for any other conversation."""
@@ -278,14 +297,27 @@ async def turn(conv: Any, text: str) -> Any:
         retries = 0
         while True:
             body = request(spec, messages)
+            fast = "speed" in body
             piece += 1
             key = f"{conv.id}:{len(messages)}:{piece}"
             try:
-                final = await _stream(client, body, lambda t, key=key: conv.live_text(key, t))
+                # a request in fast mode goes without the client's own retries, which wait as long as the API says
+                # before each one: when the API does not serve it, the turn goes on at standard speed at once (below)
+                final = await _stream(client.with_options(max_retries=0) if fast else client, body,
+                                      lambda t, key=key: conv.live_text(key, t))
             except Exception as e:  # noqa: BLE001 — a broken stream is sent again a few times
                 conv.live_text(key, None)
                 import anthropic  # noqa: PLC0415
 
+                if fast and isinstance(e, anthropic.APIError):
+                    # fast mode's own rate limit or capacity, an account without it, or any failure the client would
+                    # have retried: the request is sent again at standard speed, with the retries of any request. The
+                    # rest of the turn stays there, since the two speeds share no prompt cache; the next turn asks for
+                    # fast mode again.
+                    log.warning("%s: a request of %s in fast mode failed (%s); its turn goes on at standard speed",
+                                conv.c, conv.id, getattr(e, "status_code", None) or type(e).__name__)
+                    spec.fast = False
+                    continue
                 transient = isinstance(e, (anthropic.APIConnectionError, anthropic.InternalServerError)) or (
                     isinstance(e, anthropic.APIStatusError) and e.status_code in (429, 529))
                 if not transient or retries >= STREAM_RETRIES:
@@ -321,7 +353,7 @@ async def turn(conv: Any, text: str) -> Any:
                 messages.append({"role": "user", "content": [*cut, *_said(conv)]})
                 _save(path, messages)
                 continue
-            done = await asyncio.gather(*(_call(conv, box, b) for b in calls))
+            done = await _calls(conv, box, calls)
             conv.emit_results([r for r, _ in done])
             messages.append({"role": "user", "content": [*(m for _, m in done), *_said(conv)]})
             _save(path, messages)

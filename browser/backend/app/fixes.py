@@ -59,8 +59,8 @@ restart; the newest row of a fix shows its state now, with the clicks it takes.
 A dev install's launcher (scripts/install.sh --local) starts the server from the clone, while Use it now starts it from
 live, where the fixes are: on a server that runs from the clone, Your fixes shows a fix that is on as off, and says why,
 and its Use it starts the server from live again (not_here).
-THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file code tickets again,
-and Report a problem offers no fix (problem, which GET /fixes answers).
+THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file nothing and answer
+with the reason, and Report a problem offers no fix (problem, which GET /fixes answers).
 """
 from __future__ import annotations
 
@@ -100,6 +100,7 @@ EMPTY = "Ask for a change to thimble with /thimble-fix <what should work differe
 RESTART_BY_HAND = "restart thimble-browser to load it"
 RESTART_AFTER_S = 0.3  # restart starts the server again this long after it returns, so the answer its caller gives goes out
 BUSY_WAIT_S = 600.0  # how long a restart waits for main and the other agents to end their turns
+BUSY_POLL_S = 0.25  # how often it looks whether they have
 LINKS = (("backend", ".venv"), ("frontend", "node_modules"))  # what the install lends a copy and live's browser/
 PAGE_CHARS = 8000  # of the text copy of the page
 TRIED_CHARS = 6000  # of a fix's change in Ask Claude's message (tried_route)
@@ -129,6 +130,7 @@ _waiting: dict[str, dict[str, _Asking]] = {}
 _checks: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its chat, while the kernel checks the fix
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
+_waits: dict[int, dict[str, str]] = {}  # fix id → the turn its restart waits for, which its row names (restart)
 _recovered = False
 
 
@@ -407,6 +409,8 @@ def status(every: bool = False) -> dict[str, Any]:
         away = every and not_here(r, kind)
         rows.append({"id": fid, "title": r.get("title") or "", "state": "off" if away else r.get("state"),
                      "why": NOT_HERE if away else None, "phase": phase,
+                     # the turn the restart waits for, by its workspace and its chat's name (restart)
+                     "waits": _waits.get(fid) if phase == "restarting" else None,
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
@@ -438,24 +442,39 @@ words such as "this" or "this card" can name something in it. They can also name
 showed when they asked is below.
 
 Your working folder is the copy: {work}. Its browser/backend/.venv and browser/frontend/node_modules are links to the
-installed packages, so the browser's tests run there: `cd browser/frontend && npx vitest run FILE` for the page,
-`cd browser/backend && .venv/bin/python -m pytest tests_public/FILE` for the server.{earlier}
+installed packages, so the browser's tests run there.
+
+thimble checks your change after you end. For the page (browser/frontend), it runs the type check, the build and the
+unit tests of what you changed. For the server (browser/backend and browser/prompts), it checks that the server loads,
+and it runs the tests of the server's prompts. It does not run the server's other tests. For the plugin, it runs the
+plugin's tests. So run only a test that you added or changed, and the test file of a server module that you changed.
+`cd browser/frontend && npx vitest run FILE` runs a test file of the page.
+`cd browser/backend && .venv/bin/python -m pytest tests_public/FILE` runs a test file of the server.{earlier}
 
 <page>
 {page}
 </page>"""
 EARLIER = ("\n\nAn earlier change for this request, which did not pass, is in {patch}; start from it when it helps. "
            "It did not pass because {why}.")
+# more words for a fix that an update set aside: its old change is what the new copy starts from (the kernel's round,
+# a redo for it; plugin/fix/fixer.ts beforeText)
+SET_ASIDE = ("\n\nAn earlier change for this request, which thimble did not use, is in {patch}; start from it when it "
+             "helps.")
 # another try in the fix's copy, which held work no check took (the kernel's redo, same_copy; plugin/fix/fixer.ts
 # beforeText)
 KEPT = ("\n\nThe last try did not pass because {why}. Your copy holds the change of that try, and the changes that were "
         "made in the copy after it. Start from them.")
+# how the tests of the try before ended, so that the fixer of another try reads the failure and does not run the tests
+# again to see it (the kernel's refusal of a change whose tests failed; plugin/fix/fixer.ts refusedText)
+FAILED = "\n\nThe end of the output of the last try's tests:\n\n{tests}\n\n{log}Fix what fails."
+LOG = "Their whole output is in {path}. "
 
 
 def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
     """The fixer's first message: the registry's fixer text as the workbench reads it (prompts.py), the person's words
-    (each round), where it works, what the try before left it, for another try (`earlier`: the kernel's redo says
-    where, and the record why that try did not pass), and the page."""
+    (each round), where it works, what thimble checks after it ends (the kernel's `done`), so which tests it runs
+    itself, what the try before left it, for another try (`earlier`: the kernel's redo says where, and the record why
+    that try did not pass and how its tests ended), and the page."""
     from . import prompts  # noqa: PLC0415
 
     prompt = prompts.load(FIXER_TEXT).strip()
@@ -463,8 +482,14 @@ def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
     asked = "\n".join(f"Round {i + 1}: {w}" for i, w in enumerate(words)) if len(words) > 1 else (
         words[0] if words else rec.get("title", ""))
     why = str(rec.get("error") or "its checks failed").rstrip(".")
-    more = "" if not earlier else KEPT.format(why=why) if rec.get("same_copy") else EARLIER.format(
+    before = SET_ASIDE if rec.get("set_aside") else EARLIER
+    more = "" if not earlier else KEPT.format(why=why) if rec.get("same_copy") else before.format(
         patch=rec["earlier"], why=why) if rec.get("earlier") else ""
+    refused = rec.get("refused") or {}
+    if earlier and refused.get("tests"):
+        log = str(refused.get("log") or "")
+        more += FAILED.format(tests=tail_of(str(refused["tests"])),
+                              log=LOG.format(path=log) if log and Path(log).is_file() else "")
     return FIRST.format(prompt=prompt, id=rec["id"], asked=asked, work=rec.get("work"), earlier=more,
                         page=(page or "(nothing)").strip()[:PAGE_CHARS])
 
@@ -684,7 +709,8 @@ async def settle(fid: int, answer: str) -> None:
         # the checks build the page into the fix's temp folder, which its fixer writes too: what is there once they end
         # is their build (checks_page)
         await asyncio.to_thread(shutil.rmtree, checks_page(fid), True)
-        # the tests run for one fix at a time, and once more when they fail (the kernel's _run_tests)
+        # the checks run for one fix at a time, each as a command of its own, and one that can fail for its timing
+        # alone runs once more (the kernel's _run_tests)
         r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way
@@ -752,8 +778,8 @@ def runtime_task(coro: Any, name: str) -> None:
 
 async def restart(fid: int, said: str, kind: str, why: str) -> None:
     """The server starts again from live's browser/ (once main and the agents end their turns), and a row of the fix
-    says `said`. A fix that went on asks nothing more there, as the terminal's line goes once the fix is on: Your fixes
-    has its Undo."""
+    says `said`. While it waits for a turn, the fix's row names the turn (_waits). A fix that went on asks nothing more
+    there, as the terminal's line goes once the fix is on: Your fixes has its Undo."""
     from . import dev  # noqa: PLC0415
 
     if not dev.supervised():
@@ -764,23 +790,47 @@ async def restart(fid: int, said: str, kind: str, why: str) -> None:
     note(fid, kind, said, **({"dismissed": True} if kind == "fixed" else {}))
     _phase_set(fid, "restarting")
     t0 = time.monotonic()
-    while _busy() and time.monotonic() - t0 < BUSY_WAIT_S:
-        await asyncio.sleep(2)
+    named = None
+    while (conv := _busy()) is not None and time.monotonic() - t0 < BUSY_WAIT_S:
+        if conv is not named:
+            named = conv
+            _waits[fid] = _turn_of(conv)
+            _event(fid, "restarting")
+        await asyncio.sleep(BUSY_POLL_S)
+    if _waits.pop(fid, None):
+        _event(fid, "restarting")
     root = target_root()
     asyncio.get_running_loop().call_later(RESTART_AFTER_S, lambda: asyncio.ensure_future(
         dev._do_restart(why, cwd=root / "backend")))
 
 
-def _busy() -> bool:
-    """Whether main or another agent of this server is in a turn (the fixer whose end restarts it is not)."""
+def _busy() -> Any:
+    """The conversation of this server that is in a turn, main's or another agent's (the fixer whose end restarts it is
+    not), a workspace's main before its agents; None when none is."""
     from . import runtime  # noqa: PLC0415
 
     me = asyncio.current_task()
     with contextlib.suppress(Exception):
         for sp in runtime.spaces():
-            if sp.main.running or any(c.running and c.task is not me for c in sp.convs.values()):
-                return True
-    return False
+            for conv in (sp.main, *sp.convs.values()):
+                if conv.running and (conv is sp.main or conv.task is not me):
+                    return conv
+    return None
+
+
+def _turn_of(conv: Any) -> dict[str, str]:
+    """What names a conversation in a turn to the person: its workspace, and its chat as the thread list names it
+    (main, `main/<name>` for a thread and for a fix's chat, another agent's chat by its title)."""
+    from . import agents, session  # noqa: PLC0415
+
+    name = "main" if conv.kind == "main" else "an agent"
+    with contextlib.suppress(Exception):
+        chat = session.chat_of_agent(conv.c, conv.agent_id) if conv.kind != "main" else None
+        meta = agents.meta_or_none(conv.c, chat) if chat else None
+        if meta is not None:
+            under_main = meta.get("kind") == agents.KIND_THREAD or meta.get("role") == FIXER
+            name = agents.thread_name(meta) if under_main else str(meta.get("name") or meta.get("title") or name)
+    return {"workspace": conv.c, "name": name}
 
 
 # ------------------------------------------------------------------ where the server runs from
@@ -845,18 +895,22 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
         return ""
     if tree and not here and page_built(own) and page_tree(own) == tree and put_page(own / "dist", fe / "dist"):
         return ""
-    npm = shutil.which("npm")
-    if not npm:
-        return "the page was not built: npm is not on the PATH"
+    # the page's build alone, with the page's own vite: `npm run build` runs the type check first, which the checks of
+    # each fix ran (the kernel's done), and the person waits for this build after their click
+    if not shutil.which("node"):
+        return "the page was not built: Node is not on the PATH"
     try:
-        p = subprocess.run([npm, "--prefix", str(fe), "run", "build"], capture_output=True, text=True, timeout=900,
-                           env={**os.environ, "npm_config_update_notifier": "false"})
+        p = subprocess.run([str(fe / "node_modules" / ".bin" / "vite"), "build"], cwd=fe, capture_output=True,
+                           text=True, timeout=900)
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"the page was not built: {e}"
     if p.returncode != 0:
-        tail = [ln for ln in (p.stdout + "\n" + p.stderr).strip().splitlines() if ln.strip()]
-        err = next((ln for ln in tail if "error" in ln.lower()), tail[-1] if tail else "no message")
-        return f"the page did not build: {err.strip()[:300]}"
+        tail = [ln.strip() for ln in (p.stdout + "\n" + p.stderr).splitlines() if ln.strip()] or ["no message"]
+        at = next((i for i, ln in enumerate(tail) if "error" in ln.lower()), len(tail) - 1)
+        # vite's `error during build:` is a heading: the line after it says what failed
+        if tail[at].endswith(":") and at + 1 < len(tail):
+            at += 1
+        return f"the page did not build: {tail[at][:300]}"
     return ""
 
 
@@ -1073,6 +1127,8 @@ async def change(c: str, fid: int, words: str, page: str = "", *, said: str | No
     if _phase.get(fid) in ("testing", "applying", "restarting"):
         raise HTTPException(409, f"thimble is {'checking' if _phase[fid] == 'testing' else 'putting on'} this fix; "
                                  "say it again once its notice shows")
+    # a fix that an update set aside: the round starts in a new copy, and the fixer starts from the old change
+    aside = (await asyncio.to_thread(record, fid)).get("state") == "pending"
     rec = _json(await asyncio.to_thread(kernel, ["round", str(fid)], stdin=words, timeout=180), "round")
     conv = _fixers.get(fid)
     if conv is not None and conv.running:
@@ -1086,7 +1142,8 @@ async def change(c: str, fid: int, words: str, page: str = "", *, said: str | No
         conv.queue.append(round_text(rec, words))
         live = True
     else:
-        await start_fixer(c, rec, page, said=said, asked=words, announce=announce, tell=tell)
+        await start_fixer(c, {**rec, "set_aside": aside}, page, earlier=aside, said=said, asked=words,
+                          announce=announce, tell=tell)
         live = False
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state"), "round": True,
                     "change": bool(rec.get("prev")), "live": live}}
@@ -1106,8 +1163,10 @@ def fixes_context(recs: list[dict[str, Any]]) -> str:
 
     def word(r: dict[str, Any]) -> str:
         prev = r.get("prev") or {}
-        return f"on, being changed ({r.get('state')})" if prev.get("state") == "on" and r.get("state") != "on" else \
-            str(r.get("state"))
+        state = str(r.get("state"))
+        if prev.get("state") == "on" and state != "on":
+            return f"on, being changed ({state})"
+        return "off, set aside at an update" if state == "pending" else state
 
     lines = []
     for r in shown:
@@ -1320,7 +1379,8 @@ async def redo(c: str, fid: int) -> dict[str, Any]:
     before = await asyncio.to_thread(record, fid)
     rec = _json(await asyncio.to_thread(kernel, ["redo", str(fid)], timeout=180), "redo")
     dismiss(fid)
-    await start_fixer(c, {**rec, "error": before.get("error")}, earlier=True, announce=False)
+    await start_fixer(c, {**rec, "error": before.get("error"), "refused": before.get("refused")}, earlier=True,
+                      announce=False)
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state")}}
 
 
@@ -1330,6 +1390,16 @@ async def redo_route(c: str, fid: int, http: Request) -> dict[str, Any]:
     _clicked(http)
     config.workspace_dir(c)
     return await redo(c, fid)
+
+
+def tail_of(tests: str) -> str:
+    """The end of a fix's tests' output as the kernel keeps it (its _end: a line that names the check, then the end of
+    what the check printed), in about TAIL_CHARS: cut after that first line, which says which check failed."""
+    tests = tests.strip()
+    head, nl, rest = tests.partition("\n")
+    if len(tests) <= TAIL_CHARS or not nl or len(head) > TAIL_CHARS // 4:
+        return tests[-TAIL_CHARS:]
+    return f"{head}\n…{rest[len(head) - TAIL_CHARS:]}"
 
 
 def tried(fid: int) -> dict[str, str]:
@@ -1342,8 +1412,8 @@ def tried(fid: int) -> dict[str, str]:
         diff = diff[: diff.rfind("\n", 0, TRIED_CHARS) + 1 or TRIED_CHARS] + "…\n"
     tail = ""
     with contextlib.suppress(HTTPException):
-        tail = str(record(fid).get("tests_tail") or "").strip()
-    return {"diff": diff, "tests": tail[-TAIL_CHARS:]}
+        tail = str(record(fid).get("tests_tail") or "")
+    return {"diff": diff, "tests": tail_of(tail)}
 
 
 @router.get("/fixes/{fid}/tried")

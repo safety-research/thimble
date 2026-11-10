@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import agents, config, dev, fixes, runtime, session
+from app import agents, config, dev, events, fixes, runtime, session
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
@@ -191,6 +191,38 @@ async def _started_again() -> None:
     runtime.ensure(CORPUS)
 
 
+def _has_fix(fixing: Any) -> None:
+    """The person has fix 1, ready: a fix that more words can change."""
+    work = fixing.home / "fixes" / "work" / "1"
+    (work / "browser").mkdir(parents=True)
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "words": ["count the rows"], "state": "ready",
+                      "work": str(work), "base": "HEAD", "made_in": "browser", "updated": 1.0}
+
+
+async def test_more_words_for_a_fix_that_an_update_set_aside_start_its_fixer_from_the_old_change(fixing, monkeypatch):
+    """An update set fix 1 aside (pending). Main reads it as off, in the terminal's words, and a round of it starts a
+    fixer in the new copy that is told where the old change is, as the terminal's fixer is (plugin/fix/fixer.ts)."""
+    _has_fix(fixing)
+    patch = str(fixing.home / "fixes" / "tmp" / "1" / "earlier.patch")
+    fixing.recs[1].update(state="pending", earlier=patch)
+    assert fixes.fixes_context(list(fixing.recs.values())) == '1  "Card counts rows" (off, set aside at an update)'
+
+    client = api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts its rows.")])
+    await fixes.change(CORPUS, 1, "port it to the new release", "")
+    await _ended()
+    assert [c[0] for c in fixing.calls][:2] == ["show", "round"]
+    first = client.bodies[0]["messages"][-1]["content"]
+    assert (f"An earlier change for this request, which thimble did not use, is in {patch}; start from it when it "
+            "helps.") in first
+    assert "which did not pass" not in first and "The last try did not pass" not in first
+
+    # a round of a fix that no update set aside names no earlier change
+    client = api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: It counts the empty rows too.")])
+    await fixes.change(CORPUS, 1, "count the empty rows too", "")
+    await _ended()
+    assert "An earlier change for this request" not in client.bodies[0]["messages"][-1]["content"]
+
+
 async def test_a_fix_is_one_line_in_main_per_fixer_that_runs_until_its_checks_end_also_after_restarts(fixing,
                                                                                                      monkeypatch):
     """Main's chat shows each fixer once, as a side thread's line, whose chat runs while the fixer works and while the
@@ -261,6 +293,40 @@ async def test_only_the_analyst_s_click_puts_a_fix_on_and_undo_takes_it_off(fixi
     assert fixes.status()["fixes"] == []
 
 
+async def test_use_it_now_waits_for_each_running_turn_and_the_fix_s_row_names_the_turn_it_waits_for(
+        fixing, monkeypatch, analyst):
+    """Use it now while main and a side thread work: the server starts again only once both turns ended, and until
+    then the fix's row names the turn the restart waits for, by its workspace and its chat's name in the thread list."""
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows."),
+                          text("Because of the deploy.")])
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    sp = runtime.ensure(CORPUS)
+    fork = next(c for c in sp.convs.values() if c.kind == "fork" and c.role != fixes.FIXER)
+    await fork.task
+    # a turn of main's and a turn of the thread's that run
+    main_ends, thread_ends = asyncio.Event(), asyncio.Event()
+    sp.main.task = asyncio.ensure_future(main_ends.wait())
+    fork.task = asyncio.ensure_future(thread_ends.wait())
+
+    def waits() -> Any:
+        [row] = fixes.status()["fixes"]
+        return row["phase"], row["waits"]
+
+    await fixes.apply_route(1, analyst)
+    await _until(lambda: waits() == ("restarting", {"workspace": CORPUS, "name": "main"}),
+                 "the row never named main's turn")
+    main_ends.set()
+    await _until(lambda: waits() == ("restarting", {"workspace": CORPUS, "name": "main/why"}),
+                 "the row never named the thread's turn")
+    assert fixing.restarts == [], "no restart while a turn runs"
+    thread_ends.set()
+    await _restarted(fixing, "the turns ended")
+    assert waits() == ("restarting", None)
+
+
 async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_and_use_it_starts_it_from_live(
         fixing, analyst):
     # a dev install (scripts/install.sh --local), whose launcher started this server from the clone (this checkout)
@@ -292,3 +358,60 @@ async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_an
 def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():
     end = fixes.end_of("It already is.\n\n```\nTitle: Bar word is bold\nRequest: The bar's word is bold already.\n```")
     assert end == {"title": "Bar word is bold", "summary": "The bar's word is bold already.", "request": True}
+
+
+def test_a_page_with_no_build_to_take_is_built_without_a_second_type_check(monkeypatch, tmp_path):
+    # live's page after the person's click, with no build of its sources to take (prepare): the checks of each fix ran
+    # the type check, so the person waits for the page's build alone
+    root = tmp_path / "browser"
+    fe = root / "frontend"
+    fe.mkdir(parents=True)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes, "page_tree", lambda fe: "")
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: f"/usr/bin/{name}")
+    ran: list[tuple[list[str], Any]] = []
+    ends = [subprocess.CompletedProcess([], 0, "built in 9s\n", "")]
+
+    def run(argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        ran.append(([str(a) for a in argv], kw.get("cwd")))
+        return ends[0]
+
+    monkeypatch.setattr(fixes.subprocess, "run", run)
+    assert fixes.prepare(root) == ""
+    assert ran == [([str(fe / "node_modules" / ".bin" / "vite"), "build"], fe)]
+    # a page that does not build: the row says what the build said failed, not the heading above it
+    ends[0] = subprocess.CompletedProcess([], 1, "transforming...\n", (
+        'x Build failed in 2s\nerror during build:\nsrc/App.tsx (3:9): "Gone" is not exported by "src/chat/fix.ts", '
+        'imported by "src/App.tsx".\n    at getRollupError (parseAst.js:317:41)\n'))
+    assert '"Gone" is not exported by "src/chat/fix.ts"' in fixes.prepare(root)
+    # no Node to run the build with: the row says so, and nothing ran
+    del ran[:]
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    assert "Node" in fixes.prepare(root) and not ran
+
+
+def test_the_fixer_of_another_try_reads_how_the_last_try_s_tests_ended_and_where_their_whole_output_is(tmp_path):
+    # the kernel's refusal of a change whose tests failed stays on the fix's record: the next fixer reads the failure
+    # in its first message and does not run the tests again to see it
+    log = tmp_path / "tests.log"
+    log.write_text("all of it")
+    tests = "page: unit tests (failed after 11 s)\n FAIL  tests/public/bar.test.ts > the bar says rows"
+    rec = {"id": 3, "title": "Bar says rows", "words": ["make the bar say rows"], "work": "/made-up/fixes/work/3",
+           "same_copy": True, "error": "its tests failed in the sandbox",
+           "refused": {"why": "its tests failed in the sandbox", "files": [], "tests": tests, "log": str(log)}}
+    again = fixes.first_message(rec, "the page", earlier=True)
+    assert "The last try did not pass because its tests failed in the sandbox." in again
+    assert f"The end of the output of the last try's tests:\n\n{tests}\n\n" in again
+    assert f"Their whole output is in {log}. Fix what fails." in again
+    # a log that is gone is not named, and a first try is told of no tests
+    log.unlink()
+    assert "whole output" not in fixes.first_message(rec, "the page", earlier=True)
+    assert "last try" not in fixes.first_message(rec, "the page")
+
+
+def test_the_end_of_a_fix_s_tests_keeps_the_line_that_names_the_check_when_it_is_cut():
+    head = "page: unit tests (failed after 11 s)"
+    cut = fixes.tail_of(head + "\n" + "a line the tests printed\n" * 400 + "the last line")
+    assert cut.startswith(head + "\n…") and cut.endswith("the last line")
+    assert len(cut) <= fixes.TAIL_CHARS + 2
+    assert fixes.tail_of(head + "\nthe last line\n") == head + "\nthe last line"

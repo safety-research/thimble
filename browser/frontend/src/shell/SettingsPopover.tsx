@@ -47,14 +47,14 @@ export const MODELS_LABEL = 'Models'
 
 /** The Models rows in order, each an agent by its plain name and the role whose model and effort it runs (backend
  * config.MODEL_ROLES): main and its side threads, which are forks of main and run on its model; the writer that Write
- * and Revise start; the dev agent of view builds, view reviews, code tickets and thimble fix; the checks (Heads up,
+ * and Revise start; the dev agent of view builds, view reviews and thimble fix; the checks (Heads up,
  * Explainers, Judgment calls and the analyst's own); the calls that read records for labels, label drafts and view fit;
  * the card check, which reads each card's picture; the view proposals after a turn and the viewers proposed for file
  * types. */
 export const MODEL_ROWS: readonly { role: string; name: string }[] = [
   { role: 'main', name: 'Main and side threads' },
   { role: 'writer', name: 'Writer' },
-  { role: 'dev', name: 'View builds and code tickets' },
+  { role: 'dev', name: 'View builds' },
   { role: 'checks', name: 'Comments' },
   { role: 'labels', name: 'Labels' },
   { role: 'verify', name: 'Card check' },
@@ -62,8 +62,8 @@ export const MODEL_ROWS: readonly { role: string; name: string }[] = [
 ]
 
 /** The rows with a fast mode of their own: main's session (the composer's bolt), and the roles thimble's config keeps
- * one for (backend config.ROLES_WITH_FAST): the classifiers, and the dev row's, which `thimble fix` runs with. The
- * writer and the checks run as subagents of main, which Claude Code gives no fast mode of their own. */
+ * one for (backend config.ROLES_WITH_FAST): the classifiers, and the dev row's, which its agents and `thimble fix`
+ * run with, and which is main's until the person sets it here. The writer and the checks have none. */
 export const FAST_ROLES: readonly string[] = ['main', 'dev', 'labels', 'verify', 'suggest']
 
 /** Whether a row shows the fast-mode bolt: a row with fast mode, while its model has it. Pure. */

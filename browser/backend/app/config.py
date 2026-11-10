@@ -838,16 +838,16 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # Every role that runs a model, with exactly the model and effort it runs on. main's model, effort and fast mode are the
 # composer's, kept as settings.json `models.main` and read at main's next turn (runtime.Space.spec_of), so main is not
 # a role here. Every other role is set in thimble's config
-# (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier; userconf.ROLES naming each agent's role),
-# applied to the next start:
+# (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier and the dev row; userconf.ROLES naming
+# each agent's role), applied to the next start:
 #   orient     the orientation, a subagent of main (thimble:orientation)
 #   subagents  the orientation's own subagents, which it starts as thimble:orient-helper; by default the orientation's model
 #              without the 1M tag, at its effort
 #   critic     the critic, a subagent of the orientation (thimble:critic)
 #   writer     a writer, a subagent of main (thimble:writer)
 #   checks     each run of a report check (thimble:check)
-#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer), a code ticket's agent
-#              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
+#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer) and `thimble fix`'s session
+#              (dev.py)
 #   verify     the card check's reading of a card's picture (card_check), a classifier
 #   labels     the labels classifier (concepts), the label draft and the view fit
 #   suggest    the view proposals after a turn (proposer.py) and for a file type (views.suggest), a classifier
@@ -858,10 +858,13 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, then thimble's config. Every role resolves to a model id (exact_model) and an
 # effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
 # (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
-# and only for ROLES_WITH_FAST: the classifiers, and the dev row for `thimble fix`, the one `claude -p` job of the
-# server (dev.py). thimble's agents are subagents of main, which have no fast mode of their own (Claude Code's agent
-# definition has none), so a view build, a review and a code ticket's agent run without the dev row's (chosen leaves it
-# out).
+# and only for ROLES_WITH_FAST: the classifiers, and the dev row, for `thimble fix`, the one `claude -p` job of the
+# server (dev.py), and for the row's agents, which the server runs itself: a view build and a review
+# run with the row's fast mode (subagents.fast_for). A writer and a check have none. The dev row's fast mode has
+# no default of its own: while neither THIMBLE_DEV_FAST nor thimble's config sets it, it is main's (main_fast), read
+# when a job starts, and the row says so with `fast_follows: main`. Once the analyst sets it, on or off, it stays as
+# set whatever main's is. Without a workspace there is no main: the unset row's `fast` is then None, which leaves
+# `thimble fix` to the analyst's Claude Code settings (dev.py).
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
@@ -869,7 +872,7 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's frontmatter
     "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
-    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
+    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": None},  # None: main's fast mode (models_for)
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
     "suggest": {"model": "claude-opus-5-5", "effort": "medium", "fast": False},
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
@@ -881,11 +884,10 @@ ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the ana
 MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 # The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES).
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}
-# the classifiers, each a call the server makes, which runs at its own speed, and the dev row's `thimble fix`, the one
-# `claude -p` job of the server, which keeps the fast mode it had (on by default)
+# the classifiers, each a call the server makes, which runs at its own speed, and the dev row: its agents (a view's
+# builder and reviewer) and `thimble fix`, the one `claude -p` job of the server (main's fast
+# mode until the analyst sets the row's)
 ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
-# the rows whose fast mode reaches only some of their runs: the dev row's, `thimble fix`'s alone (chosen)
-FAST_OF_TICKETS = ("dev",)
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)
 # efforts earlier builds stored, read as the level they ran at: Ultracode ran at xhigh (cc_settings.ULTRACODE_EFFORT)
 LEGACY_EFFORTS = {"ultracode": "xhigh"}
@@ -990,7 +992,7 @@ def _analyst_default(c: str | None, key: str) -> Any:
 
 
 def role_default(role: str, c: str | None = None) -> dict[str, Any]:
-    """A role's model and effort (and fast mode, for a classifier) before the environment and the workspace's settings."""
+    """A role's model, effort and fast mode before the environment and the workspace's settings."""
     if role == "orient":
         own_model = _analyst_default(c, "model")
         return {"model": str(own_model or ORIENT_DEFAULT_MODEL), "effort": ORIENT_DEFAULT_EFFORT, "fast": False}
@@ -1035,19 +1037,31 @@ def _configured(c: str | None) -> dict[str, dict[str, Any]]:
 
 def chosen(c: str | None, role: str) -> set[str]:
     """The fields of a role (model, effort, fast) set for workspace `c` in thimble's config or with
-    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them. The dev row's fast mode is `thimble fix`'s alone
-    (FAST_OF_TICKETS), so it is never a field a subagent takes from it."""
+    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them."""
     out = set(_configured(c).get(role) or {})
     env = {f for f in ("model", "effort", "fast") if os.environ.get(f"THIMBLE_{role.upper()}_{f.upper()}", "").strip()}
-    return (out | env) - ({"fast"} if role in FAST_OF_TICKETS else set())
+    return out | env
+
+
+def main_fast(c: str) -> bool:
+    """Main's fast mode in workspace `c`, as the composer has it (settings.json `models.main.fast`, events._choose): off
+    until the analyst turns it on, and off where the file holds none or cannot be read."""
+    from . import nofollow  # noqa: PLC0415
+
+    try:  # in the workspace, which a card's code writes: never read through a link left there (nofollow)
+        held = json.loads(nofollow.read_text(workspace_path(c) / "settings.json"))
+        return bool(held[MODELS_KEY]["main"]["fast"])
+    except (OSError, ValueError, LookupError, TypeError):
+        return False
 
 
 def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
     """{role: {model, effort, fast}} for a workspace, every role of MODEL_ROLES: its default under the environment under
     thimble's config, with a full model id and an explicit effort, never '' (module note above): thimble:orient-helper's
     (`subagents`) take the orientation's where nothing sets them, with `follows: orient`, and a stored LEGACY_EFFORTS
-    value its level. The `refusal` row adds `off`. The orientation's default reads the analyst's settings for the folder
-    of `c` when it is given."""
+    value its level. The dev row's fast mode is main's where nothing sets it, with `fast_follows: main`, and None
+    without a workspace. The `refusal` row adds `off`. The orientation's default reads the analyst's settings for the
+    folder of `c` when it is given."""
     over = _configured(c)
     out: dict[str, dict[str, Any]] = {}
     for role in MODEL_ROLES:
@@ -1062,7 +1076,11 @@ def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
         conf["effort"] = conf["effort"] or ROLE_MODELS_DEFAULT.get(role, {}).get("effort") or ORIENT_DEFAULT_EFFORT
         if role == "orient":
             conf["model"] = long_context(conf["model"])
-        conf["fast"] = role in ROLES_WITH_FAST and bool(conf.get("fast")) and has_fast_mode(conf["model"])
+        if role == "dev" and conf.get("fast") is None and c:
+            # nothing sets the row's fast mode, so it is main's as it is now: the next job runs as main's next turn does
+            conf["fast"], conf["fast_follows"] = main_fast(c), "main"
+        if not (role == "dev" and conf.get("fast") is None):  # the unset dev row without a workspace stays None
+            conf["fast"] = role in ROLES_WITH_FAST and bool(conf.get("fast")) and has_fast_mode(conf["model"])
         if role == "refusal":
             conf["off"] = bool(conf.get("off")) or not conf["model"]
         else:

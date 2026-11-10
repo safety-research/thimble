@@ -2,12 +2,15 @@
 // The chat as the analyst uses it (src/chat/ChatPanel.tsx, useChat.ts, Rows.tsx), over a stand-in server that answers
 // the routes the panel calls as the server does: a question goes to main, and the answer shows with the card it made
 // and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a model
-// picked under the composer shows there at once; a rewind takes a message back; a side thread says it is starting, then
+// picked under the composer shows there at once; a view's thread shows the fast mode of its build's row in Settings,
+// which is main's until the row's own is set; a rewind takes a message back; a side thread says it is starting, then
 // that it works, and ends on its answer; a fix shows in main as a side thread does.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
+import { chooseMain } from '../../src/chat/mainChoice.ts'
 import { bus } from '../../src/lib/bus.ts'
+import { invalidateSettings } from '../../src/lib/models.ts'
 import type { FixRow } from '../../src/chat/fix.ts'
 import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -23,6 +26,8 @@ let chats: Record<string, { meta: ChatMeta; events: ChatRecord[] }>
 let posted: { url: string; body: unknown }[]
 /** The fixes GET /fixes lists (backend fixes.status). */
 let fixes: FixRow[]
+/** The Models rows GET /settings gives, by role (settings.models). */
+let models: Record<string, object>
 
 const main = (extra: Record<string, unknown> = {}) =>
   ({ id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: false, attached: ATTACHED, unread: [], ...extra }) as unknown as ChatMeta
@@ -45,6 +50,12 @@ function answer(u: string, init?: RequestInit): unknown {
     chats.main.meta = { ...chats.main.meta, attached: { ...held, model_choice: body.model, settings_effort: body.model.endsWith('4-8') ? 'high' : 'medium', ...fast } }
     return { model: body.model }
   }
+  if (u.endsWith('/session/fast')) {
+    // main's meta holds the choice at once, and a row that follows main's fast mode shows it (config.models_for)
+    chats.main.meta = { ...chats.main.meta, attached: { ...chats.main.meta.attached!, fast_choice: body.fast } }
+    for (const [role, row] of Object.entries(models)) if ((row as { fast_follows?: string }).fast_follows === 'main') models[role] = { ...row, fast: body.fast }
+    return { fast: body.fast }
+  }
   if (u.endsWith('/interrupt')) return { stopped: true }
   if (u.endsWith('/chats/main/rewind')) {
     // the rewind's line in main's log, and the words it gives back
@@ -54,6 +65,11 @@ function answer(u: string, init?: RequestInit): unknown {
   }
   if (/\/chats(\?|$)/.test(u)) return Object.values(chats).map((c) => c.meta)
   if (/\/fixes(\?|$)/.test(u)) return { problem: '', fixes }
+  if (u.endsWith('/settings')) {
+    // a pick is merged into what its row holds
+    for (const [role, patch] of Object.entries((body?.models ?? {}) as Record<string, object>)) models[role] = { ...models[role], ...patch }
+    return { models }
+  }
   if (/\/(proposals|notices|views)(\?|$)/.test(u)) return []
   return {}
 }
@@ -62,6 +78,8 @@ beforeEach(() => {
   chats = { main: { meta: main(), events: [] } }
   posted = []
   fixes = []
+  models = {}
+  invalidateSettings('mini')
   localStorage.clear()
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   Element.prototype.scrollIntoView = () => undefined // jsdom lays nothing out
@@ -183,6 +201,55 @@ test('a model picked in the line under the composer shows there at once, with th
   await pick('claude-opus-4-8')
   // Opus 4.8 at the effort main runs it at, with fast mode off until the bolt turns it on
   expect(await shown()).toEqual(['Opus 4.8', 'high', 'model:claude-opus-4-8', 'false', null])
+})
+
+test("a view's thread shows the fast mode of its build's row in Settings under the composer, and the bolt switches it as the row's does", async () => {
+  // the row "View builds": Opus 5.5 at high effort, with its own fast mode on
+  models = { dev: { model: 'claude-opus-5-5', effort: 'high', fast: true } }
+  chats.dv1 = { meta: { id: 'dv1', kind: 'agent', role: 'dev', title: 'view: Decisions', created_at: T, parent: 'main', status: 'done', view: 'decisions', asked: true } as unknown as ChatMeta, events: [] }
+  localStorage.setItem('thimble:mini:thread-current', JSON.stringify('dv1'))
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  await settle()
+  const line = () => el.querySelector<HTMLElement>('.chat-composer .role-line[data-role="dev"] .model-line')!
+  const bolt = () => line().querySelector<HTMLElement>('.fast-bolt')
+  /** The line's model and effort, and its bolt: its name, pressed, locked. */
+  const shown = () => [
+    line().querySelector('.model-line-part')?.textContent,
+    line().querySelector('.model-line-effort')?.textContent,
+    ...['aria-label', 'aria-pressed', 'aria-disabled'].map((a) => bolt()?.getAttribute(a)),
+  ]
+  expect(shown()).toEqual(['Opus 5.5', 'high', 'Fast mode for the view build', 'true', null])
+  // the request the row's switch in Settings sends (settings.test.tsx)
+  await click(bolt()!)
+  await settle()
+  await settle()
+  expect(posted).toEqual([{ url: '/api/ws/mini/settings', body: { models: { dev: { fast: false } } } }])
+  expect(shown().slice(3)).toEqual(['false', null])
+  // a model without fast mode has no bolt, as its row in Settings has none
+  await click(line().querySelector<HTMLElement>('[aria-label="Model for the view build"]')!)
+  await click(document.querySelector<HTMLElement>('.menu-item[data-item="model:claude-sonnet-5-5"]')!)
+  await settle()
+  await settle()
+  expect([line().querySelector('.model-line-part')?.textContent, bolt()]).toEqual(['Sonnet 5.5', null])
+})
+
+test("a view's thread shows main's fast mode while its row sets none, as soon as main's bolt switches it", async () => {
+  // the row "View builds" with no fast mode of its own: it shows main's, which is off
+  models = { dev: { model: 'claude-opus-5-5', effort: 'high', fast: false, fast_follows: 'main' } }
+  chats.dv1 = { meta: { id: 'dv1', kind: 'agent', role: 'dev', title: 'view: Decisions', created_at: T, parent: 'main', status: 'done', view: 'decisions', asked: true } as unknown as ChatMeta, events: [] }
+  localStorage.setItem('thimble:mini:thread-current', JSON.stringify('dv1'))
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  await settle()
+  const pressed = () => el.querySelector('.chat-composer .role-line[data-role="dev"] .fast-bolt')?.getAttribute('aria-pressed')
+  expect(pressed()).toBe('false')
+  // main's bolt, in the line under main's chat or in Settings' row for main
+  await act(async () => void (await chooseMain('mini', { fast: true })))
+  await settle()
+  await settle()
+  expect(posted).toEqual([{ url: '/api/ws/mini/session/fast', body: { fast: true } }])
+  expect(pressed()).toBe('true')
 })
 
 test('Rewind asks under the message first, then takes it and what came after back, its words in the box again', async () => {

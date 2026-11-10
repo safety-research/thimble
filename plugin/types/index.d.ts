@@ -163,6 +163,8 @@ declare module 'claude-code' {
       fixers: Record<string, number>
       /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id (fixer.ts) */
       fixerBox: Record<string, string[]>
+      /** the files no fix may change whose write each fix's fixer was refused, by the fix's id (fixer.ts) */
+      fixerDenied: Record<string, string[]>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, `<host row>#cu` for a catch-up, `<row>#s` for a simpler version): { running, want,

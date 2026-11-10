@@ -43,6 +43,7 @@ import os
 import platform
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -99,7 +100,7 @@ def health_timeout_s() -> float:
     return got if 0 < got < float("inf") else HEALTH_TIMEOUT_S
 
 
-FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
+FIX_INSTRUCTION = "Ask for a change to thimble with /thimble-fix <what should work differently>."  # fixes.EMPTY
 # `thimble fix` and `thimble revert` change thimble's own code, which only a development install (a git clone of thimble)
 # can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
 DEV_ONLY_LINES = {
@@ -137,11 +138,11 @@ MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
 RUNNING_HEAD = "thimble: running now:"
 RUNNING_BACK_LINE = ("A restart stops them. Once the server is back, the writers resume by themselves, and a view build "
-                     "or dev ticket starts again.")
+                     "starts again.")
 RESTART_QUESTION = "Restart the server now? [y/N] "
 RESTART_UNASKED_LINE = "thimble: not restarted, since there is no terminal to ask in; pass --yes to restart anyway."
 RESTART_DECLINED_LINE = "thimble: not restarted."
-STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the writers, and starts a view build or dev ticket "
+STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the writers, and starts a view build "
                   "again.")
 STOP_QUESTION = "Stop the server now? [y/N] "
 STOP_UNASKED_LINE = "thimble: not stopped, since there is no terminal to ask in; pass --yes to stop anyway."
@@ -1678,13 +1679,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     if box.get("use") == "never":
         return [f"{head}off in thimble's config (sandbox.use \"never\"); {without}"]
     if not missing:
-        from . import ticket_box  # noqa: PLC0415
-
-        why = ticket_box.problem()
-        tickets = ("a code ticket's checks and test server run in thimble's sandbox runtime, and its change reaches "
-                   "thimble's own code only once you allow it" if not why else
-                   f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
-        return [f"{head}runs; {tickets}"]
+        return [f"{head}runs"]
     line = f"{head}off, missing " + ", ".join(missing) + f"; {without}"
     if not cmds or not commands:
         return [line + (f"; {what}" if what else "")]
@@ -1791,10 +1786,10 @@ def node_runs_frontend_tests(v: tuple[int, int, int]) -> bool:
 
 def node_line(commands: bool = True) -> str:
     """Node's version, which custom views and the sandbox runtime (app/srt.py) need, and with `commands` what to install
-    when it is missing or too old. Where the frontend's tests are installed (a code ticket's vitest gate, dev.py), a node
-    older than they need is a problem too."""
+    when it is missing or too old. Where the frontend's tests are installed (the vitest gate of `thimble fix`, dev.py),
+    a node older than they need is a problem too."""
     exe = shutil.which("node")
-    need = (f"custom views and the sandbox card code and code tickets run in need Node {NODE_MIN_MAJOR}+"
+    need = (f"custom views and the sandbox card code runs in need Node {NODE_MIN_MAJOR}+"
             f"{' (https://nodejs.org)' if commands else ''}; everything else works without it")
     if not exe:
         return f"not found; {need}"
@@ -1808,7 +1803,7 @@ def node_line(commands: bool = True) -> str:
     modules = FRONTEND_DIR / "node_modules"
     fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
     if v and (modules / ".bin" / "vitest").exists() and not node_runs_frontend_tests(v):
-        return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so code tickets' vitest checks "
+        return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so the frontend's vitest checks "
                 "fail" + ("; upgrade Node (https://nodejs.org)" if commands else ""))
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
                   + (f" (run `{fix}` again)" if commands else ""))
@@ -2527,7 +2522,9 @@ PICK_ASK = "Number to resume (Enter to cancel): "
 # pick_session's answer for a new session, which alone moves the open one aside (open_session): a session picked that
 # holds no chat of main with a turn gets chat "new" too, and stays
 NEW_SESSION = {"archive": None, "chat": "new", "new": True}
-SET_ASIDE_LINE = "the last session here is set aside; thimble-browser --continue brings it back"
+# the last start line of a new session in a folder that has an earlier one, in the same words at each start, as Claude
+# Code's start screen lists a folder's recent sessions: the start is a new session and says how to resume the latest
+RESUME_LINE = "to resume your latest session ({when}, {turns}, {cards}) run: thimble-browser --continue"
 SET_ASIDE_FAILED_LINE =("the last session was not moved aside ({why}), so the page opens it with a new chat; "
                          "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
@@ -2545,6 +2542,28 @@ def _ago(at: float, now: float | None = None) -> str:
 
 def _counted(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def _when(at: float, now: float | None = None) -> str:
+    """A time as a local date and time: `Nov 8 14:32`, with its year when that is not this year's."""
+    t = time.localtime(at)
+    year = "" if t.tm_year == time.localtime(now).tm_year else f" {t.tm_year}"
+    return f"{time.strftime('%b', t)} {t.tm_mday}{year} {time.strftime('%H:%M', t)}"
+
+
+def resume_line(name: str) -> str | None:
+    """What a new session's start says last when workspace `name` has an earlier session: when the latest one was last
+    written, what it holds, and the command that resumes it (RESUME_LINE), the session `--continue` picks. None when
+    the folder has no earlier session, and when the latest is the open one, which open_session did not move aside and
+    said so."""
+    from . import folder_sessions  # noqa: PLC0415
+
+    rows = folder_sessions.listing(name)
+    if not rows or rows[0]["archive"] is None:
+        return None
+    r = rows[0]
+    return RESUME_LINE.format(when=_when(r["at"]), turns=_counted(r["turns"], "turn"),
+                              cards=_counted(r["cards"], "card"))
 
 
 def session_lines(rows: list[dict[str, Any]], width: int = 100, now: float | None = None) -> list[str]:
@@ -2609,8 +2628,8 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
 def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool:
     """Put the session pick_session chose in place in workspace `name`, then open its chat of main (the register
     route's `chat`). A new session (NEW_SESSION) moves the open one aside when it holds anything (`POST
-    /api/ws/{c}/archive`); an earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going
-    there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
+    /api/ws/{c}/archive`), and the start's last line says how to resume it (resume_line); an earlier one comes back
+    from the archive (`POST /api/ws/{c}/restore`), the open one going there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
     says why, when the session was not brought back; a session that was not moved aside stays open, with a new chat and
     a line that says so."""
     from . import folder_sessions  # noqa: PLC0415
@@ -2626,9 +2645,7 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
         ws = Path(resolve_env()["workspaces_dir"]) / name
         if ws.is_dir() and folder_sessions.holds(folder_sessions.summary(ws)):
             answered, moved = archive_workspace(url, name)
-            if moved:
-                print(BROWSER_LINE.format(what=SET_ASIDE_LINE))
-            else:
+            if not moved:
                 why = "the server found no workspace to move" if answered else "the server did not move it"
                 print(BROWSER_LINE.format(what=SET_ASIDE_FAILED_LINE.format(why=why, log=log_path())))
     status, resp = _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True,
@@ -2637,6 +2654,84 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
         why = resp.get("detail") if isinstance(resp, dict) else None
         print(BROWSER_LINE.format(what=f"the chat was not opened ({why or status}); see {log_path()}"))
     return True
+
+
+# elsewhere_line's words. {then} is ELSEWHERE_QUIT while a server of this home runs: a start that names another
+# workspaces folder uses that server as it is, with the folder it started with
+ELSEWHERE_LINE = {False: "an earlier session of this folder is in {folder} ({when}, {turns}, {cards}); to open it, "
+                         "{then}run {cmd}",
+                  True: "{n} earlier sessions of this folder are in {folder} (the latest {when}; {turns}, {cards} in "
+                        "all); to open one, {then}run {cmd}"}
+ELSEWHERE_QUIT = "quit thimble-browser (Ctrl-C), then "
+ELSEWHERE_CMD = "THIMBLE_WORKSPACES_DIR={folder} thimble-browser --resume"
+
+
+def _shell_word(path: Path) -> str:
+    """`path` as one word of a shell command, with the home folder written `~` when the rest needs no quotes."""
+    shown = _tilde(path)
+    return shown if shown.startswith("~") and shlex.quote(shown[1:]) == shown[1:] else shlex.quote(str(path))
+
+
+def _server_folder(home_dir: Path) -> Path | None:
+    """The workspaces folder of the server that server.json in the home `home_dir` records, when that server runs now.
+    None when none does."""
+    try:
+        st = json.loads((home_dir / server_json().name).read_text("utf-8"))
+        if not is_server(st.get("pid"), int(st.get("port") or 0), st.get("repo")):
+            return None
+        return Path(st["env"]["workspaces_dir"]).expanduser().resolve()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def elsewhere_line(cwd: Path, data_dir: Path, name: str | None = None, *, new: bool = False,
+                   now: float | None = None) -> str | None:
+    """What a start says when the folder's earlier sessions are in another workspaces folder than the one it uses, None
+    when it has nothing to say. The workbench's own folder holds no session with anything in it for the folder `cwd`
+    (folder_sessions.listing), and the workspaces folder in the terminal plugin's home (fixes.plugin_home) holds one for
+    its workspace: `name`, else the one the folder is registered as (known_corpus), which is how a start with that
+    folder finds it. A workbench that ran with that folder as THIMBLE_WORKSPACES_DIR kept its sessions there, and a
+    start without it moved none of them. The line says how many there are, when the latest was last written and what
+    they hold, as resume_line does, then the command that lists them.
+
+    None too when the match is not sure or the command is not safe: that home's own registry gives the name to another
+    folder; this start registered the folder (`new`), so only that registry can say the name was this folder's; a
+    server runs with that folder now, which a second server must not open. Reads only."""
+    from . import fixes, folder_sessions  # noqa: PLC0415
+
+    here, registry = cwd.resolve(), data_dir.resolve()
+    if name is None:
+        known = known_corpus(here, registry)
+        if known is None or not (known[1] == here or known[1].parent == registry):  # pick_session's `mine`
+            return None
+        name = known[0]
+    theirs = fixes.plugin_home().expanduser()
+    shown = theirs / "workspaces"  # as the launcher names a home's workspaces folder
+    folder = shown.resolve()
+    if folder == Path(resolve_env()["workspaces_dir"]).resolve():
+        return None
+    try:
+        rows = folder_sessions.elsewhere(name, folder)
+    except Exception as e:  # noqa: BLE001 — a folder this workbench did not write never stops a start
+        _log(f"the sessions of {name} in {folder} were not read: {e}")
+        return None
+    if not rows:
+        return None
+    with server_dirs():
+        if folder_sessions.listing(name):
+            return None
+    rec = config.read_sidecar(name, theirs / "data")
+    hit = config.sidecar_match(here, [rec]) if rec is not None else None
+    if (new or rec is not None) and not (hit is not None and hit[1] == here):
+        return None
+    running = _server_folder(home())
+    if folder in (running, _server_folder(theirs)):
+        return None
+    turns = _counted(sum(int(r["turns"]) for r in rows), "turn")
+    cards = _counted(sum(int(r["cards"]) for r in rows), "card")
+    return ELSEWHERE_LINE[len(rows) > 1].format(
+        n=len(rows), folder=_tilde(shown), when=_when(rows[0]["at"], now), turns=turns, cards=cards,
+        then=ELSEWHERE_QUIT if running is not None else "", cmd=ELSEWHERE_CMD.format(folder=_shell_word(shown)))
 
 
 def cmd_browser(args: argparse.Namespace) -> int:
@@ -2649,7 +2744,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
     chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets the new
     link there once `thimble-browser --unpair` changed its key (watch_links). With `--detach` it returns once the link is printed and
-    the server keeps running."""
+    the server keeps running. A start that finds no session with anything in it for the folder says where another
+    workspaces folder holds some (elsewhere_line)."""
     from . import claude_access  # noqa: PLC0415
 
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
@@ -2663,6 +2759,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     with server_dirs():
         chosen = pick_session(cwd, data_dir, getattr(args, "session", None) or "new")
     if chosen is None:
+        if line := elsewhere_line(cwd, data_dir):
+            print(BROWSER_LINE.format(what=line))
         return 1
     if refuse_foreign(api_url()):
         return 1
@@ -2689,6 +2787,14 @@ def cmd_browser(args: argparse.Namespace) -> int:
     link = ui_url(name, pair=to_terminal())
     print(BROWSER_LINE.format(what=link), flush=True)
     print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)
+    # the start's last line is about the folder's earlier sessions: where they are when another workspaces folder
+    # holds them, else how to resume the latest one when this start is a new session
+    earlier = elsewhere_line(cwd, data_dir, name, new=opened)
+    if earlier is None and not opened and chosen.get("new"):
+        with server_dirs():
+            earlier = resume_line(name)
+    if earlier:
+        print(BROWSER_LINE.format(what=earlier), flush=True)
     if not env["dev"] and not has_ui_build():
         print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):

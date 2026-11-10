@@ -147,7 +147,9 @@ def err(text: str) -> ToolResult:
 class Spec:
     """What is code about a tool: its name, the roles that get it, and its handler as `module:attr`, called as
     `handler(ctx, args)`. `sessions` names the session kinds whose agents alone get it; `aliases` are alternative
-    names a call still reaches but no listing shows. `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork)."""
+    names a call still reaches but no listing shows. `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork).
+    `in_order`: the call reads files that the other calls of its message may write, such as a view's check beside an
+    edit of the view, so it runs where the message wrote it and not at the same time as them (runtime_api._calls)."""
 
     name: str
     roles: tuple[str, ...]
@@ -155,6 +157,7 @@ class Spec:
     sessions: "tuple[str | None, ...]" = ()
     aliases: tuple[str, ...] = ()
     makes_cards: bool = False
+    in_order: bool = False
 
 
 _H = "app.tools:_h_"
@@ -205,14 +208,19 @@ REGISTRY: dict[str, Spec] = {
         Spec("fix_thimble", (ANALYST,), _H + "fix_thimble"),
         # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
         # gates of record (view_tools.py); a gate stops when its agent is stopped
-        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION)),
-        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,)),
-        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,)),
-        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,)),
+        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
+             in_order=True),
+        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), in_order=True),
+        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
+             in_order=True),
+        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
+             in_order=True),
         # a code ticket's agent checks its change in the ticket's box as often as it wants, and finishes once, where the
         # server commits the change and runs the gates of record (ticket_tools.py)
-        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,)),
-        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,)),
+        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,),
+             in_order=True),
+        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
+             in_order=True),
     )
 }
 
@@ -229,6 +237,12 @@ class ToolsFileError(prompts.PromptError):
 
 def known(name: str) -> bool:
     return name in REGISTRY or name in TOOL_ALIASES
+
+
+def in_order(name: str) -> bool:
+    """Whether a call of the tool `name` runs where its message wrote it (Spec.in_order); no built-in tool does."""
+    spec = REGISTRY.get(TOOL_ALIASES.get(name, name))
+    return spec is not None and spec.in_order
 
 
 def canonical(name: str) -> str:
@@ -2638,26 +2652,11 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
     from . import fixes  # noqa: PLC0415
 
-    if not fixes.problem():
-        # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix
-        return ok(hint("file_dev_ticket-fix"))
-    from . import dev  # noqa: PLC0415 — dev imports this module's callers
-
-    source = ANALYST if ctx.actor == ANALYST else ctx.actor
-    rec = await _maybe_await(dev.file_ticket(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source,
-                                             start=False, route="typed"))
-    label = dev._label(rec)
-    # main's ticket: prepared, then the server starts its agent (dev.start_typed); a thread's fork's keeps no call of
-    # the fork's (_fork_start)
-    ans = await dev.start_typed(rec, call=None if fork is not None else ctx.tool_use_id)
-    if ans.get("held"):
-        return ok(hint("file_dev_ticket-waits", label=label, running=str(ans.get("running") or "another ticket")))
-    if ans.refused or "input" not in ans:
-        return ok(hint("file_dev_ticket-cannot-run", label=label, why=ans.reason or str(ans.kind or "")))
-    if fork is not None:
-        return await _fork_start(ctx, ans, what=f"{label}: {title}")
-    return ok(hint("file_dev_ticket-start", label=label, title=title, start=hint("agent-started")))
-
+    # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix: this call
+    # files nothing, and says why where fixes cannot be made on this server
+    if why := fixes.problem():
+        return ok(hint("file_dev_ticket-fix-off", why=why))
+    return ok(hint("file_dev_ticket-fix"))
 
 
 async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:

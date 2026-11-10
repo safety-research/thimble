@@ -610,9 +610,10 @@ export const api = {
   fixes: (every = false) => j<FixStatus>(`${apiBase()}/fixes${every ? '?every=true' : ''}`),
   /** Use it now, or Use it in Your fixes: the person's click puts the fix on, and the server starts again with it */
   applyFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/apply`, { method: 'POST' }),
-  /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows, which main reads with the person's
-   * fixes and starts the fix from (or a fix's number alone, which tries a fix that did not pass again); `fix`: words
-   * typed in that fix's own thread, a round of it */
+  /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows: the fix starts at once where main
+   * could name no other fix for the words, else main reads them with the person's fixes and starts the fix from them
+   * (or a fix's number alone, which tries a fix that did not pass again); `fix`: words typed in that fix's own thread,
+   * a round of it */
   requestFix: (ws: string, words: string, page: string, fix?: number) =>
     j<{ fix?: { id: number; title: string; state: string }; event?: string }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page, ...(fix !== undefined ? { fix } : {}) }) }),
   undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/undo`, { method: 'POST' }),
@@ -627,11 +628,8 @@ export const api = {
   /** Report a problem's Fix it with /thimble-fix: the server makes it a fix of the person's thimble wherever fixes work
    * (backend dev.post_ticket) */
   fileTicket: (body: NewTicketBody) => j<Ticket>(`${apiBase()}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
-  retryTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
-  /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
-  startTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
   dismissTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
-  /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */
+  /** stop a running ticket: nothing is applied and it ends `stopped` */
   stopTicket: (id: string) => j<{ ok: boolean }>(`${apiBase()}/dev/tickets/${enc(id)}/stop`, { method: 'POST' }),
 
   // ---- settings ----

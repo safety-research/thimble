@@ -4,21 +4,19 @@ A ticket is one record of dev/tickets.jsonl (repo root, gitignored), numbered pe
 dev/tickets/<id>/shots/. Filing opens the ticket's thread (a chat of role dev) and lands a chip in main; tickets run one
 at a time, urgent first, and only in a development install (a git checkout of thimble: RELEASE_LINE).
 
-The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagent of main (subagents.py), on Settings'
-dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the server prepares the ticket,
-then the runtime starts its agent (module_bridge). Main's file_dev_ticket prepares it and starts its agent the same way
-(start_typed); a thread's fork's file_dev_ticket is prepared the same way, and the server starts its agent with the
-fork's call (tools._fork_start). While another
-ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts without a click or main's
-call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
-in thimble's home), takes the before shot, and
+The ticket's agent. Nothing starts a code ticket: a change to thimble's code is a fix of the person's thimble
+(fixes.py). Filing in the browser makes a fix (post_ticket), main's file_dev_ticket without a view files nothing, and
+no queued record starts (_start_next_if_idle). The rest of this paragraph is the run the code below still holds. A code
+ticket is worked by a `thimble:dev-ticket`, a subagent of main (subagents.py), on Settings' dev row's model and effort:
+the server prepares the ticket, then the runtime starts its agent (module_bridge). Preparing cuts a git worktree off the
+live branch (worktree_path, under worktrees_dir, in thimble's home), takes the before shot, and
 opens the ticket's thread, which the agent's chat takes over (subagents.ensure_chat, `adopt`). The agent edits the
 worktree, checks its change with the `ticket_checks` tool as often as it wants, and calls `finish_ticket`, where the
 server commits every change in the worktree to the ticket's branch and runs the gates of record, counting the attempts
 (ticket_tools.py). Its end (ticket_ended, _settle_ticket) is the backstop: an agent that ended without finish_ticket but
 left a change gets the gates once. A change that passed is put back as it passed, then the after shot, the analyst's
 Allow, a fast-forward of the live branch (rebasing once if it moved), a UI rebuild, and a restart when backend or plugin
-files changed. Stop on the ticket stops its agent, and it ends stopped with Retry.
+files changed. Stop on the ticket stops its agent, and it ends stopped.
 `revert_last_apply` is `thimble revert`.
 
 `thimble fix`. With the server down there is no workspace and no runtime, so `thimble fix` (fix_offline) keeps
@@ -31,7 +29,7 @@ Recovery. The live checkout changes only in the fast-forward, after every gate p
 restart_watch.py, which rolls the apply back when the server does not come back. A server restart leaves a ticket's
 agent running in main: the next server takes it up again from the registry (_recover); a ticket whose agent passed
 while no server ran is settled then, and one whose agent ended without a pass, or whose preparation the restart cut
-short, ends stopped with Retry.
+short, ends stopped.
 
 View builds. A view proposal is built at once by a `thimble:view-builder`, a subagent of main (subagents.py), at most
 VIEW_POOL at once (queue_view); the others wait queued, and a start refused at the subagent limit goes back to the
@@ -44,9 +42,9 @@ its attempts (view_tools.py). Its end (build_ended, _settle) is the backstop: a 
 the gate once; a proposal the analyst did not ask for that still fails gets up to VIEW_REPAIRS new builders started with
 what failed, and then fails with Retry (_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's
 last builder as a message when it can still be reached in main's session, so it keeps its context, else to a new
-builder; a change that fails leaves the view as it was (views.end_revision). A pass starts the view's review
-(view_review.py). The Stop in a build's thread, or on its builder, ends the build failed with Retry
-(views.stop_build, _view_stopped).
+builder; a change that fails leaves the view as it was (views.end_revision). A first build that passes starts the
+view's review (view_review.py); a change that passes starts none once a review of the view has ended. The Stop in a
+build's thread, or on its builder, ends the build failed with Retry (views.stop_build, _view_stopped).
 
 Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
@@ -73,11 +71,12 @@ the ticket stopped with its branch kept. Where the box can't run, the ticket run
 outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no stops it before its worktree exists.
 
 thimble's config. `thimble fix`'s session runs with the dev agent's `agents.dev` settings (userconf.py, dev_config) and
-the dev row's fast mode; agent_session's module note says what the config adds. Its Bash runs in the sandbox where it
-can run, and its sandbox also writes what a commit in its worktree writes into the checkout's git folder (ticket_fence).
-A ticket's agent and a view builder run as main's subagents, on the dev agent's model and effort unless their run names
-its own, and without web tools while the dev agent's `web` is off (subagents.roles); Claude Code gives a subagent no
-fast mode of its own.
+the dev row's fast mode where the analyst set it; it runs outside a workspace, so an unset row leaves fast mode to the
+analyst's Claude Code settings (config.models_for). agent_session's module note says what the config adds. Its Bash
+runs in the sandbox where it can run, and its sandbox also writes what a commit in its worktree writes into the
+checkout's git folder (ticket_fence). A view builder runs as main's subagent, on the dev agent's
+model and effort unless its run names its own, in the dev row's fast mode (subagents.fast_for), which is main's until
+the analyst sets the row's own, and without web tools while the dev agent's `web` is off (subagents.roles).
 """
 from __future__ import annotations
 
@@ -166,10 +165,10 @@ SESSION_KEY = "dev"  # the THIMBLE_SESSION of `thimble fix`'s session
 SOURCES = ("ui", "analyst", "terminal")
 STATUSES = ("queued", "running", "applied", "applied, restart pending", "failed", "needs manual merge", "reverted",
             "rolled back", "stopped", "dismissed")
-# the ends that leave nothing applied and can be retried or discarded; main gets a chip for each but `stopped`
+# the ends that leave nothing applied and can be discarded; main gets a chip for each but `stopped`
 FAILED = ("failed", "needs manual merge", "rolled back", "stopped")
 # Why this server cannot run a code ticket (ticket_problem, runner_problem). Each is shown to the analyst in the ticket's
-# thread and passed to main in file_dev_ticket's result.
+# thread.
 RELEASE_LINE = ("thimble's own code can only be changed in a development install (a git clone of thimble), and this is "
                 "a release install. Send the request with Report a problem in the top bar instead.")
 NO_RUNNER_LINE = "This server runs no dev tickets (THIMBLE_DEV_STACK is off, as on a validation stack)."
@@ -468,9 +467,9 @@ def _log_for(t: dict[str, Any]) -> Log:
 
 def file_ticket(workspace: str | None, title: str, body: str, source: str = "analyst", *, urgent: bool = False,
                 target: dict[str, Any] | None = None, start: bool = True, route: str = "click") -> dict[str, Any]:
-    """Store a ticket, open its thread, chip main, and, for a click (`route`), start it when nothing runs; a ticket
-    this server can never run fails at once with the reason. Main's ticket (route `typed`) is started by its caller
-    (start_typed). Raises ValueError on an empty ticket, an unknown source or an unknown workspace."""
+    """Store a ticket, open its thread and chip main. Nothing starts it here: `thimble fix` runs its own (fix_offline,
+    `start` False), and no queued code ticket starts (_start_next_if_idle); one this server can never run fails at once
+    with the reason. Raises ValueError on an empty ticket, an unknown source or an unknown workspace."""
     title = str(title or "").strip()
     if not title:
         title = _title_from(body)
@@ -515,8 +514,9 @@ def ticket_problem() -> str:
 
 
 def tickets_run_here(c: str | None = None) -> bool:
-    """Whether code tickets run here, so the module registers `thimble:dev-ticket` (subagents.Type.when)."""
-    return not ticket_problem()
+    """Whether the module registers `thimble:dev-ticket` (subagents.Type.when): never, since nothing starts a code
+    ticket. A change to thimble's code is a fix of the person's thimble (fixes.py)."""
+    return False
 
 
 def runner_problem(*, fixing: bool = False) -> str:
@@ -539,18 +539,6 @@ def _fail_now(t: dict[str, Any], why: str) -> dict[str, Any]:
     _ticket_event(rec, "failed")
     _ticket_notice(rec)
     return rec
-
-
-def _queued() -> list[dict[str, Any]]:
-    """The queued tickets this server starts, urgent first: the clicks of its own workspaces. Main's ticket that waits
-    for the analyst's Start (`held`) is none of them."""
-    mine = set(_workspaces())
-    items = [t for t in _read() if t.get("status") == "queued" and t.get("workspace") in mine and not t.get("held")]
-    return [t for t in items if t.get("urgent")] + [t for t in items if not t.get("urgent")]
-
-
-def _next_queued() -> dict[str, Any] | None:
-    return next(iter(_queued()), None)
 
 
 # ----------------------------------------------------------------------------- run state
@@ -1470,10 +1458,11 @@ class Sessions:
                fence: dict[str, Any] | None = None, models: dict[str, Any] | None = None,
                env: dict[str, str] | None = None) -> list[str]:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
-        settings), else the dev role's, `--add-dir` folders, the `fence` settings and thimble's config for the dev agent
-        (dev_config). Its environment goes in the settings' `env` (config.session_env, without this server's THIMBLE_*
-        values): the fence's, `env`, its key as THIMBLE_SESSION, and no ceiling on --print's wait for its background
-        work (agent_session.BG_WAIT_ENV).
+        settings), else the dev role's (its fast mode None while nothing sets it and there is no workspace, whose main
+        it would follow: config.models_for), `--add-dir` folders, the `fence` settings and thimble's config for the dev
+        agent (dev_config). Its environment goes in the settings' `env` (config.session_env, without this server's
+        THIMBLE_* values): the fence's, `env`, its key as THIMBLE_SESSION, and no ceiling on --print's wait for its
+        background work (agent_session.BG_WAIT_ENV).
         Nobody can answer its requests (module note, `thimble fix`), so it keeps UNHOSTED_TOOLS and gets no web tools.
         It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later turn
         (agent_session.LATER_TOOLS), since its process ends with its turn, and, when fenced, not FENCED_OFF_TOOLS.
@@ -2181,7 +2170,7 @@ TICKET_ROLE = "dev-ticket"  # the type of a code ticket's agent (subagents.TYPES
 NO_CHANGE_LINE = "the dev agent made no change"
 NO_PASS_LINE = "the dev agent ended without a change that passed the checks"
 NOT_STARTED_LINE = "the dev agent did not start: {reason}"
-# why a ticket that was running ends stopped at a server's start (_recover), each with Retry
+# why a ticket that was running ends stopped at a server's start (_recover)
 TICKET_ORPHANED = "the dev agent ended while thimble's server was not running"
 TICKET_CUT_SHORT = "thimble's server stopped while it prepared the ticket"
 TICKET_OLD = "this ticket ran in an earlier version of thimble"
@@ -2306,35 +2295,6 @@ async def _launch_ticket(run: Run, t: dict[str, Any], route: str, call: str | No
         return subagents.refusal(subagents.HOOK, error)
 
 
-async def start_typed(t: dict[str, Any], call: str | None = None) -> Any:
-    """Main's file_dev_ticket: the ticket prepared, then its agent started as a typed start (subagents.start_job),
-    which the server makes at once. While another ticket runs, the ticket waits for the
-    analyst's Start on its card (`held`): {"held": True, "running": <its label>}. A ticket this server cannot run fails
-    at once; a refusal is the Answer's."""
-    from . import subagents  # noqa: PLC0415
-
-    if why := ticket_problem():
-        _fail_now(t, why)
-        return subagents.refusal(subagents.ERROR, why)
-    if _running():
-        cur = _get(_current.ticket_id) if _current is not None else None
-        rec = _update(t["id"], held=True) or t
-        _ticket_event(rec, "queued")
-        return subagents.Answer({"held": True, "running": _label(cur) if cur else "another ticket"})
-    run = _start_run(t, "typed")
-    if run is None:
-        return subagents.refusal(subagents.HOOK, "the ticket was taken up already")
-    rec = _get(t["id"]) or t
-    run.task = asyncio.get_running_loop().create_task(_launch_ticket(run, rec, "typed", call),
-                                                      name=f"ticket:{t['id']}")
-    try:
-        return await asyncio.shield(run.task)
-    except asyncio.CancelledError:
-        if run.task.cancelled():  # the analyst's Stop while it was being prepared
-            return subagents.refusal(subagents.HOOK, STOPPED_BEFORE_START)
-        raise
-
-
 def _attach(t: dict[str, Any], **fields: Any) -> Run:
     """This process takes up a running ticket (a restart, or its agent's end with no run here)."""
     global _current
@@ -2367,7 +2327,7 @@ def ticket_started(c: str, run: Any, req: dict[str, Any]) -> None:
 
 
 def ticket_refused(c: str, req: dict[str, Any]) -> None:
-    """A ticket's agent did not start (subagents.Type.refused): the ticket ends, its card saying why with Retry;
+    """A ticket's agent did not start (subagents.Type.refused): the ticket ends, its card saying why;
     `stopped` or `dismissed` when the analyst's Stop refused main's pending start."""
     if req.get("kind") != "start":
         return
@@ -2440,12 +2400,12 @@ async def checks_now(t: dict[str, Any]) -> dict[str, Any] | None:
 
 async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str, report: str) -> None:
     """What the end of a ticket's agent means for the ticket, the backstop of finish_ticket:
-    - the analyst stopped it (Stop, Discard): the ticket ends stopped (dismissed for Discard), with Retry;
+    - the analyst stopped it (Stop, Discard): the ticket ends stopped (dismissed for Discard);
     - it passed: the worktree is put back to the change that passed, then the after shot, the analyst's Allow on the
       ticket's card in every mode (APPLY_QUESTION) and the apply of that commit (_apply), as before; an agent thimble
       stopped after its pass (view_tools.FINISH_GRACE_S) passed all the same;
     - its last attempt failed: the ticket fails with what the checks found;
-    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it, with Retry;
+    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it;
     - it ended without calling finish_ticket and left a change: the gates run once, and a pass goes on as above;
     - otherwise it failed, with what the checks found, or the agent's last words when it made no change; when main's
       plan mode held it at its end, where it could only read and plan, with that reason (subagents.plan_failed_line)."""
@@ -2746,7 +2706,8 @@ def config_port() -> int:
 
 def _start_run(t: dict[str, Any], route: str = "click") -> Run | None:
     """Claim the ticket and make it this process's run; a click's run starts at once (_launch_ticket), main's is started
-    by start_typed. None when another server of the checkout claimed it first."""
+    by its caller. None when another server of the checkout claimed it first. It has no caller now, since nothing
+    starts a code ticket."""
     global _current
     rec = _claim(t["id"])
     if rec is None:
@@ -2762,17 +2723,9 @@ def _start_run(t: dict[str, Any], route: str = "click") -> Run | None:
 
 
 def _start_next_if_idle() -> None:
-    """Start the next queued ticket when none runs: a ticket filed, retried or started starts, or is refused, at
-    once."""
-    if _closing or _running() or not STACK_ENABLED:
-        return
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return  # no loop (the CLI): tickets wait for the server
-    for t in _queued():
-        if _start_run(t) is not None:
-            return
+    """Nothing: no queued code ticket starts, since a change to thimble's code is a fix of the person's thimble
+    (fixes.py). A record that is still queued stays as it is until the analyst discards it."""
+    return
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -2786,9 +2739,9 @@ def _pid_alive(pid: Any) -> bool:
 def _recover() -> None:
     """After a start, take up what a restart left: a running ticket whose agent still runs in main is this server's
     run again; one whose agent passed while no server ran is settled now, its Allow asked again; one waiting for main's
-    Agent call waits on; any other ends stopped with Retry (TICKET_ORPHANED, TICKET_CUT_SHORT, or TICKET_OLD for one an
+    Agent call waits on; any other ends stopped (TICKET_ORPHANED, TICKET_CUT_SHORT, or TICKET_OLD for one an
     earlier version ran or queued again). Another live server's ticket is left alone. An applied ticket whose bookkeeping
-    was cut short is finished. A rollback the restart watch made is recorded first. Then the queue starts."""
+    was cut short is finished. A rollback the restart watch made is recorded first. No queued ticket starts."""
     from . import subagents  # noqa: PLC0415
 
     try:
@@ -3358,13 +3311,16 @@ def gate_step(c: str, slug: str, report: dict[str, Any], chat: str | None = None
 
 def register_pass(c: str, slug: str, agent_id: str | None) -> dict[str, Any]:
     """A gate of record passed for the view `slug`: it is registered (views.mark_built, which keeps the copy readers
-    see), the change it carried is done, and main hears the `view` event. The view."""
+    see), the change it carried is done, and main hears the `view` event. The pass of a change to a view built before
+    says so in the proposal's `finish` (`revision`), which the builder's end reads (_settle). The view."""
     from . import views  # noqa: PLC0415
 
+    revision = bool((views.read_proposal(c, slug) or {}).get("revision"))
     view = views.mark_built(c, slug)
     views.update_proposal(c, slug, changed=None, change=None, revision=None, failed_change=None, last_report=None,
                           checks_failed=None, fed_back=None,
-                          finish={"agent": agent_id, "result": "pass", "version": view.get("version")})
+                          finish={"agent": agent_id, "result": "pass", "version": view.get("version"),
+                                  **({"revision": True} if revision else {})})
     views.drop_built_copy(c, slug)
     _view_cleared(c, slug)
     try:
@@ -3412,8 +3368,10 @@ async def _settled(c: str, slug: str, run: Any, status: str, report: str, why: s
 async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: str) -> None:
     """What a builder's end means for its view, the backstop of finish_view:
     - its next run began meanwhile: nothing here, since that run's end settles the view;
-    - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
-      pass is gated again (views.regate: a pass is the new version, a failure puts the version that passed back);
+    - it passed: done, its work folder lets go of its extracts, and a first build starts the review, which a change to
+      a view built before starts only while no review of the view has ended (view_review.after_built); a folder that
+      changed after the pass is gated again (views.regate: a pass is the new version, a failure puts the version that
+      passed back);
     - a change to the built view that left its files as they were built (a message the run answered, or a change it was
       stopped before it wrote): the view is as it was, with nothing to check;
     - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, the analyst's Stop with VIEW_STOPPED, and a
@@ -3445,7 +3403,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             gate_step(c, slug, regated, chat=run.chat)
         work_files.after_run(c, work, "done")
         log.info("the view %s/%s was built", c, slug)
-        view_review.after_built(c, slug)
+        view_review.after_built(c, slug, change=bool(finish.get("revision")))
         return
     if prop.get("revision") and views.unchanged_since_built(c, slug):
         views.end_revision(c, slug)
@@ -3470,7 +3428,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if rep.get("ok"):
             register_pass(c, slug, run.agent_id)
             work_files.after_run(c, work, "done")
-            view_review.after_built(c, slug)
+            view_review.after_built(c, slug, change=bool(prop.get("revision")))
             return
         lines = "\n".join(views.gate_lines(rep))
         prop = views.update_proposal(c, slug, last_report=views.kept_report(rep, ERROR_CHARS)) or prop
@@ -4193,8 +4151,8 @@ def _ticket_or_404(tid: str) -> dict[str, Any]:
 
 
 def _clicked(request: Request) -> None:
-    """403 unless the request is the analyst's click (subagents.analyst_only): filing, Retry, Start, Stop and Discard
-    start or stop a ticket's agent through main's module, which auto mode does not judge, and only from localhost."""
+    """403 unless the request is the analyst's click (subagents.analyst_only): filing starts a fix, and Stop and
+    Discard stop a ticket's agent through main's module, which auto mode does not judge, and only from localhost."""
     from . import subagents  # noqa: PLC0415
 
     if not _is_loopback(request):
@@ -4204,24 +4162,20 @@ def _clicked(request: Request) -> None:
 
 @router.post("/dev/tickets", status_code=202)
 async def post_ticket(body: NewTicket, request: Request) -> dict[str, Any]:
-    """Report a problem's Fix it with /thimble-fix, a click: a fix of the person's thimble wherever fixes work, which
-    is the only place the browser offers it (GET /fixes); else a code ticket, whose agent starts through main's module
-    once nothing else runs."""
+    """Report a problem's Fix it with /thimble-fix, a click: a fix of the person's thimble (fixes.py), as /thimble-fix
+    makes one. The browser offers it only where fixes work (GET /fixes); elsewhere the answer is 409 with why
+    (fixes.request). 400 for a body that names no workspace."""
     await _on_first_request()
     _clicked(request)
     from . import fixes  # noqa: PLC0415
 
-    if body.workspace and not fixes.problem():
-        # a change to thimble's code is a fix of the person's thimble (fixes.py), as /thimble-fix makes one
-        title, text = body.title.strip(), body.body.strip()
-        words = text if title and text.startswith(title.rstrip("…")) else "\n\n".join(x for x in (title, text) if x)
-        got = await fixes.request(body.workspace, words, title=body.title.strip() or None)
-        return {"id": f"fix-{got['fix']['id']}", "title": got["fix"].get("title"), "status": "running", "chat": None,
-                "fix": got["fix"]}
-    try:
-        return file_ticket(body.workspace, body.title, body.body, body.source, urgent=body.urgent, target=body.target)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+    if not body.workspace:
+        raise HTTPException(400, "workspace is required")
+    title, text = body.title.strip(), body.body.strip()
+    words = text if title and text.startswith(title.rstrip("…")) else "\n\n".join(x for x in (title, text) if x)
+    got = await fixes.request(body.workspace, words, title=body.title.strip() or None)
+    return {"id": f"fix-{got['fix']['id']}", "title": got["fix"].get("title"), "status": "running", "chat": None,
+            "fix": got["fix"]}
 
 
 @router.get("/dev/tickets")
@@ -4289,7 +4243,7 @@ def resume_views(c: str) -> None:
 @router.post("/dev/tickets/{tid}/stop", status_code=202)
 async def stop_ticket(tid: str, request: Request) -> dict[str, Any]:
     """Stop the running ticket, a click: its agent is stopped through main's module, nothing is applied, and it ends
-    `stopped`, which Retry runs again. 409 when it is not running here, or with thimble's reason it could not stop it
+    `stopped`. 409 when it is not running here, or with thimble's reason it could not stop it
     (stop it in the terminal then)."""
     _clicked(request)
     t = _ticket_or_404(tid)
@@ -4320,46 +4274,25 @@ async def dismiss_ticket(tid: str, request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
-RETRYABLE = (*FAILED, "reverted", "dismissed")
-
-
 @router.post("/dev/tickets/{tid}/retry", status_code=202)
 async def retry_ticket(tid: str, request: Request) -> dict[str, Any]:
-    """Run the ticket again, a click, in a new thread with a new agent, once nothing else runs. A ticket this server
-    cannot run fails again at once, saying why. 409 for one that is queued, running or applied."""
+    """The Retry of a ticket's card, which the page no longer shows: 409 with how to ask for the change now
+    (fixes.EMPTY), since nothing starts a code ticket. The ticket stays as it was."""
     _clicked(request)
-    t = _ticket_or_404(tid)
-    if t.get("status") not in RETRYABLE:
-        raise HTTPException(409, f"the ticket is {t.get('status')}")
-    _close_chat(t, "stopped", "retried")
-    try:
-        chat = _open_chat(t)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    rec = _update(tid, status="queued", error=None, ts_end=None, chat=chat, interrupted=0, route="click", held=None,
-                  agent_id=None, request=None, finish=None, change=None, attempt=0) or t
-    log.info("ticket %s queued again (Retry)", tid)
-    _ticket_event(rec, "queued")
-    if why := ticket_problem():
-        return _fail_now(rec, why)
-    _start_next_if_idle()
-    return _get(tid) or rec
+    _ticket_or_404(tid)
+    from . import fixes  # noqa: PLC0415
+
+    raise HTTPException(409, fixes.EMPTY)
 
 
 @router.post("/dev/tickets/{tid}/start", status_code=202)
 async def start_ticket(tid: str, request: Request) -> dict[str, Any]:
-    """Start, a click on main's ticket that waited while another ran (`held`): it starts through main's module once
-    nothing else runs. 409 for a ticket that does not wait so."""
+    """The Start of a waiting ticket's card, which the page no longer shows: 409, as retry_ticket."""
     _clicked(request)
-    t = _ticket_or_404(tid)
-    if t.get("status") != "queued" or not t.get("held"):
-        raise HTTPException(409, f"the ticket is {t.get('status')}")
-    rec = _update(tid, held=None, route="click") or t
-    _ticket_event(rec, "queued")
-    if why := ticket_problem():
-        return _fail_now(rec, why)
-    _start_next_if_idle()
-    return _get(tid) or rec
+    _ticket_or_404(tid)
+    from . import fixes  # noqa: PLC0415
+
+    raise HTTPException(409, fixes.EMPTY)
 
 
 @router.get("/dev/status")
@@ -4373,7 +4306,7 @@ async def status() -> dict[str, Any]:
     la = last_apply()
     return {
         "running": running,
-        "tickets": ticket_problem(),  # '' where code tickets run
+        "tickets": ticket_problem(),  # why a code ticket could not run here; nothing starts one now
         "current": {"id": rt["id"], "n": rt.get("n"), "title": rt["title"], "workspace": rt.get("workspace"),
                     "ts_start": run.ts_start} if running and run and rt else None,
         "queued": sum(1 for t in _read() if t.get("status") == "queued"),

@@ -1072,7 +1072,7 @@ export interface Ticket {
   chat?: string | null
   ts?: string
   error?: string | null
-  /** main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed) */
+  /** on a record of an earlier version: main's ticket that waited for the analyst's Start while another ran */
   held?: boolean | null
   /** the id of its agent, a `thimble:dev-ticket` subagent of the analyst's Claude Code session, once it started */
   agent_id?: string | null
@@ -1101,10 +1101,12 @@ export interface ModelConf {
   model: string
   /** '' for a model Claude Code runs with no effort (Haiku 4.5) */
   effort: Effort | string
-  /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
+  /** fast mode: the classifiers' rows (labels, verify, suggest) and the dev row; the other agents have none */
   fast: boolean
   /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
   follows?: string
+  /** the row whose fast mode this one shows and runs with while the analyst has set none (the dev row: `main`) */
+  fast_follows?: string
   /** the refusal row: no second call when a classifier's model refuses */
   off?: boolean
 }

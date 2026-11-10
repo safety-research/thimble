@@ -7,8 +7,11 @@
 // the plugins, and the line then offers u to undo it. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
+import { refusedText } from '../fix/fixer'
+import { carriedLine, fixLineNow } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, registerFix, wordsOfSkill } from '../fix/register'
+import { fixesContext, namedFix } from '../fix/request'
 import { promptStub } from './stubs'
 import { test } from './kit'
 
@@ -39,8 +42,9 @@ function admits(m: Any, e: Any): boolean {
 
 let now = 0
 
-/** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. */
-function setup() {
+/** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. `refuse`: the
+ *  kernel's check does not use the fixer's first change, with this refusal. */
+function setup(refuse: Any = null) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
@@ -74,11 +78,22 @@ function setup() {
       return ok(fix)
     }
     if (verb === 'done') {
+      // a fixer that says why it cannot be done: the fix fails with its words, and the files no fix may change that the
+      // plugin names after the fix's number block another try
+      const c = argv.indexOf('--cannot')
+      if (c > 0) {
+        const blocked = argv.slice(argv.indexOf('done') + 2, c)
+        return ok(Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null, ...(blocked.length ? { blocked } : {}) }))
+      }
+      // the check that refuses the first change keeps the refusal on the record
+      if (refuse && !fix.commit) return ok(Object.assign(fix, { state: 'failed', commit: 'c0ffee0', tests: 'failed', error: refuse.why, refused: refuse }))
       // the fix takes the fixer's title
       const t = argv.indexOf('--title')
-      Object.assign(fix, { state: 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], title: t > 0 ? argv[t + 1] : fix.title })
+      Object.assign(fix, { state: 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', error: null, refused: null, files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], title: t > 0 ? argv[t + 1] : fix.title })
       return ok(fix)
     }
+    // another round in the same copy, which keeps the refusal for its fixer
+    if (verb === 'again') return ok(Object.assign(fix, { state: 'working', error: null }))
     if (verb === 'apply') {
       // the kernel checks the press's secret against the sha256 the plugin wrote
       if (!JSON.parse(files.get(`${HOME}/fixes/asks/1.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix apply: only the person's key press in thimble does that" }
@@ -326,6 +341,56 @@ test("y while Claude's turn runs: the line says the fix loads when Claude finish
   expect(await fixKey(s.$, 'u')).toBe(null)
 })
 
+test("a change whose tests failed: a new fixer gets another round in the same copy, told the end of the tests' output and the file that holds all of it; the person sees the fix only once it passes", async () => {
+  const LOG = `${HOME}/fixes/tmp/1/tests.log`
+  const s = setup({ why: 'its tests failed in the sandbox', files: [], tests: '(fail) the bar says read\n 1 fail', log: LOG })
+  await requested(s)
+  expect(s.verbs()).toContain('again 1')
+  expect(s.spawns.length).toBe(2)
+  expect(s.spawns[1]).toMatchObject({ subagentType: 'fork', cwd: WORK })
+  expect(String(s.spawns[1].prompt)).toContain(`thimble did not use the last change for this fix: its tests failed in the sandbox. Your last change is in your copy. The end of their output:\n\n(fail) the bar says read\n 1 fail\n\nTheir whole output is in ${LOG}. Fix what fails.`)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  await s.end('Title: Bar says read for coverage\nWhat it does: The bar says r read 14%.', 'agent-fixer-2')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
+  // a refusal from a kernel that names no file: the end of the output alone
+  expect(refusedText({ why: 'its tests failed in the sandbox', files: [], tests: ' 1 fail' }, false)).toContain('The end of their output:\n\n 1 fail\n\nFix what fails.')
+})
+
+test("a fixer's write of a file no fix may change is refused at once, with the reason; when it then says it cannot be done, the failed fix offers no other try", async () => {
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  const write = (s: ReturnType<typeof setup>, tool: string, file_path: string, agentId = 'agent-fixer-1') => s.call('tool.call', { tool, tool_use_id: 'tu-w', agentId, file_path }, ran)
+  // the fix flow's files and the privacy scan, however the path in the copy is spelled
+  expect((await write(s, 'Edit', `${WORK}/plugin/fix/line.ts`)).deny).toBe('thimble refuses a change to plugin/fix/line.ts (the fix flow): no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through. Leave it as it is and make the change in other files. When the request truly cannot be met without it, end with one line `Cannot: <why, in plain words for the person>` in place of the Title line; thimble shows that line to the person.')
+  expect(String((await write(s, 'Write', `${WORK}/./plugin//fix/test/new.test.mjs`)).deny)).toContain('a change to plugin/fix/test/new.test.mjs (the fix flow)')
+  expect(String((await write(s, 'MultiEdit', `${WORK}/plugin/engine/kernel/privacy.py`)).deny)).toContain('a change to plugin/engine/kernel/privacy.py (the privacy scan)')
+  expect(String((await write(s, 'Edit', `${WORK}/plugin/fix/line.ts`)).deny)).toContain('a change to plugin/fix/line.ts (the fix flow)')
+  // the copy's other files, a test of the fix flow among them, are the fixer's to write
+  for (const file_path of [`${WORK}/plugin/bar/bar.tsx`, `${WORK}/plugin/tests/fix.test.ts`, `${WORK}/plugin/fixes.ts`])
+    expect((await write(s, 'Write', file_path)).result.ran).toBe(file_path)
+  // the fixer cannot do without them: the kernel hears which files, each once, and the failed fix's line offers no y
+  await s.end('Cannot: the fix line is drawn by plugin/fix/line.ts, which no fix may change.')
+  expect(s.verbs()).toContain('done 1 plugin/fix/line.ts plugin/fix/test/new.test.mjs plugin/engine/kernel/privacy.py --cannot -')
+  expect(s.ran.find(x => x.argv.includes('done'))?.stdin).toBe('the fix line is drawn by plugin/fix/line.ts, which no fix may change.')
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual([
+    '  × make the bar say read did not pass · the fix line is drawn by plugin/fix/line.ts, which no fix may change.',
+    '    d ask Claude · n dismiss',
+  ])
+  expect(await fixKey(s.$, 'y')).toBe(null)
+  // a new fixer of the fix was refused no write: its Cannot names no file, and y tries the fix again
+  const t = setup({ why: 'its tests failed in the sandbox', files: [], tests: ' 1 fail' })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await ask(t, "make the bar's coverage item say read")
+  expect(String((await write(t, 'Edit', `${WORK}/plugin/fix/line.ts`)).deny)).toContain('a change to plugin/fix/line.ts (the fix flow)')
+  await t.end('Title: Bar says read for coverage\nWhat it does: The bar says r read 14%.')
+  expect(t.spawns.length).toBe(2)
+  await t.end('Cannot: the test of the bar cannot pass.', 'agent-fixer-2')
+  expect(t.verbs().filter(v => v.startsWith('done'))).toEqual(['done 1 --summary - --title Bar says read for coverage', 'done 1 --cannot -'])
+  expect(await fixKey(t.$, 'y')).not.toBe(null)
+})
+
 test("a fixer that closes its end in a code fence: the fence is no part of what the fix does", async () => {
   const s = setup()
   await requested(s, 'Done.\n\n```\nTitle: Bar says read for coverage\nWhat it does: The bar says r read 14%.\n```')
@@ -360,4 +425,44 @@ test("Claude's fix-thimble skill starts no fix without the person's /thimble-fix
   await s.end('Title: Legend shows every row\nWhat it does: The legend wraps.')
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Legend shows every row · tests pass')
   expect(await toldOf(s)).toBe(`thimble's fixer finished the fix "Legend shows every row"; it waits for the person's y. Nothing for you to do.`)
+})
+
+test("words for a fix an update set aside name that fix, never a new one, and Claude reads it in the list as set aside", () => {
+  const fixes: Any[] = [{ id: 2, title: 'resume finds the sessions', state: 'pending', words: [] }, { id: 3, title: 'a note', state: 'on', words: [] }]
+  expect(namedFix('2 port it to 1.0.1', '', fixes)).toEqual({ target: 2, fresh: false })
+  expect(namedFix('port fix 2 to 1.0.1', '2', fixes)).toEqual({ target: 2, fresh: false })
+  expect(fixesContext(fixes)).toContain('2  "resume finds the sessions" (off, set aside at an update)')
+})
+
+test("the line after the session's start put back the fixes an update set aside says how many of the person's fixes stay off, and the command that brings them back", async () => {
+  const s = setup()
+  await carriedLine(s.$, { to: '1.0.1', back: [1], had: [], aside: [2, 3] })
+  expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1 · 1 fix on again · 2 of your fixes are off: they do not fit 1.0.1 · in a shell: thimble reapply')
+})
+
+test("more words for a fix an update set aside: its fixer works in a new copy and reads where the fix's change from before the update is", async () => {
+  const s = setup()
+  const COPY = `${HOME}/fixes/work/2`
+  const EARLIER = `${HOME}/fixes/tmp/2/earlier.patch`
+  const aside: Any = { id: 2, title: 'resume finds the sessions', words: ['resume should find the sessions'], rounds: 1, made_in: 'terminal', state: 'pending', work: null, commit: 'c0ffee2', error: 'it does not fit 1.0.1' }
+  // the kernel's list holds the fix set aside; its round of it is a new copy, whose answer names the old change's patch
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    const r = await run(argv, o)
+    const verb = argv.includes('fix') ? argv[argv.indexOf('fix') + 1] : ''
+    if (verb === 'list') return { ...r, stdout: JSON.stringify({ ...JSON.parse(r.stdout), fixes: [aside] }) }
+    if (verb !== 'round') return r
+    Object.assign(aside, { state: 'working', work: COPY, error: null, rounds: 2, words: [...aside.words, o.stdin] })
+    return { ...r, stdout: JSON.stringify({ ...aside, earlier: EARLIER }) }
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const r = await ask(s, '2 port it to 1.0.1')
+  expect(String(r.text)).toContain('changes the person\'s fix "resume finds the sessions" in the background')
+  expect(s.verbs().filter(v => /^(new|round|redo)\b/.test(v))).toEqual(['round 2'])
+  expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('port it to 1.0.1')
+  expect(s.spawns.length).toBe(1)
+  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: COPY })
+  const first = String(s.spawns[0].prompt)
+  expect(first).toContain('Round 1: resume should find the sessions\nRound 2: port it to 1.0.1')
+  expect(first).toContain(`Your working folder is the copy: ${COPY}.\nAn earlier change for this request, which thimble did not use, is in ${EARLIER}; start from it when it helps.`)
 })

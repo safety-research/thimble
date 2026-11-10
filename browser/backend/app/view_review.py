@@ -3,16 +3,18 @@
 and fixes clear problems in how it draws, with a fresh context. The view reaches the analyst at once and the review runs
 beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
 
-dev._settle calls after_built() when a build or a change to a view passes, and the review starts through thimble's
-plugin module as part of the start that asked for the build (a follow-on start); Review again is the analyst's click.
+dev._settle calls after_built() when a build or a change to a view passes. After a view's first build the review
+starts through thimble's plugin module as part of the start that asked for the build (a follow-on start). A change to a
+view built before starts none once a review of the view has ended; Review again is the analyst's click, after a build
+and after a change.
 The reviewer's registered prompt is the `review` section of prompts/view-review.md; its run's prompt names the view
 (prompts/dev-view-review.md, task). It works
 in rounds, through two thimble tools (view_tools.py):
 1. view_pictures: the overview as the Views bar opens it, then the states it asks for, up to EXTRA_SHOTS more a round
    (EXTRA_STATES, such as a control clicked or another pane width), shot into views-work/<slug>/review/<round>/ with
    what the checks found, how the page's text fits (views.layout_notes), the controls the first picture shows and a
-   sample of the records the pages fetched. It reads the pictures with Read. Without the headless browser there are no
-   pictures, and it is told so.
+   sample of the records the pages fetched. The pictures come with the tool's answer. Without the headless browser
+   there are no pictures, and it is told so.
 2. If it finds problems, it edits the view's files, checks them with view_check, and calls finish_review with what it
    revised and what it leaves. The gate runs: a pass keeps the revision (views.mark_built) and counts a round, and
    before ROUNDS rounds it is told to take the pictures again; a failure puts the view back as it was before the round
@@ -26,7 +28,8 @@ The state rides on the proposal as `review {state, round, ts, revised, left, not
 and goes out with the `view` event, `shots` counting the pictures the review took. views/.reviewed/<slug>/ keeps the
 view as it was built for Undo until the next build or change passes, and <slug>.last the last version that passed,
 restored when a revision fails. A review run again keeps what the review before it revised, so Undo still reaches the
-view as it was built. A new change to the view stops its review; a view replaced or deleted stops it with no trace
+view as it was built. A new change to the view stops its review; once the change passes, that review keeps its state,
+without what it revised, so its mark still offers Review again. A view replaced or deleted stops it with no trace
 (forget)."""
 from __future__ import annotations
 
@@ -187,13 +190,17 @@ def task(c: str, prop: dict[str, Any]) -> str:
 # --------------------------------------------------------------------------- starting and stopping
 
 
-def after_built(c: str, slug: str) -> None:
-    """Start the review of a view that just passed its checks: a first build or a change, which is the new version Undo
-    goes back to. A reviewer of that view that runs goes on, since it drives its own rounds; one that is being stopped
-    is followed by a new review once it ends. A view thimble ships is never reviewed."""
+def after_built(c: str, slug: str, change: bool = False) -> None:
+    """A view just passed its checks, which is the new version Undo goes back to. A first build starts its review. A
+    `change` to a view built before starts none once a review of the view has ended, where its mark offers Review
+    again: that review keeps its state and its time, without what it revised, which is part of the changed view now. A
+    view whose review never ran to an end, with none on the proposal or one that still waits to start, gets it after a
+    change too. A reviewer of that view that runs goes on, since it drives its own rounds; one that is being stopped
+    is followed by a new review once it ends, after a first build alone. With the review off, either pass leaves no
+    review on the proposal. A view thimble ships is never reviewed."""
     run = subagents.current(c, key(slug))
     if run is not None:
-        if (c, run.agent_id) in _stopping:
+        if (c, run.agent_id) in _stopping and not change:
             _restart.add((c, slug))
         return
     view = views.read_view(c, slug)
@@ -205,7 +212,14 @@ def after_built(c: str, slug: str) -> None:
         if prop.get("review"):
             views.update_proposal(c, slug, review=None)
         return
-    start(c, slug)
+    review = review_of(prop)
+    if not change or review.get("state") not in ("done", "failed", "stopped"):
+        start(c, slug)
+        return
+    if review.get("revised"):  # written here and not with _set, which would stamp the time of a review that never ran
+        review["revised"] = []
+        views.update_proposal(c, slug, review=review)
+        views._emit(c, slug, str(prop.get("status") or "built"), review=public(review))
 
 
 def start(c: str, slug: str, again: bool = False, route: str = subagents.FOLLOW_ON) -> bool:
@@ -501,10 +515,13 @@ def _wanted(states: Any, left: int) -> list[dict[str, Any]]:
     return more[:max(0, left)]
 
 
-async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str]:
+async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, list[Any]]:
     """view_pictures for the reviewer `agent_id`: in a round's first call the overview, then the states asked for, up
     to EXTRA_SHOTS a round, into views-work/<slug>/review/<round>/. (The pictures' lines, each its number, path and
-    what it shows, then what the checks found; the records the pages fetched.) NoPictures for none."""
+    what it shows, then what the checks found; the records the pages fetched; the pictures as the tool's answer carries
+    them, in their lines' order: view_tools.picture.) NoPictures for none."""
+    from . import view_tools  # noqa: PLC0415
+
     prop = views.read_proposal(c, slug)
     view = views.read_view(c, slug)
     if prop is None or view is None:
@@ -529,14 +546,17 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
         raise NoPictures(why)
     extra = sum(1 for w in wanted if w["state"] != "overview")
     _set(c, slug, pictured=rnd, extra_left=left - extra, shots=done + sum(1 for s in shots if s.get("png")))
-    lines = [f"{i}: {s['png']} ({_about(s)})" for i, s in enumerate(shots, done + 1) if s.get("png")]
+    taken = [(i, s) for i, s in enumerate(shots, done + 1) if s.get("png")]
+    pics = await asyncio.to_thread(lambda: [view_tools.picture(s["png"]) for _, s in taken])
+    lines = [f"{i}: {s['png']}{pic.scaled if pic else ', which did not load'} ({_about(s)})"
+             for (i, s), pic in zip(taken, pics)]
     if shots and shots[0].get("controls") and shots[0].get("state") == "overview":
         lines.append(f"The controls picture {done + 1} shows, by their text: "
                      + "; ".join(str(x) for x in shots[0]["controls"]))
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-"
+    return "\n".join(lines), records_text(shots) or "-", [pic for pic in pics if pic]
 
 
 def _about(s: dict[str, Any]) -> str:

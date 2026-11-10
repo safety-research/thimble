@@ -9,8 +9,9 @@ and the agent takes up its start (bind). The typed start of a thread's fork's pr
 start_writing or run_check the server starts with the fork's call (tools._fork_start). Every click route takes the
 analyst's browser cookie (hook_auth.analyst), never the server's token alone.
 
-Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for), which the runtime
-runs it with.
+Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for), a view's review
+its row's effort up to medium (Type.effort_at_most), which the runtime runs it with, in fast mode where its row in
+Settings has it on (fast_for).
 
 The files. subagents.json and callers.jsonl, in the workspace's `trusted` folder, hold the pending requests, the agents
 and which agent made each thimble call (subagent_files.py). Kernels see the folder read-only (kernel_wrap.TRUSTED_DIR).
@@ -108,7 +109,8 @@ def _resolve(ref: str) -> Any:
 class Type:
     """One of thimble's agent types. `kind` is the session kind of its key (tools.session_kind), `chat_role` the role
     of its chat, `row` its row of config.models_for and `agent` its row of thimble's config (userconf.AGENTS: web,
-    memory). `define`, `own`, `started`, `ended` and `refused` name `module:attr`: the role's definition for a workspace,
+    memory). `effort_at_most` is the highest effort a run takes from its row (none: the row's, values_for).
+    `define`, `own`, `started`, `ended` and `refused` name `module:attr`: the role's definition for a workspace,
     the thimble tools it may call, and its handlers (module note, runs and ends). `when` names `module:attr`, a function
     of the workspace that says whether the role is registered there (none: always). With `keeps_chat` a run's end
     leaves its chat running, and the role's end handler ends it (a code ticket goes on to the analyst's Allow).
@@ -133,6 +135,7 @@ class Type:
     left_work: str = ""
     gated: bool = False
     own_notices: bool = False
+    effort_at_most: str = ""
 
 
 TYPES: dict[str, Type] = {
@@ -146,7 +149,10 @@ TYPES: dict[str, Type] = {
     "view-reviewer": Type("view-reviewer", tools.REVIEW_SESSION, "dev", "dev", "dev",
                           "app.view_tools:reviewer_definition", "app.view_tools:REVIEWER_TOOLS",
                           "app.view_review:subagent_started", "app.view_review:subagent_ended",
-                          "app.view_review:subagent_refused", left_work="app.view_review:left_work"),
+                          "app.view_review:subagent_refused", left_work="app.view_review:left_work",
+                          # one light pass over pictures: at medium it takes about half the model time it takes at
+                          # high, and changes a view as seldom
+                          effort_at_most="medium"),
     "check": Type("check", tools.CHECK_SESSION, "check", "checks", "checks", "app.checks:definition",
                   "app.checks:OWN_TOOLS", "app.checks:subagent_started", "app.checks:subagent_ended",
                   "app.checks:subagent_refused", own_notices=True),
@@ -185,18 +191,35 @@ def values_for(c: str, role: str, args: dict[str, Any] | None = None) -> dict[st
     (config.models_for). A model alias is written as its full id, as Settings shows it; Ultracode's effort is xhigh
     (config.effort_level). An effort that is none of
     the levels Claude Code takes is not passed on, since the registration would then carry a value Claude Code does not
-    run at: Settings' effort stands. A model Claude Code runs with no effort (config.has_effort) gets none."""
+    run at: Settings' effort stands. A model Claude Code runs with no effort (config.has_effort) gets none. A type with
+    `effort_at_most` takes the row's effort up to that level, so a view's review runs at medium on a row at medium or
+    above and at the row's effort on a lower one; an effort the run's arguments name stands."""
     args = args or {}
     conf = config.models_for(c)[TYPES[role].row]
     model = config.exact_model(str(args.get("model") or "").strip()) or str(conf.get("model") or "")
     asked = str(args.get("effort") or "").strip()
-    effort = config.effort_level(asked) or str(conf.get("effort") or "")
+    effort = config.effort_level(asked) or _at_most(str(conf.get("effort") or ""), TYPES[role].effort_at_most)
     if asked and not config.effort_level(asked):
         log.warning("%s: a run of the %s named the effort %r, which Claude Code does not take; it runs at %s",
                     c, role, asked, effort)
     if not config.has_effort(model):
         effort = ""
     return {"model": model, "effort": effort}
+
+
+def _at_most(effort: str, most: str) -> str:
+    """`effort`, or `most` where `effort` is a higher level (config.ROLE_EFFORTS, lowest first)."""
+    levels = config.ROLE_EFFORTS
+    return most if most in levels and effort in levels and levels.index(effort) > levels.index(most) else effort
+
+
+def fast_for(c: str, role: str) -> bool:
+    """Whether a run of `role` runs in fast mode: as Settings' row for the role has it (config.models_for), which is on
+    only for a row that takes fast mode, on a model that has it. So a view's builder and its reviewer
+    run with the dev row's, which is main's until the analyst sets the row's own, and a writer and a check with
+    none. Read at the run's start, so a run that starts after the analyst turned main's on runs in fast mode."""
+    t = TYPES.get(role)
+    return bool(t and config.models_for(c)[t.row].get("fast"))
 
 
 def _agent_conf(c: str, agent: str) -> dict[str, Any]:

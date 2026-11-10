@@ -75,18 +75,22 @@ file and its command hooks, the launcher, thimble's scripts and lock files (a pa
 names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
 fix show does; a fix that thimble update --continue turns on again, with no key press, may change only those it changed
 before (continue_), and one that an update puts back on its own (carry) is the very change the person had on. A file
-moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
-prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
-refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
-to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
-cannot be done (done with `cannot`), which is the failure the person sees. Another try at a failed fix (redo: y on its
-line, or /thimble-fix N alone) goes on in its copy while the copy holds work that no check took, such as the change
-Claude made there in the person's session, so that the check takes it; else it starts in a new copy cut from mine, with
-the earlier change to start from. The quick tests run with no network, for one
-fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (_run_tests).
-They run in a process of their own (the runner), apart from the call that checks the fix, so that they may take longer
-than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what came of them,
-and done waits for that (_start_tests).
+moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's prompt does not list these
+files. The plugin has the same list (fix/protected.mjs, which a test holds equal to this one) and refuses the fixer's
+write of such a file when it makes it, so that the fixer learns it before its round ends; a change its shell makes is
+refused at its end. A check that refuses a change (these files, a binary file, failing tests) keeps the refusal on the
+record (refused: why, the files, the end of the tests' output and the log that holds all of it) until the next check,
+and the plugin gives it back to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the
+tests, or ends saying why it cannot be done (done with `cannot`), which is the failure the person sees.
+Another try at a failed fix (redo: y on its line, or /thimble-fix N alone) goes on in its copy while the copy holds
+work that no check took, such as the change Claude made there in the person's session, so that the check takes it;
+else it starts in a new copy cut from mine, with the earlier change to start from. The quick tests are the checks that
+can see the files the fix changes (_checks). They run with no network, for one fix at a time, each as a command of its
+own, the copy's launcher first, and the page's type check and its build at the same time; the hooks tests, which can
+fail for their timing alone, run once more when they fail, and any other check fails the fix at its first run
+(_run_tests). They run in a process of their own (the runner), apart from the call that checks the fix, so that they may
+take longer than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what
+came of them, and done waits for that (_start_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -114,7 +118,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .store import Store, thimble_home
 
@@ -125,6 +129,7 @@ PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
 # the files a fix may not change, by what each one is: the way back, which turns fixes off and undoes them, and the scan
 # a shared fix goes through (fnmatch patterns over the repository's paths). The refusal names each file with what it is.
+# The plugin refuses the fixer's writes from the same list (fix/protected.mjs, whose patterns take * alone): change both.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
                      "plugin/prompts/fixer.md",
@@ -1044,8 +1049,31 @@ def _has_pytest(py: str) -> bool:
     return run([py, "-c", "import pytest"], check=False).returncode == 0
 
 
+class Check(NamedTuple):
+    """One of the checks of a change (_checks): its name in the log, and the shell command that runs it in the copy, in
+    the sandbox. `again`: it can fail for its timing alone, so a run that fails runs once more before the check counts
+    as failed. `beside`: it and the check before it use nothing of each other, so the two run at the same time
+    (_run_tests)."""
+    name: str
+    cmd: str
+    again: bool = False
+    beside: bool = False
+
+
 QUICK_TESTS = "claude plugin test plugin"
 PYTESTS = '"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider'
+# the kernel's Python files, which the hooks tests cannot see: their runner takes a test file anywhere in the plugin,
+# but no Python file; a hooks test reads no file and starts no process, and what it imports is the plugin's hooks code,
+# none of it one of these (tests/test_hooks_tests.py holds that)
+KERNEL_ONLY = ("plugin/engine/*.py", "plugin/tests/*.py", "plugin/conftest.py")
+# the kernel's test files of the fix flow and of the privacy scan, whose subjects no fix may change (PROTECTED), and
+# what else of the repository they import, read or run, or their run loads from the plugin (a Python file, a settings
+# file of pytest): all they can see of a change. A path outside the plugin and the browser workbench (thimble's
+# scripts) counts as seen
+FIX_TESTS = ("test_fix_copy_git.py", "test_fix_links.py", "test_fix_nested_git.py", "test_fix_pr.py",
+             "test_fix_share.py", "test_fix_zip.py", "test_fixes.py", "test_privacy.py")
+FIX_TESTS_SEE = ("plugin/engine/*", "plugin/*.py", "plugin/*.ini", "plugin/*.toml", "plugin/*.cfg",
+                 "plugin/.claude-plugin/*", "plugin/prompts/reapply.md", "plugin/sandbox/*")
 # the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
 # no traceback: the launcher, and the kernel run directly, since a launcher that answers --help itself would hide a dead
 # kernel. Each has SMOKE_LIMIT seconds, and then its processes are stopped (exit 124), so that one that hangs does not
@@ -1063,10 +1091,15 @@ LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess 
                   "printf \"%s\\n%s --help: exit %s\\n\" \"$o\" \"$n\" \"$s\"; return 1;; esac; }\n"
                   "chk plugin/bin/thimble plugin/bin/thimble && "
                   "chk plugin/engine/thimble.py \"$THIMBLE_PYTHON\" plugin/engine/thimble.py)")
-# the page's checks, in its folder: its type check and its build, as its package.json runs them (the build into the
-# sandbox's temp folder), then the unit tests of what changed since the commit the change was made on ({base})
-PAGE_CHECKS = ('(cd browser/frontend && node_modules/.bin/tsc -b && node_modules/.bin/vite build --logLevel warn '
-               '--outDir "$TMPDIR/page" --emptyOutDir && node_modules/.bin/vitest run --changed {base} --passWithNoTests)')
+# the page's checks, each in its folder: its type check and its build, as its package.json runs them (the build into
+# the sandbox's temp folder), at the same time, since the build reads the sources and not what the type check writes;
+# then the unit tests of what changed since the commit the change was made on ({base})
+PAGE_CHECKS = (
+    Check("the page's type check", "cd browser/frontend && node_modules/.bin/tsc -b"),
+    Check("the page's build", 'cd browser/frontend && node_modules/.bin/vite build --logLevel warn --outDir "$TMPDIR/page" '
+                              "--emptyOutDir", beside=True),
+    Check("the page's unit tests", "cd browser/frontend && node_modules/.bin/vitest run --changed {base} --passWithNoTests"),
+)
 # the server's checks, in its folder: its code loads (app.main imports the module of each of its routes, as the server's
 # start does), and, when its Python has pytest, its prompts render and name only the hints its code has
 # (scripts/check.sh's parity). Its whole suite needs what the sandbox does not give (a browser, the network, many
@@ -1078,53 +1111,66 @@ SERVER_PROMPTS = ('(cd browser/backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m
 WORKBENCH_PACKAGES = (("frontend", "node_modules"), ("backend", ".venv"))
 
 
-def _tests_argv(fid: int | str) -> list[str]:
-    """The command that runs the quick tests (_run_tests) in the copy, in the sandbox, as for a change to the terminal
-    plugin. done makes it before its guard, since making it may install the sandbox runtime, which takes minutes; once it
-    committed the change, it runs the checks of what the change touched (_checks_argv)."""
-    return _checks_argv(fid, ["plugin/"], "HEAD")
+def _checks_box(fid: int | str, paths: list[str], base: str,
+                box: list[str] | None = None) -> tuple[list[str], list[Check]]:
+    """The start of the sandbox's command for the copy of `fid` (a fix's id, or carry), and the checks of a change to
+    `paths`, made there on commit `base`, each of which runs as that start with its own command (_checks, _run_tests).
+    `box`: that start as the caller made it already (done makes it before its guard, since making it may install the
+    sandbox runtime, which takes minutes); it is made again only for checks that read more folders than it shows."""
+    checks, reads = _checks(home() / "work" / str(fid), paths, base)
+    if reads:
+        return sandbox_argv(fid, reads=reads), checks
+    return sandbox_argv(fid) if box is None else box, checks
 
 
-def _checks_argv(fid: int | str, paths: list[str], base: str) -> list[str]:
-    """The command that runs the checks of a change to `paths`, made on commit `base`, in the copy of `fid` (a fix's
-    id, or carry), in the sandbox (_checks)."""
-    cmd, reads = _checks(home() / "work" / str(fid), paths, base)
-    return [*(sandbox_argv(fid, reads=reads) if reads else sandbox_argv(fid)), cmd]
-
-
-def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
-    """The checks of a change to `paths`, made in the copy `wt` on commit `base`, as one shell command that runs in the
-    copy, in the sandbox, and the folders that the sandbox reads for them besides: done checks a fix with them, and
-    carry the fixes it puts back, so that the two check alike. By the part of thimble a path is in: outside browser/,
-    the terminal plugin's (the copy's launcher and the kernel's command, LAUNCHER_SMOKE; the hooks tests when Claude
-    Code is installed; the kernel's tests when this Python has pytest); browser/frontend/, the page's (PAGE_CHECKS);
-    browser/backend/ and browser/prompts/, the server's (SERVER_LOADS, and SERVER_PROMPTS when its Python has pytest);
-    the rest of browser/, none. The page's and the server's run with the browser workbench's packages, which the copy
-    borrows (_borrow): with none (the workbench is not installed), they are left out. THIMBLE_FIX_TESTS, a shell
-    command, replaces them all."""
+def _checks(wt: Path, paths: list[str], base: str) -> tuple[list[Check], list[str]]:
+    """The checks of a change to `paths`, made in the copy `wt` on commit `base`, in the order they run, each a shell
+    command of its own that runs in the copy, in the sandbox, so that one that fails is known by its name; and the
+    folders that the sandbox reads for them besides. done checks a fix with them, and carry the fixes it puts back, so
+    that the two check alike. By the part of thimble a path is in: outside browser/, the terminal plugin's (the copy's
+    launcher and the kernel's command, LAUNCHER_SMOKE; the hooks tests when Claude Code is installed; the kernel's
+    tests when this Python has pytest); browser/frontend/, the page's (PAGE_CHECKS); browser/backend/ and
+    browser/prompts/, the server's (SERVER_LOADS, and SERVER_PROMPTS when its Python has pytest); the rest of browser/,
+    none. Of the terminal plugin's, a check that cannot see the change is left out: the hooks tests, for a change to
+    the kernel's Python files alone (KERNEL_ONLY), and the kernel's tests of the fix flow and of the privacy scan, for
+    a change to none of what they see (_kernel_tests). The kernel's tests, which stop at the first that fails, go
+    before the hooks tests when the change has Python files. Only the hooks tests fail for their timing alone, so only
+    they run once more when they fail (Check.again). The page's type check and its build run at the same time
+    (Check.beside). The page's and the server's run with the browser workbench's packages, which the copy borrows
+    (_borrow): with none (the workbench is not installed), they are left out. THIMBLE_FIX_TESTS, a shell command,
+    replaces them all, as one check that runs once more when it fails."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if cmd:
-        return cmd, []
-    parts: list[str] = []
+        return [Check("the tests", cmd, again=True)], []
+    checks: list[Check] = []
     reads: list[str] = []
-    if any(not p.startswith("browser/") for p in paths):
-        parts.append(LAUNCHER_SMOKE)
-        if shutil.which(claude()):
-            parts.append(QUICK_TESTS)
-        if _has_pytest(_python()):
-            parts.append(PYTESTS)
+    mine = [p for p in paths if not p.startswith("browser/")]
+    if mine:
+        checks.append(Check("thimble's start", LAUNCHER_SMOKE))
+        kernel_only = all(any(fnmatch.fnmatch(p, pat) for pat in KERNEL_ONLY) for p in mine)
+        hooks = [Check("the hooks tests", QUICK_TESTS, again=True)] if shutil.which(claude()) and not kernel_only else []
+        kernel = [Check("the kernel's tests", _kernel_tests(mine))] if _has_pytest(_python()) else []
+        checks += [*kernel, *hooks] if any(p.endswith(".py") for p in mine) else [*hooks, *kernel]
     page = any(p.startswith("browser/frontend/") for p in paths)
     server = any(p.startswith(("browser/backend/", "browser/prompts/")) for p in paths)
     lent = _borrow(wt) if page or server else {}
     if page and "frontend" in lent:
-        parts.append(PAGE_CHECKS.format(base=shlex.quote(base)))
+        checks += [c._replace(cmd=c.cmd.format(base=shlex.quote(base))) for c in PAGE_CHECKS]
         reads += lent["frontend"]
     if server and "backend" in lent:
-        parts.append(SERVER_LOADS)
+        checks.append(Check("the server's import", SERVER_LOADS))
         if _has_pytest(str(wt / "browser" / "backend" / ".venv" / "bin" / "python")):
-            parts.append(SERVER_PROMPTS)
+            checks.append(Check("the server's prompt tests", SERVER_PROMPTS))
         reads += lent["backend"]
-    return " && ".join(parts) or "true", reads
+    return checks, reads
+
+
+def _kernel_tests(paths: list[str]) -> str:
+    """The command of the kernel's tests for a change to `paths`, none of them in browser/: the whole suite, or the
+    suite without the test files of the fix flow and of the privacy scan (FIX_TESTS) when the change has no path that
+    those can see (FIX_TESTS_SEE)."""
+    seen = any(not p.startswith("plugin/") or any(fnmatch.fnmatch(p, pat) for pat in FIX_TESTS_SEE) for p in paths)
+    return PYTESTS if seen else " ".join([PYTESTS, *(f"--ignore=plugin/tests/{t}" for t in FIX_TESTS)])
 
 
 def _borrow(wt: Path) -> dict[str, list[str]]:
@@ -1160,37 +1206,106 @@ def _borrow(wt: Path) -> dict[str, list[str]]:
     return out
 
 
-def _run_tests(argv: list[str], fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox, with no network, as for a change to the terminal plugin (_checks),
-    by the command _tests_argv made, which the runner gets from the call that checks the fix. They run for one fix at a
-    time, since two runs at once make the hooks tests run out of time, and a run that fails runs once more before the
-    tests count as failed. (passed, the log's last lines, which say when they passed only the second time)"""
+# the seconds that the checks of one change have together
+TESTS_LIMIT = 540
+TESTS_SLOW = f"the tests ran longer than {TESTS_LIMIT // 60} minutes"
+PASSED_AGAIN = "passed only the second time"
+
+
+def _run_tests(box: list[str], checks: list[Check], fid: int | str) -> tuple[bool, str]:
+    """The checks of a change (_checks) in the copy, with no network, each as a command of its own in the sandbox
+    (`box`, the start of that command, which the runner gets from the call that checks the fix), in their order, until
+    one fails; a check that runs beside the one before it (`beside`) starts with it, and both end before the next
+    starts. They run for one fix at a time, since two runs at once make the hooks tests run out of time, and a check
+    that can fail for its timing alone (`again`) runs once more before it counts as failed; any other fails at its
+    first run. Together they have TESTS_LIMIT seconds, of which a run that is repeated takes none. The whole log, each
+    run under a line that names its check, is in tmp/<id>/tests.log. (passed, the end of the log of the first check
+    that failed, else of the last that ran, or, when all passed, of the first run of one that passed only the second
+    time)"""
+    log: list[str] = []
+    ok, tail, twice = True, "", ""
     with Lock("tests.lock"):
-        ok, log = _tests_once(argv, fid)
-        if not ok:
-            first = log
-            ok, log = _tests_once(argv, fid)
-            if ok:
-                log = f"{PASSED_AGAIN}; the first run ended:\n{first}"
-    return ok, log
-
-
-PASSED_AGAIN = "The tests passed only the second time"
-
-
-def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
-    """One run of the quick tests in the copy: (passed, the log's last lines); the whole log in tmp/<id>/tests.log."""
-    try:
-        p = subprocess.run(argv, cwd=home() / "work" / str(fid), capture_output=True, text=True, timeout=540)
-    except subprocess.TimeoutExpired:
-        return False, "the tests ran longer than 9 minutes"
-    log = (p.stdout + p.stderr).strip()
+        left = float(TESTS_LIMIT)
+        for group in _beside(checks):
+            got = _at_once(box, group, fid, left)
+            for c, (passed, _, runs) in zip(group, got):
+                log += runs
+                if ok:
+                    tail = _end(runs[-1])
+                if passed and len(runs) > 1 and not twice:
+                    twice = f"{c.name} {PASSED_AGAIN}; the first run ended:\n{_end(runs[0])}"
+                ok = ok and passed
+            left -= max(took for _, took, _ in got)
+            if not ok:
+                break
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
     try:
-        _write_new(home() / "tmp" / str(fid) / "tests.log", log + "\n")
+        _write_new(home() / "tmp" / str(fid) / "tests.log", "\n".join(log) + "\n")
     except OSError:
         pass  # the log's last lines go on the record either way
-    return p.returncode == 0, "\n".join(log.splitlines()[-12:])
+    return ok, twice if ok and twice else tail
+
+
+def _beside(checks: list[Check]) -> list[list[Check]]:
+    """The checks in the groups that run at the same time: each one with those after it that run beside it."""
+    groups: list[list[Check]] = []
+    for c in checks:
+        if c.beside and groups:
+            groups[-1].append(c)
+        else:
+            groups.append([c])
+    return groups
+
+
+def _at_once(box: list[str], group: list[Check], fid: int | str, limit: float) -> list[tuple[bool, float, list[str]]]:
+    """The checks of one group (_beside) in the copy, at the same time when they are several, each in a thread that
+    waits for its command: what _check gives for each, in their order, once all ended."""
+    if len(group) == 1:
+        return [_check(box, group[0], fid, limit)]
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    with ThreadPoolExecutor(len(group)) as pool:
+        return list(pool.map(lambda c: _check(box, c, fid, limit), group))
+
+
+def _check(box: list[str], c: Check, fid: int | str, limit: float) -> tuple[bool, float, list[str]]:
+    """The check `c` in the copy, each run for at most `limit` seconds: one run, and one more when that fails and the
+    check can fail for its timing alone. (passed, the seconds of its last run, the log of each run)"""
+    ok, took, said = _check_once(box, c, fid, limit)
+    if ok or not c.again:
+        return ok, took, [said]
+    ok, took, again = _check_once(box, c, fid, limit, again=True)
+    return ok, took, [said, again]
+
+
+def _check_once(box: list[str], c: Check, fid: int | str, limit: float, again: bool = False) -> tuple[bool, float, str]:
+    """One run of the check `c` in the copy, for at most `limit` seconds: (passed, the seconds it took, its log: a line
+    that names the check and says what came of the run, then all that the run printed)."""
+    start = time.monotonic()
+    try:
+        p = subprocess.run([*box, c.cmd], cwd=home() / "work" / str(fid), capture_output=True, text=True,
+                           timeout=max(limit, 1.0))
+        ok, out = p.returncode == 0, p.stdout + p.stderr
+    except subprocess.TimeoutExpired as e:
+        # what it printed until then, which comes as bytes
+        said = "".join(x.decode(errors="replace") if isinstance(x, bytes) else x or "" for x in (e.stdout, e.stderr))
+        ok, out = False, f"{said.rstrip()}\n{TESTS_SLOW}"
+    took = time.monotonic() - start
+    head = f"### {c.name}{', run again' if again else ''}: {'passed' if ok else 'failed'} in {took:.1f} s"
+    return ok, took, f"{head}\n{out.strip()}".rstrip()
+
+
+def _end(said: str) -> str:
+    """The end of one run's log (_check_once): its first line, which names the check, and its last 12 lines."""
+    head, *lines = said.splitlines()
+    return "\n".join([head, *lines[-12:]])
+
+
+def _tests_log(fid: int | str) -> str | None:
+    """The whole log of the last checks in the copy of `fid` (tmp/<id>/tests.log, _run_tests), which the refusal of a
+    change whose tests failed names for the next fixer; None when thimble could not write it."""
+    p = home() / "tmp" / str(fid) / "tests.log"
+    return str(p) if p.is_file() and not p.is_symlink() else None
 
 
 def _write_new(p: Path, text: str) -> None:
@@ -1239,15 +1354,16 @@ def _guard(fid: int, deadline: float | None) -> int | None:
             time.sleep(0.1)
 
 
-def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str],
+def _start_tests(rec: dict[str, Any], named: str | None, box: list[str], checks: list[Check],
                  read: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """The quick tests of a fixer's change in a process of their own (the runner), in a session of its own, apart from
-    the call that checks the change: the tests wait for other fixes' tests and run twice when they fail, which may take
-    longer than Claude Code lets a call run. The record stays working, with `testing` (when they started, and the lock
-    file of this run, which its runner holds while it lives), until the runner writes what came of them (tests_runner).
-    Each run has a lock file of its own, so that the tests of a new round never wait for the runner of the round before.
-    The caller holds the fix's guard (done); this starts nothing when the record says that the tests run or is no longer
-    the one it read (`read`). None: it wrote nothing, and its caller waits for the tests (_wait)."""
+    """The quick tests of a fixer's change (`checks`, each run as `box` with its command, _run_tests) in a process of
+    their own (the runner), in a session of its own, apart from the call that checks the change: the tests wait for
+    other fixes' tests, and the hooks tests run twice when they fail, which may take longer than Claude Code lets a call
+    run. The record stays working, with `testing` (when they started, and the lock file of this run, which its runner
+    holds while it lives), until the runner writes what came of them (tests_runner). Each run has a lock file of its
+    own, so that the tests of a new round never wait for the runner of the round before. The caller holds the fix's
+    guard (done); this starts nothing when the record says that the tests run or is no longer the one it read (`read`).
+    None: it wrote nothing, and its caller waits for the tests (_wait)."""
     import fcntl  # noqa: PLC0415
 
     fid = rec["id"]
@@ -1265,7 +1381,7 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str],
                 lock.unlink(missing_ok=True)
                 return None
             rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
-        job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
+        job = {"id": fid, "box": box, "checks": checks, "title": named, "testing": rec["testing"]}
         log = _new_log(tmp_dir(fid) / "runner.log")
         try:
             p = subprocess.Popen([sys.executable or "python3", "-I", "-B", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
@@ -1300,12 +1416,12 @@ def tests_runner() -> None:
     run's own lock file (_start_tests) goes when the runner ends."""
     job = json.loads(sys.stdin.read())
     try:
-        ok, tail = _run_tests(job["argv"], job["id"])
+        ok, tail = _run_tests(job["box"], [Check(*c) for c in job["checks"]], job["id"])
         rec = get(job["id"])
         if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
             return
         rec.pop("testing")
-        rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
+        rec = _tested({**rec, "unshown": True}, ok, tail, job["title"], None if ok else _tests_log(job["id"]))
         if rec.get("prev") and rec["state"] == "ready":
             try:
                 settle(rec, job["testing"])
@@ -1347,13 +1463,14 @@ def shown(fid: int | str) -> dict[str, Any]:
         return put(rec)
 
 
-def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict[str, Any]:
+def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None, log: str | None = None) -> dict[str, Any]:
     """The record with what came of its tests: ready, named by the fixer's title, or failed, with the refusal that the
-    next fixer in the copy is told (the end of the tests' output)."""
+    next fixer in the copy is told (the end of the tests' output, and `log`, the file that holds all of it, when the
+    tests ran)."""
     rec.update(tests="passed" if ok else "failed", tests_tail=tail, state="ready" if ok else "failed",
                error=None if ok else TESTS_FAILED)
     if not ok:
-        rec["refused"] = {"why": TESTS_FAILED, "files": [], "tests": tail}
+        rec["refused"] = {"why": TESTS_FAILED, "files": [], "tests": tail, **({"log": log} if log else {})}
     elif named:
         rec["title"] = named
     return rec
@@ -1555,7 +1672,8 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
     no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
-    fits, starts again in a new copy (redo), and so does a request with no code (a round that ended with `Request:`,
+    fits, or that an update set aside (pending: its old change is what the new copy starts from), starts again in a new
+    copy (redo), and so does a request with no code (a round that ended with `Request:`,
     such as the fixer's question back to the person, whose copy went): its words, and the person's answer, go on in its
     next round, also for a request stored by an earlier thimble. `asked`: the person's own words, as in new."""
     words = (words or "").strip()
@@ -1565,7 +1683,7 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
             return _in_copy(rec, [words], session, asked)
     if rec.get("state") == "request" and not words:
         raise FixError("say what should work differently in this fix")
-    if rec.get("state") in ("failed", "redo", "request"):
+    if rec.get("state") in ("failed", "redo", "pending", "request"):
         return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off, ready or failed, or a request, "
@@ -1777,7 +1895,7 @@ def _gitlinks(wt: Path, env: dict[str, str], base: str) -> list[str]:
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
          tests: bool = True, session: str | None = None, cannot: str | None = None,
-         within: float | None = None) -> dict[str, Any]:
+         within: float | None = None, without: list[str] | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the checks of the parts
     of thimble it changed in the sandbox (_checks, as carry runs them for the fixes an update set aside). ready, failed
     (with the reason), or a request with no code. A round of a fix changed in place (prev): a ready change becomes the
@@ -1785,6 +1903,7 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
     `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r.
+    `without`: with `cannot`, the files whose write the plugin refused that fixer (fix/fixer.ts fixerCall).
     The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
     most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
     tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
@@ -1800,19 +1919,22 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
-        # a fixer that cannot do without the files no fix may change: another try cannot do it either (blocked)
-        blocked = protected_of((rec.pop("refused", None) or {}).get("files") or [])
+        # a fixer that cannot do without the files no fix may change: another try cannot do it either (blocked). The
+        # check before refused them, or the plugin refused the fixer's write of them
+        refused = (rec.pop("refused", None) or {}).get("files") or []
+        blocked = protected_of(list(dict.fromkeys([*refused, *(without or [])])))
         rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
                    **({"blocked": blocked} if blocked else {}))
         return put(rec)
-    # the tests' command before the guard: making it may install the sandbox runtime, which takes minutes
+    # the start of the sandbox's command before the guard: making it may install the sandbox runtime, which takes
+    # minutes
     try:
-        argv: list[str] | FixError = _tests_argv(rec["id"]) if tests else []
+        box: list[str] | FixError = sandbox_argv(rec["id"]) if tests else []
     except FixError as e:
-        argv = e
+        box = e
     guard = _guard(rec["id"], deadline)
     try:
-        checked = None if guard is None else _done(fid, title, summary, request, tests, argv, rec)
+        checked = None if guard is None else _done(fid, title, summary, request, tests, box, rec)
     finally:
         if guard is not None:
             os.close(guard)
@@ -1892,9 +2014,9 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
 
 
 def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool,
-          argv: list[str] | FixError, seen: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """done's check, under the fix's guard: `argv` is the tests' command (or why there is none). A record that is no
-    longer the one done read (`seen`) is not checked here: None."""
+          box: list[str] | FixError, seen: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """done's check, under the fix's guard: `box` is the start of the sandbox's command for the tests (or why there is
+    none). A record that is no longer the one done read (`seen`) is not checked here: None."""
     rec = get(fid)
     read = dict(rec)
     if seen is not None and rec != seen:
@@ -1945,14 +2067,14 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     if not tests:
         rec.update(tests="skipped", state="ready", error=None, **({"title": named} if named else {}))
         return put(rec)
-    if isinstance(argv, FixError):
-        return put(_tested(rec, False, str(argv), named))
+    if isinstance(box, FixError):
+        return put(_tested(rec, False, str(box), named))
     # the checks of what the change touched, as carry checks the fixes it puts back
     try:
-        argv = _checks_argv(rec["id"], [f["path"] for f in files], rec["base"])
+        box, checks = _checks_box(rec["id"], [f["path"] for f in files], rec["base"], box)
     except (FixError, OSError) as e:
         return put(_tested(rec, False, str(e), named))
-    return _start_tests(rec, named, argv, read)
+    return _start_tests(rec, named, box, checks, read)
 
 
 def _copy_gone(rec: dict[str, Any]) -> dict[str, Any]:
@@ -3324,10 +3446,10 @@ def _carry_tests(back: list[tuple[int, str]], tip: str, paths: list[str] | None 
     (False, the same) failed, (None, why) could not run (the sandbox runtime is missing, say)."""
     paths = _carry_paths(back) if paths is None else paths
     try:
-        argv = _checks_argv(CARRY, paths, tip)
+        box, checks = _checks_box(CARRY, paths, tip)
     except (FixError, OSError) as e:
         return None, str(e)
-    return _run_tests(argv, CARRY)
+    return _run_tests(box, checks, CARRY)
 
 
 def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
@@ -4707,7 +4829,9 @@ def cmd(a) -> int:
             out_json(again(a.id, a.session))
         elif verb == "done":
             if a.cannot == "-":
-                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done", within=a.within))
+                # the words after the fix's number: the files whose write the plugin refused the fixer
+                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done", within=a.within,
+                              without=ids[1:]))
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
                 out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session, within=a.within))

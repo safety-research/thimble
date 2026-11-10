@@ -1,15 +1,16 @@
 // thimble fix in the chat (backend fixes.py, chat/fix.ts). While Claude fixes the person's thimble and the kernel
-// checks the fix, the fixer shows as a side thread does: a line in main's chat where main started it, with its thread's
+// checks the fix, the fixer shows as a side thread does: a line in main's chat where the fix started, with its thread's
 // chip and a spinner while it works (Rows, FixLine), and the thread shows its whole run. The person keeps working.
 //   FixResult   how the fix ended, a row of main's chat and of the fix's thread at the time it ended (the server's `fix`
 //               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble
 //               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
 //               goes on by itself: Use it now is the person's click. The server then starts again from the fixed code,
-//               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
-//               be lost. A fix that did not pass says why, with Try again (not when it needs a file no fix may change, as
-//               the terminal's line) and Ask Claude, which shows what it tried and puts its failure in main's composer
-//               for the person to send, with its change and the end of its tests' output, once: it is not offered again.
-//               An earlier row, or one the person answered, is a quiet line of what it said.
+//               the row says "Reloading thimble…", with the turn the restart waits for while one runs, and the page
+//               loads the new build by itself when nothing typed would be lost. A fix that did not pass says why, with
+//               Try again (not when it needs a file no fix may change, as the terminal's line) and Ask Claude, which
+//               shows what it tried and puts its failure in main's composer for the person to send, with its change
+//               and the end of its tests' output, once: it is not offered again. An earlier row, or one the person
+//               answered, is a quiet line of what it said.
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -18,9 +19,9 @@ import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { servedBuild, thisBuild } from '../lib/chunkRecovery'
+import { servedBuild, thisBuild, whenRestarted } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
-import { askClaudeText, changedLines, fixActions, fixText, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow } from './fix'
+import { askClaudeText, changedLines, fixActions, fixText, RELOADING, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow, type FixStatus } from './fix'
 import { offerDraft } from './pending'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
@@ -32,13 +33,27 @@ function typing(): boolean {
   return Array.from(document.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>('textarea, input[type=text]')).some((el) => el.value.trim() !== '')
 }
 
+let reading: Promise<FixStatus> | null = null
+
+/** The fixes (GET /fixes). Callers in the same task share one read: every row of the page asks when it shows and on
+ * each `fix` event, and each read runs the kernel's list on the server (backend fixes.status). A row that asks later
+ * reads again, so none shows a read from before the event it heard of. */
+function readFixes(): Promise<FixStatus> {
+  if (!reading) {
+    reading = api.fixes()
+    queueMicrotask(() => {
+      reading = null
+    })
+  }
+  return reading
+}
+
 /** The fixes the page shows now, read again on each `fix` event and when the stream comes back (`onBack`, else a
  * read). */
 function useFixes(onBack?: () => void): [FixRow[], () => void] {
   const [rows, setRows] = useState<FixRow[]>([])
   const load = useCallback(() => {
-    api
-      .fixes()
+    readFixes()
       .then((s) => setRows(Array.isArray(s?.fixes) ? s.fixes : []))
       .catch(() => undefined)
   }, [])
@@ -65,11 +80,12 @@ function failText(what: string, e: Error): string {
 }
 
 /** The page after the person's click put a fix on or took it off: once the server is back from its restart, the page
- * loads the new build, or, while something typed would be lost, the fix's row offers Reload (`fixHeld`). And Your
- * fixes, which `/thimble-fix` alone opens. */
+ * loads the new build, or, while something typed would be lost, the fix's row offers Reload (`fixHeld`). The page asks
+ * the server whether it started again (whenRestarted), so it finds the new server before its stream opens again, which
+ * says the same later. And Your fixes, which `/thimble-fix` alone opens. */
 export function FixPage() {
   const restarting = useRef<number | null>(null)
-  const [rows, load] = useFixes(() => {
+  const back = () => {
     const fid = restarting.current
     if (fid === null) return load()
     // the server came back from the restart the person's click asked for: the page loads its new build
@@ -83,11 +99,19 @@ export function FixPage() {
         }
         bus.emit('fixHeld', { id: fid, held: 'typed' })
       }
-      load()
+      // every reader of the fixes reads them again, as on the server's `fix` event: the stream that carries those may
+      // not be open again yet
+      bus.emit('fix', { id: fid, state: 'idle' })
     })
-  })
+  }
+  const [rows, load] = useFixes(back)
   const going = rows.find(reloading)
   if (going) restarting.current = going.id
+  // while a fix goes on or comes off, the page asks the server whether it started again
+  const found = useRef(back)
+  found.current = back
+  const goingId = going?.id ?? null
+  useEffect(() => (goingId === null ? undefined : whenRestarted(() => found.current())), [goingId])
   const [busy, setBusy] = useState(false)
   const [list, setList] = useState(false)
   useEffect(() => bus.on('fixList', (e) => setList(e.open)), [])
@@ -165,7 +189,7 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
     return (
       <div className="chat-fix" role="status" data-fix={fid} data-kind="reloading">
         <Spinner size={12} className="chat-fix-ico" />
-        <span className="chat-fix-text">Reloading thimble…</span>
+        <span className="chat-fix-text">{row && reloading(row) ? fixText(row, ws) : RELOADING}</span>
       </div>
     )
   }

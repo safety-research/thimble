@@ -198,3 +198,10 @@ test("the manifest's userConfig is the features, each at its default until an op
     setOptions({})
   }
 })
+
+test('a Verifier model saved under an earlier version of a family names the model of that family now', async () => {
+  const { modelNamed } = await import('../../core/models.js')
+  assert.equal(modelNamed('Fable 5.2')?.id, 'claude-fable-5-2')
+  assert.equal(modelNamed('Fable 5.1')?.id, 'claude-fable-5-2')
+  assert.equal(modelNamed('same as Claude'), null)
+})

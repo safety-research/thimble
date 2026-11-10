@@ -64,6 +64,7 @@ Code checks every view and says what to fix when a check fails.
 - **Every claimed file is read or hidden.** `build_index` reads each claimed file whole with Python's `open()`, which thimble counts. thimble does not count reads by pyarrow, sqlite3 or mmap, so give them the bytes `open()` read. A file left out on purpose comes from `hidden(index)` as `[{"path": ..., "why": ...}]`. Images, audio, video and PDFs the view shows whole count as read. When folders beside the claimed ones hold the same files, such as other runs, claim them all.
 - **Damage does not break the view.** With one file missing and one line cut short, the view keeps working, and `problems(index)` reports the torn line.
 - **What the reader made is listed.** The reader makes some fields, rather than reading them as the file holds them. Examples are a time parsed to UTC, a value parsed from text, and merged fields. List such a field in `records`, under its kind of record, `{"name", "one", "fields"}`, where `one` says what one record is. Each field is `{"name", "type", "derived", "from", "how"}`. `name` is the field's name as the records hold it. `type` is one of `text`, `category`, `number`, `time`, `ref` or `list`. `derived` is `"cleaned"`, or `"computed"` for a value the files do not state, such as a join, an estimate or a classification. `from` and `how` are short plain phrases without semicolons. A field that depends on the records comes from `derived(index)` as `{"record", "field", "from", "how"}`, with `"kind": "computed"` for a computed one. A renamed field, a default for a missing value, a count and the view's own keys need no entry.
+- **An excerpt is the file's own words.** A citation shows `excerpt` as what the source says. So thimble looks for each line of `excerpt` in the lines that `refs` name. Copy the words as those lines hold them. Put the line you copy from first in `refs`. For a unit, copy from one of its records, such as its first. A count, a summary or an added mark such as `→` goes in `label`.
 - **Every choice draws.** Each choice of Color by, Rows and Filter by draws the view, including None and Off.
 
 ## Labels
@@ -130,4 +131,4 @@ Check the view with `view_check` as often as you want. It samples lines through 
 
 When the view is done, call `finish_view`. It runs the same checks as the record of your build. You have {{attempts}} attempts.
 
-A reviewer then looks at pictures of the view and fixes clear problems in how it draws. So start no review subagent of your own.
+After a first build, a reviewer looks at pictures of the view and fixes clear problems in how it draws. So start no review subagent of your own.
