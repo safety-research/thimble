@@ -61,8 +61,8 @@ restart; the newest row of a fix shows its state now, with the clicks it takes.
 A dev install's launcher (scripts/install.sh --local) starts the server from the clone, while Use it now starts it from
 live, where the fixes are: on a server that runs from the clone, Your fixes shows a fix that is on as off, and says why,
 and its Use it starts the server from live again (not_here).
-THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file code tickets again,
-and Report a problem offers no fix (problem, which GET /fixes answers).
+THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file nothing and answer
+with the reason, and Report a problem offers no fix (problem, which GET /fixes answers).
 """
 from __future__ import annotations
 
