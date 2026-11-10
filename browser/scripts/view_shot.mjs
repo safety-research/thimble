@@ -21,8 +21,14 @@
 //                                             request to the --media URL (thimble.mediaUrl) names, served from here,
 //                                             a Range request with the bytes it asks for (at most MEDIA_CHUNK)
 // Every other request the page makes is refused, so a view that reaches for the network fails here as it would in the
-// browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
-// `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
+// browser. A state is measured when its page has been quiet (no fetch or marks request sent or unanswered) for QUIET_MS
+// in which its frame could run after `open` (settle), or HARD_MS has passed with no request in flight, and again after
+// each action. A page that sent a request while it was measured is measured again once it is quiet, MEASURE_MAX times
+// at most. A state whose page does not run for the state's `busy` ms (BUSY_MS without it), its script holding the
+// thread without a pause, is stopped there (stuck): its result is {ok: false, stopped: true, errors}, the last error
+// what the page was doing, and the run loads no state after it, each of those {ok: false, skipped: true, errors:
+// [NOT_LOADED]}. Two lines tell the server how far a state is, for a run it ends itself: {"doing": words, "state": i}
+// at each step of a state, and {"result": {...}, "state": i} when it ends. One line ends the run:
 // {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
 // label_controls, painted, actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
 // (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
@@ -31,8 +37,9 @@
 // `label_controls` the elements whose data-label names a label that is on, shown or not, `painted`
 // how many of the marked records in view show the label's colour in a picture of the frame (paintedMarks), `actions`
 // each action with whether its control was found, `choices` with `sweep` each choice tried, {control, choice, errors},
-// its errors those the page reported while it settled (they are not among the state's own), `fonts` whether Hanken
-// Grotesk was loaded in the frame, and
+// its errors those the page reported while it settled (they are not among the state's own), in place of `shown`,
+// `layout`, `controls`, `label_controls` and `painted` (what the page shows after the last choice is no state of its
+// own), `fonts` whether Hanken Grotesk was loaded in the frame, and
 // `self_labels` the ops of the label calls the page made by itself, outside the actions (the bridge's labelRefused, or
 // a labelCall while no action was clicked), which the page answers as refused.
 import { createRequire } from 'node:module'
@@ -49,9 +56,15 @@ const SWEEP_MS = 10_000 // the most one choice of the sweep waits for its page
 const SWEEP_MAX = 40 // the choices one sweep tries
 const MIN_MS = 1200
 const HARD_MS = 25_000
+const STEP_MS = 100 // one step of a wait for a quiet page (settle)
+const MEASURE_MAX = 3 // the times a state's page is measured while it sends a request under the measurement
 // a fetch or marks request still unanswered at HARD_MS is waited for this long: a view's data calls have no time limit
 const ANSWER_MS = 600_000
 const READY_MS = 10_000
+// a state whose page does not run for this long is stopped (stuck), unless the state's `busy` names another time
+const BUSY_MS = 30_000
+const PING_MS = 1000 // the pause between two asks whether a state's page runs (stuck)
+const NOT_LOADED = 'not loaded: the run ended when the page was stopped in another state'
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
@@ -612,12 +625,71 @@ function ask(kind, body) {
   })
 }
 
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms).unref())
+
+// Whether `promise` ends within `ms`, by a timer of this process.
+const within = (promise, ms) => {
+  let timer
+  const late = new Promise((no) => (timer = setTimeout(no, ms, false).unref()))
+  return Promise.race([promise.then(() => true), late]).finally(() => clearTimeout(timer))
+}
+
+// The result of a state whose page stopped running, {ok: false, stopped: true, errors}: it comes once the page around
+// the frame and the frame have not both run a call for `ms`, as when a script holds their thread without a pause, and
+// never for a page that runs. The page is asked from here every PING_MS, with a timer of this process, since a page
+// that does not run answers nothing, a wait in it included; the time its requests take to be answered is no time it
+// does not run. The last error says what the page was doing (`at.doing`), after those it reported before.
+const stuck = (at, ms) =>
+  new Promise((stop) => {
+    const watch = async () => {
+      for (; !at.over; await sleep(PING_MS)) {
+        if (!at.page) continue
+        const frames = [at.page.mainFrame(), ...at.page.mainFrame().childFrames().slice(0, 1)]
+        const asked = Promise.all(frames.map((f) => f.evaluate(() => 0).catch(() => {})))
+        // an answer that came while this process itself was held is read only after its timer, so it gets a moment more
+        if ((await within(asked, ms)) || (await within(asked, PING_MS)) || at.over) continue
+        const why =
+          `the page's script ran more than ${Math.round(ms / 1000)} s without a pause ${at.doing}, so the page was ` +
+          'stopped (a loop that does not end, or a step that is too slow, such as drawing every record at once)'
+        return stop({ ok: false, stopped: true, errors: [...at.errors, why] })
+      }
+    }
+    watch().catch(() => {})
+  })
+
+// One state of the run: its page loaded and measured (loadState), or stopped where it did not run (stuck).
 async function shootState(browser, opt, doc, state, i) {
-  const errors = []
-  let fetches = 0
+  // the state's page, what it is doing, in words that say when (loadState sets them), the errors it reported, and
+  // whether the state is over
+  const at = { page: null, doing: 'while the page loaded and opened', errors: [], over: false }
+  try {
+    return await Promise.race([loadState(browser, opt, doc, state, i, at), stuck(at, Number(state.busy) || BUSY_MS)])
+  } finally {
+    at.over = true
+    if (at.page) await at.page.close().catch(() => {})
+  }
+}
+
+async function loadState(browser, opt, doc, state, i, at) {
+  const errors = at.errors
+  // the step the page is at, for a state that is stopped (stuck) and for the server
+  const step = (doing) => {
+    at.doing = doing
+    say({ doing, state: i })
+  }
+  let fetches = 0 // the fetches the page sent, and `fetched` those answered
+  let fetched = 0
   let inflight = 0
+  // counts each request the page sent, each answer and each note of the page, and `lastActivity` is when the last was
+  let activity = 0
   let lastActivity = Date.now()
+  const active = () => {
+    activity++
+    lastActivity = Date.now()
+  }
   const page = await browser.newPage({ viewport: state.viewport || opt.viewport })
+  at.page = page
+  step(at.doing)
   try {
     // no WebRTC in any frame, the page's own nested ones too, since no policy covers it and page.route never sees it
     await page.addInitScript(() => {
@@ -648,24 +720,36 @@ async function shootState(browser, opt, doc, state, i) {
       if (m.type() === 'error' && !isMedia(m.location()?.url || '')) errors.push(`console: ${m.text()}`.slice(0, 400))
     })
     page.on('pageerror', (e) => errors.push(`page: ${e.message}`.slice(0, 400)))
-    // a fetch or a marks request keeps the page from being shot until it is answered
-    const tracked = async (kind, body) => {
+    // a fetch or a marks request keeps the page from being shot until it is answered; `unanswered` names each that is
+    // not, in a few words (`what`)
+    const unanswered = new Map()
+    let sent = 0
+    const tracked = async (kind, body, what) => {
+      const n = ++sent
+      unanswered.set(n, what)
       inflight++
-      lastActivity = Date.now()
+      active()
       try {
         return await ask(kind, { state: i, ...body })
       } finally {
+        unanswered.delete(n)
         inflight--
-        lastActivity = Date.now()
+        active()
       }
     }
-    await page.exposeFunction('thimbleFetch', (query) => {
+    await page.exposeFunction('thimbleFetch', async (query) => {
       fetches++
-      return tracked('fetch', { query })
+      try {
+        return await tracked('fetch', { query }, `thimble.fetch(${(JSON.stringify(query) || '').slice(0, 120)})`)
+      } finally {
+        fetched++
+      }
     })
-    await page.exposeFunction('thimbleMarks', (refs) => tracked('marks', { refs }))
+    await page.exposeFunction('thimbleMarks', (refs) =>
+      tracked('marks', { refs }, `the marks of ${(refs || []).length} ref(s)`),
+    )
     await page.exposeFunction('thimbleNote', (kind, text) => {
-      lastActivity = Date.now()
+      active()
       if (kind === 'error') errors.push(String(text).slice(0, 400))
     })
     const tokens = readFileSync(new URL('../frontend/src/styles/tokens.css', import.meta.url), 'utf8')
@@ -744,22 +828,53 @@ async function shootState(browser, opt, doc, state, i) {
     while (!(await page.evaluate(() => window.__ready)) && Date.now() - t0 < READY_MS) await page.waitForTimeout(50)
     const ready = await page.evaluate(() => window.__ready)
     if (!ready) errors.push('the page never said it was ready (the bridge did not load, or a script stopped it)')
+    const opened = Date.now()
+    const el = await page.$('#f')
+    const frame = await el.contentFrame()
+    // once the frame could run: through one frame it drew, or 100 ms where it draws none, and one turn of its timers,
+    // and then the page around it, which passes the frame's requests on; a frame whose thread is busy answers late
+    const ran = async () => {
+      await frame
+        .evaluate(
+          () =>
+            new Promise((done) => {
+              let once = false
+              const end = () => {
+                if (once) return
+                once = true
+                setTimeout(done, 0)
+              }
+              requestAnimationFrame(end)
+              setTimeout(end, 100)
+            }),
+        )
+        .catch(() => {})
+      await page.evaluate(() => new Promise((done) => setTimeout(done, 0))).catch(() => {})
+    }
     // until the page has been quiet for QUIET_MS, at least `min` ms after `from`, or HARD_MS after `from` with no
-    // request unanswered, or ANSWER_MS after it
+    // request unanswered, or ANSWER_MS after it. The quiet time is counted in steps of STEP_MS, and a step ends once
+    // the frame could run in it (ran), so the time a busy frame takes to answer is no quiet time. A page that draws in
+    // small steps for longer than QUIET_MS, and sends no request meanwhile, is still taken for quiet while it draws.
     const settle = async (from, min) => {
-      lastActivity = Math.max(lastActivity, from)
+      let seen = activity
+      let held = 0
       for (;;) {
-        await page.waitForTimeout(100)
+        await Promise.all([page.waitForTimeout(STEP_MS), ran()])
         const t = Date.now() - from
-        if (inflight === 0 && Date.now() - lastActivity > QUIET_MS && t > min) break
+        if (inflight > 0 || activity !== seen) {
+          seen = activity
+          held = 0
+        } else held += STEP_MS
+        if (inflight === 0 && held > QUIET_MS && t > min) break
         if ((t >= HARD_MS && inflight === 0) || t >= ANSWER_MS) break
       }
     }
-    await settle(Date.now(), MIN_MS)
-    const el = await page.$('#f')
-    const frame = await el.contentFrame()
+    await settle(opened, MIN_MS)
+    // from when the last wait before the measurement counts: the page's opening, or its last action
+    let waited = opened
     const actions = []
     for (const want of ready ? state.actions || [] : []) {
+      step(`when the control "${String(want).slice(0, 80)}" was clicked`)
       const how = await frame.evaluate(findControl, { want: String(want), sel: CONTROLS }).catch(() => '')
       const target = frame.locator('[data-thimble-act]').first()
       // a label call while the action is clicked and the page settles is the analyst's
@@ -771,7 +886,10 @@ async function shootState(browser, opt, doc, state, i) {
         // a control that would not take the action counts as not found
       }
       actions.push({ control: String(want), found: !!how })
-      if (how) await settle(Date.now(), QUIET_MS)
+      if (how) {
+        waited = Date.now()
+        await settle(waited, QUIET_MS)
+      }
       await page.evaluate(() => (window.__acting = false))
     }
     // every choice of the kit's controls in turn: what the page reports while it draws one is that choice's error
@@ -786,6 +904,7 @@ async function shootState(browser, opt, doc, state, i) {
       for (const [control, choice] of list) if (!firsts.some(([c]) => c === control)) firsts.push([control, choice])
       for (const [control, choice, again] of [...list.slice(0, SWEEP_MAX), ...firsts.map(([c, ch]) => [c, ch, true])]) {
         const before = errors.length
+        step(`when "${choice.slice(0, 80)}" of the control "${control.slice(0, 80)}" was chosen`)
         await page.evaluate(() => (window.__acting = true))
         const threw = await frame
           .evaluate(([a, b]) => {
@@ -814,9 +933,13 @@ async function shootState(browser, opt, doc, state, i) {
     }
     // a request the page sent after the last wait ended, such as the next page of data it loads, is waited for before
     // it counts as unanswered
+    step('while the page was measured')
     const until = Date.now() + ANSWER_MS
     while (inflight > 0 && Date.now() < until) await settle(Date.now(), 0)
-    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s`)
+    if (inflight > 0) {
+      const names = [...unanswered.values()].slice(0, 3).join('; ')
+      errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s: ${names}`.slice(0, 400))
+    }
     const fonts = await frame
       .evaluate(async () => {
         await document.fonts.ready
@@ -824,32 +947,61 @@ async function shootState(browser, opt, doc, state, i) {
         return document.fonts.check('13px "Hanken Grotesk"')
       })
       .catch(() => false)
-    if (state.out) await el.screenshot({ path: state.out })
-    const height = await page.evaluate(() => window.__height)
-    const refs = await page.evaluate(() => [...window.__refs])
-    const marks = await page.evaluate(() => window.__marks || {})
     const count = (sel) => frame.evaluate((s) => document.querySelectorAll(s).length, sel).catch(() => 0)
-    const shown = await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null)
-    const layout = await frame.evaluate(layoutCounts).catch(() => null)
-    const controls = await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => [])
-    const on = await page.evaluate(() => window.__on || []).catch(() => [])
-    const labelControls = await frame.evaluate((ids) => [...document.querySelectorAll('[data-label]')].filter((e) => ids.includes(e.getAttribute('data-label'))).length, on).catch(() => 0)
-    const painted = ready ? await paintedMarks(page, el, frame, marks).catch((e) => ({ error: plain(e) })) : null
+    // the picture, with `shot`, and the counts of the page as it is; after a sweep, only those that hold for no one
+    // choice
+    const measure = async (shot) => {
+      if (shot && state.out) await el.screenshot({ path: state.out })
+      const height = await page.evaluate(() => window.__height)
+      const refs = await page.evaluate(() => [...window.__refs])
+      const marked = await count('[data-thimble-label]')
+      const hidden = await count('[data-thimble-drop]')
+      if (state.sweep) return { height, refs, marked, hidden }
+      const marks = await page.evaluate(() => window.__marks || {})
+      const shown = await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null)
+      const layout = await frame.evaluate(layoutCounts).catch(() => null)
+      const controls = await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => [])
+      const on = await page.evaluate(() => window.__on || []).catch(() => [])
+      const labelControls = await frame.evaluate((ids) => [...document.querySelectorAll('[data-label]')].filter((e) => ids.includes(e.getAttribute('data-label'))).length, on).catch(() => 0)
+      return { height, refs, marked, hidden, marks, shown, layout, controls, label_controls: labelControls }
+    }
+    // measure, made again once the page is quiet while it sent a request or had one unanswered under the measurement,
+    // which then is of a page that was not done; after MEASURE_MAX times the last stands. The waits for a quiet page
+    // count from `waited`, as the last wait before them did, so a page that is never quiet takes no longer for them.
+    const began = Date.now()
+    const measured = async (shot) => {
+      for (let n = 1; ; n++) {
+        const seen = activity
+        const got = await measure(shot)
+        await ran()
+        if ((activity === seen && inflight === 0) || n >= MEASURE_MAX) return got
+        await settle(waited, 0)
+      }
+    }
+    let got = state.sweep ? await measure(true) : await measured(true)
+    // the marks' pictures, made again, and the counts with them, while a fetch began, ended or was unanswered under
+    // them; a marks request does not count, since their own scroll can make the page send one
+    let painted = null
+    for (let n = 1; ready && !state.sweep; n++) {
+      const [sent, answered] = [fetches, fetched]
+      painted = await paintedMarks(page, el, frame, got.marks, began + PAINT_STEADY_MS).catch((e) => ({ error: plain(e) }))
+      await ran()
+      if ((fetches === sent && fetched === answered && fetches === fetched) || n >= MEASURE_MAX) break
+      await settle(waited, 0)
+      // the layout stays the one measured before the pictures scrolled the page
+      got = { ...(await measured(false)), layout: got.layout }
+    }
     return {
       ok: ready && errors.length === 0,
       errors,
       fetches,
-      height,
-      refs: refs.length,
-      records: refs.filter((r) => RECORD_REF.test(r)).length,
-      units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
-      marked: await count('[data-thimble-label]'),
-      hidden: await count('[data-thimble-drop]'),
-      shown,
-      layout,
-      controls,
-      label_controls: labelControls,
-      painted,
+      height: got.height,
+      refs: got.refs.length,
+      records: got.refs.filter((r) => RECORD_REF.test(r)).length,
+      units: got.refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
+      marked: got.marked,
+      hidden: got.hidden,
+      ...(state.sweep ? {} : { shown: got.shown, layout: got.layout, controls: got.controls, label_controls: got.label_controls, painted }),
       actions,
       ...(state.sweep ? { choices } : {}),
       fonts,
@@ -879,9 +1031,9 @@ const framesDrawn = (frame) =>
 // round measures the marked elements in view, pictures the frame with the styles on, off and on again, and measures
 // them again. A page that redraws meanwhile, as a late redraw or a scroll's does, shows its marks elsewhere than they
 // were measured: while the elements moved over a round, or their pixels differ in its two pictures with the styles
-// on, the round is made again once the frame has drawn, for at most PAINT_STEADY_MS; `tries` counts the rounds. It
-// runs last, since it may scroll the page.
-async function paintedMarks(page, el, frame, marks) {
+// on, the round is made again once the frame has drawn, until the time `until`; `tries` counts the rounds. It runs
+// after the picture and the counts, since it may scroll the page.
+async function paintedMarks(page, el, frame, marks, until) {
   if (!Object.values(marks).some((m) => m && typeof m.bar === 'string' && m.bar)) return null
   const want = { marks, record: RECORD_REF.source, bar: BAR, max: PAINT_MAX }
   // a picture of the frame as it is, CSS animations and transitions at their end
@@ -890,7 +1042,6 @@ async function paintedMarks(page, el, frame, marks) {
     frame.evaluate((x) => {
       for (const s of document.querySelectorAll('style[data-thimble="labels"]')) s.disabled = x
     }, off)
-  const until = Date.now() + PAINT_STEADY_MS
   let got = await frame.evaluate(markTargets, { ...want, scroll: true })
   for (let tries = 1; ; tries++) {
     // after a scroll to the first marked element (none was in view) and after a round the page moved in, measured
@@ -926,14 +1077,17 @@ async function main() {
   const browser = await chromium.launch({ executablePath })
   const out = new Array(states.length)
   let next = 0
+  let ended = false // a state was stopped (stuck): no state after it is loaded
   const worker = async () => {
-    while (next < states.length) {
+    while (next < states.length && !ended) {
       const i = next++
       try {
         out[i] = await shootState(browser, opt, doc, states[i], i)
       } catch (e) {
         out[i] = { ok: false, errors: [plain(e)] }
       }
+      if (out[i].stopped) ended = true
+      say({ result: out[i], state: i })
     }
   }
   try {
@@ -941,7 +1095,7 @@ async function main() {
   } finally {
     await browser.close()
   }
-  say({ done: true, states: out })
+  say({ done: true, states: Array.from(out, (r) => r || { ok: false, skipped: true, errors: [NOT_LOADED] }) })
 }
 
 main().catch((e) => {
