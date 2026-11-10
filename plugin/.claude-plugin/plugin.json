@@ -53,13 +53,13 @@
     "checkerModel": {
       "type": "string",
       "title": "Verifier model",
-      "description": "The model of the verifier, which checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.1: that model, which reads the conversation without the cache of the conversation's model.",
+      "description": "The model of the verifier, which checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.2: that model, which reads the conversation without the cache of the conversation's model.",
       "options": [
         "same as Claude",
         "Haiku 5.5",
         "Sonnet 5.5",
         "Opus 5.5",
-        "Fable 5.1"
+        "Fable 5.2"
       ],
       "default": "same as Claude"
     },
