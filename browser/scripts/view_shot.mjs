@@ -24,7 +24,11 @@
 // browser. A state is measured when its page has been quiet (no fetch or marks request sent or unanswered) for QUIET_MS
 // in which its frame could run after `open` (settle), or HARD_MS has passed with no request in flight, and again after
 // each action. A page that sent a request while it was measured is measured again once it is quiet, MEASURE_MAX times
-// at most. One line ends the run:
+// at most. A state whose page does not run for the state's `busy` ms (BUSY_MS without it), its script holding the
+// thread without a pause, is stopped there (stuck): its result is {ok: false, stopped: true, errors}, the last error
+// what the page was doing, and the run loads no state after it, each of those {ok: false, skipped: true, errors:
+// [NOT_LOADED]}. Two lines tell the server how far a state is, for a run it ends itself: {"doing": words, "state": i}
+// at each step of a state, and {"result": {...}, "state": i} when it ends. One line ends the run:
 // {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
 // label_controls, painted, actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
 // (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
@@ -57,6 +61,10 @@ const MEASURE_MAX = 3 // the times a state's page is measured while it sends a r
 // a fetch or marks request still unanswered at HARD_MS is waited for this long: a view's data calls have no time limit
 const ANSWER_MS = 600_000
 const READY_MS = 10_000
+// a state whose page does not run for this long is stopped (stuck), unless the state's `busy` names another time
+const BUSY_MS = 30_000
+const PING_MS = 1000 // the pause between two asks whether a state's page runs (stuck)
+const NOT_LOADED = 'not loaded: the run ended when the page was stopped in another state'
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
@@ -617,8 +625,58 @@ function ask(kind, body) {
   })
 }
 
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms).unref())
+
+// Whether `promise` ends within `ms`, by a timer of this process.
+const within = (promise, ms) => {
+  let timer
+  const late = new Promise((no) => (timer = setTimeout(no, ms, false).unref()))
+  return Promise.race([promise.then(() => true), late]).finally(() => clearTimeout(timer))
+}
+
+// The result of a state whose page stopped running, {ok: false, stopped: true, errors}: it comes once the page around
+// the frame and the frame have not both run a call for `ms`, as when a script holds their thread without a pause, and
+// never for a page that runs. The page is asked from here every PING_MS, with a timer of this process, since a page
+// that does not run answers nothing, a wait in it included; the time its requests take to be answered is no time it
+// does not run. The last error says what the page was doing (`at.doing`), after those it reported before.
+const stuck = (at, ms) =>
+  new Promise((stop) => {
+    const watch = async () => {
+      for (; !at.over; await sleep(PING_MS)) {
+        if (!at.page) continue
+        const frames = [at.page.mainFrame(), ...at.page.mainFrame().childFrames().slice(0, 1)]
+        const asked = Promise.all(frames.map((f) => f.evaluate(() => 0).catch(() => {})))
+        // an answer that came while this process itself was held is read only after its timer, so it gets a moment more
+        if ((await within(asked, ms)) || (await within(asked, PING_MS)) || at.over) continue
+        const why =
+          `the page's script ran more than ${Math.round(ms / 1000)} s without a pause ${at.doing}, so the page was ` +
+          'stopped (a loop that does not end, or a step that is too slow, such as drawing every record at once)'
+        return stop({ ok: false, stopped: true, errors: [...at.errors, why] })
+      }
+    }
+    watch().catch(() => {})
+  })
+
+// One state of the run: its page loaded and measured (loadState), or stopped where it did not run (stuck).
 async function shootState(browser, opt, doc, state, i) {
-  const errors = []
+  // the state's page, what it is doing, in words that say when (loadState sets them), the errors it reported, and
+  // whether the state is over
+  const at = { page: null, doing: 'while the page loaded and opened', errors: [], over: false }
+  try {
+    return await Promise.race([loadState(browser, opt, doc, state, i, at), stuck(at, Number(state.busy) || BUSY_MS)])
+  } finally {
+    at.over = true
+    if (at.page) await at.page.close().catch(() => {})
+  }
+}
+
+async function loadState(browser, opt, doc, state, i, at) {
+  const errors = at.errors
+  // the step the page is at, for a state that is stopped (stuck) and for the server
+  const step = (doing) => {
+    at.doing = doing
+    say({ doing, state: i })
+  }
   let fetches = 0 // the fetches the page sent, and `fetched` those answered
   let fetched = 0
   let inflight = 0
@@ -630,6 +688,8 @@ async function shootState(browser, opt, doc, state, i) {
     lastActivity = Date.now()
   }
   const page = await browser.newPage({ viewport: state.viewport || opt.viewport })
+  at.page = page
+  step(at.doing)
   try {
     // no WebRTC in any frame, the page's own nested ones too, since no policy covers it and page.route never sees it
     await page.addInitScript(() => {
@@ -660,13 +720,19 @@ async function shootState(browser, opt, doc, state, i) {
       if (m.type() === 'error' && !isMedia(m.location()?.url || '')) errors.push(`console: ${m.text()}`.slice(0, 400))
     })
     page.on('pageerror', (e) => errors.push(`page: ${e.message}`.slice(0, 400)))
-    // a fetch or a marks request keeps the page from being shot until it is answered
-    const tracked = async (kind, body) => {
+    // a fetch or a marks request keeps the page from being shot until it is answered; `unanswered` names each that is
+    // not, in a few words (`what`)
+    const unanswered = new Map()
+    let sent = 0
+    const tracked = async (kind, body, what) => {
+      const n = ++sent
+      unanswered.set(n, what)
       inflight++
       active()
       try {
         return await ask(kind, { state: i, ...body })
       } finally {
+        unanswered.delete(n)
         inflight--
         active()
       }
@@ -674,12 +740,14 @@ async function shootState(browser, opt, doc, state, i) {
     await page.exposeFunction('thimbleFetch', async (query) => {
       fetches++
       try {
-        return await tracked('fetch', { query })
+        return await tracked('fetch', { query }, `thimble.fetch(${(JSON.stringify(query) || '').slice(0, 120)})`)
       } finally {
         fetched++
       }
     })
-    await page.exposeFunction('thimbleMarks', (refs) => tracked('marks', { refs }))
+    await page.exposeFunction('thimbleMarks', (refs) =>
+      tracked('marks', { refs }, `the marks of ${(refs || []).length} ref(s)`),
+    )
     await page.exposeFunction('thimbleNote', (kind, text) => {
       active()
       if (kind === 'error') errors.push(String(text).slice(0, 400))
@@ -806,6 +874,7 @@ async function shootState(browser, opt, doc, state, i) {
     let waited = opened
     const actions = []
     for (const want of ready ? state.actions || [] : []) {
+      step(`when the control "${String(want).slice(0, 80)}" was clicked`)
       const how = await frame.evaluate(findControl, { want: String(want), sel: CONTROLS }).catch(() => '')
       const target = frame.locator('[data-thimble-act]').first()
       // a label call while the action is clicked and the page settles is the analyst's
@@ -835,6 +904,7 @@ async function shootState(browser, opt, doc, state, i) {
       for (const [control, choice] of list) if (!firsts.some(([c]) => c === control)) firsts.push([control, choice])
       for (const [control, choice, again] of [...list.slice(0, SWEEP_MAX), ...firsts.map(([c, ch]) => [c, ch, true])]) {
         const before = errors.length
+        step(`when "${choice.slice(0, 80)}" of the control "${control.slice(0, 80)}" was chosen`)
         await page.evaluate(() => (window.__acting = true))
         const threw = await frame
           .evaluate(([a, b]) => {
@@ -863,9 +933,13 @@ async function shootState(browser, opt, doc, state, i) {
     }
     // a request the page sent after the last wait ended, such as the next page of data it loads, is waited for before
     // it counts as unanswered
+    step('while the page was measured')
     const until = Date.now() + ANSWER_MS
     while (inflight > 0 && Date.now() < until) await settle(Date.now(), 0)
-    if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s`)
+    if (inflight > 0) {
+      const names = [...unanswered.values()].slice(0, 3).join('; ')
+      errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s: ${names}`.slice(0, 400))
+    }
     const fonts = await frame
       .evaluate(async () => {
         await document.fonts.ready
@@ -1003,14 +1077,17 @@ async function main() {
   const browser = await chromium.launch({ executablePath })
   const out = new Array(states.length)
   let next = 0
+  let ended = false // a state was stopped (stuck): no state after it is loaded
   const worker = async () => {
-    while (next < states.length) {
+    while (next < states.length && !ended) {
       const i = next++
       try {
         out[i] = await shootState(browser, opt, doc, states[i], i)
       } catch (e) {
         out[i] = { ok: false, errors: [plain(e)] }
       }
+      if (out[i].stopped) ended = true
+      say({ result: out[i], state: i })
     }
   }
   try {
@@ -1018,7 +1095,7 @@ async function main() {
   } finally {
     await browser.close()
   }
-  say({ done: true, states: out })
+  say({ done: true, states: Array.from(out, (r) => r || { ok: false, skipped: true, errors: [NOT_LOADED] }) })
 }
 
 main().catch((e) => {

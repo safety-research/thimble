@@ -3307,7 +3307,10 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
     request the page makes, `fetch`, `marks` or `media`, is answered by `await answer(kind, state index, message)`, a
     dict of the answer's fields. Returns one result per state, {ok, errors, fetches, fonts, png?, ...} as view_shot.mjs
     reports it; without Node or the frontend's packages each has build_problem's line as its one error, and without the
-    browser (headless.missing) each is `unavailable`, its one error headless.NO_SCREENSHOTS."""
+    browser (headless.missing) each is `unavailable`, its one error headless.NO_SCREENSHOTS. A state whose page did not
+    run for the state's whole time (_state_time) is `stopped`, its last error what its script was doing, and the states
+    not loaded by then are `skipped`. A run that its own time ends keeps the results of the states that were done, and
+    each other state's error says what its page was doing."""
     def failed(why: str) -> list[dict[str, Any]]:
         return [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
 
@@ -3323,6 +3326,14 @@ async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, wid
         return []
     with tempfile.TemporaryDirectory(prefix="thimble-view-") as work:
         return await _shoot_in(Path(work), doc, states, answer, path, width=width, height=height, media=media)
+
+
+def _state_time(state: dict[str, Any]) -> float:
+    """The seconds of a headless run that are one state's: SHOT_STATE_S, and SWEEP_STATES times that beside them for a
+    state that tries every choice of the kit's controls (`sweep`), which waits for its page after each of them. A page
+    that does not run for the whole of them, its script holding the thread without a pause, is stopped there
+    (view_shot.mjs `stuck`)."""
+    return SHOT_STATE_S * (1 + (SWEEP_STATES if state.get("sweep") else 0))
 
 
 async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: Any, path: str | None, *, width: int,
@@ -3341,7 +3352,8 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
     # writes: an `out` lies in a folder an agent's commands write (a view's build folder), where the browser's write by
     # its path would follow a link put there
     shots = {i: work / f"shot-{i}.png" for i, s in enumerate(states) if s.get("out")}
-    atomic_write_text(states_file, json.dumps([{**s, "out": str(shots[i]) if i in shots else None}
+    atomic_write_text(states_file, json.dumps([{**s, "out": str(shots[i]) if i in shots else None,
+                                                "busy": int(_state_time(s) * 1000)}
                                                for i, s in enumerate(states)], default=str))
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", *(["--media", media] if media else [])]
@@ -3355,6 +3367,8 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
     results: list[dict[str, Any]] | None = None
     launch_error = ""  # the run's own error when the browser did not start
     answering = [0.0, 0]  # seconds spent answering the page's requests, and the requests being answered now
+    doing: dict[int, str] = {}  # what each state's page was doing last, in words that say when, as the run tells it
+    early: dict[int, dict[str, Any]] = {}  # the result of each state that is done, for a run that does not end
 
     async def reply(obj: dict[str, Any]) -> None:
         assert proc.stdin is not None
@@ -3389,6 +3403,10 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                     answering[0] += time.monotonic() - t
                     answering[1] -= 1
                 await reply({"id": msg[kind], **got})
+            elif "doing" in msg:
+                doing[state_of(msg)] = str(msg["doing"])
+            elif isinstance(msg.get("result"), dict):
+                early[state_of(msg)] = msg["result"]
             elif msg.get("done"):
                 results = list(msg.get("states") or [])
                 if msg.get("error") and not results:
@@ -3396,8 +3414,7 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                     results = [{"ok": False, "errors": [launch_error.splitlines()[0][:400]]} for _ in states]
                 return
 
-    # a state that tries every choice of the kit's controls (`sweep`) waits for its page after each of them
-    limit = SHOT_TIMEOUT_S + SHOT_STATE_S * (len(states) + SWEEP_STATES * sum(1 for s in states if s.get("sweep")))
+    limit = SHOT_TIMEOUT_S + sum(_state_time(s) for s in states)
     talk = asyncio.ensure_future(converse())
     start = time.monotonic()
     timed_out = ""
@@ -3429,7 +3446,12 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
     if results is None:
         why = timed_out or (f"the headless browser exited {proc.returncode}: {err[-400:]}" if proc.returncode else
                             "the headless page did not finish")
-        results = [{"ok": False, "errors": [why], "fetches": 0} for _ in states]
+        # the states that were done keep their results, and each other one says what its page was doing when the run's
+        # time ended
+        late = {i: f"{why}: the time ran out {doing[i]}" if i in doing else f"{why}, before this state was loaded"
+                for i in range(len(states))} if timed_out else {}
+        results = [early.get(i) or {"ok": False, "errors": [late.get(i, why)], "fetches": 0}
+                   for i in range(len(states))]
     out: list[dict[str, Any]] = []
     for i, s in enumerate(states):
         r = dict(results[i]) if i < len(results) and isinstance(results[i], dict) else {"ok": False, "errors": ["the state was not shot"]}
