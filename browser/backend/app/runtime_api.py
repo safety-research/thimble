@@ -175,6 +175,24 @@ async def _call(conv: Any, box: runtime_tools.Box, block: dict[str, Any]) -> tup
     return rec, msg
 
 
+async def _calls(conv: Any, box: runtime_tools.Box,
+                 blocks: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Run the tool calls of one message: what _call returns for each, in the calls' order. The calls run at the same
+    time, but a call that reads what the others may write (tools.Spec.in_order) runs alone, where the message wrote
+    it: a view's check after an edit of the view checks the edited files, as it does in a session of Claude Code,
+    which runs such calls one after another."""
+    from . import tools  # noqa: PLC0415
+
+    done: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    rest = list(blocks)
+    while rest:
+        # the calls up to the next one that runs in order, or that one alone
+        n = next((i for i, b in enumerate(rest) if tools.in_order(str(b["name"]))), len(rest)) or 1
+        done += await asyncio.gather(*(_call(conv, box, b) for b in rest[:n]))
+        rest = rest[n:]
+    return done
+
+
 def _said(conv: Any) -> list[dict[str, Any]]:
     """What the analyst sent main while its tool calls ran, as text blocks after their results (Conv.take_waiting); none
     for any other conversation."""
@@ -335,7 +353,7 @@ async def turn(conv: Any, text: str) -> Any:
                 messages.append({"role": "user", "content": [*cut, *_said(conv)]})
                 _save(path, messages)
                 continue
-            done = await asyncio.gather(*(_call(conv, box, b) for b in calls))
+            done = await _calls(conv, box, calls)
             conv.emit_results([r for r, _ in done])
             messages.append({"role": "user", "content": [*(m for _, m in done), *_said(conv)]})
             _save(path, messages)

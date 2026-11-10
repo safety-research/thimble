@@ -147,7 +147,9 @@ def err(text: str) -> ToolResult:
 class Spec:
     """What is code about a tool: its name, the roles that get it, and its handler as `module:attr`, called as
     `handler(ctx, args)`. `sessions` names the session kinds whose agents alone get it; `aliases` are alternative
-    names a call still reaches but no listing shows. `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork)."""
+    names a call still reaches but no listing shows. `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork).
+    `in_order`: the call reads files that the other calls of its message may write, such as a view's check beside an
+    edit of the view, so it runs where the message wrote it and not at the same time as them (runtime_api._calls)."""
 
     name: str
     roles: tuple[str, ...]
@@ -155,6 +157,7 @@ class Spec:
     sessions: "tuple[str | None, ...]" = ()
     aliases: tuple[str, ...] = ()
     makes_cards: bool = False
+    in_order: bool = False
 
 
 _H = "app.tools:_h_"
@@ -205,14 +208,19 @@ REGISTRY: dict[str, Spec] = {
         Spec("fix_thimble", (ANALYST,), _H + "fix_thimble"),
         # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
         # gates of record (view_tools.py); a gate stops when its agent is stopped
-        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION)),
-        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,)),
-        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,)),
-        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,)),
+        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
+             in_order=True),
+        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), in_order=True),
+        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
+             in_order=True),
+        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
+             in_order=True),
         # a code ticket's agent checks its change in the ticket's box as often as it wants, and finishes once, where the
         # server commits the change and runs the gates of record (ticket_tools.py)
-        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,)),
-        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,)),
+        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,),
+             in_order=True),
+        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
+             in_order=True),
     )
 }
 
@@ -229,6 +237,12 @@ class ToolsFileError(prompts.PromptError):
 
 def known(name: str) -> bool:
     return name in REGISTRY or name in TOOL_ALIASES
+
+
+def in_order(name: str) -> bool:
+    """Whether a call of the tool `name` runs where its message wrote it (Spec.in_order); no built-in tool does."""
+    spec = REGISTRY.get(TOOL_ALIASES.get(name, name))
+    return spec is not None and spec.in_order
 
 
 def canonical(name: str) -> str:
