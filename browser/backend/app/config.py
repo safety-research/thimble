@@ -838,8 +838,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # Every role that runs a model, with exactly the model and effort it runs on. main's model, effort and fast mode are the
 # composer's, kept as settings.json `models.main` and read at main's next turn (runtime.Space.spec_of), so main is not
 # a role here. Every other role is set in thimble's config
-# (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier; userconf.ROLES naming each agent's role),
-# applied to the next start:
+# (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier and the dev row; userconf.ROLES naming
+# each agent's role), applied to the next start:
 #   orient     the orientation, a subagent of main (thimble:orientation)
 #   subagents  the orientation's own subagents, which it starts as thimble:orient-helper; by default the orientation's model
 #              without the 1M tag, at its effort
@@ -987,7 +987,7 @@ def _analyst_default(c: str | None, key: str) -> Any:
 
 
 def role_default(role: str, c: str | None = None) -> dict[str, Any]:
-    """A role's model and effort (and fast mode, for a classifier) before the environment and the workspace's settings."""
+    """A role's model, effort and fast mode before the environment and the workspace's settings."""
     if role == "orient":
         own_model = _analyst_default(c, "model")
         return {"model": str(own_model or ORIENT_DEFAULT_MODEL), "effort": ORIENT_DEFAULT_EFFORT, "fast": False}

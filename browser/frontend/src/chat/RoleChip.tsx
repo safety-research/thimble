@@ -1,7 +1,6 @@
 // The model line at the foot of a thread's composer whose message goes to one of thimble's agents rather than to main.
 // A change to a view goes to the dev role, whose line is the settings popover's row for it, drawn as ModelLine; a pick
-// is saved as the settings popover saves it and applies from the role's next run. thimble's agents have no fast mode,
-// so the line has no bolt.
+// is saved as the settings popover saves it and applies from the role's next run. The line has no bolt.
 import { useEffect, useState } from 'react'
 import { bus } from '../lib/bus'
 import { loadSettings, modelChoices, onSettingsChange, saveRole } from '../lib/models'

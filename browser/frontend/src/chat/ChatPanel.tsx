@@ -702,11 +702,13 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       return Promise.resolve(true)
     }
     if (fixing !== null || target.to === 'fix') {
-      // `/thimble-fix <words>` goes to main, which reads it with the person's fixes beside it and starts the fix (a round
-      // of one of theirs, or a new one) or first asks one short question, as in the terminal (backend fixes.ask). The fix
-      // runs in the background in a thread of its own (fixes.fixer_chat); main's chat shows the message, the fixer's
-      // line where main started it, as a side thread's (Rows), main's line, and how the fix ended once it did. Typed in
-      // a fix's thread, the words are a round of that fix
+      // `/thimble-fix <words>` starts its fix at once where main could name no other fix for the words (the person has
+      // no fix that words can change, or wrote `new` or a fix's number first); else it goes to main, which reads it
+      // with the person's fixes beside it and starts the fix (a round of one of theirs, or a new one) or first asks one
+      // short question, as in the terminal (backend fixes.ask). The fix runs in the background in a thread of its own
+      // (fixes.fixer_chat); main's chat shows the message, the fixer's line where the fix started, as a side thread's
+      // (Rows), main's line where main read the words, and how the fix ended once it did. Typed in a fix's thread, the
+      // words are a round of that fix
       const inFix = target.to === 'fix'
       track('ui-click', { target: inFix ? `fix:${target.fix}` : 'fix:ask' })
       if (!inFix) {

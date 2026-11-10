@@ -1101,7 +1101,7 @@ export interface ModelConf {
   model: string
   /** '' for a model Claude Code runs with no effort (Haiku 4.5) */
   effort: Effort | string
-  /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
+  /** fast mode: the classifiers' rows (labels, verify, suggest) and the dev row; the other agents have none */
   fast: boolean
   /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
   follows?: string

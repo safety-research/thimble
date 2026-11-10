@@ -1,5 +1,5 @@
 // thimble fix in the chat (backend fixes.py, chat/fix.ts). While Claude fixes the person's thimble and the kernel
-// checks the fix, the fixer shows as a side thread does: a line in main's chat where main started it, with its thread's
+// checks the fix, the fixer shows as a side thread does: a line in main's chat where the fix started, with its thread's
 // chip and a spinner while it works (Rows, FixLine), and the thread shows its whole run. The person keeps working.
 //   FixResult   how the fix ended, a row of main's chat and of the fix's thread at the time it ended (the server's `fix`
 //               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble

@@ -62,8 +62,8 @@ export const MODEL_ROWS: readonly { role: string; name: string }[] = [
 ]
 
 /** The rows with a fast mode of their own: main's session (the composer's bolt), and the roles thimble's config keeps
- * one for (backend config.ROLES_WITH_FAST): the classifiers, and the dev row's, which `thimble fix` runs with. The
- * writer and the checks run as subagents of main, which Claude Code gives no fast mode of their own. */
+ * one for (backend config.ROLES_WITH_FAST): the classifiers, and the dev row's, which its agents and `thimble fix`
+ * run with. The writer and the checks have none. */
 export const FAST_ROLES: readonly string[] = ['main', 'dev', 'labels', 'verify', 'suggest']
 
 /** Whether a row shows the fast-mode bolt: a row with fast mode, while its model has it. Pure. */

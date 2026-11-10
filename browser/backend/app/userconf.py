@@ -17,7 +17,8 @@ One fence for main and its agents. thimble's agents are subagents of main and ru
 adds no rule, working directory or sandbox to main's session. So the orientation's `web`, `network` and `data` are
 main's keys, which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web
 tools. Code tickets' agents are subagents of main too. The dev agent alone
-keeps its own permission mode, fast mode and fence keys, for `thimble fix`, which stays a job of the server.
+keeps its own permission mode and fence keys, for `thimble fix`, which stays a job of the server, and its own fast
+mode, for its agents and `thimble fix` (subagents.fast_for).
 Installs follow Claude Code's permission mode: thimble adds no rule for them. The web tools do too at `web` "ask":
 Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule would also ask in auto
 mode, since Claude Code obeys an explicit ask rule there (live check: the checks asked three times for the web in auto
@@ -120,7 +121,7 @@ DEFAULTS: dict[str, Any] = {
         "critic": _subagent(None),
         "writer": _subagent(None),
         "checks": _subagent(None),
-        "dev": _session_agent("off"),  # its `fast` is `thimble fix`'s (config.FAST_OF_TICKETS)
+        "dev": _session_agent("off"),  # its `fast` is its agents' and `thimble fix`'s (subagents.fast_for)
         **{a: {"model": None, "effort": None, "fast": None, "prompt": None} for a in CALLS},
         "suggest": {"model": None, "effort": None, "fast": None},
         "refusal": {"model": None, "effort": None, "off": None},
