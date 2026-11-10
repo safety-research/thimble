@@ -60,7 +60,7 @@ macOS or Linux (on Windows, WSL 2), with Claude Code, Python and Node.js.
 
 ## Security
 
-thimble is a research prototype. Its main risk is the Claude Code sessions it launches to check citations, answer side threads, design cards and run the workbench's agents: they read your files and can run commands with your session's permissions, so instructions hidden in your data could steer them. Please report security issues privately to [@mjoerke](https://github.com/mjoerke).
+thimble is a research prototype and may have security vulnerabilities. Report security issues privately to [@mjoerke](https://github.com/mjoerke).
 
 ## Contributing
 

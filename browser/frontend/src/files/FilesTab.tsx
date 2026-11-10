@@ -136,7 +136,7 @@ export function ReaderTabs({ tabs, current, onPick, onClose, isDir }: TabsProps)
   // the open tab gives up its name's end only in a strip too narrow for it beside the menu's button
   const activeMax = fit ? Math.max(0, Math.min(TAB_MAX_PX, fit.room - (hidden.length ? fit.more : 0))) : undefined
   return (
-    <span ref={wrap} className="reader-tabs-wrap">
+    <span ref={wrap} className={'reader-tabs-wrap' + (tabs.length > 1 ? ' is-many' : '')}>
       {/* the strip as it would be with every tab whole, out of sight, where the widths are read */}
       <span ref={measureRef} className="reader-tabs-measure" aria-hidden="true" inert>
         {tabs.map((t, i) => (
