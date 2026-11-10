@@ -39,6 +39,7 @@ import bisect
 import colorsys
 import contextlib
 import contextvars
+import copy
 import fnmatch
 import functools
 import hashlib
@@ -2892,7 +2893,7 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     sampled lines, on a sample of the claimed files for a builder's `draft` check (check_answer). The report check()
     returns, with the files' problems among its `problems`. With `picture` the page as it opens is pictured for the
     session. Each reader call of the gate may take CHECK_CALL_S, so a reader that never answers fails the checks rather
-    than holding its kernel."""
+    than holding its kernel. Checks that passed are not run again while nothing they read has changed (_kept_pass)."""
     token = _call_limit.set(CHECK_CALL_S)
     try:
         return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture, draft=draft)
@@ -2932,7 +2933,8 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
         report["notes"] = [*report.get("notes", []), note]
     if picture:
         _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
-    _gate_notes[(c, slug)] = [ln for ln in gate_lines(report) if ln.startswith(("unread: ", "files: ", "page: ", "note: "))]
+    _gate_notes[(c, slug)] = [ln for ln in gate_lines(report) if ln.startswith(("unread: ", "files: ", "page: ", "note: "))
+                              and ln != f"note: {PASS_KEPT}"]
     return report
 
 
@@ -3587,7 +3589,9 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     left (CHECKS_LEFT). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
     checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
     or sampled line opens passes the rest. Returns {ok, view, index, checks, page, shots, coverage, unread, problems,
-    notes}."""
+    notes}. A pass is remembered (_keep_pass): a later check of the same view files, claimed files and locators
+    answers its report with a note (PASS_KEPT) and runs nothing but the picture it asks for (_kept_pass); a failure is
+    never remembered."""
     view = read_view(c, slug)
     if view is None:
         return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
@@ -3602,12 +3606,92 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     if not files:
         report["problems"].append(f"no file of the corpus matches the claims {', '.join(view['claims'])}")
         return report
+    key = {"digest": digest(Path(view["dir"])), "locators": _named(locators),
+           "files": await asyncio.to_thread(fingerprint, files)}
+    if (kept := await _kept_pass(c, slug, view, key, files, of)) is not None:
+        again, read = kept
+        if not picture or await _pictured(c, slug, view, read, again, shot_dir or (cache_dir(c, view) / "shots")):
+            log.info("%s: the checks of the view %s did not run again, nothing changed since they passed", c, slug)
+            return again
     token = _checking.set(((c, slug, view.get("dir")), files))
     try:
-        return await _checked(c, slug, view, files, of, report, locators, shot_dir=shot_dir, picture=picture,
-                              need_locators=need_locators)
+        report = await _checked(c, slug, view, files, of, report, locators, shot_dir=shot_dir, picture=picture,
+                                need_locators=need_locators)
     finally:
         _checking.reset(token)
+    if digest(Path(view["dir"])) == key["digest"]:  # a folder that changed while its checks ran passed as neither
+        _keep_pass(c, slug, key, of is None, report)
+    return report
+
+
+# the passes of the checks that this process remembers (a restart forgets them), so that a view nothing changed for is
+# not run again (_check): (workspace, slug) -> its newest PASSES_KEPT, each {digest, locators, files, whole, report},
+# the digest of the view's folder, the locators checked and the fingerprint of the files read, `whole` when those were
+# every file the view claims
+PASSES_KEPT = 4
+_passes: dict[tuple[str, str], list[dict[str, Any]]] = {}
+# the note of a report that a remembered pass gave
+PASS_KEPT = ("Nothing changed since these checks passed: the view's files, the files it claims and the locators are the "
+             "same. So the checks did not run again.")
+
+
+def _named(locators: list[str] | None) -> list[str]:
+    """The locators a check was given, each once and in their order."""
+    return list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
+
+
+def _keep_pass(c: str, slug: str, key: dict[str, Any], whole: bool, report: dict[str, Any]) -> None:
+    """Remember the report of checks that passed, under `key` (_check): only one whose page loaded and whose choices
+    were tried, so not one made without the browser, and only one that opened a locator. Its pictures are left out, and
+    so are the reader answers of its states, which can be large and which only the checks themselves read."""
+    page = report.get("page") or {}
+    shots = report.get("shots") or []
+    if not (report.get("ok") and page.get("ok") and report.get("checks") and any(s.get("state") == "choices" for s in shots)):
+        return
+    kept = copy.deepcopy({**report, "view": None, "page": {k: x for k, x in page.items() if k != "png"},
+                          "shots": [{k: x for k, x in s.items() if k not in ("answers", "png")} for s in shots]})
+    others = [p for p in _passes.get((c, slug), []) if any(p[k] != key[k] for k in key)]
+    _passes[(c, slug)] = [{**key, "whole": whole, "report": kept}, *others][:PASSES_KEPT]
+
+
+async def _kept_pass(c: str, slug: str, view: dict[str, Any], key: dict[str, Any], files: list[tuple[str, int, int]],
+                     of: int | None) -> tuple[dict[str, Any], list[tuple[str, int, int]]] | None:
+    """The remembered pass that holds for a check with `key` of `files` (_check), as a report of its own with the note
+    that says so (PASS_KEPT), and the files that pass read; None when the checks must run. A pass holds for the same
+    view files and locators when it read these same files. For a draft check's sample (`of`), a pass that read every
+    claimed file holds too, while they are as it read them: they are stat'ed only when such a pass is remembered."""
+    same = [p for p in _passes.get((c, slug), []) if (p["digest"], p["locators"]) == (key["digest"], key["locators"])]
+    hit = next((p for p in same if p["files"] == key["files"]), None)
+    if hit is None and of is not None and any(p["whole"] for p in same):
+        files = await asyncio.to_thread(claimed_files, c, view)
+        every = await asyncio.to_thread(fingerprint, files)
+        hit = next((p for p in same if p["whole"] and p["files"] == every), None)
+    if hit is None:
+        return None
+    report = copy.deepcopy(hit["report"])
+    report["view"] = view
+    report["notes"] = [PASS_KEPT, *report.get("notes", [])]
+    return report, files
+
+
+async def _pictured(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]], report: dict[str, Any],
+                    base: Path) -> bool:
+    """The page as it opens pictured for the remembered `report`, as shoot_checks pictures it for checks that run: on
+    `files`, the files that pass read, and in the one state `opened`. False when the picture was not taken, and then
+    the checks run."""
+    token = _checking.set(((c, slug, view.get("dir")), files))
+    try:
+        shot = await shoot(c, slug, {"ref": None, "path": files[0][0]}, base / f"check-{int(time.time())}-overview.png",
+                           width=PANE_SIZE[0], height=PANE_SIZE[1], labels=NO_LABELS)
+    finally:
+        _checking.reset(token)
+    if not shot.get("ok") or not shot.get("png"):
+        return False
+    report["page"]["png"] = shot["png"]
+    for s in report["shots"]:
+        if s.get("state") == "opened":
+            s["png"] = shot["png"]
+    return True
 
 
 # the note of a report whose view did not pass the checks before the last two (_checked), with a page and without one
@@ -3655,7 +3739,7 @@ async def _checked(c: str, slug: str, view: dict[str, Any], files: list[tuple[st
                 f"{m['path']} ({m['why']})" for m in cov["missing"][:NOT_SHOWN_NAMED])
                 + (" and more" if len(cov["missing"]) > NOT_SHOWN_NAMED else "")))
 
-    wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
+    wanted = _named(locators)
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
     # (a workbook, a video) has no lines to sample, its rows are cited in its own notation, and a file hidden() leaves
     # out has no records in the view

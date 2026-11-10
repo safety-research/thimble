@@ -120,6 +120,7 @@ def _fresh(monkeypatch):
     views._memo.clear()
     views._ready.clear()
     views._derived_kept.clear()
+    views._passes.clear()
     sys.modules.pop("_thimble_views", None)
     yield
     views._memo.clear()
@@ -189,9 +190,19 @@ async def test_a_builder_s_draft_check_of_a_view_over_many_files_reads_a_sample_
     out = await views.check_answer(CORPUS, "logs", [named], picture=False)
     assert max(read) == 6, read  # and the checks' run on a copy with one of them missing
     assert any(ln.startswith("index: 6 of the 20 files the view claims, a sample") for ln in out["lines"])
+    # the sample's pass answers a draft check of the same sample, and never a gate of record
     read.clear()
+    out = await views.check_answer(CORPUS, "logs", [named], picture=False)
+    assert not read and f"note: {views.PASS_KEPT}" in out["lines"]
     rep = await views.gate(CORPUS, "logs", [named])
     assert max(read) == 20 and rep["index"]["files"] == 20 and "of" not in rep["index"]
+    # a pass that read every file answers a draft check too, which then reads none
+    html = views.views_dir(CORPUS) / "logs" / views.VIEW_HTML
+    html.write_text(html.read_text("utf-8") + "<!-- changed -->", "utf-8")
+    assert (await views.gate(CORPUS, "logs", [named]))["ok"]
+    read.clear()
+    out = await views.check_answer(CORPUS, "logs", [named], picture=False)
+    assert not read and f"note: {views.PASS_KEPT}" in out["lines"] and "index: 20 file(s)" in " ".join(out["lines"])
 
 
 async def test_a_check_tries_the_choices_and_a_damaged_copy_only_once_the_rest_passes_and_then_both_at_once(
@@ -235,6 +246,60 @@ async def test_a_check_tries_the_choices_and_a_damaged_copy_only_once_the_rest_p
         (False, True), (True, False)]
     assert [s["state"] for s in passed["shots"]] == [*views.CHECK_STATES, "choices"]
     assert "page: choices, 0 records and 0 units shown" in lines and not any(views.CHECKS_LEFT in ln for ln in lines)
+
+
+async def test_checks_that_passed_do_not_run_again_until_the_view_its_files_or_the_locators_change(
+        ws, inproc, bound, monkeypatch):
+    """Most gates of record, and many checks of a review, ran on files that had not changed since a check passed, each
+    at the cost of every page load: a pass is remembered, and a check of the same view files, claimed files and
+    locators answers its report with a note and loads no page, or only the picture it asks for. A changed view file,
+    a changed claimed file and other locators each run the checks, and so does a check that failed."""
+    runs: list[list[dict]] = []
+
+    async def page(c, slug, states, **_kw):
+        runs.append(states)
+        return [{"ok": True, "errors": [], "fetches": 0, **({"choices": []} if s.get("sweep") else {}),
+                 **({"png": str(s["out"])} if s.get("out") else {})} for s in states]
+
+    async def gate(locators: list[str], **kw) -> tuple[dict, int, bool]:
+        """(the report, the page runs it took, whether it says that the checks did not run again)"""
+        runs.clear()
+        report = await views.gate(CORPUS, "threads", locators, **kw)
+        return report, len(runs), f"note: {views.PASS_KEPT}" in views.gate_lines(report)
+
+    def found(report: dict) -> list[str]:
+        return [ln for ln in views.gate_lines(report) if ln != f"note: {views.PASS_KEPT}"]
+
+    monkeypatch.setattr(views, "shoot_states", page)
+    post = ["board.jsonl#L3"]
+    first, ran, kept = await gate(post)
+    assert first["ok"] and (ran, kept) == (3, False)
+    again, ran, kept = await gate(post)
+    assert again["ok"] and (ran, kept) == (0, True) and found(again) == found(first)
+    assert [s["state"] for s in again["shots"]] == [*views.CHECK_STATES, "choices"] and again["view"]["slug"] == "threads"
+    # a draft check that reads every claimed file is the same check, and its pass is one for a gate of record
+    draft = await views.check_answer(CORPUS, "threads", post, picture=False)
+    assert draft["ok"] and f"note: {views.PASS_KEPT}" in draft["lines"] and not runs
+    # a picture: the page is loaded once, as it opens, and nothing else runs
+    pictured, ran, kept = await gate(post, picture=True, draft=True)
+    png = pictured["page"]["png"]
+    assert (ran, kept) == (1, True) and png.endswith("-overview.png") and f"png: {png}" in views.gate_lines(pictured)
+    assert runs[0][0]["labels"] == views.NO_LABELS and "png" not in (await gate(post))[0]["page"]
+    # a changed file of the view
+    html = views.views_dir(CORPUS) / "threads" / views.VIEW_HTML
+    html.write_text(html.read_text("utf-8") + "<!-- changed -->", "utf-8")
+    assert (await gate(post))[1:] == (3, False) and (await gate(post))[1:] == (0, True)
+    # a changed file that the view claims
+    board = config.corpus_dir(CORPUS) / "board.jsonl"
+    board.write_text(board.read_text("utf-8") + json.dumps(
+        {"thread": "t2", "author": "cy", "time": "2026-06-01T10:15:00Z", "body": "Noted."}) + "\n", "utf-8")
+    assert (await gate(post))[1:] == (3, False) and (await gate(post))[1:] == (0, True)
+    # other locators
+    assert (await gate(["board.jsonl#L1"]))[1:] == (3, False) and (await gate(post))[1:] == (0, True)
+    # checks that failed run again
+    for _ in range(2):
+        failed, ran, kept = await gate(["board.jsonl#L99"])
+        assert not failed["ok"] and (ran, kept) == (1, False)
 
 
 def test_a_view_s_page_loads_in_a_frame_that_blocks_every_host_before_any_script(ws, tmp_path, monkeypatch):
