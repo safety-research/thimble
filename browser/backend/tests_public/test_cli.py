@@ -91,8 +91,8 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
     """`thimble-browser --continue`, and `--resume` of the session open now, keep that session when it holds a card, a
     label, a document or a side thread but no chat of main with a turn, as a session of an earlier thimble or one with
     a card made by hand does: the page opens a new chat in it. Only a new session moves the open one aside
-    (pick_session, open_session), and it says so with the command that brings it back. The server's routes are
-    faked."""
+    (pick_session, open_session), and it prints nothing then: the start's last line says how to resume it
+    (resume_line). The server's routes are faked."""
     from app import config, notebook  # noqa: PLC0415
 
     with cli.server_dirs():
@@ -114,20 +114,25 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
         assert [route for route, _ in asked] == routes, how
         assert asked[-1][1]["chat"] == "new"
         said = capsys.readouterr().out.splitlines()
-        assert said == ([cli.BROWSER_LINE.format(what=cli.SET_ASIDE_LINE)] if how == "new" else []), how
+        assert said == [], how
 
 
-def test_a_new_session_that_finds_the_open_one_empty_names_the_earlier_one_and_continue_brings_it_back(home, data,
-                                                                                                       monkeypatch, capsys):
-    """A plain thimble-browser start whose open session is empty, as the start after the one that set the last session
-    aside leaves it, says that an earlier session is set aside, what it holds, and that --continue brings it back. The
-    server's routes are faked; its archive moves the folder as ledger.archive_workspace does."""
+def test_a_new_session_ends_its_start_with_how_to_resume_the_latest_earlier_one(home, data, monkeypatch, capsys):
+    """A plain thimble-browser start in a folder that has an earlier session says how to resume the latest one: when it
+    was last written, what it holds, and `thimble-browser --continue` (resume_line, the start's last line). The words
+    are the same at the start that moves the session aside and at each start after it. A folder with no earlier
+    session has no such line, and neither has a start whose open session holds something, which was not moved aside.
+    The server's routes are faked; its archive moves the folder as ledger.archive_workspace does."""
+    import re  # noqa: PLC0415
+
     from app import config, ledger, notebook  # noqa: PLC0415
 
     with cli.server_dirs():
+        assert cli.resume_line("mini") is None
         nb = notebook.create_notebook(config.workspace_dir("mini"), "G")
         notebook.insert_cell("mini", nb["id"], notebook.new_cell("note", "test", "By hand", nb["id"],
                                                                  payload={"text": "made by hand"}))
+        assert cli.resume_line("mini") is None
 
     def answer(method, url, body=None, timeout=5.0):
         if url.endswith("/archive"):
@@ -141,17 +146,17 @@ def test_a_new_session_that_finds_the_open_one_empty_names_the_earlier_one_and_c
 
     monkeypatch.setattr(cli, "_request", answer)
     cwd = data / "mini"
-    said = []
+    lines = []
     for _ in range(2):
         with cli.server_dirs():
             assert cli.open_session("http://127.0.0.1:1", "mini", cwd, cli.pick_session(cwd, data, "new"))
-        said.append(capsys.readouterr().out.splitlines())
-    assert said[0] == [cli.BROWSER_LINE.format(what=cli.SET_ASIDE_LINE)]
-    # the second start sets nothing aside, and says what is there to bring back
-    assert len(said[1]) == 1 and "thimble-browser --continue brings it back" in said[1][0], said[1]
-    assert "0 turns and 1 card" in said[1][0], said[1]
-    with cli.server_dirs():
-        assert cli.pick_session(cwd, data, "continue")["archive"]
+            lines.append(cli.resume_line("mini"))
+        assert capsys.readouterr().out == ""
+    assert lines[0] == lines[1], lines
+    assert re.fullmatch(r"to resume your latest session \([A-Z][a-z]{2} \d{1,2} \d\d:\d\d, 0 turns, 1 card\) run: "
+                        r"thimble-browser --continue", lines[0]), lines[0]
+    assert cli._when(time.mktime((2025, 3, 9, 7, 5, 0, 0, 0, -1)), time.mktime((2026, 11, 10, 12, 0, 0, 0, 0, -1))) \
+        == "Mar 9 2025 07:05"
 
 
 @pytest.mark.timeout(120)
