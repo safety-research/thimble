@@ -899,7 +899,7 @@ The checks failed on your revision, so the view is as it was before your change.
 
 ## view-pictures
 
-The pictures, which Read opens:
+The pictures come with this answer, in this order:
 
 {paths}
 

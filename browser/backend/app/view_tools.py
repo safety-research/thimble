@@ -3,11 +3,11 @@
 session are tools they call (plan, lane E):
 
   view_check     the draft check (views.check_answer), as often as the agent wants: the gate with the locators it names,
-                 and a picture of the page as it opens when it asks for one
+                 and a picture of the page as it opens when it asks for one, which comes with the answer
   finish_view    the builder's end: the gates of record (views.gate); a pass registers the view (views.mark_built) and
                  tells main (the `view` event), a failure answers what failed and the attempt, up to dev.MAX_ATTEMPTS
   view_pictures  the reviewer's pictures (view_review.shoot): the overview first, then up to view_review.EXTRA_SHOTS
-                 more states a round, into views-work/<slug>/review/<round>/, whose paths it opens with Read
+                 more states a round, into views-work/<slug>/review/<round>/, which come with the answer
   finish_review  the reviewer's end of a round: the gate over its revision, which stays (a round counted, up to
                  view_review.ROUNDS) or is undone (the view as it last passed)
 
@@ -25,7 +25,7 @@ import contextlib
 import logging
 from typing import Any
 
-from . import config, subagents, tools
+from . import config, nofollow, runtime_tools, subagents, tools
 
 log = logging.getLogger("thimble.view_tools")
 
@@ -152,21 +152,47 @@ def cancel_grace(c: str, agent_id: str) -> None:
         h.cancel()
 
 
+# --------------------------------------------------------------------------- the pictures a tool took
+
+
+def picture(path: Any) -> runtime_tools.Picture | None:
+    """The picture file `path` as a tool's answer carries it, scaled down when it is over what the API takes
+    (runtime_tools.picture); None for a file that does not open as a picture. A view's pictures lie in folders its
+    agent's commands write, so the file is opened as nofollow opens one."""
+    try:
+        with nofollow.reader(path) as f:
+            return runtime_tools.picture(f)
+    except OSError:
+        return None
+
+
+def _with_pictures(text: str, pics: list[runtime_tools.Picture]) -> Any:
+    """A tool's answer of `text` and then the pictures it took, in their order, as the `screenshot` tool returns its
+    picture: the agent sees them on either runtime, without a Read of their files."""
+    return tools.ToolResult([{"type": "text", "text": text},
+                             *({"type": "image", "data": p.data, "mimeType": p.mime} for p in pics)])
+
+
 # --------------------------------------------------------------------------- view_check
 
 
-def _check_text(answer: dict[str, Any]) -> str:
+def _check_text(answer: dict[str, Any], pic: runtime_tools.Picture | None = None) -> str:
+    """What view_check answers: whether the checks pass, their lines, and the file of the picture it took, which comes
+    with the answer as `pic`."""
     lines = [str(x) for x in answer.get("lines") or []]
     head = "The checks pass." if answer.get("ok") else "The checks fail."
     out = "\n".join([head, *lines])
-    if answer.get("png"):
-        out += f"\n\nThe picture of the page as it opens, which Read opens: {answer['png']}"
+    if answer.get("png") and pic is not None:
+        out += f"\n\nThe picture of the page as it opens comes with this answer{pic.scaled}. Its file: {answer['png']}"
+    elif answer.get("png"):
+        out += f"\n\nThe picture of the page as it opens did not load. Its file: {answer['png']}"
     return out
 
 
 async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_check`: the checks of the view the caller builds or reviews, with the `locators` it names beside the
-    sampled lines, and with `picture` a picture of the page as it opens (views.check_answer)."""
+    sampled lines, and with `picture` a picture of the page as it opens (views.check_answer), which the answer carries
+    after its text."""
     from . import views  # noqa: PLC0415
 
     try:
@@ -178,7 +204,8 @@ async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     raw = [raw] if isinstance(raw, str) else raw
     locators = [str(x).strip() for x in raw if str(x).strip()]
     answer = await views.check_answer(ctx.c, slug, locators, bool(args.get("picture")))
-    return tools.ok(_check_text(answer))
+    pic = await asyncio.to_thread(picture, answer["png"]) if answer.get("png") else None
+    return _with_pictures(_check_text(answer, pic), [pic] if pic else [])
 
 
 # --------------------------------------------------------------------------- finish_view
@@ -241,7 +268,7 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
 async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_pictures`: pictures of the view the caller reviews, the overview first in each round, then the states it
     asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched and what the checks found
-    (view_review.pictures)."""
+    (view_review.pictures). The answer carries the pictures after its text, in the order the text lists them."""
     from . import view_review  # noqa: PLC0415
 
     try:
@@ -249,10 +276,10 @@ async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     except Refused as e:
         return tools.err(str(e))
     try:
-        paths, records = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
+        paths, records, pics = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
     except view_review.NoPictures as e:
         return tools.err(str(e))
-    return tools.ok(tools.hint("view-pictures", paths=paths, records=records))
+    return _with_pictures(tools.hint("view-pictures", paths=paths, records=records), pics)
 
 
 # --------------------------------------------------------------------------- finish_review
