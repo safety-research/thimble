@@ -131,4 +131,4 @@ Check the view with `view_check` as often as you want. It samples lines through 
 
 When the view is done, call `finish_view`. It runs the same checks as the record of your build. You have {{attempts}} attempts.
 
-A reviewer then looks at pictures of the view and fixes clear problems in how it draws. So start no review subagent of your own.
+After a first build, a reviewer looks at pictures of the view and fixes clear problems in how it draws. So start no review subagent of your own.
