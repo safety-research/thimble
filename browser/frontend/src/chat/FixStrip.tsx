@@ -19,7 +19,7 @@ import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { servedBuild, thisBuild } from '../lib/chunkRecovery'
+import { servedBuild, thisBuild, whenRestarted } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
 import { askClaudeText, changedLines, fixActions, fixText, RELOADING, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow } from './fix'
 import { offerDraft } from './pending'
@@ -66,11 +66,12 @@ function failText(what: string, e: Error): string {
 }
 
 /** The page after the person's click put a fix on or took it off: once the server is back from its restart, the page
- * loads the new build, or, while something typed would be lost, the fix's row offers Reload (`fixHeld`). And Your
- * fixes, which `/thimble-fix` alone opens. */
+ * loads the new build, or, while something typed would be lost, the fix's row offers Reload (`fixHeld`). The page asks
+ * the server whether it started again (whenRestarted), so it finds the new server before its stream opens again, which
+ * says the same later. And Your fixes, which `/thimble-fix` alone opens. */
 export function FixPage() {
   const restarting = useRef<number | null>(null)
-  const [rows, load] = useFixes(() => {
+  const back = () => {
     const fid = restarting.current
     if (fid === null) return load()
     // the server came back from the restart the person's click asked for: the page loads its new build
@@ -84,11 +85,19 @@ export function FixPage() {
         }
         bus.emit('fixHeld', { id: fid, held: 'typed' })
       }
-      load()
+      // every reader of the fixes reads them again, as on the server's `fix` event: the stream that carries those may
+      // not be open again yet
+      bus.emit('fix', { id: fid, state: 'idle' })
     })
-  })
+  }
+  const [rows, load] = useFixes(back)
   const going = rows.find(reloading)
   if (going) restarting.current = going.id
+  // while a fix goes on or comes off, the page asks the server whether it started again
+  const found = useRef(back)
+  found.current = back
+  const goingId = going?.id ?? null
+  useEffect(() => (goingId === null ? undefined : whenRestarted(() => found.current())), [goingId])
   const [busy, setBusy] = useState(false)
   const [list, setList] = useState(false)
   useEffect(() => bus.on('fixList', (e) => setList(e.open)), [])
