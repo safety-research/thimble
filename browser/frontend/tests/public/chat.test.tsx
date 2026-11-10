@@ -204,7 +204,7 @@ test('a model picked in the line under the composer shows there at once, with th
 })
 
 test("a view's thread shows the fast mode of its build's row in Settings under the composer, and the bolt switches it as the row's does", async () => {
-  // the row "View builds and code tickets": Opus 5.5 at high effort, with its own fast mode on
+  // the row "View builds": Opus 5.5 at high effort, with its own fast mode on
   models = { dev: { model: 'claude-opus-5-5', effort: 'high', fast: true } }
   chats.dv1 = { meta: { id: 'dv1', kind: 'agent', role: 'dev', title: 'view: Decisions', created_at: T, parent: 'main', status: 'done', view: 'decisions', asked: true } as unknown as ChatMeta, events: [] }
   localStorage.setItem('thimble:mini:thread-current', JSON.stringify('dv1'))
@@ -235,7 +235,7 @@ test("a view's thread shows the fast mode of its build's row in Settings under t
 })
 
 test("a view's thread shows main's fast mode while its row sets none, as soon as main's bolt switches it", async () => {
-  // the row "View builds and code tickets" with no fast mode of its own: it shows main's, which is off
+  // the row "View builds" with no fast mode of its own: it shows main's, which is off
   models = { dev: { model: 'claude-opus-5-5', effort: 'high', fast: false, fast_follows: 'main' } }
   chats.dv1 = { meta: { id: 'dv1', kind: 'agent', role: 'dev', title: 'view: Decisions', created_at: T, parent: 'main', status: 'done', view: 'decisions', asked: true } as unknown as ChatMeta, events: [] }
   localStorage.setItem('thimble:mini:thread-current', JSON.stringify('dv1'))

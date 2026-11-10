@@ -846,8 +846,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 #   critic     the critic, a subagent of the orientation (thimble:critic)
 #   writer     a writer, a subagent of main (thimble:writer)
 #   checks     each run of a report check (thimble:check)
-#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer), a code ticket's agent
-#              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
+#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer) and `thimble fix`'s session
+#              (dev.py)
 #   verify     the card check's reading of a card's picture (card_check), a classifier
 #   labels     the labels classifier (concepts), the label draft and the view fit
 #   suggest    the view proposals after a turn (proposer.py) and for a file type (views.suggest), a classifier
@@ -859,8 +859,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
 # (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
 # and only for ROLES_WITH_FAST: the classifiers, and the dev row, for `thimble fix`, the one `claude -p` job of the
-# server (dev.py), and for the row's agents, which the server runs itself: a view build, a review and a code ticket's
-# agent run with the row's fast mode (subagents.fast_for). A writer and a check have none. The dev row's fast mode has
+# server (dev.py), and for the row's agents, which the server runs itself: a view build and a review
+# run with the row's fast mode (subagents.fast_for). A writer and a check have none. The dev row's fast mode has
 # no default of its own: while neither THIMBLE_DEV_FAST nor thimble's config sets it, it is main's (main_fast), read
 # when a job starts, and the row says so with `fast_follows: main`. Once the analyst sets it, on or off, it stays as
 # set whatever main's is. Without a workspace there is no main: the unset row's `fast` is then None, which leaves
@@ -885,7 +885,7 @@ MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haik
 # The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES).
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}
 # the classifiers, each a call the server makes, which runs at its own speed, and the dev row: its agents (a view's
-# builder and reviewer, a code ticket's agent) and `thimble fix`, the one `claude -p` job of the server (main's fast
+# builder and reviewer) and `thimble fix`, the one `claude -p` job of the server (main's fast
 # mode until the analyst sets the row's)
 ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)

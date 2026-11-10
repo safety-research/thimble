@@ -628,11 +628,8 @@ export const api = {
   /** Report a problem's Fix it with /thimble-fix: the server makes it a fix of the person's thimble wherever fixes work
    * (backend dev.post_ticket) */
   fileTicket: (body: NewTicketBody) => j<Ticket>(`${apiBase()}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
-  retryTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
-  /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
-  startTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
   dismissTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
-  /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */
+  /** stop a running ticket: nothing is applied and it ends `stopped` */
   stopTicket: (id: string) => j<{ ok: boolean }>(`${apiBase()}/dev/tickets/${enc(id)}/stop`, { method: 'POST' }),
 
   // ---- settings ----

@@ -708,7 +708,7 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
   }
   if (item.chip === 'ticket' && item.chat) {
     // the ticket's start is the dev chat's own row; its end names the thread that holds the whole run, where a failure's
-    // reason and its Retry are (chat/TicketStatus)
+    // reason is (chat/TicketStatus)
     if (item.status === 'started') return null
     const text = ticketChipText(item)
     return <Note className="chat-chip-row" data-chip="ticket" data-status={item.status} text={text} chips={<ThreadChip id={item.chat} />} />

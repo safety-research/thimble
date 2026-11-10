@@ -2652,26 +2652,11 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
     from . import fixes  # noqa: PLC0415
 
-    if not fixes.problem():
-        # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix
-        return ok(hint("file_dev_ticket-fix"))
-    from . import dev  # noqa: PLC0415 — dev imports this module's callers
-
-    source = ANALYST if ctx.actor == ANALYST else ctx.actor
-    rec = await _maybe_await(dev.file_ticket(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source,
-                                             start=False, route="typed"))
-    label = dev._label(rec)
-    # main's ticket: prepared, then the server starts its agent (dev.start_typed); a thread's fork's keeps no call of
-    # the fork's (_fork_start)
-    ans = await dev.start_typed(rec, call=None if fork is not None else ctx.tool_use_id)
-    if ans.get("held"):
-        return ok(hint("file_dev_ticket-waits", label=label, running=str(ans.get("running") or "another ticket")))
-    if ans.refused or "input" not in ans:
-        return ok(hint("file_dev_ticket-cannot-run", label=label, why=ans.reason or str(ans.kind or "")))
-    if fork is not None:
-        return await _fork_start(ctx, ans, what=f"{label}: {title}")
-    return ok(hint("file_dev_ticket-start", label=label, title=title, start=hint("agent-started")))
-
+    # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix: this call
+    # files nothing, and says why where fixes cannot be made on this server
+    if why := fixes.problem():
+        return ok(hint("file_dev_ticket-fix-off", why=why))
+    return ok(hint("file_dev_ticket-fix"))
 
 
 async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:

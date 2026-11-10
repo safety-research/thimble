@@ -200,8 +200,8 @@ async def test_discard_on_a_view_whose_build_failed_drops_the_view_and_its_propo
 
 async def test_a_view_s_review_runs_at_medium_effort_on_a_dev_row_at_medium_or_above(board, bridge, monkeypatch):
     """The reviewer takes the dev row's effort up to medium: medium on a row at medium, high, xhigh or max, and the
-    row's own on a row at low. Its definition and its start carry that effort. The builder and a code ticket's agent
-    keep the row's effort, and an effort a run's arguments name stands."""
+    row's own on a row at low. Its definition and its start carry that effort. The builder and the row's
+    `dev-ticket` type keep the row's effort, and an effort a run's arguments name stands."""
     real = config.models_for
     runs_at = {"low": "low", "medium": "medium", "high": "medium", "xhigh": "medium", "max": "medium"}
     assert tuple(runs_at) == config.ROLE_EFFORTS

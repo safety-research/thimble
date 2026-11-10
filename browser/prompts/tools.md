@@ -787,23 +787,15 @@ No element of the page has a `data-anchor` that names a record (its citation for
 
 ## file_dev_ticket-no-view
 
-No view is named {view}. The views are {views}. File the ticket again with one of them, or without `view` for a change to thimble itself.
-
-## file_dev_ticket-cannot-run
-
-Filed {label}. But it cannot run here, so it failed at once: {why} Tell the analyst, because only they can change this.
-
-## file_dev_ticket-waits
-
-Filed {label}. {running} runs now, and code tickets run one at a time. So this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
-
-## file_dev_ticket-start
-
-Filed {label}: {title}. {start}
+No view is named {view}. The views are {views}. File the ticket again with one of them.
 
 ## file_dev_ticket-fix
 
 This call filed nothing. A change to thimble itself is a fix of the person's thimble. They ask for it with /thimble-fix <what should work differently>.
+
+## file_dev_ticket-fix-off
+
+Nothing was filed: {why}. Tell the analyst, because only they can change this.
 
 ## fix_thimble-new
 

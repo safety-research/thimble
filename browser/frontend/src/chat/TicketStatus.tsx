@@ -1,27 +1,26 @@
 // A dev ticket's state at the foot of its thread: while it runs, a line only while thimble's question about its code
-// waits on the card (its Stop is the composer's stop square, ChatPanel), Discard while it waits in the queue, Start and
-// Discard for main's ticket that waits for the analyst while another runs (`held`), and after a failure or a stop the
-// reason with Retry and Discard. An applied ticket shows nothing. The ticket is re-fetched on each `ticket` stream event.
+// waits on the card (its Stop is the composer's stop square, ChatPanel), and for one that still waits in the queue how
+// to ask for the change now (FIX_ALONE), since nothing starts a code ticket, with Discard. After a failure or a stop it
+// shows the reason with Discard. An applied ticket shows nothing. The ticket is re-fetched on each `ticket` stream event.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Mark } from '../components/Marks'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Ticket } from '../lib/types'
-import { Note, openThread } from './Notes'
+import { FIX_ALONE } from './fix'
+import { Note } from './Notes'
 
-/** The ends that leave nothing applied and take Retry and Discard (backend dev.RETRYABLE). */
+/** The ends that leave nothing applied: each shows its reason, and Discard unless it is discarded already. */
 const ENDED = new Set(['failed', 'needs manual merge', 'rolled back', 'stopped', 'reverted', 'dismissed'])
 
-/** The line of main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed). */
-export const HELD_LINE = 'Waits for your Start, since code tickets run one at a time'
-
-/** What the line says for a ticket's status: the reason for a failure, and for a stop thimble made (main's quit:
- * backend dev._settle_ticket), a word for the rest; null for none. Pure. */
-export function ticketStatusText(t: Pick<Ticket, 'status' | 'error' | 'held'>): string | null {
+/** What the line says for a ticket's status: for one that waits in the queue, which nothing starts, how to ask for the
+ * change now; the reason for a failure, and for a stop thimble made (main's quit: backend dev._settle_ticket), a word
+ * for the rest; null for none. Pure. */
+export function ticketStatusText(t: Pick<Ticket, 'status' | 'error'>): string | null {
   switch (t.status) {
     case 'queued':
-      return t.held ? HELD_LINE : 'Queued behind another ticket'
+      return FIX_ALONE
     case 'stopped':
       return t.error ? reason(t.error) : 'Stopped'
     case 'reverted':
@@ -71,45 +70,26 @@ export function useTicket<T extends Ticket>(id: string | null): [T | null, (t: T
 export const WAITING_LINE = 'Waiting for permission'
 
 export function TicketStatus({ ticket, waiting = false, onChange }: { ticket: Ticket; waiting?: boolean; onChange: (t: Ticket) => void }) {
-  const [busy, setBusy] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   // the request itself is the telemetry record (lib/telemetry's wrapped fetch)
-  const act = (what: 'retry' | 'dismiss' | 'start') => {
-    setBusy(what)
-    const call = what === 'retry' ? api.retryTicket(ticket.id) : what === 'start' ? api.startTicket(ticket.id) : api.dismissTicket(ticket.id)
-    call
+  const discard = () => {
+    setBusy(true)
+    api
+      .dismissTicket(ticket.id)
       .then(() => api.ticket(ticket.id))
-      .then((t) => {
-        onChange(t)
-        // a Retry runs in a new agent chat: follow it there
-        if (what === 'retry' && t.chat && t.chat !== ticket.chat) openThread(t.chat, 'ticket-retry')
-      })
-      .catch((e: Error) => bus.emit('toast', { text: `Could not ${what} the ticket. ${e.message}`, kind: 'error' }))
-      .finally(() => setBusy(null))
+      .then(onChange)
+      .catch((e: Error) => bus.emit('toast', { text: `Could not dismiss the ticket. ${e.message}`, kind: 'error' }))
+      .finally(() => setBusy(false))
   }
+  const discardButton = (
+    <Button size="sm" className="chat-ticket-act" busy={busy} onClick={discard}>
+      Discard
+    </Button>
+  )
   const text = ticketStatusText(ticket)
   const failed = ticket.status === 'failed' || ticket.status === 'needs manual merge' || ticket.status === 'rolled back'
   if (ticket.status === 'running') return waiting ? <Note className="chat-ticket-status" data-status="running" data-waiting="" text={WAITING_LINE} /> : null
-  if (ticket.status === 'queued') {
-    return (
-      <Note
-        className="chat-ticket-status"
-        data-status="queued"
-        text={text}
-        chips={
-          <>
-            {ticket.held && (
-              <Button size="sm" className="chat-ticket-act" busy={busy === 'start'} onClick={() => act('start')}>
-                Start
-              </Button>
-            )}
-            <Button size="sm" className="chat-ticket-act" busy={busy === 'dismiss'} onClick={() => act('dismiss')}>
-              Discard
-            </Button>
-          </>
-        }
-      />
-    )
-  }
+  if (ticket.status === 'queued') return <Note className="chat-ticket-status" data-status="queued" text={text} chips={discardButton} />
   if (!ENDED.has(ticket.status)) return null
   return (
     <Note
@@ -121,18 +101,7 @@ export function TicketStatus({ ticket, waiting = false, onChange }: { ticket: Ti
           <span className="chat-ticket-why">{text}</span>
         </>
       }
-      chips={
-        <>
-          <Button size="sm" className="chat-ticket-act" busy={busy === 'retry'} onClick={() => act('retry')}>
-            Retry
-          </Button>
-          {ticket.status !== 'dismissed' && (
-            <Button size="sm" className="chat-ticket-act" busy={busy === 'dismiss'} onClick={() => act('dismiss')}>
-              Discard
-            </Button>
-          )}
-        </>
-      }
+      chips={ticket.status !== 'dismissed' && discardButton}
     />
   )
 }

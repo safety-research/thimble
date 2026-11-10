@@ -1,5 +1,5 @@
 """The server runs every agent itself: main, the side threads' forks and thimble's agents (writers, view builders and
-reviewers, report checks, code tickets), on whichever way to reach Claude the person chose (claude_access.py):
+reviewers, report checks), on whichever way to reach Claude the person chose (claude_access.py):
 
     api   an API key or Workload Identity Federation: a loop on the Messages API in this process (runtime_api.py),
           with the built-in tools of runtime_tools.py. No `claude` process is started.
