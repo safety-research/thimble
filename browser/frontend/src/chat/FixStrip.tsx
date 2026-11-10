@@ -5,11 +5,12 @@
 //               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble
 //               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
 //               goes on by itself: Use it now is the person's click. The server then starts again from the fixed code,
-//               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
-//               be lost. A fix that did not pass says why, with Try again (not when it needs a file no fix may change, as
-//               the terminal's line) and Ask Claude, which shows what it tried and puts its failure in main's composer
-//               for the person to send, with its change and the end of its tests' output, once: it is not offered again.
-//               An earlier row, or one the person answered, is a quiet line of what it said.
+//               the row says "Reloading thimble…", with the turn the restart waits for while one runs, and the page
+//               loads the new build by itself when nothing typed would be lost. A fix that did not pass says why, with
+//               Try again (not when it needs a file no fix may change, as the terminal's line) and Ask Claude, which
+//               shows what it tried and puts its failure in main's composer for the person to send, with its change
+//               and the end of its tests' output, once: it is not offered again. An earlier row, or one the person
+//               answered, is a quiet line of what it said.
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -20,7 +21,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { servedBuild, thisBuild } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
-import { askClaudeText, changedLines, fixActions, fixText, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow } from './fix'
+import { askClaudeText, changedLines, fixActions, fixText, RELOADING, reloading, STATE_WORDS, triedLines, type FixAction, type FixRow } from './fix'
 import { offerDraft } from './pending'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
@@ -165,7 +166,7 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
     return (
       <div className="chat-fix" role="status" data-fix={fid} data-kind="reloading">
         <Spinner size={12} className="chat-fix-ico" />
-        <span className="chat-fix-text">Reloading thimble…</span>
+        <span className="chat-fix-text">{row && reloading(row) ? fixText(row, ws) : RELOADING}</span>
       </div>
     )
   }

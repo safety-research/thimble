@@ -102,6 +102,7 @@ EMPTY = "Ask for a change to thimble with /thimble-fix <what should work differe
 RESTART_BY_HAND = "restart thimble-browser to load it"
 RESTART_AFTER_S = 0.3  # restart starts the server again this long after it returns, so the answer its caller gives goes out
 BUSY_WAIT_S = 600.0  # how long a restart waits for main and the other agents to end their turns
+BUSY_POLL_S = 0.25  # how often it looks whether they have
 LINKS = (("backend", ".venv"), ("frontend", "node_modules"))  # what the install lends a copy and live's browser/
 PAGE_CHARS = 8000  # of the text copy of the page
 TRIED_CHARS = 6000  # of a fix's change in Ask Claude's message (tried_route)
@@ -131,6 +132,7 @@ _waiting: dict[str, dict[str, _Asking]] = {}
 _checks: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its chat, while the kernel checks the fix
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
+_waits: dict[int, dict[str, str]] = {}  # fix id → the turn its restart waits for, which its row names (restart)
 _recovered = False
 
 
@@ -409,6 +411,8 @@ def status(every: bool = False) -> dict[str, Any]:
         away = every and not_here(r, kind)
         rows.append({"id": fid, "title": r.get("title") or "", "state": "off" if away else r.get("state"),
                      "why": NOT_HERE if away else None, "phase": phase,
+                     # the turn the restart waits for, by its workspace and its chat's name (restart)
+                     "waits": _waits.get(fid) if phase == "restarting" else None,
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
@@ -754,8 +758,8 @@ def runtime_task(coro: Any, name: str) -> None:
 
 async def restart(fid: int, said: str, kind: str, why: str) -> None:
     """The server starts again from live's browser/ (once main and the agents end their turns), and a row of the fix
-    says `said`. A fix that went on asks nothing more there, as the terminal's line goes once the fix is on: Your fixes
-    has its Undo."""
+    says `said`. While it waits for a turn, the fix's row names the turn (_waits). A fix that went on asks nothing more
+    there, as the terminal's line goes once the fix is on: Your fixes has its Undo."""
     from . import dev  # noqa: PLC0415
 
     if not dev.supervised():
@@ -766,23 +770,47 @@ async def restart(fid: int, said: str, kind: str, why: str) -> None:
     note(fid, kind, said, **({"dismissed": True} if kind == "fixed" else {}))
     _phase_set(fid, "restarting")
     t0 = time.monotonic()
-    while _busy() and time.monotonic() - t0 < BUSY_WAIT_S:
-        await asyncio.sleep(2)
+    named = None
+    while (conv := _busy()) is not None and time.monotonic() - t0 < BUSY_WAIT_S:
+        if conv is not named:
+            named = conv
+            _waits[fid] = _turn_of(conv)
+            _event(fid, "restarting")
+        await asyncio.sleep(BUSY_POLL_S)
+    if _waits.pop(fid, None):
+        _event(fid, "restarting")
     root = target_root()
     asyncio.get_running_loop().call_later(RESTART_AFTER_S, lambda: asyncio.ensure_future(
         dev._do_restart(why, cwd=root / "backend")))
 
 
-def _busy() -> bool:
-    """Whether main or another agent of this server is in a turn (the fixer whose end restarts it is not)."""
+def _busy() -> Any:
+    """The conversation of this server that is in a turn, main's or another agent's (the fixer whose end restarts it is
+    not), a workspace's main before its agents; None when none is."""
     from . import runtime  # noqa: PLC0415
 
     me = asyncio.current_task()
     with contextlib.suppress(Exception):
         for sp in runtime.spaces():
-            if sp.main.running or any(c.running and c.task is not me for c in sp.convs.values()):
-                return True
-    return False
+            for conv in (sp.main, *sp.convs.values()):
+                if conv.running and (conv is sp.main or conv.task is not me):
+                    return conv
+    return None
+
+
+def _turn_of(conv: Any) -> dict[str, str]:
+    """What names a conversation in a turn to the person: its workspace, and its chat as the thread list names it
+    (main, `main/<name>` for a thread and for a fix's chat, another agent's chat by its title)."""
+    from . import agents, session  # noqa: PLC0415
+
+    name = "main" if conv.kind == "main" else "an agent"
+    with contextlib.suppress(Exception):
+        chat = session.chat_of_agent(conv.c, conv.agent_id) if conv.kind != "main" else None
+        meta = agents.meta_or_none(conv.c, chat) if chat else None
+        if meta is not None:
+            under_main = meta.get("kind") == agents.KIND_THREAD or meta.get("role") == FIXER
+            name = agents.thread_name(meta) if under_main else str(meta.get("name") or meta.get("title") or name)
+    return {"workspace": conv.c, "name": name}
 
 
 # ------------------------------------------------------------------ where the server runs from

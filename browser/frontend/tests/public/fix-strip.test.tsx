@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // thimble fix in the page (src/chat/fix.ts, src/chat/FixStrip.tsx, backend fixes.py): how a fix ended is a row of the
 // chat. The newest row of a fix that passed its checks asks, and Use it now (the person's click) puts it on: the row
-// says "Reloading thimble…", then, with the server back, what it said, with nothing left to ask. A fix that is on
-// offers Undo. Your fixes says why a fix is off when the server says.
+// says "Reloading thimble…", then, with the server back, what it said, with nothing left to ask. While the restart
+// waits for a running turn, the row says whose. A fix that is on offers Undo. Your fixes says why a fix is off when the
+// server says.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { FixRow } from '../../src/chat/fix.ts'
@@ -59,6 +60,26 @@ test('a fix that passed asks, and Use it now puts it on; a fix that is on offers
   await settle()
   await click(button(on, 'Undo'))
   expect(sent).toEqual(['POST /fixes/3/apply', 'POST /fixes/3/undo'])
+})
+
+test('while the restart waits for a running turn, the row says whose turn, and where in another workspace', async () => {
+  const waiting = (waits: FixRow['waits']) => [ready({ phase: 'restarting', kind: null, said: null, waits })]
+  const moved = () => act(async () => bus.emit('fix', { id: 3, state: 'restarting' }))
+  fixes = waiting({ workspace: 'mini', name: 'main' })
+  const el = await mount(<FixResult ws="mini" fid={3} text={SAID} kind="ready" latest />)
+  await settle()
+  const said = () => el.querySelector('[data-kind="reloading"] .chat-fix-text')?.textContent
+  expect(said()).toBe('Reloading thimble when main finishes…')
+  fixes = waiting({ workspace: 'other', name: 'main/why-the-spike' })
+  await moved()
+  await settle()
+  expect(said()).toBe('Reloading thimble when main/why-the-spike in other finishes…')
+  // nothing runs any more: the server starts again
+  fixes = waiting(null)
+  await moved()
+  await settle()
+  expect(said()).toBe('Reloading thimble…')
+  expect(el.querySelector('button')).toBeNull()
 })
 
 test('Your fixes says why a fix that is on is off where the server runs, and Use it puts it on', async () => {

@@ -44,6 +44,8 @@ export interface FixRow {
   why?: string | null
   /** what this server does with it now; null once it ended */
   phase: 'fixing' | 'testing' | 'applying' | 'restarting' | null
+  /** the turn the server's restart waits for, while it does: its workspace and its chat's name (backend fixes.restart) */
+  waits?: { workspace: string; name: string } | null
   /** how it ended, until dismissed: ready (it asks the person), fixed (on), failed, request, undone, problem */
   kind: 'ready' | 'fixed' | 'failed' | 'request' | 'undone' | 'problem' | null
   said: string | null
@@ -73,10 +75,15 @@ export interface FixStatus {
 /** Whether the fix goes on now, after the person's click (or comes off after Undo): the server starts again. */
 export const reloading = (r: FixRow): boolean => r.phase === 'applying' || r.phase === 'restarting'
 
-/** What a fix's row says now. Pure. */
-export function fixText(r: FixRow): string {
-  if (reloading(r)) return 'Reloading thimble…'
-  return r.said || r.title
+export const RELOADING = 'Reloading thimble…'
+
+/** What a fix's row says now, on the page of workspace `ws`: while the server's restart waits for a turn to end, whose
+ * turn, with its workspace when that is another one. Pure. */
+export function fixText(r: FixRow, ws = ''): string {
+  if (!reloading(r)) return r.said || r.title
+  const w = r.waits
+  if (!w?.name) return RELOADING
+  return `Reloading thimble when ${w.name}${w.workspace && w.workspace !== ws ? ` in ${w.workspace}` : ''} finishes…`
 }
 
 export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo' | 'ask'

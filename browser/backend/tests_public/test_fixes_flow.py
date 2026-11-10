@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import agents, config, dev, fixes, runtime, session
+from app import agents, config, dev, events, fixes, runtime, session
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
@@ -336,6 +336,40 @@ async def test_only_the_analyst_s_click_puts_a_fix_on_and_undo_takes_it_off(fixi
     assert fixes.status()["fixes"][0]["said"] == "thimble fix undone: Card counts rows"
     await fixes.dismiss_route(1, analyst)
     assert fixes.status()["fixes"] == []
+
+
+async def test_use_it_now_waits_for_each_running_turn_and_the_fix_s_row_names_the_turn_it_waits_for(
+        fixing, monkeypatch, analyst):
+    """Use it now while main and a side thread work: the server starts again only once both turns ended, and until
+    then the fix's row names the turn the restart waits for, by its workspace and its chat's name in the thread list."""
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows."),
+                          text("Because of the deploy.")])
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    sp = runtime.ensure(CORPUS)
+    fork = next(c for c in sp.convs.values() if c.kind == "fork" and c.role != fixes.FIXER)
+    await fork.task
+    # a turn of main's and a turn of the thread's that run
+    main_ends, thread_ends = asyncio.Event(), asyncio.Event()
+    sp.main.task = asyncio.ensure_future(main_ends.wait())
+    fork.task = asyncio.ensure_future(thread_ends.wait())
+
+    def waits() -> Any:
+        [row] = fixes.status()["fixes"]
+        return row["phase"], row["waits"]
+
+    await fixes.apply_route(1, analyst)
+    await _until(lambda: waits() == ("restarting", {"workspace": CORPUS, "name": "main"}),
+                 "the row never named main's turn")
+    main_ends.set()
+    await _until(lambda: waits() == ("restarting", {"workspace": CORPUS, "name": "main/why"}),
+                 "the row never named the thread's turn")
+    assert fixing.restarts == [], "no restart while a turn runs"
+    thread_ends.set()
+    await _restarted(fixing, "the turns ended")
+    assert waits() == ("restarting", None)
 
 
 async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_and_use_it_starts_it_from_live(
