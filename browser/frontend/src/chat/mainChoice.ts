@@ -31,8 +31,9 @@ export async function chooseMain(ws: string, choice: MainChoice, target = 'chat:
     bus.emit('toast', { text: `Could not set ${what}: ${(err as Error).message}`, kind: 'error' })
     return false
   }
-  // the model menus name the models the settings hold
-  if ('model' in choice) invalidateSettings(ws)
+  // the model menus name the models the settings hold, and the row for view builds shows main's fast mode while its
+  // own is not set (backend config.models_for), which a model without fast mode turns off too
+  if (!('effort' in choice)) invalidateSettings(ws)
   bus.emit('toast', { text: `${choiceWords(choice)}: ${NEXT_LAUNCH}.`, kind: 'info' })
   return true
 }
