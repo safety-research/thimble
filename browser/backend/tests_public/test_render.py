@@ -114,3 +114,28 @@ def test_a_figure_request_carries_the_figure_beside_what_a_card_request_carries(
     asked = render.request_for(CORPUS, cell, figure={"style": "paper", "part": "legend"})
     assert asked.pop("figure") == {"style": "paper", "part": "legend"}
     assert asked == plain
+
+
+async def test_the_page_says_when_a_figure_draws_nothing_and_the_picture_is_still_its_box():
+    """A Paper legend of a chart with no legend of colors (a matplotlib figure) comes back `empty`, so an export leaves
+    its legend files out; a card or a figure that drew comes back as it did. The page is stood in for."""
+
+    class FakePage:
+        def __init__(self, out):
+            self.out, self.shots = out, []
+
+        async def evaluate(self, script, *args):
+            return self.out if args else False
+
+        async def screenshot(self, **kw):
+            self.shots.append(kw["clip"])
+            return b"made-up png"
+
+    pool = render.Pool(pages=1)
+    for out, empty in (({"box": {"x": 16, "y": 16, "width": 4, "height": 4}, "fonts": True, "empty": True}, True),
+                       ({"box": {"x": 16, "y": 16, "width": 240, "height": 240}, "fonts": True}, False)):
+        page = FakePage(out)
+        res = render.Rendered()
+        await pool._render_on(page, {"figure": {"style": "paper", "part": "legend"}}, res)
+        assert res.empty is empty and res.png == b"made-up png"
+        assert page.shots == [{"x": 16, "y": 16, "width": out["box"]["width"], "height": out["box"]["height"]}]

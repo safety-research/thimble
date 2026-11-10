@@ -73,7 +73,8 @@ class Rendered:
     scroll boxes hold past their height, and a table's rows past the ones it shows first, past what the canvas shows at
     rest; card_size, card_fit), the width its widest content lays out at and the room it has (`width` and `frame`, px,
     both 0 when nothing lays out wider than its room), whether the fonts the card asks for were loaded, the API paths
-    the page asked for that the request did not answer, and the times in ms."""
+    the page asked for that the request did not answer, whether a figure drew nothing (`empty`: a Paper legend of a
+    chart with no legend of colors, render_figure), and the times in ms."""
 
     png: bytes | None = None
     box: dict[str, float] = field(default_factory=dict)
@@ -82,6 +83,7 @@ class Rendered:
     frame: float = 0.0
     fonts: bool = True
     requests: list[str] = field(default_factory=list)
+    empty: bool = False
     ms: dict[str, float] = field(default_factory=dict)
     error: str = ""
 
@@ -301,6 +303,7 @@ class Pool:
             res.width, res.frame = float(wide["width"]), float(wide["frame"])
         res.fonts = bool(out.get("fonts", True))
         res.requests = list(out.get("requests") or [])
+        res.empty = out.get("empty") is True
         res.error = str(out.get("error") or "")
         if not res.fonts and not self._warned_fonts:
             # a fallback face changes every width the card is drawn at: the page's own faces did not load

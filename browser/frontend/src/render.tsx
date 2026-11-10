@@ -59,6 +59,8 @@ export interface RenderResult {
   fonts: boolean
   requests: string[]
   error?: string
+  /** a figure that draws nothing: a Paper legend of a chart with no legend of colors (figures/Figure `data-empty`) */
+  empty?: boolean
   ms: { settle: number }
 }
 
@@ -120,8 +122,8 @@ const boxOf = (el: Element): Box => {
   return { x: r.left + window.scrollX, y: r.top + window.scrollY, width: r.width, height: r.height }
 }
 
-/** Resolves once the card is drawn: no body is still drawing (`data-settled="false"`) and the DOM has been still for
- * QUIET_MS; false when SETTLE_MAX_MS passed first. */
+/** Resolves once the card is drawn: no body is still drawing (`data-settled="false"`, on `el` itself too, a figure that
+ * draws after it mounts) and the DOM has been still for QUIET_MS; false when SETTLE_MAX_MS passed first. */
 async function settled(el: HTMLElement): Promise<boolean> {
   let last = now()
   const mo = new MutationObserver(() => (last = now()))
@@ -131,7 +133,8 @@ async function settled(el: HTMLElement): Promise<boolean> {
     await document.fonts.ready
     for (;;) {
       await frame()
-      const pending = el.querySelector('[data-settled="false"], [data-settling]') || Array.from(el.querySelectorAll('.outputs-vega')).some((c) => !c.querySelector('svg, canvas') && !c.parentElement?.querySelector('.outputs-error'))
+      const busy = '[data-settled="false"], [data-settling]'
+      const pending = el.matches(busy) || el.querySelector(busy) || Array.from(el.querySelectorAll('.outputs-vega')).some((c) => !c.querySelector('svg, canvas') && !c.parentElement?.querySelector('.outputs-error'))
       if (!pending && now() - last >= QUIET_MS) return true
       if (now() - start > SETTLE_MAX_MS) return false
     }
@@ -214,7 +217,7 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   await settled(card)
   const fonts = await fontsLoaded(figures === 'blog' ? [...FACES, ...BLOG_FACES] : FACES)
   // a figure is measured by its own box alone: no body past what it shows, nothing wider than its room
-  if (figure) return { box: boxOf(card), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
+  if (figure) return { box: boxOf(card), fonts, requests: [...unanswered], ...(card.hasAttribute('data-empty') ? { empty: true } : {}), ms: { settle: Math.round(now() - t0) } }
   const wide = bodyWidth(card)
   return { box: boxOf(card), body: bodyHeight(card), ...(wide ? { wide } : {}), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
 }
