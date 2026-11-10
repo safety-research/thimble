@@ -1,10 +1,19 @@
-/* The page's two faces, served from the app (@fontsource, OFL-1.1) rather than Google Fonts, since the card harness
+/* The page's faces, served from the app (@fontsource, OFL-1.1) rather than Google Fonts, since the card harness
    renders offscreen without network access and a fallback face would give measured labels the wrong width. Hanken
-   Grotesk 400, 500, 600 and 400 italic; Geist Mono 400 and 500. The files declare their subsets with unicode-range so
-   the browser fetches only what a page uses. lib/frame.ts reads these rules back for sandboxed frames. */
+   Grotesk 400, 500, 600 and 400 italic; Geist Mono 400 and 500; and the faces of the Blog figure style
+   (blogpost-figure's), which only a page in that style uses: DM Sans 400 to 700 for its charts and figures, Source
+   Serif 4 400, 600 and 400 italic for its documents. The files declare their subsets with unicode-range, and the browser
+   fetches only the faces and subsets a page uses. lib/frame.ts reads these rules back for sandboxed frames. */
 @import '@fontsource/hanken-grotesk/400.css';
 @import '@fontsource/hanken-grotesk/400-italic.css';
 @import '@fontsource/hanken-grotesk/500.css';
 @import '@fontsource/hanken-grotesk/600.css';
 @import '@fontsource/geist-mono/400.css';
 @import '@fontsource/geist-mono/500.css';
+@import '@fontsource/dm-sans/400.css';
+@import '@fontsource/dm-sans/500.css';
+@import '@fontsource/dm-sans/600.css';
+@import '@fontsource/dm-sans/700.css';
+@import '@fontsource/source-serif-4/400.css';
+@import '@fontsource/source-serif-4/400-italic.css';
+@import '@fontsource/source-serif-4/600.css';

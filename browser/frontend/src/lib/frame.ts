@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import { barEnds } from './barEnds'
-import type { Resolved } from './theme'
+import { useTheme, type FigureStyle, type Resolved } from './theme'
 import { token, vegaConfig, VIZ_DIV, VIZ_INK, VIZ_SEQ, VIZ_SERIES } from './vizTheme'
 
 /** Takes WebRTC away from a frame before its own scripts run, since no content security policy covers it. A frame the
@@ -131,20 +131,24 @@ export function viewStyle(scheme: Resolved): string {
   return `${NO_RTC}<style>:root{color-scheme:${scheme};${vars}}</style>`
 }
 
-/** the families the page serves itself (styles/fonts.css) */
+/** the families the page serves itself (styles/fonts.css) that every frame gets: the page's two faces */
 const PAGE_FAMILIES = ['Hanken Grotesk', 'Geist Mono']
+/** the faces a figure style draws its charts in that the page serves (styles/fonts.css), which a frame gets beside the
+ * page's while that style is on, so a chart the frame draws (a custom card's with thimble.vegaConfig, a view's) is in
+ * them; Paper's face is the system's */
+export const FIGURE_FACES: Readonly<Record<FigureStyle, readonly string[]>> = { thimble: [], blog: ['DM Sans'], paper: [] }
 
 /** The page's own faces among @font-face rules as the browser writes them back (CSSFontFaceRule.cssText), each
- * {decls: its declarations with the src left out, url: its woff2}: the families of styles/fonts.css, their latin and
- * latin-ext subsets (the files are named by subset, and the others, cyrillic and vietnamese, would only add weight to
- * every frame). Pure, so tests run it. */
-export function pageFaces(rules: readonly string[]): { decls: string; url: string }[] {
+ * {decls: its declarations with the src left out, url: its woff2}: the families of styles/fonts.css that `families`
+ * names (the page's two faces by default), their latin and latin-ext subsets (the files are named by subset, and the
+ * others, cyrillic and vietnamese, would only add weight to every frame). Pure, so tests run it. */
+export function pageFaces(rules: readonly string[], families: readonly string[] = PAGE_FAMILIES): { decls: string; url: string }[] {
   const out: { decls: string; url: string }[] = []
   for (const rule of rules) {
     const body = /@font-face\s*\{([\s\S]*)\}/.exec(rule)?.[1]
     if (!body) continue
     const family = /font-family:\s*["']?([^;"']+)["']?/.exec(body)?.[1]?.trim()
-    if (!family || !PAGE_FAMILIES.includes(family)) continue
+    if (!family || !families.includes(family)) continue
     const url = /url\(\s*["']?([^)"']+?\.woff2[^)"']*)["']?\s*\)/.exec(body)?.[1]
     if (!url || !/-latin-/.test(url)) continue
     out.push({ decls: body.replace(/src:[^;]*;?/, '').trim(), url })
@@ -152,17 +156,22 @@ export function pageFaces(rules: readonly string[]): { decls: string; url: strin
   return out
 }
 
-let facesOnce: Promise<string> | null = null
+/** the rules fetched and being fetched, by the families they hold (facesKey) */
+const facesOnce = new Map<string, Promise<string>>()
 /** the rules once fetched, for a frame built after that to have them at once */
-let facesDone: string | null = null
+const facesDone = new Map<string, string>()
+const facesKey = (extra: readonly string[]): string => [...PAGE_FAMILIES, ...extra].join(',')
 
-/** @font-face rules with the page's two faces inlined as data URLs, read from the page's own stylesheets and fetched
- * once per page: a sandboxed frame has an opaque origin, so it can load no font from the app by URL, and without them
- * its text would fall back to the system face. '' when there are none or they cannot be fetched (the frame then keeps
- * the fallback). */
-export function frameFonts(): Promise<string> {
-  if (facesOnce) return facesOnce
-  facesOnce = (async () => {
+/** @font-face rules with the page's two faces, and the faces `extra` names (FIGURE_FACES), inlined as data URLs, read
+ * from the page's own stylesheets and fetched once per page: a sandboxed frame has an opaque origin, so it can load no
+ * font from the app by URL, and without them its text would fall back to the system face. '' when there are none or
+ * they cannot be fetched (the frame then keeps the fallback). */
+export function frameFonts(extra: readonly string[] = []): Promise<string> {
+  const key = facesKey(extra)
+  const known = facesOnce.get(key)
+  if (known) return known
+  const families = [...PAGE_FAMILIES, ...extra]
+  const once = (async () => {
     try {
       const texts: string[] = []
       for (const sheet of Array.from(document.styleSheets)) {
@@ -175,7 +184,7 @@ export function frameFonts(): Promise<string> {
         for (const r of Array.from(rules)) if (r.cssText.startsWith('@font-face')) texts.push(r.cssText)
       }
       const rules = await Promise.all(
-        pageFaces(texts).map(async ({ decls, url }) => {
+        pageFaces(texts, families).map(async ({ decls, url }) => {
           const buf = new Uint8Array(await (await fetch(new URL(url, document.baseURI))).arrayBuffer())
           let bin = ''
           for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
@@ -186,22 +195,29 @@ export function frameFonts(): Promise<string> {
     } catch {
       return ''
     }
-  })().then((r) => (facesDone = r))
-  return facesOnce
+  })().then((r) => {
+    facesDone.set(key, r)
+    return r
+  })
+  facesOnce.set(key, once)
+  return once
 }
 
-/** The page's faces for a frame's document: null until they are read, then the rules (or '' when there are none). A
- * frame waits for them, so it is drawn once, in them. */
+/** The page's faces for a frame's document, with the faces of the figure style that is on (FIGURE_FACES): null until
+ * they are read, then the rules (or '' when there are none). A frame waits for them, so it is drawn once, in them. */
 export function useFrameFonts(): string | null {
-  const [fonts, setFonts] = useState<string | null>(facesDone)
+  const extra = FIGURE_FACES[useTheme().figures]
+  const key = facesKey(extra)
+  const fonts = facesDone.get(key) ?? null
+  const [, setRead] = useState(0)
   useEffect(() => {
     if (fonts != null) return
     let alive = true
-    void frameFonts().then((f) => alive && setFonts(f))
+    void frameFonts(extra).then(() => alive && setRead((n) => n + 1))
     return () => {
       alive = false
     }
-  }, [fonts])
+  }, [key, fonts, extra])
   return fonts
 }
 
@@ -278,8 +294,8 @@ export function useCardLibs(ws: string, libs: readonly string[] | undefined): st
   return got?.key === key ? got.head : null
 }
 
-/** The page's faces for a view's page, in a style element. */
-export async function viewFonts(): Promise<string> {
-  const rules = await frameFonts()
+/** The page's faces for a view's page, with the faces `extra` names (FIGURE_FACES), in a style element. */
+export async function viewFonts(extra: readonly string[] = []): Promise<string> {
+  const rules = await frameFonts(extra)
   return rules ? `<style>${rules}</style>` : ''
 }

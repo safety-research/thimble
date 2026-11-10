@@ -564,13 +564,17 @@ const firstFamily = (stack: string): string => stack.split(',')[0].trim().replac
 
 /** The fonts a chart is measured in, declared and loaded before it is embedded: Vega caches each label width it
  * measures, so a label measured in the fallback font keeps that width after the real font arrives. `document.fonts.load`
- * does nothing for an undeclared font, so the chart first waits up to FACES_WAIT_MS for the fonts to be declared. */
+ * does nothing for an undeclared font, so the chart first waits up to FACES_WAIT_MS for the page's fonts to be declared;
+ * a figure style's chart faces (--viz-font, --viz-font-label, when they are not the page's) are declared with them
+ * (styles/fonts.css), or are the system's. */
 const fontsReady = async (): Promise<unknown> => {
   if (typeof document === 'undefined' || !document.fonts) return
-  const families = [firstFamily(token('--font-mono')), firstFamily(token('--font-body'))]
+  const page = [token('--font-mono'), token('--font-body')]
+  const families = page.map(firstFamily)
   const declared = () => families.every((fam) => Array.from(document.fonts).some((f) => f.family.replace(/["']/g, '') === fam))
   for (const t0 = Date.now(); !declared() && Date.now() - t0 < FACES_WAIT_MS; ) await new Promise((r) => setTimeout(r, 50))
-  const faces = [`11px ${token('--font-mono')}`, `11px ${token('--font-body')}`, `500 13px ${token('--font-body')}`]
+  const own = [token('--viz-font'), token('--viz-font-label')].filter((f, i, all) => f && !families.includes(firstFamily(f)) && all.indexOf(f) === i)
+  const faces = [`11px ${page[0]}`, `11px ${page[1]}`, `500 13px ${page[1]}`, ...own.flatMap((f) => [`12px ${f}`, `500 13px ${f}`, `600 13px ${f}`])]
   await Promise.all(faces.map((f) => document.fonts.load(f, 'Aa0').catch(() => [])))
   return document.fonts.ready
 }

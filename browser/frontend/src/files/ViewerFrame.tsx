@@ -36,7 +36,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
+import { FIGURE_FACES, viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
 import { getAskKey, onAskKey } from '../lib/platform'
 import { recordOf } from '../lib/refs'
 import { notePress } from '../lib/surfaces'
@@ -387,7 +387,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, labe
   hosted.current = host
   const isHosted = !!host
   const [page, setPage] = useState<string | null>(null)
-  const { resolved, key } = useTheme()
+  const { resolved, key, figures } = useTheme()
   const ready = useRef(false)
   const target = useRef(targetRef)
   target.current = targetRef
@@ -432,11 +432,18 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, labe
     ;(own ? own.page() : api.viewFrame(ws, slug, version))
       .then((doc) => alive && setPage(doc))
       .catch((e: Error) => alive && (noPage.current ? noPage.current(e.message) : report.current?.(`the view's page did not load: ${e.message}`)))
-    void viewFonts().then((f) => alive && setFonts(f))
     return () => {
       alive = false
     }
   }, [ws, slug, version, isHosted])
+  // the app's faces, with the faces of the figure style that is on, for the view's charts (lib/frame FIGURE_FACES)
+  useEffect(() => {
+    let alive = true
+    void viewFonts(FIGURE_FACES[figures]).then((f) => alive && setFonts(f))
+    return () => {
+      alive = false
+    }
+  }, [figures])
   // the theme's tokens are read when the page is built, so a theme change reloads the page with the new colours; the
   // page waits for the app's faces so it is drawn once, in them
   // the Colour by choice kept for the view is read as the page is built, so the page starts on it; the page's later
