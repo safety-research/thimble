@@ -202,6 +202,21 @@ async def test_a_builder_s_draft_check_of_a_view_over_many_files_reads_a_sample_
     assert max(read) == 20 and rep["index"]["files"] == 20 and "of" not in rep["index"]
 
 
+async def test_an_excerpt_that_is_not_the_cited_lines_words_fails_with_the_lines_compared_and_what_to_do(
+        ws, inproc, bound, monkeypatch):
+    async def no_page(c, slug, states, **_kw):
+        return [{"ok": True, "errors": [], "fetches": 0} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    summary = THREADS_READER.replace('"excerpt": "\\n".join(b for _, _, _, b in posts)', '"excerpt": f"{len(posts)} posts"')
+    assert summary != THREADS_READER
+    views.write_view(CORPUS, "threads", reader=summary, html=THREADS_HTML, **VIEW)
+    out = await views.check_answer(CORPUS, "threads", ["view:threads/t1"], picture=False)
+    bad = next(ln for ln in out["lines"] if ln.startswith("bad view:threads/t1: "))
+    assert "the excerpt is not literal text of the records it cites: '3 posts'" in bad
+    assert "is not in board.jsonl#L1, board.jsonl#L3 or 1 more." in bad and "first in `refs`" in bad
+
+
 def test_a_view_s_page_loads_in_a_frame_that_blocks_every_host_before_any_script(ws, tmp_path, monkeypatch):
     # the built interface's chart drawing (views.KIT_CHART_JS), a stand-in, so the count does not hang on a build
     (tmp_path / "dist" / "kit").mkdir(parents=True)

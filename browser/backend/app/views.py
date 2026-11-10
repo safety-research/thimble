@@ -3710,7 +3710,11 @@ async def _checked(c: str, slug: str, view: dict[str, Any], files: list[tuple[st
         else:
             gone = missing_lines(res["excerpt"], "\n".join(t for t in texts if t))
             if gone:
-                row["why"] = f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r}"
+                held = res["refs"][:CHECK_KEY_REFS]
+                among = ", ".join(held[:2]) + (f" or {len(held) - 2} more" if len(held) > 2 else "")
+                row["why"] = (f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r} is not in "
+                              f"{among}. Copy the words of those lines, or put the line the words come from first in "
+                              "`refs`. A count, a summary or an added mark goes in `label`")
                 return row
         if res["key"] and res["key"] not in keys and p["kind"] != "view":
             keys.append(res["key"])
