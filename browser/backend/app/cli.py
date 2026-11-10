@@ -552,6 +552,52 @@ def lock(wait_s: float = LOCK_WAIT_S) -> Iterator[None]:
             os.close(fd)
 
 
+HOLDERS_LOCK = "holders.lock"  # <home>/: each thimble-browser that holds a terminal holds it shared (hold_server)
+HELD: dict[str, int] = {}  # hold_server's file descriptor on HOLDERS_LOCK, open until this process ends
+
+
+def hold_server() -> None:
+    """Hold the server for this thimble-browser. One server serves every folder, so the thimble-browser of a second
+    folder uses the server that the first one started, and quitting stops it only when no other thimble-browser holds
+    it (last_holder). The hold is a shared lock on <home>/holders.lock, which the system lets go when the process ends,
+    however it ends. It waits while a thimble-browser that quit stops the server, so that a start then starts a new
+    server. When the lock cannot be taken, this thimble-browser stops the server when it quits."""
+    if "fd" in HELD:
+        return
+    path = home() / HOLDERS_LOCK
+    try:
+        ensure_home()
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as e:
+        _log(f"could not open {path}: {e}")
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+    except OSError as e:
+        os.close(fd)
+        _log(f"could not lock {path}: {e}")
+        return
+    HELD["fd"] = fd
+
+
+def last_holder() -> bool:
+    """Whether this thimble-browser is the last that holds the server (hold_server), so that quitting stops it. It lets
+    its shared lock go, then takes the lock alone, and keeps it while it stops the server, until the process ends. Of
+    two that quit at once, one gets it. False while another thimble-browser holds the server; True when this one holds
+    no lock."""
+    fd = HELD.get("fd")
+    if fd is None:
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    except OSError as e:
+        _log(f"could not lock {home() / HOLDERS_LOCK}: {e}")
+    return True
+
+
 def _detach() -> None:
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
@@ -2593,7 +2639,8 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
 def cmd_browser(args: argparse.Namespace) -> int:
     """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server unless this install's own server
     answers (ensure_running, own_server), open the folder as a workspace, print the page's sign-in link to that server
-    and how thimble reaches Claude (claude_access.py), then hold the terminal until Ctrl-C, which stops it. No Claude
+    and how thimble reaches Claude (claude_access.py), then hold the terminal until Ctrl-C, which stops the server
+    unless a thimble-browser in another terminal holds it too (hold_server). No Claude
     Code session starts here: the server runs main and every agent itself (runtime.py). `--session` says which session
     of the folder the page opens (pick_session, open_session): a new one, as each `claude` starts a new session, as
     empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
@@ -2616,6 +2663,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
         return 1
     if refuse_foreign(api_url()):
         return 1
+    if not getattr(args, "detach", False):
+        hold_server()
     try:
         up: bool | None = ensure_running(start_wait_s())
     except TimeoutError as e:
@@ -2695,6 +2744,8 @@ def _quit(signum: int, _frame: Any) -> None:
 
 
 STOPPING_LINE = BROWSER_LINE.format(what="stopping the server and its agents...")
+KEPT_LINE = BROWSER_LINE.format(what="another thimble-browser still uses the server, so it keeps running; Ctrl-C in "
+                                     "the last one stops it.")
 INTERRUPTED_LINE = "thimble {cmd}: interrupted"
 
 
@@ -2710,8 +2761,9 @@ def _say(*lines: str) -> None:
 def hold_until_quit(sleep: Callable[[float], None] = time.sleep) -> None:
     """Hold the terminal until Ctrl-C, or until the terminal closes or the launcher is told to end, then say at once
     that the server stops and stop it (stop), which stops every agent it runs first (runtime.stop_all) and takes some
-    seconds. A second signal does not cut that stop short, and lines a closed terminal can no longer take are dropped.
-    `sleep` is a seam for tests."""
+    seconds. While a thimble-browser in another terminal holds the server too (last_holder), the server keeps running
+    and a line says so. A second signal does not cut that stop short, and lines a closed terminal can no longer take are
+    dropped. `sleep` is a seam for tests."""
     sigs = (signal.SIGINT, signal.SIGHUP, signal.SIGTERM)
     before = {sig: signal.getsignal(sig) for sig in sigs}
     for sig in (signal.SIGHUP, signal.SIGTERM):
@@ -2722,8 +2774,11 @@ def hold_until_quit(sleep: Callable[[float], None] = time.sleep) -> None:
     except (KeyboardInterrupt, Quit):
         for sig in sigs:
             signal.signal(sig, signal.SIG_IGN)
-        _say("", STOPPING_LINE)
-        _say(*stop())
+        if last_holder():
+            _say("", STOPPING_LINE)
+            _say(*stop())
+        else:
+            _say("", KEPT_LINE)
     finally:
         for sig, handler in before.items():
             signal.signal(sig, handler)
@@ -2732,14 +2787,18 @@ def hold_until_quit(sleep: Callable[[float], None] = time.sleep) -> None:
 def interrupted(args: argparse.Namespace) -> int:
     """Ctrl-C before a command was done (for thimble-browser, before it held the terminal: hold_until_quit): one line in
     place of Python's traceback, and 130, as a shell gives a command that Ctrl-C ended. A server thimble-browser started
-    on this run is stopped, since no terminal holds it any more; one that ran before it is left running."""
+    on this run is stopped, since no terminal holds it any more, unless a thimble-browser in another terminal holds it
+    already (last_holder); one that ran before it is left running."""
     _say("", INTERRUPTED_LINE.format(cmd=args.cmd))
     started = LAST_START.get("pid")
     if args.cmd == "browser" and not getattr(args, "detach", False) and started and pid_alive(started):
         before = signal.signal(signal.SIGINT, signal.SIG_IGN)  # a second Ctrl-C does not cut the stop short
         try:
-            _say(STOPPING_LINE)
-            _say(*stop())
+            if last_holder():
+                _say(STOPPING_LINE)
+                _say(*stop())
+            else:
+                _say(KEPT_LINE)
         finally:
             signal.signal(signal.SIGINT, before)
     return 130

@@ -114,6 +114,46 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
         assert asked[-1][1]["chat"] == "new"
 
 
+@pytest.mark.timeout(120)
+def test_a_quit_leaves_the_server_running_while_another_thimble_browser_holds_it(home, monkeypatch, capsys):
+    """One server serves every folder, so the thimble-browser of a second folder uses the server the first one started.
+    Ctrl-C in one of them, before its link or after it, stops the server only when no other thimble-browser holds it
+    (hold_server, last_holder), and says so when it keeps running. Once the other one has ended, however it ended, the
+    next quit stops the server. The other thimble-browser is a process of its own; the stop is faked."""
+    import argparse  # noqa: PLC0415
+
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop", lambda **kw: stops.append(1) or ["server: pid 1 stopped (1 process)"])
+    monkeypatch.setattr(cli, "HELD", {})
+
+    def quit_now(_s: float) -> None:
+        raise KeyboardInterrupt
+
+    def hold_again() -> None:  # this terminal's next thimble-browser
+        os.close(cli.HELD.pop("fd"))
+        cli.hold_server()
+
+    other = subprocess.Popen([sys.executable, "-c", "from app import cli; cli.hold_server(); print('holding', flush=True); "
+                              "import time; time.sleep(100)"], cwd=BACKEND, env={**os.environ, "THIMBLE_HOME": str(home)},
+                             stdout=subprocess.PIPE, text=True)
+    try:
+        assert other.stdout.readline().strip() == "holding"
+        cli.hold_server()
+        cli.hold_until_quit(sleep=quit_now)
+        assert stops == [] and capsys.readouterr().out.splitlines()[-1] == cli.KEPT_LINE
+        hold_again()
+        monkeypatch.setattr(cli, "LAST_START", {"pid": other.pid})  # a server this run started, stand-in
+        assert cli.interrupted(argparse.Namespace(cmd="browser", detach=False)) == 130
+        assert stops == [] and capsys.readouterr().out.splitlines()[-1] == cli.KEPT_LINE
+    finally:
+        other.kill()
+        other.wait(timeout=10)
+    hold_again()
+    cli.hold_until_quit(sleep=quit_now)
+    assert stops == [1] and cli.STOPPING_LINE in capsys.readouterr().out.splitlines()
+    os.close(cli.HELD.pop("fd"))
+
+
 def test_stop_ends_a_server_that_a_restart_started_in_another_tree(tmp_path, monkeypatch):
     """A fix that goes on starts the server again from the checkout of the person's fixes, under the same pid
     (fixes.restart, dev._do_restart). The server records the tree it runs from as it starts, so that the launcher's
