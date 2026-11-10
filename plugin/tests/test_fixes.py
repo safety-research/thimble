@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,7 @@ ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from kernel import cli as CLI  # noqa: E402
 from kernel import fixes as FX  # noqa: E402
 from releases_server import Releases  # noqa: E402
 
@@ -346,6 +348,143 @@ def test_a_fix_may_not_change_the_way_back_and_its_record_names_the_safety_files
     # a fix that changes none of them has no notice
     d = made(world)
     assert "notice" not in FX.done(d["id"], "Bar says read", "") and FX.notice_said(FX.get(d["id"])) == ""
+
+
+def test_the_plugin_refuses_the_same_files_at_a_fixers_write_and_a_fixer_that_cannot_do_without_one_blocks_another_try(
+        world, monkeypatch):
+    # the list the plugin reads the fixer's writes against (fix/protected.mjs) is the kernel's: the same kinds in the
+    # same order with the same patterns, and no pattern needs more than the * that the plugin reads
+    text = (FX.PLUGIN / "fix" / "protected.mjs").read_text()
+    theirs = json.loads(re.search(r"^export const PROTECTED_KINDS = (\{.*?^\})", text, re.M | re.S).group(1))
+    assert list(theirs.items()) == [(kind, list(pats)) for kind, pats in FX.PROTECTED_KINDS.items()]
+    assert not [pat for pat in FX.PROTECTED if set(pat) & set("?[")]
+    # a fixer that was refused the write of such a file ends saying why it cannot be done: the plugin names the files
+    # after the fix's number, and the ones no fix may change block another try with no new words
+    r = made(world, edit=False)
+    monkeypatch.setattr(CLI, "stdin_text", lambda *a, **k: "the fix line is drawn by a file no fix may change")
+    assert CLI.main(["fix", "done", str(r["id"]), "plugin/fix/line.ts", "plugin/bar/bar.tsx", "--cannot", "-"]) == 0
+    r = FX.get(r["id"])
+    assert r["state"] == "failed" and r["error"] == "the fix line is drawn by a file no fix may change"
+    assert r["blocked"] == ["plugin/fix/line.ts"]
+    with pytest.raises(FX.FixError, match="needs a change to plugin/fix/line.ts, which no fix may make"):
+        FX.redo(r["id"])
+
+
+def test_a_change_whose_tests_fail_keeps_the_end_of_their_output_and_names_the_log_for_the_next_fixer(world, monkeypatch):
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "for n in $(seq 1 20); do echo made-up line $n; done; exit 1")
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "")
+    assert r["state"] == "failed" and r["tests"] == "failed" and r["error"] == "its tests failed in the sandbox"
+    # the record keeps the last lines, under the name of the check that failed, and the refusal names the file that
+    # holds them all, which the next fixer reads
+    log = FX.tmp_dir(r["id"]) / "tests.log"
+    head, *lines = r["tests_tail"].splitlines()
+    assert head.startswith("### the tests, run again: failed in ") and lines[0] == "made-up line 9" and len(lines) == 12
+    assert "made-up line 1\n" in log.read_text()
+    assert r["refused"] == {"why": "its tests failed in the sandbox", "files": [], "tests": r["tests_tail"], "log": str(log)}
+    # another round in the same copy keeps the refusal for its fixer
+    assert FX.again(r["id"])["refused"]["log"] == str(log)
+
+
+def test_a_change_gets_each_check_that_can_see_its_files(monkeypatch):
+    monkeypatch.delenv("THIMBLE_FIX_TESTS", raising=False)
+    monkeypatch.setenv("THIMBLE_CLAUDE", "/bin/sh")  # Claude Code is installed
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: True)
+    monkeypatch.setattr(FX, "_borrow", lambda wt: {"frontend": ["/made-up/node_modules"], "backend": ["/made-up/.venv"]})
+    start = FX.Check("thimble's start", FX.LAUNCHER_SMOKE)
+    # only the hooks tests fail for their timing alone, so only they run once more when they fail
+    hooks = FX.Check("the hooks tests", FX.QUICK_TESTS, again=True)
+    kernel = FX.Check("the kernel's tests", FX.PYTESTS)
+    fewer = kernel._replace(cmd=" ".join([FX.PYTESTS, *(f"--ignore=plugin/tests/{t}" for t in FX.FIX_TESTS)]))
+    page = [c._replace(cmd=c.cmd.format(base="c0ffee0")) for c in FX.PAGE_CHECKS]
+    server = [FX.Check("the server's import", FX.SERVER_LOADS), FX.Check("the server's prompt tests", FX.SERVER_PROMPTS)]
+
+    def checks(*paths: str) -> list[FX.Check]:
+        return FX._checks(Path("/made-up/copy"), list(paths), "c0ffee0")[0]
+
+    # hooks code and a text the model reads: the tests of the fix flow and of the privacy scan cannot see them
+    assert checks("plugin/bar/bar.tsx", "plugin/tests/bar.test.ts") == [start, hooks, fewer]
+    assert checks("plugin/prompts/guidance.md") == [start, hooks, fewer]
+    # the kernel's Python files alone: no hooks test can see them, and the fix flow's tests import them
+    assert checks("plugin/engine/kernel/coverage.py", "plugin/tests/test_coverage.py") == [start, kernel]
+    # Python outside the kernel, and the kernel with hooks code: the hooks tests run, after the kernel's
+    assert checks("plugin/hooks/temp_allow.py") == [start, kernel, hooks]
+    assert checks("plugin/engine/kernel/coverage.py", "plugin/bar/bar.tsx") == [start, kernel, hooks]
+    # what the fix flow's tests read or run, a settings file of their run, a file of the kernel's folder that is not
+    # Python (the hooks tests' runner takes a test file anywhere in the plugin), and a file in no part named here:
+    # every check runs
+    for seen in ("plugin/prompts/reapply.md", "plugin/sandbox/run.mjs", "plugin/.claude-plugin/plugin.json",
+                 "plugin/pytest.ini", "plugin/engine/kernel/extra.test.ts", "scripts/release-file.sh", "README.md"):
+        assert checks(seen) == [start, hooks, kernel], seen
+    # the workbench's page and its server, each check a command of its own
+    assert checks("browser/frontend/src/chat/Notice.tsx") == page
+    assert [c.name for c in page] == ["the page's type check", "the page's build", "the page's unit tests"]
+    assert page[2].cmd.endswith("vitest run --changed c0ffee0 --passWithNoTests") and not any(c.again for c in page)
+    # the page's build runs at the same time as its type check, and its unit tests after the two
+    assert [c.beside for c in page] == [False, True, False]
+    assert checks("browser/backend/app/labels.py", "browser/prompts/main.md") == server
+    assert checks("browser/README.md") == []
+    assert checks("plugin/engine/kernel/coverage.py", "browser/frontend/src/App.tsx") == [start, kernel, *page]
+
+
+def test_only_a_check_that_can_fail_for_its_timing_runs_again_and_a_failure_names_its_check(world, monkeypatch):
+    ran = world["tmp"] / "ran"
+
+    def check(name: str, word: str, then: str, again: bool = False) -> FX.Check:
+        # a made-up check: it writes its word where the test counts its runs, prints a line, and ends as `then` says
+        return FX.Check(name, f"echo {word} >> '{ran}'; echo made-up {word} output; {then}", again)
+
+    second = f"test $(grep -c hooks '{ran}') = 2"  # fails at its first run and passes at its second
+    made_up = [check("thimble's start", "start", "true"), check("the hooks tests", "hooks", second, again=True),
+               check("the kernel's tests", "kernel", "false"), check("the page's build", "build", "true")]
+    monkeypatch.setattr(FX, "_checks", lambda wt, paths, base: (made_up, []))
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    # the hooks tests ran twice; the kernel's tests failed at their first run, and no check ran after them
+    assert r["state"] == "failed" and ran.read_text().split() == ["start", "hooks", "hooks", "kernel"]
+    assert r["tests_tail"].startswith("### the kernel's tests: failed in ")
+    assert r["tests_tail"].splitlines()[1:] == ["made-up kernel output"]
+    # the whole log has each run under a line that names its check and says what came of it
+    heads = [line[4:].split(" in ")[0] for line in Path(r["refused"]["log"]).read_text().splitlines() if line.startswith("### ")]
+    assert heads == ["thimble's start: passed", "the hooks tests: failed", "the hooks tests, run again: passed",
+                     "the kernel's tests: failed"]
+    # with no check that fails, the record says that the hooks tests passed only the second time
+    ran.unlink()
+    del made_up[2]
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    assert r["state"] == "ready" and ran.read_text().split() == ["start", "hooks", "hooks", "build"]
+    assert r["tests_tail"].startswith("the hooks tests passed only the second time; the first run ended:\n"
+                                      "### the hooks tests: failed in ")
+
+
+def test_checks_that_run_beside_each_other_run_at_the_same_time_and_the_log_keeps_them_apart(world, monkeypatch):
+    here = world["tmp"]
+
+    def meets(mine: str, other: str) -> str:
+        # a made-up check that passes only while the other one runs: it says that it started, then waits until the
+        # other said so, for at most 20 seconds
+        return (f"echo made-up {mine} output; touch '{here}/{mine}'; for i in $(seq 200); do "
+                f"test -e '{here}/{other}' && exit 0; sleep 0.1; done; exit 1")
+
+    made_up = [FX.Check("the page's type check", meets("types", "build")),
+               FX.Check("the page's build", meets("build", "types"), beside=True),
+               FX.Check("the page's unit tests", f"test -e '{here}/types' -a -e '{here}/build' && echo made-up unit output")]
+    monkeypatch.setattr(FX, "_checks", lambda wt, paths, base: (made_up, []))
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    # the two met, and the unit tests ran after both; the log has the output of each under its own line
+    assert r["state"] == "ready" and r["tests_tail"].splitlines()[1:] == ["made-up unit output"]
+    log = (FX.tmp_dir(r["id"]) / "tests.log").read_text().splitlines()
+    assert [line.split(" in ")[0] if line.startswith("### ") else line for line in log] == [
+        "### the page's type check: passed", "made-up types output", "### the page's build: passed", "made-up build output",
+        "### the page's unit tests: passed", "made-up unit output"]
+    # one of the two fails: the other still ends, the record keeps the end of the one that failed, and no check follows
+    made_up[:] = [FX.Check("the page's type check", "echo made-up type error; false"),
+                  FX.Check("the page's build", f"sleep 0.3; touch '{here}/built'; echo made-up build output", beside=True),
+                  FX.Check("the page's unit tests", f"touch '{here}/unit'")]
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    assert r["state"] == "failed" and (here / "built").exists() and not (here / "unit").exists()
+    head, *lines = r["tests_tail"].splitlines()
+    assert head.startswith("### the page's type check: failed in ") and lines == ["made-up type error"]
+    assert "### the page's build: passed in " in Path(r["refused"]["log"]).read_text()
 
 
 def as_github(w) -> Path:

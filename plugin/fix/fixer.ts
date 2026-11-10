@@ -11,7 +11,9 @@
 //                               the copy and its temp folder, reaches only the package registries, by the release's
 //                               sandbox code), in the foreground, for at most 5 minutes, and never publishes to the
 //                               registries or signs in to them (npm publish, npm login);
-//                               Write and Edit only in the copy; its other calls as they are
+//                               Write and Edit only in the copy, and never a file no fix may change (protected.mjs):
+//                               that write is refused at once, with the reason the kernel's check gives at the fixer's
+//                               end, which still refuses such a file that its shell changed; its other calls as they are
 //   fixerCheck($, e)            a Bash call thimble put in the sandbox needs no dialog, as Claude Code's own sandboxed
 //                               commands need none, unless the person's rules deny the command; its other calls go
 //                               through Claude Code's own permission handling in the person's mode
@@ -26,7 +28,8 @@
 //                               fix shown`). An end that comes while another check of the same fix waits (a new round's
 //                               fixer) is kept, and checked once that check returns.
 //
-//   state: fixers (agentId → the fix's id), fixerBox (the sandbox command's start, by the fix's id)
+//   state: fixers (agentId → the fix's id), fixerBox (the sandbox command's start, by the fix's id), fixerDenied (the
+//          files no fix may change whose write the fix's fixer was refused, by the fix's id)
 import type { EngineInterface } from 'claude-code'
 
 import { busy, busyWhile } from '../bar/busy'
@@ -37,6 +40,7 @@ import { cut } from '../core/text.js'
 import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
 import { type Fix, type Refusal, askedWords, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { PROTECTED_KINDS } from './protected.mjs'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -45,9 +49,16 @@ type Any = any
 
 const FIXERS = { plugin: 'thimble', key: 'fixers' } as const
 const BOX = { plugin: 'thimble', key: 'fixerBox' } as const
+const DENIED = { plugin: 'thimble', key: 'fixerDenied' } as const
 
 async function fixers($: Engine): Promise<Record<string, number>> {
   return ((await $.state.get(FIXERS)).value ?? {}) as Record<string, number>
+}
+
+/** The files no fix may change whose write a fix's fixer was refused (fixerCall), by the fix's id, since that fixer
+ *  started. */
+async function denied($: Engine): Promise<Record<string, string[]>> {
+  return ((await $.state.get(DENIED)).value ?? {}) as Record<string, string[]>
 }
 
 /** The fixes whose fixer works in this session: the records name the session (several sessions share the fixes'
@@ -83,16 +94,27 @@ export function changingText(f: Fix): string {
   return `These words change the fix the person already ${had}, "${f.prev?.title || f.title}"${f.prev?.summary || f.summary ? ` (${f.prev?.summary || f.summary})` : ''}; its change is in your copy, and your change becomes part of it.`
 }
 
+/** How a fixer ends when the request cannot be met without what thimble refused. The prompt does not say it; the
+ *  refusals do. */
+const CANNOT = 'end with one line `Cannot: <why, in plain words for the person>` in place of the Title line; thimble shows that line to the person.'
+
 /** For the next fixer after the check did not use a change (another round in the same copy, or y on the failed line in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the files no fix may change; this names only the ones the change touched. `earlier`: another try in a new
- *  copy. */
+ *  not list the files no fix may change; this names only the ones the change touched. For tests that failed, it gives
+ *  the end of their output and names the file with all of it, so that the fixer reads the failure and does not run the
+ *  tests again to see it. `earlier`: another try in a new copy. */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
     ? `Leave ${r.files.join(', ')} as ${r.files.length > 1 ? 'they are' : 'it is'} and make the change in other files${earlier ? ', without the earlier change\'s parts in them' : ''}.`
-    : `The end of their output:\n\n${r.tests ?? ''}\n\nFix what fails.`
-  return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
+    : `The end of their output:\n\n${r.tests ?? ''}\n\n${r.log ? `Their whole output is in ${r.log}. ` : ''}Fix what fails.`
+  return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, ${CANNOT}`
+}
+
+/** For a fixer whose write of a file no fix may change is refused: the file with what it is and why, in the words of
+ *  the kernel's check at the fixer's end (protected_why), and what to do, as refusedText says it after that check. */
+function protectedText(path: string, kind: string): string {
+  return `thimble refuses a change to ${path} (${kind}): no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through. Leave it as it is and make the change in other files. When the request truly cannot be met without it, ${CANNOT}`
 }
 
 /** For another try of a fix that did not pass (redo), what the try before left the new fixer, as the kernel's redo
@@ -164,6 +186,12 @@ async function start($: Engine, fix: Fix, before: string | null, screen: string)
   // the command's start for its shell, kept for each of its Bash calls
   const box = await sandboxOf($, fix.id)
   if (typeof box === 'string') return `The fixer did not start: ${box}`
+  // a new fixer was refused no write yet
+  const kept = await denied($)
+  if (kept[String(fix.id)]) {
+    delete kept[String(fix.id)]
+    await $.state.set(DENIED, kept as never)
+  }
   // no type: a fork of the session, which sees the conversation; named after the fix, never its number
   const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, before, task, screen), description: fixingWord(fix), cwd: fix.work || undefined, name: fixSlug(fix) })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
@@ -234,8 +262,16 @@ const wrapped = new Map<string, { run: string; asked: string }>()
  *  which could carry the conversation's data off as a package. */
 const REGISTRY_WRITE = /\b(?:npm|pnpm|yarn)\b[^;&|\n]*?\s(?:publish|unpublish|adduser|add-user|login|logout|token|owner|access|deprecate|dist-tag|team|org|hook|profile|star|unstar)(?=[\s;&|)]|$)/
 
-/** One tool call of a fixer: its shell command put in the sandbox, a write outside its copy or to a package registry
- *  refused, else as it is. */
+/** What a file no fix may change is (PROTECTED_KINDS), or null for any other file. `path`: from the repository's root.
+ *  A * of a pattern stands for any characters, a / among them, as in the kernel's check. */
+function protectedKind(path: string): string | null {
+  const plain = (s: string) => s.replace(/[.+?^$|(){}[\]\\]/g, '\\$&')
+  const like = (pat: string) => new RegExp(`^${pat.split('*').map(plain).join('.*')}$`, 's').test(path)
+  return Object.entries(PROTECTED_KINDS).find(([, pats]) => pats.some(like))?.[0] ?? null
+}
+
+/** One tool call of a fixer: its shell command put in the sandbox, a write outside its copy, of a file no fix may
+ *  change, or to a package registry refused, else as it is. */
 export async function fixerCall($: Engine, e: Any, id: number): Promise<{ call?: Any; deny?: string } | null> {
   const isWrite = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)
   if (e.tool !== 'Bash' && !isWrite) return null
@@ -243,8 +279,16 @@ export async function fixerCall($: Engine, e: Any, id: number): Promise<{ call?:
   if (typeof argv === 'string') return { deny: `thimble could not set up this fix's sandbox (${argv}); end now.` }
   if (isWrite) {
     const p = String(e.file_path ?? e.notebook_path ?? '')
-    const ok = p.startsWith('/') && !p.split('/').includes('..') && writable(argv).some(w => p === w || p.startsWith(`${w}/`))
-    return ok ? null : { deny: `The fixer changes only its copy of thimble (${writable(argv)[0] ?? 'the copy'}); ${p || 'that file'} is outside it.` }
+    const places = writable(argv)
+    const ok = p.startsWith('/') && !p.split('/').includes('..') && places.some(w => p === w || p.startsWith(`${w}/`))
+    if (!ok) return { deny: `The fixer changes only its copy of thimble (${places[0] ?? 'the copy'}); ${p || 'that file'} is outside it.` }
+    // a file no fix may change, by its path in the copy (the first place): refused now, and kept for the fixer's end
+    const path = p.startsWith(`${places[0]}/`) ? p.slice(places[0]!.length + 1).split('/').filter(x => x && x !== '.').join('/') : ''
+    const kind = path ? protectedKind(path) : null
+    if (!kind) return null
+    const all = await denied($)
+    await $.state.set(DENIED, { ...all, [String(id)]: [...new Set([...(all[String(id)] ?? []), path])] } as never)
+    return { deny: protectedText(path, kind) }
   }
   const asked = String(e.command ?? '')
   if (REGISTRY_WRITE.test(asked)) return { deny: "The fixer's shell reaches the npm and PyPI registries to add a package to its copy, never to publish one or sign in to them." }
@@ -378,11 +422,13 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   const end = endOf(String(e.answer ?? ''))
   const fix = await fixOf($, id)
   const name = fix ? fixName(fix) : `fix ${id}`
-  // `Cannot: <why>`: the fixer found that the request cannot be met; the fix fails with its words
+  // `Cannot: <why>`: the fixer found that the request cannot be met; the fix fails with its words. The files no fix may
+  // change whose write it was refused go after the fix's number: another try would need them too, as the kernel knows
+  // of the ones its own check refused (blocked)
   const args = end.cannot
-    ? ['done', String(id), '--cannot', '-']
+    ? ['done', String(id), ...((await denied($))[String(id)] ?? []), '--cannot', '-']
     : ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : [])]
-  // the tests run in a process of the kernel's own, for one fix at a time, each run once more when it fails
+  // the tests run in a process of the kernel's own, for one fix at a time, the hooks tests once more when they fail
   // (engine/kernel/fixes.py done), which may take longer than Claude Code gives a process call (10 minutes,
   // core/test/limits.test.mjs): each call waits for them at most DONE_WAIT_S, and while the fix it gives says that they
   // still run, the next call waits on. A fix whose tests already run (its end taken again after a reload) is waited for

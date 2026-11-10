@@ -7,6 +7,7 @@
 // the plugins, and the line then offers u to undo it. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
+import { refusedText } from '../fix/fixer'
 import { fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, registerFix, wordsOfSkill } from '../fix/register'
 import { promptStub } from './stubs'
@@ -39,8 +40,9 @@ function admits(m: Any, e: Any): boolean {
 
 let now = 0
 
-/** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. */
-function setup() {
+/** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. `refuse`: the
+ *  kernel's check does not use the fixer's first change, with this refusal. */
+function setup(refuse: Any = null) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
@@ -74,11 +76,22 @@ function setup() {
       return ok(fix)
     }
     if (verb === 'done') {
+      // a fixer that says why it cannot be done: the fix fails with its words, and the files no fix may change that the
+      // plugin names after the fix's number block another try
+      const c = argv.indexOf('--cannot')
+      if (c > 0) {
+        const blocked = argv.slice(argv.indexOf('done') + 2, c)
+        return ok(Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null, ...(blocked.length ? { blocked } : {}) }))
+      }
+      // the check that refuses the first change keeps the refusal on the record
+      if (refuse && !fix.commit) return ok(Object.assign(fix, { state: 'failed', commit: 'c0ffee0', tests: 'failed', error: refuse.why, refused: refuse }))
       // the fix takes the fixer's title
       const t = argv.indexOf('--title')
-      Object.assign(fix, { state: 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], title: t > 0 ? argv[t + 1] : fix.title })
+      Object.assign(fix, { state: 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', error: null, refused: null, files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], title: t > 0 ? argv[t + 1] : fix.title })
       return ok(fix)
     }
+    // another round in the same copy, which keeps the refusal for its fixer
+    if (verb === 'again') return ok(Object.assign(fix, { state: 'working', error: null }))
     if (verb === 'apply') {
       // the kernel checks the press's secret against the sha256 the plugin wrote
       if (!JSON.parse(files.get(`${HOME}/fixes/asks/1.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix apply: only the person's key press in thimble does that" }
@@ -324,6 +337,56 @@ test("y while Claude's turn runs: the line says the fix loads when Claude finish
   await s.call('prompt.submit', { text: 'thanks', origin: { kind: 'composer' } }, async (e: Any) => e)
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
   expect(await fixKey(s.$, 'u')).toBe(null)
+})
+
+test("a change whose tests failed: a new fixer gets another round in the same copy, told the end of the tests' output and the file that holds all of it; the person sees the fix only once it passes", async () => {
+  const LOG = `${HOME}/fixes/tmp/1/tests.log`
+  const s = setup({ why: 'its tests failed in the sandbox', files: [], tests: '(fail) the bar says read\n 1 fail', log: LOG })
+  await requested(s)
+  expect(s.verbs()).toContain('again 1')
+  expect(s.spawns.length).toBe(2)
+  expect(s.spawns[1]).toMatchObject({ subagentType: 'fork', cwd: WORK })
+  expect(String(s.spawns[1].prompt)).toContain(`thimble did not use the last change for this fix: its tests failed in the sandbox. Your last change is in your copy. The end of their output:\n\n(fail) the bar says read\n 1 fail\n\nTheir whole output is in ${LOG}. Fix what fails.`)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  await s.end('Title: Bar says read for coverage\nWhat it does: The bar says r read 14%.', 'agent-fixer-2')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
+  // a refusal from a kernel that names no file: the end of the output alone
+  expect(refusedText({ why: 'its tests failed in the sandbox', files: [], tests: ' 1 fail' }, false)).toContain('The end of their output:\n\n 1 fail\n\nFix what fails.')
+})
+
+test("a fixer's write of a file no fix may change is refused at once, with the reason; when it then says it cannot be done, the failed fix offers no other try", async () => {
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  const write = (s: ReturnType<typeof setup>, tool: string, file_path: string, agentId = 'agent-fixer-1') => s.call('tool.call', { tool, tool_use_id: 'tu-w', agentId, file_path }, ran)
+  // the fix flow's files and the privacy scan, however the path in the copy is spelled
+  expect((await write(s, 'Edit', `${WORK}/plugin/fix/line.ts`)).deny).toBe('thimble refuses a change to plugin/fix/line.ts (the fix flow): no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through. Leave it as it is and make the change in other files. When the request truly cannot be met without it, end with one line `Cannot: <why, in plain words for the person>` in place of the Title line; thimble shows that line to the person.')
+  expect(String((await write(s, 'Write', `${WORK}/./plugin//fix/test/new.test.mjs`)).deny)).toContain('a change to plugin/fix/test/new.test.mjs (the fix flow)')
+  expect(String((await write(s, 'MultiEdit', `${WORK}/plugin/engine/kernel/privacy.py`)).deny)).toContain('a change to plugin/engine/kernel/privacy.py (the privacy scan)')
+  expect(String((await write(s, 'Edit', `${WORK}/plugin/fix/line.ts`)).deny)).toContain('a change to plugin/fix/line.ts (the fix flow)')
+  // the copy's other files, a test of the fix flow among them, are the fixer's to write
+  for (const file_path of [`${WORK}/plugin/bar/bar.tsx`, `${WORK}/plugin/tests/fix.test.ts`, `${WORK}/plugin/fixes.ts`])
+    expect((await write(s, 'Write', file_path)).result.ran).toBe(file_path)
+  // the fixer cannot do without them: the kernel hears which files, each once, and the failed fix's line offers no y
+  await s.end('Cannot: the fix line is drawn by plugin/fix/line.ts, which no fix may change.')
+  expect(s.verbs()).toContain('done 1 plugin/fix/line.ts plugin/fix/test/new.test.mjs plugin/engine/kernel/privacy.py --cannot -')
+  expect(s.ran.find(x => x.argv.includes('done'))?.stdin).toBe('the fix line is drawn by plugin/fix/line.ts, which no fix may change.')
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual([
+    '  × make the bar say read did not pass · the fix line is drawn by plugin/fix/line.ts, which no fix may change.',
+    '    d ask Claude · n dismiss',
+  ])
+  expect(await fixKey(s.$, 'y')).toBe(null)
+  // a new fixer of the fix was refused no write: its Cannot names no file, and y tries the fix again
+  const t = setup({ why: 'its tests failed in the sandbox', files: [], tests: ' 1 fail' })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await ask(t, "make the bar's coverage item say read")
+  expect(String((await write(t, 'Edit', `${WORK}/plugin/fix/line.ts`)).deny)).toContain('a change to plugin/fix/line.ts (the fix flow)')
+  await t.end('Title: Bar says read for coverage\nWhat it does: The bar says r read 14%.')
+  expect(t.spawns.length).toBe(2)
+  await t.end('Cannot: the test of the bar cannot pass.', 'agent-fixer-2')
+  expect(t.verbs().filter(v => v.startsWith('done'))).toEqual(['done 1 --summary - --title Bar says read for coverage', 'done 1 --cannot -'])
+  expect(await fixKey(t.$, 'y')).not.toBe(null)
 })
 
 test("a fixer that closes its end in a code fence: the fence is no part of what the fix does", async () => {
