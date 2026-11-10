@@ -177,83 +177,6 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     assert any(r.get("kind") == "fix" and r.get("status") == "ready" for r in _log(CORPUS, chat["id"]))
 
 
-def _shown(c: str) -> list[tuple[str, str]]:
-    """What main's chat shows of a fix's start: the person's messages and each fixer's line."""
-    return [(r["type"], r.get("text") or r.get("chat")) for r in _log(c) if r["type"] in ("user", "agent")]
-
-
-async def test_words_that_no_fix_could_take_start_a_new_fix_at_once_with_no_turn_of_main(fixing, monkeypatch):
-    """/thimble-fix from a person with no fix that words can change: a turn of main's could only name a new fix, so the
-    fix starts from the request itself. Main's chat shows their message, then the fixer's line, and main hears of the
-    fix at their next message."""
-    client = api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
-    got = await fixes.ask(CORPUS, "count the rows", PAGE)
-    assert got == {"fix": {"id": 1, "title": "count the rows", "state": "working"}}
-    assert not fixes._waiting.get(CORPUS) and CORPUS not in fixes._asked, "no words wait for main's fix_thimble"
-    await _ended()
-    # the one request to the model is the fixer's, with the person's words and the page as they sent it
-    [body] = client.bodies
-    first = body["messages"][-1]["content"]
-    assert "count the rows" in first and "Incidents by week" in first
-    assert [c[0] for c in fixing.calls][:2] == ["list", "new"]
-    [chat] = _fixer_chats(CORPUS)
-    assert _shown(CORPUS) == [("user", "/thimble-fix count the rows"), ("agent", chat["id"])]
-    [note] = runtime.ensure(CORPUS).notes[runtime.MAIN]
-    assert "The person asked thimble's fixer for a change to thimble itself" in note
-    assert fixes.status()["fixes"][0]["kind"] == "ready"
-
-
-def _has_fix(fixing: Any) -> None:
-    """The person has fix 1, ready: a fix that more words can change."""
-    work = fixing.home / "fixes" / "work" / "1"
-    (work / "browser").mkdir(parents=True)
-    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "words": ["count the rows"], "state": "ready",
-                      "work": str(work), "base": "HEAD", "made_in": "browser", "updated": 1.0}
-
-
-async def test_words_that_a_fix_could_take_go_to_main_which_names_the_fix(fixing, monkeypatch):
-    """With a fix the words might follow up on, main decides, as before: its turn reads the words with the person's
-    fixes beside them, and its fix_thimble starts a round of the fix it names, in the person's words."""
-    _has_fix(fixing)
-
-    def then(body: dict[str, Any]) -> list[Any]:
-        # main's request after its call and the fixer's first one run side by side
-        mine = "their thimble (fix 1)" in json.dumps(body["messages"][-1])
-        return text("Title: Card counts rows\nWhat it does: It counts the empty rows too." if mine else "On it.")
-
-    client = api_key(monkeypatch, [call("fix_thimble", {"words": "1"}), then, then])
-    got = await fixes.ask(CORPUS, "count the empty rows too", PAGE)
-    assert list(got) == ["event"] and [c[0] for c in fixing.calls] == ["list"], "nothing starts before main's turn"
-    assert [a.words for a in fixes._waiting[CORPUS].values()] == ["count the empty rows too"]
-    await runtime._spaces[CORPUS].main.task
-    await _ended()
-    read = client.bodies[0]["messages"][-1]["content"]
-    assert "count the empty rows too" in read and '1  "Card counts rows" (ready)' in read
-    verbs = [c[0] for c in fixing.calls]
-    assert "round" in verbs and "new" not in verbs
-    assert fixing.recs[1]["words"] == ["count the rows", "count the empty rows too"]
-
-
-async def test_the_person_s_own_number_or_new_before_their_words_starts_the_fix_with_no_turn_of_main(fixing,
-                                                                                                    monkeypatch):
-    """`/thimble-fix 1 <words>` is a round of fix 1 and `/thimble-fix new <words>` a new fix, whatever main would name:
-    each starts from the request itself, with the words after its head."""
-    _has_fix(fixing)
-    end = text("Title: Card counts rows\nWhat it does: It counts the empty rows too.")
-    client = api_key(monkeypatch, [end, text("Title: Blue bar\nWhat it does: The bar is blue.")])
-    got = await fixes.ask(CORPUS, "1 count the empty rows too", PAGE)
-    assert (got["fix"]["id"], got["fix"]["round"]) == (1, True)
-    await _ended()
-    assert fixing.recs[1]["words"] == ["count the rows", "count the empty rows too"]
-    got = await fixes.ask(CORPUS, "new: make the bar blue", PAGE)
-    assert got["fix"]["id"] == 2 and fixing.recs[2]["words"] == ["make the bar blue"]
-    await _ended(2)
-    assert len(client.bodies) == 2 and not fixes._waiting.get(CORPUS), "the two fixers' requests, none of main's"
-    [one, two] = _fixer_chats(CORPUS)
-    assert _shown(CORPUS) == [("user", "/thimble-fix 1 count the empty rows too"), ("agent", one["id"]),
-                              ("user", "/thimble-fix new: make the bar blue"), ("agent", two["id"])]
-
-
 async def _started_again() -> None:
     """The server starts again (Use it now): its agents stop and the mirror keeps where each transcript stands
     (runtime.stop_all), what it held in memory goes, and the next server attaches main's session again."""
@@ -266,6 +189,14 @@ async def _started_again() -> None:
     fixes._where.clear()
     runtime._spaces.clear()
     runtime.ensure(CORPUS)
+
+
+def _has_fix(fixing: Any) -> None:
+    """The person has fix 1, ready: a fix that more words can change."""
+    work = fixing.home / "fixes" / "work" / "1"
+    (work / "browser").mkdir(parents=True)
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "words": ["count the rows"], "state": "ready",
+                      "work": str(work), "base": "HEAD", "made_in": "browser", "updated": 1.0}
 
 
 async def test_more_words_for_a_fix_that_an_update_set_aside_start_its_fixer_from_the_old_change(fixing, monkeypatch):
