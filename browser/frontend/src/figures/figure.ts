@@ -116,8 +116,8 @@ export function figureCell(cell: Cell, chart?: (spec: Spec) => Spec): Cell {
 }
 
 /** A Paper figure's caption in a report, `Figure N. Takeaway. Question`: the number's words, the takeaway (bold in the
- * caption) ending in one period, and the question. Pure. */
+ * caption) ending in one period, or in its own question or exclamation mark, and the question. Pure. */
 export function captionParts(n: number, takeaway: string | null | undefined, question: string | null | undefined): { lead: string; takeaway: string; question: string } {
   const said = figureText(takeaway).replace(/[.\s]+$/, '')
-  return { lead: `Figure ${n}.`, takeaway: said ? `${said}.` : '', question: figureText(question) }
+  return { lead: `Figure ${n}.`, takeaway: !said ? '' : /[?!…]$/.test(said) ? said : `${said}.`, question: figureText(question) }
 }

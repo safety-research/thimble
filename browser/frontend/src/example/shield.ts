@@ -102,13 +102,15 @@ try {
   /* nothing here sends one */
 }
 
-/** What the frame's storage starts with: the theme the page shows, so the panes draw in its paper and accent. */
+/** What the frame's storage starts with: the theme the page shows, so the panes draw in its paper, accent and figure
+ * style. */
 function seed(): Record<string, string> {
   const out: Record<string, string> = {}
   const root = host()?.document.documentElement
   for (const [attr, key] of [
     ['data-paper', 'thimble:paper'],
     ['data-accent', 'thimble:accent'],
+    ['data-figures', 'thimble:figures'],
   ]) {
     const v = root?.getAttribute(attr)
     if (v) out[key] = v

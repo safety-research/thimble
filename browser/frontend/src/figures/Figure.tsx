@@ -6,7 +6,7 @@
 // marker included; a caption under the chart in a report (`caption`, the figure's number). thimble: the card face, as
 // the canvas draws it. The chart takes the figure style the page is in, which the harness sets for the request (the
 // pure parts are figures/figure.ts).
-import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CardBody } from '../canvas/bodies'
 import { CardFace } from '../canvas/CardFace'
 import { CARD_PAD_X } from '../canvas/Cell'
@@ -20,7 +20,7 @@ import type { FigureStyle } from '../lib/theme'
 import type { Cell } from '../lib/types'
 import { drawChart, type DrawnChart } from '../lib/vegaDraw'
 import { token } from '../lib/vizTheme'
-import { BLOG_CHART_W, captionParts, chartOf, figureCell, figureText, headline, paperSize, paperSpec } from './figure'
+import { BLOG_FIGURE, captionParts, chartOf, figureCell, figureText, headline, paperSize, paperSpec } from './figure'
 import './figure.css'
 
 export type FigurePart = 'figure' | 'legend'
@@ -36,10 +36,14 @@ export interface FigureProps {
   caption?: number
   /** the card's label, for a label card's face */
   label: ConceptDetailState
+  /** a Blog figure's width, px, BLOG_FIGURE's when not given: a report's column may be narrower */
+  width?: number
+  /** a Blog figure's headline in place of the card's takeaway: a report's caption, or the field that edits it */
+  headline?: ReactNode
 }
 
-export function Figure({ cell, style, part = 'figure', columns, caption, label }: FigureProps) {
-  if (style === 'blog') return <BlogFigure cell={cell} label={label} />
+export function Figure({ cell, style, part = 'figure', columns, caption, label, width, headline }: FigureProps) {
+  if (style === 'blog') return <BlogFigure cell={cell} label={label} width={width} title={headline} />
   if (style === 'paper') return part === 'legend' ? <PaperLegend cell={cell} columns={columns} /> : <PaperFigure cell={cell} caption={caption} label={label} />
   return (
     <div className={`figure figure-thimble bcell bcell-kind-${kindOf(cell)}`} data-figure="thimble" style={{ position: 'relative', width: CARD_W }}>
@@ -48,17 +52,18 @@ export function Figure({ cell, style, part = 'figure', columns, caption, label }
   )
 }
 
-/** Blog's figure (module note): the headline is the takeaway, or the question when the card has none. */
-function BlogFigure({ cell, label }: { cell: Cell; label: ConceptDetailState }) {
+/** Blog's figure (module note): the headline is `title` when given, else the takeaway, or the question when the card
+ * has none; the chart takes the panel's width less its padding. */
+function BlogFigure({ cell, label, width = BLOG_FIGURE.width, title }: { cell: Cell; label: ConceptDetailState; width?: number; title?: ReactNode }) {
   const takeaway = headline(cell.takeaway)
   const question = figureText(cell.title)
   const shown = useMemo(() => figureCell(cell), [cell])
   return (
-    <div className="figure figure-blog" data-figure="blog">
-      <h1 className="figure-title">{takeaway || question}</h1>
-      {takeaway && question ? <p className="figure-sub">{question}</p> : null}
+    <div className="figure figure-blog" data-figure="blog" style={width !== BLOG_FIGURE.width ? { width } : undefined}>
+      <h1 className="figure-title">{title ?? (takeaway || question)}</h1>
+      {(title != null || takeaway) && question ? <p className="figure-sub">{question}</p> : null}
       <div className="figure-chart">
-        <CardBody cell={shown} width={BLOG_CHART_W} label={label} />
+        <CardBody cell={shown} width={width - 2 * BLOG_FIGURE.padX} label={label} />
       </div>
     </div>
   )

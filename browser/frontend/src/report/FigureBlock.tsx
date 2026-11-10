@@ -6,12 +6,13 @@
 // the new takeaway, also after a change made while the figure was not on the page (captionSource), unless the analyst
 // locked the figure.
 // In the editor the question line is a handle that moves the figure, as the block's actions in the gutter do.
+// In a figure style (lib/theme FigureStyle) a figure is drawn as that style's figure instead (FigureInStyle).
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { ChatMarkdown } from '../chat/markdown'
 import { CITATION, takeawayChecks } from '../marks/marks'
 import { CardBody, exampleRefs } from '../canvas/bodies'
-import { useConceptDetail, useConcepts } from '../canvas/concepts'
+import { useConceptDetail, useConcepts, type ConceptDetailState } from '../canvas/concepts'
 import { CanvasContext } from '../canvas/context'
 import { RefEditor } from '../canvas/RefEditor'
 import { Button } from '../components/Button'
@@ -20,11 +21,14 @@ import { Chip } from '../components/Chip'
 import { chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
+import { Figure as StyledFigure } from '../figures/Figure'
+import { BLOG_FIGURE, captionParts, headline } from '../figures/figure'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { hhmm } from '../lib/time'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
+import { useTheme, type FigureStyle } from '../lib/theme'
 import type { CardVersion, Cell, WriteupFigure } from '../lib/types'
 import { useReportCtx } from './context'
 import { anchorFor, figureCandidates, readableText } from './model'
@@ -223,6 +227,10 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
   // the caption edited in place, and where the click that opened it landed
   const [editing, setEditing] = useState<{ at: { x: number; y: number } | null } | null>(null)
   const concepts = useConcepts(ws)
+  const { figures } = useTheme()
+  // a label card's label, for its figure in a figure style (CardFigure reads its own in thimble's)
+  const payload = (cell?.payload ?? {}) as Record<string, unknown>
+  const label = useConceptDetail(ws, figures !== 'thimble' && cell?.kind === 'label' && typeof payload.concept === 'string' ? payload.concept : null)
   // the card is its citations' home, so a citation of its own table marks the cell in place, as on the canvas
   const citeHome = cellRef ? cellIdOf(cellRef) : undefined
   // the card as the caption last followed it, the latest caption and its setter, read by the card's updates
@@ -320,6 +328,23 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
   const takeaway = cell?.takeaway ?? ''
   const take = takeaway && caption && readableText(caption) === readableText(takeaway) ? takeaway : caption
   const editable = !!onCaption
+  // the caption field's text when it closes: kept as the caption unless it still says `shown`, what the field opened on
+  const done = (shown: string) => (v: string) => {
+    setEditing(null)
+    const next = v.replace(/\s*\n+\s*/g, ' ').trim()
+    if (next !== shown.trim()) onCaption?.(next)
+  }
+  // in a figure style a card that stands drawn is the style's figure, which says its caption, else the card's takeaway:
+  // a caption that only repeats the card's question, which a figure written without one keeps, says nothing of its own
+  // (backend exports._said). A figure being made, still read or whose card is gone stays as the report draws it
+  if (figures !== 'thimble' && !pending && cell) {
+    const said = take && readableText(take) !== readableText(cell.title ?? '') ? take : takeaway
+    return (
+      <figure className={`wu-fig wu-fig-${figures}`} ref={setBox} data-fig={id} data-anchor={cellRef || undefined} data-anchor-text={caption || cell.title || ''} data-anchor-parts="" data-cite-home={citeHome} contentEditable={false}>
+        <FigureInStyle ws={ws} cell={cell} style={figures} width={width} label={label} caption={said} table={art?.kind === 'table'} body={body} editing={editing} onEdit={editable ? setEditing : undefined} onDone={done(said)} />
+      </figure>
+    )
+  }
   return (
     <figure className="wu-fig" ref={setBox} data-fig={id} data-anchor={cellRef || undefined} data-anchor-text={caption || cell?.title || ''} data-anchor-parts="" data-cite-home={citeHome} contentEditable={false}>
       {!pending && (
@@ -337,17 +362,7 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
       {!pending && (editable || !!take) && (
         <div className="wu-fig-take">
           {editing ? (
-            <RefEditor
-              className="wu-fig-caption chat-text"
-              label="Caption"
-              value={take}
-              at={editing.at}
-              onDone={(v) => {
-                setEditing(null)
-                const next = v.replace(/\s*\n+\s*/g, ' ').trim()
-                if (next !== take.trim()) onCaption?.(next)
-              }}
-            />
+            <RefEditor className="wu-fig-caption chat-text" label="Caption" value={take} at={editing.at} onDone={done(take)} />
           ) : (
             <div
               ref={editable ? keepFromEditor : undefined}
@@ -389,6 +404,84 @@ function CardFigure({ ws, cell, width }: { ws: string; cell: Cell; width: number
         <div className="wu-fig-card">
           <CardBody cell={cell} width={width} label={label} />
         </div>
+      </GlyphCites.Provider>
+    </CanvasContext.Provider>
+  )
+}
+
+interface FigureInStyleProps {
+  ws: string
+  cell: Cell
+  style: Exclude<FigureStyle, 'thimble'>
+  /** the figure's width in the column, px; 0 before it was measured */
+  width: number
+  label: ConceptDetailState
+  /** what the figure says: its caption, else the card's takeaway */
+  caption: string
+  /** a table card, whose table (`body`, as the report draws it) Paper sets as wide as the text */
+  table: boolean
+  body: ReactNode
+  editing: { at: { x: number; y: number } | null } | null
+  /** a click or Enter on the caption opens its field, in the editor */
+  onEdit?: (editing: { at: { x: number; y: number } | null }) => void
+  onDone: (caption: string) => void
+}
+
+/** A figure in a figure style, as the export draws it (figures/Figure): Blog's panel at the column's width, at most its
+ * own, with the caption as its headline in plain words and the question under it; Paper's chart with its legend under
+ * it in two columns, as paper-figure's LaTeX places its legend file, or a table as wide as the text, then the caption
+ * `Figure N. Takeaway. Question`, its number the page's count of figures (report.css). A click on the headline or the
+ * caption edits the caption in place, as on a figure in thimble's style. */
+function FigureInStyle({ ws, cell, style, width, label, caption, table, body, editing, onEdit, onDone }: FigureInStyleProps) {
+  const board = useContext(CanvasContext)
+  const concepts = useConcepts(ws)
+  const ctx = useMemo(() => ({ ...board, ws, concepts }), [board, ws, concepts])
+  const field = (shown: ReactNode) =>
+    editing ? (
+      <RefEditor className="wu-fig-said" label="Caption" value={caption} at={editing.at} onDone={onDone} />
+    ) : onEdit ? (
+      <span
+        ref={keepFromEditor}
+        className="wu-fig-said"
+        role="textbox"
+        aria-label="Caption"
+        tabIndex={0}
+        onClick={(e) => onEdit({ at: { x: e.clientX, y: e.clientY } })}
+        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), onEdit({ at: null }))}
+      >
+        {shown}
+      </span>
+    ) : (
+      shown
+    )
+  const said = headline(caption)
+  const parts = captionParts(0, caption, cell.title)
+  return (
+    <CanvasContext.Provider value={ctx}>
+      <GlyphCites.Provider value={true}>
+        {style === 'blog' ? (
+          width > 0 && <StyledFigure cell={cell} style="blog" label={label} width={Math.min(width, BLOG_FIGURE.width)} headline={said ? field(said) : undefined} />
+        ) : (
+          <>
+            {table ? (
+              <div className="wu-fig-art wu-fig-art-table">{body}</div>
+            ) : (
+              <div className="wu-fig-art">
+                <StyledFigure cell={cell} style="paper" label={label} />
+                <StyledFigure cell={cell} style="paper" part="legend" columns={2} label={label} />
+              </div>
+            )}
+            <figcaption className="wu-fig-cap">
+              {field(
+                <>
+                  {parts.takeaway ? <b>{parts.takeaway}</b> : null}
+                  {parts.takeaway && parts.question ? ' ' : null}
+                  {parts.question}
+                </>,
+              )}
+            </figcaption>
+          </>
+        )}
       </GlyphCites.Provider>
     </CanvasContext.Provider>
   )
