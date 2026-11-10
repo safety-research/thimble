@@ -1,5 +1,6 @@
 """thimble's config for its agents: $THIMBLE_HOME/config.json (THIMBLE_HOME, else ~/.thimble), and an optional override
-for one workspace, workspaces/<c>/config.json. docs/config.md documents every key.
+for one workspace, workspaces/<c>/config.json. docs/config.md documents every key but `cardWait`: it sets the wait of a
+code ticket's card, and nothing starts a code ticket now.
 
 Layers, lowest first: DEFAULTS, the file, the workspace's override. An object merges key by key (`sandbox`, `agents` and
 each agent); any other value replaces the one below it, null included, which stands for thimble's default.
@@ -16,7 +17,7 @@ an agent would change in its own permissions and decides; a session nobody answe
 One fence for main and its agents. thimble's agents are subagents of main and run in main's permission mode; thimble
 adds no rule, working directory or sandbox to main's session. So the orientation's `web`, `network` and `data` are
 main's keys, which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web
-tools. Code tickets' agents are subagents of main too. The dev agent alone
+tools. The dev agent alone
 keeps its own permission mode and fence keys, for `thimble fix`, which stays a job of the server, and its own fast
 mode, for its agents and `thimble fix` (subagents.fast_for), which is main's while this file sets none
 (config.models_for).
@@ -54,7 +55,7 @@ CALLS = ("labels", "cardCheck")  # one model call each, with no tools
 # each agent's role among config.MODEL_ROLES
 ROLES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "checks", "dev": "dev",
          "labels": "labels", "cardCheck": "verify", "suggest": "suggest", "refusal": "refusal"}
-# each agent's row among modes.AGENTS: the dev agent's alone; every other agent, code tickets' among them, runs in main's
+# each agent's row among modes.AGENTS: the dev agent's alone; every other agent runs in main's
 # mode (module note, one fence)
 MODE_ROWS = {"dev": "dev"}
 SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents that run as subagents of main

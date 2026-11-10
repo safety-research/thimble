@@ -100,7 +100,7 @@ def health_timeout_s() -> float:
     return got if 0 < got < float("inf") else HEALTH_TIMEOUT_S
 
 
-FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
+FIX_INSTRUCTION = "Ask for a change to thimble with /thimble-fix <what should work differently>."  # fixes.EMPTY
 # `thimble fix` and `thimble revert` change thimble's own code, which only a development install (a git clone of thimble)
 # can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
 DEV_ONLY_LINES = {
@@ -138,11 +138,11 @@ MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
 RUNNING_HEAD = "thimble: running now:"
 RUNNING_BACK_LINE = ("A restart stops them. Once the server is back, the writers resume by themselves, and a view build "
-                     "or dev ticket starts again.")
+                     "starts again.")
 RESTART_QUESTION = "Restart the server now? [y/N] "
 RESTART_UNASKED_LINE = "thimble: not restarted, since there is no terminal to ask in; pass --yes to restart anyway."
 RESTART_DECLINED_LINE = "thimble: not restarted."
-STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the writers, and starts a view build or dev ticket "
+STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the writers, and starts a view build "
                   "again.")
 STOP_QUESTION = "Stop the server now? [y/N] "
 STOP_UNASKED_LINE = "thimble: not stopped, since there is no terminal to ask in; pass --yes to stop anyway."
@@ -1679,13 +1679,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     if box.get("use") == "never":
         return [f"{head}off in thimble's config (sandbox.use \"never\"); {without}"]
     if not missing:
-        from . import ticket_box  # noqa: PLC0415
-
-        why = ticket_box.problem()
-        tickets = ("a code ticket's checks and test server run in thimble's sandbox runtime, and its change reaches "
-                   "thimble's own code only once you allow it" if not why else
-                   f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
-        return [f"{head}runs; {tickets}"]
+        return [f"{head}runs"]
     line = f"{head}off, missing " + ", ".join(missing) + f"; {without}"
     if not cmds or not commands:
         return [line + (f"; {what}" if what else "")]
@@ -1792,10 +1786,10 @@ def node_runs_frontend_tests(v: tuple[int, int, int]) -> bool:
 
 def node_line(commands: bool = True) -> str:
     """Node's version, which custom views and the sandbox runtime (app/srt.py) need, and with `commands` what to install
-    when it is missing or too old. Where the frontend's tests are installed (a code ticket's vitest gate, dev.py), a node
-    older than they need is a problem too."""
+    when it is missing or too old. Where the frontend's tests are installed (the vitest gate of `thimble fix`, dev.py),
+    a node older than they need is a problem too."""
     exe = shutil.which("node")
-    need = (f"custom views and the sandbox card code and code tickets run in need Node {NODE_MIN_MAJOR}+"
+    need = (f"custom views and the sandbox card code runs in need Node {NODE_MIN_MAJOR}+"
             f"{' (https://nodejs.org)' if commands else ''}; everything else works without it")
     if not exe:
         return f"not found; {need}"
@@ -1809,7 +1803,7 @@ def node_line(commands: bool = True) -> str:
     modules = FRONTEND_DIR / "node_modules"
     fix = f"bash {config.REPO_ROOT / 'scripts' / 'install.sh'}"
     if v and (modules / ".bin" / "vitest").exists() and not node_runs_frontend_tests(v):
-        return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so code tickets' vitest checks "
+        return (f"{out}, older than the frontend's tests need (Node {NODE_TESTS_FLOOR}), so the frontend's vitest checks "
                 "fail" + ("; upgrade Node (https://nodejs.org)" if commands else ""))
     return out + ("" if modules.is_dir() else f"; {modules} is missing, so custom views cannot build"
                   + (f" (run `{fix}` again)" if commands else ""))

@@ -215,8 +215,8 @@ def _at_most(effort: str, most: str) -> str:
 
 def fast_for(c: str, role: str) -> bool:
     """Whether a run of `role` runs in fast mode: as Settings' row for the role has it (config.models_for), which is on
-    only for a row that takes fast mode, on a model that has it. So a view's builder, its reviewer and a code ticket's
-    agent run with the dev row's, which is main's until the analyst sets the row's own, and a writer and a check with
+    only for a row that takes fast mode, on a model that has it. So a view's builder and its reviewer
+    run with the dev row's, which is main's until the analyst sets the row's own, and a writer and a check with
     none. Read at the run's start, so a run that starts after the analyst turned main's on runs in fast mode."""
     t = TYPES.get(role)
     return bool(t and config.models_for(c)[t.row].get("fast"))

@@ -369,7 +369,7 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | 
     """The session's inline settings: its effort as 0.8's calls pinned it and its fast mode as its Spec has it
     (sdk.cli_settings), as the Messages API runtime sends them (runtime_api.request): main's and its thread forks' the
     composer's choice, off until the analyst turns it on, and an agent's that of its row in Settings
-    (subagents.fast_for: the dev row's for a view's builder and reviewer and a code ticket's agent, which is main's
+    (subagents.fast_for: the dev row's for a view's builder and reviewer, which is main's
     until the analyst sets the row's own, none for a writer or a check), whatever speed thimble's own calls default to
     (config.model_speed), and Claude Code runs a session at
     standard speed itself where the account has no fast mode; the sandbox for Bash
