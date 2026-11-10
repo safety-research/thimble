@@ -23,7 +23,8 @@ export interface ExportFormat {
 
 const base = (ws: string, slug: string) => `${apiBase()}/ws/${encodeURIComponent(ws)}/investigations/main/types/${encodeURIComponent(slug)}`
 
-function save(blob: Blob, name: string) {
+/** `blob` saved as the file `name`, as a download the browser makes. */
+export function save(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -32,7 +33,8 @@ function save(blob: Blob, name: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-async function fail(res: Response): Promise<never> {
+/** A failed answer as the error it throws: the server's detail, else the status text. */
+export async function fail(res: Response): Promise<never> {
   await signInNeeded(res)
   let detail = res.statusText
   try {

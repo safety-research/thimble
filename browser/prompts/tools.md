@@ -375,6 +375,21 @@ Get a picture of what the analyst sees in the browser. It is slow. Use it only w
 }
 ```
 
+## export_card
+
+Write a card's figure as files into a folder of the corpus, in the figure style the analyst chose, as the card's Export menu saves them. Use it when the analyst asks for a card as a figure or as files.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "card": {"type": "string", "description": "card:<id>"},
+    "folder": {"type": "string", "description": "The folder for the files, relative to the corpus folder. Default figures."}
+  },
+  "required": ["card"]
+}
+```
+
 ## start_writing
 
 Start a writer as a subagent of this session. The writer writes or revises one document from this conversation, the cards and the documents. Call it when the analyst asks for a document or for a change to one. To change one passage of a written document, use `edit_document` yourself.
@@ -700,6 +715,10 @@ thimble shows {surfaces} {layout}.
 ## open_view-view
 
 Opened the {view} view in Files.
+
+## export_card-written
+
+Wrote the figure of {card} in the {style} figure style: {paths}.
 
 ## clear_filter-cleared
 
