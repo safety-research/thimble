@@ -220,7 +220,7 @@ test('x on a stale citation checks it again against the files as they are now; o
   const r = await repairOf($, 'row-1', 1)
   expect(r).toMatchObject({ again: true })
   // a copy of the file kept from before the change is no evidence either
-  expect((r as Any).prompt).toContain('The analyst pressed x on citation 1, since README.md changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence. It may stand in an earlier reply than your last.\nCheck it again from the start.')
+  expect((r as Any).prompt).toContain('The analyst pressed x on citation 1, since README.md changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence. Say what changed in `reason`, not in the sentence. It may stand in an earlier reply than your last.\nCheck it again from the start.')
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   // while it runs it is checked again, its old sources gone
   const running = (await rowMarks($, 'row-1'))!.items[0]!
