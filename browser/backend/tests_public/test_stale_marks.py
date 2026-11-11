@@ -286,3 +286,88 @@ def test_a_computed_mark_rests_on_the_files_its_code_read_and_is_stale_only_when
     asyncio.run(marks.refresh_sources(CORPUS))
     (m3,) = marks.stored(CORPUS, turn)["items"]
     assert [s["file"] for s in marks.stale_sources(m3)] == ["build-a/report/review-results.json"], m3
+
+
+def _seed_reading_card(monkeypatch, data, takeaway: str) -> tuple[str, list[int]]:
+    """A card whose code read `data` (its reads record), its table as that file makes it, and a takeaway; a run of its
+    code, kept (1) or not (0), is replaced by one that reads the file again: (its id, the runs of it)."""
+    from app import notebook
+
+    def table() -> dict:
+        rows = json.loads(data.read_text())
+        body = "".join(f"<tr><th>{a}</th><td>{n}</td></tr>" for a, n in rows.items())
+        return {"text/html": f"<table><tr><th>agent</th><th>test runs</th></tr>{body}</table>"}
+
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "Tests", role="exploration")
+    cell = notebook.new_cell("code", "run", "Test runs by agent", nb["id"], code="print()")
+    cell.update(status="ok", outputs=[table()], takeaway=takeaway, reads=[str(data.relative_to(config.corpus_dir(CORPUS)))])
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    ran: list[int] = []
+
+    async def trial_run(c, cid, code):
+        ran.append(0)
+        return {**notebook.get_cell(c, cid), "outputs": [table()], "status": "ok", "trial": "t1", "reads": cell["reads"]}
+
+    async def trial_settle(c, cid, tid, *, keep):
+        assert tid == "t1" and keep is False
+
+    async def run_cell(c, nb_id, cid):
+        ran.append(1)
+        with notebook.editing(ws):
+            hit = notebook._locate(ws, cid)
+            hit[1].update(outputs=[table()], status="ok")
+            notebook.write_notebook(ws, hit[0])
+
+    monkeypatch.setattr(notebook, "trial_run", trial_run)
+    monkeypatch.setattr(notebook, "trial_settle", trial_settle)
+    monkeypatch.setattr(notebook, "_run_cell", run_cell)
+    return cell["id"], ran
+
+
+def test_a_takeaway_mark_on_a_card_s_value_goes_stale_when_the_card_s_input_changes_that_value_and_repair_runs_the_card(_fresh, monkeypatch):
+    from app import notebook
+
+    folder = config.corpus_dir(CORPUS)
+    data = folder / "tests.json"
+    data.write_text(json.dumps({"agent-01": 71, "agent-02": 40}))
+    _main(monkeypatch, folder)
+    cid, ran = _seed_reading_card(monkeypatch, data, "agent-01 ran its tests [71](#) times.")
+
+    async def fork(c, main, cut, prompt):
+        value = json.loads(data.read_text())["agent-01"]
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": f"card:{cid}#test runs/agent-01"}, "reason": "the table says so",
+                **({"status": "verified"} if value == 71 else {"status": "corrected", "correction": {"words": str(value)}})}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    asyncio.run(marks.start_check(CORPUS, {"sid": SID, "cwd": str(folder), "transcript_path": None}, turn, [], "cut-1", fork=fork))
+    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    # the card's value rests on the file the card's code read
+    assert m["status"] == "verified" and [s["file"] for s in m["sources"]] == ["tests.json"], m
+    assert m["rerun"] == {"card": cid, "values": {f"card:{cid}#test%20runs/agent-01": "71"}}
+    index = json.loads((config.workspace_dir(CORPUS) / "marks" / "cited.json").read_text())
+    assert [f["by"] for f in index["files"].values()] == [{f"card:{cid}": [0]}]
+    # another agent's count changed: the card's code runs again, not kept, and the cited value is as it was
+    _edit(data, json.dumps({"agent-01": 71, "agent-02": 41}))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m2,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert ran == [0] and marks.stale_sources(m2) == [], m2
+    # the cited value changed: the takeaway's mark is stale, and the card shows its outputs as they were
+    _edit(data, json.dumps({"agent-01": 72, "agent-02": 41}))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m3,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert ran == [0, 0] and [s["file"] for s in marks.stale_sources(m3)] == ["tests.json"], m3
+    assert ">71<" in notebook.get_cell(CORPUS, cid)["outputs"][0]["text/html"]
+
+    # Repair: the card runs again, then the check reads its new value and corrects the takeaway's words
+    async def go():
+        assert await marks.repair(CORPUS, card=cid, k=0, fork=fork) == ""
+        await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+    asyncio.run(go())
+    assert ran == [0, 0, 1]
+    (m4,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert m4["status"] == "corrected" and m4["shown"] == "72" and marks.stale_sources(m4) == [], m4
+    assert m4["rerun"]["values"] == {f"card:{cid}#test%20runs/agent-01": "72"}

@@ -122,6 +122,8 @@ the checker's own words, which this module shows and does not check.
                                                                      rests on differs from what the check read, cited
                                                                      lines that moved at their new numbers, and
                                                                      computed evidence whose files changed run again
+  shown_refs(evidence), card_values(refs, cards)                 -> the places card evidence cites, and what each
+                                                                     shows in `cards`
   card_index(cards, at)                                          -> the cards' tables, places and values, one per
                                                                      line, for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
@@ -2609,6 +2611,36 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None, at: float | None =
     line = lines[i][1]
     return "", {"cid": cid, "title": title, "ref": f"{head}@out{out_i}#L{n}", "value": line, "text": line,
                 "where": f"line {n} of the card's output", "out": ("lines", out_i), "n": n, "lines": lines, "i": i, **kept}
+
+
+CARD_WHOLE = re.compile(r"^card:([A-Za-z0-9_-]+)$")
+
+
+def shown_refs(evidence: Any) -> list[str]:
+    """The places that card evidence as the person sees it (check_card) cites: its place or places, and those of its
+    other outputs (`more`); for a count, the whole card it counts (`card:<id>`, card_values)."""
+    out: list[str] = []
+    for e in [evidence, *(evidence.get("more") or [] if isinstance(evidence, dict) else [])]:
+        if not isinstance(e, dict) or e.get("kind", "card") != "card" or not e.get("card"):
+            continue
+        refs = [f"card:{e['card']}"] if e.get("count") else e.get("refs") if isinstance(e.get("refs"), list) else [e.get("ref")]
+        out += [str(r) for r in refs if r and str(r) not in out]
+    return out
+
+
+def card_values(refs: list[str], cards: list[dict[str, Any]] | None) -> dict[str, str | None]:
+    """What each place shows in `cards`, by place: a cell's value or a line's text (_card_place); for a whole card,
+    `card:<id>`, its outputs as text; None for a place the cards do not have."""
+    out: dict[str, str | None] = {}
+    for ref in refs:
+        whole = CARD_WHOLE.match(ref)
+        if whole:
+            card = next((c for c in cards or [] if str(c.get("id")) == whole.group(1)), None)
+            out[ref] = json.dumps(card.get("outputs"), sort_keys=True, ensure_ascii=False) if card else None
+            continue
+        _, p = _card_place(ref, cards)
+        out[ref] = str(p["value"]) if p else None
+    return out
 
 
 def _apart(places: list[dict[str, Any]]) -> str:
