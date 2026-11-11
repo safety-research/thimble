@@ -34,8 +34,9 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    page reads a chat (agents.py), refresh_soon makes one pass in the background, as the terminal does after Claude's
    calls that can write (plugin/marks/stale.ts): a stat of each cited file, and only for a file whose stat changed
    since the last pass, the marks that rest on it, from the replies that hold them, to evidence.examine, which reads
-   the file once for all of them. A mark whose source changed is stale, which the page draws (marks.ts lookOf), and Repair
-   checks it again against the files as they are now, its computed evidence only a call of that check's own (`fresh`).
+   the file once for all of them. A mark whose source changed is stale, which the page draws (marks.ts lookOf); cited
+   lines that only moved take their new numbers, with no other sign. Repair checks a stale mark again against the
+   files as they are now, its computed evidence only a call of that check's own (`fresh`).
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -1156,35 +1157,37 @@ def _same_source(a: Any, b: dict[str, Any]) -> bool:
 async def refresh_sources(c: str) -> None:
     """One pass over the workspace's cited files (_cited): a stat of each, and only for the files whose stat changed
     since the last pass, the marks that rest on them, from the replies that hold them, to evidence.examine, which reads
-    each file once for all of them. A reply whose marks changed is written again, so the page draws them stale, or no
-    longer stale."""
+    each file once for all of them. A reply whose marks changed is written again, so the page draws them stale, no
+    longer stale, or at the lines they moved to."""
     files = (await asyncio.to_thread(_cited, c))["files"]
     now = await asyncio.to_thread(lambda: {p: _seen_of(p) for p in files})
     due = {p: s for p, s in now.items() if not _same_seen(s, files[p].get("seen"))}
     if not due:
         return
-    # the marks that rest on those files, each with its sources there: (turn, n, places in its sources, sent)
-    asked: list[tuple[str, int, list[int], list[dict[str, Any]]]] = []
+    # the marks that rest on those files, each with its sources there: (turn, n, places in its sources, sent, evidence)
+    asked: list[tuple[str, int, list[int], list[dict[str, Any]], Any]] = []
     for turn in sorted({t for p in due for t in files[p].get("by") or {}}):
         for m in (stored(c, turn) or {}).get("items") or []:
             ks = [k for k, src in enumerate(m["sources"]) if isinstance(src, dict) and src.get("path") in due] if _confirmed(m) else []
             if ks:
-                asked.append((turn, m["n"], ks, [m["sources"][k] for k in ks]))
+                asked.append((turn, m["n"], ks, [m["sources"][k] for k in ks], m.get("evidence")))
     if asked:
         ev = evidence()
-        got = await asyncio.to_thread(ev.examine, [{"sources": sent} for *_, sent in asked])
-        changed = [(a, x) for a, x in zip(asked, got) if x["sources"] != a[3]]
+        got = await asyncio.to_thread(ev.examine, [{"sources": sent, **({"evidence": e} if e else {})} for *_, sent, e in asked])
+        changed = [(a, x) for a, x in zip(asked, got) if "evidence" in x or x["sources"] != a[3]]
         for turn in sorted({a[0] for a, _ in changed}):
             mine = [(a, x) for a, x in changed if a[0] == turn]
 
             def change(r: dict[str, Any], mine: list[tuple[Any, dict[str, Any]]] = mine) -> dict[str, Any]:
                 # a mark checked again meanwhile keeps the sources of its new check
                 for m in r["items"]:
-                    for (_, n, ks, sent), x in mine:
+                    for (_, n, ks, sent, _), x in mine:
                         if m.get("n") == n and _confirmed(m) and all(k < len(m["sources"]) and _same_source(m["sources"][k], s)
                                                                      for k, s in zip(ks, sent)):
                             for k, s in zip(ks, x["sources"]):
                                 m["sources"][k] = s
+                            if "evidence" in x:
+                                m["evidence"] = x["evidence"]
                 return r
 
             await _edit(c, turn, change, tell=False)

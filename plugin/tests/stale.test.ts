@@ -1,7 +1,8 @@
 // A citation whose source changed after its check (marks/stale.ts): the pass stats each cited file once, from the index
 // of cited files (store.ts citedFiles), and sends the kernel only the citations that rest on a file whose stat changed;
 // a citation whose cited lines changed draws stale in the answer, and its card says which file changed and offers x,
-// which checks it again against the files as they are now. All data is made up. `claude plugin test plugin`.
+// which checks it again against the files as they are now. Cited lines that only moved take their new numbers. All
+// data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
@@ -115,6 +116,7 @@ test('a citation whose cited lines changed after its check draws stale; its card
   await bash()
   expect(asked.length).toBe(1)
   expect(asked[0][0].sources[0]).toMatchObject({ path: FILE, line: '4', sha256: 'a1' })
+  expect(asked[0][0].evidence).toMatchObject({ file: 'runs/summary.txt', line: '4' })
   // its own mark changes in the answer: the words in the warning color, ↻ after them
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
   expect(textOf(drawn)).toContain('12 of 40 ↻')
@@ -216,15 +218,15 @@ test('x on a stale citation checks it again against the files as they are now; o
   expect(staleOf(done)).toEqual([])
 })
 
-test('a pass stats each cited file once and reads only the replies whose citations rest on a file that changed', async () => {
+test('a pass stats each cited file once and reads only the replies whose citations rest on a file that changed; moved lines take their new numbers', async () => {
   setOptions({ citations: 'auto + verify' })
   const A = { file: 'a.md', path: '/made-up/data/a.md', line: '3', size: 10, mtime: 1, sha256: 'aa' }
   const B = { file: 'b.md', path: '/made-up/data/b.md', line: '7', size: 20, mtime: 2, sha256: 'bb' }
   const place = (s: Any, n: number) => ({ kind: 'quote', file: s.file, line: String(n), lines: [{ n, text: 'the words', highlight: [4, 9] }] })
   const mark = (n: number, s: Any): MarkItem => ({ n, row: 'r', words: 'the words', start: 0, end: 9, sentence: 's', status: 'verified', shown: 'the words', evidence: place(s, Number(s.line)) as never, sources: [s] })
   const files: Record<string, { size: number; mtimeMs: number }> = { [A.path]: { size: 10, mtimeMs: 1 }, [B.path]: { size: 20, mtimeMs: 2 } }
-  // the kernel finds b.md's cited line changed
-  const { $, seen } = engine(req => ({ cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }), files)
+  // the kernel finds b.md's cited line two lines down, as it read
+  const { $, seen } = engine(req => ({ cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, line: '9' })), evidence: { ...c.evidence, line: '9', lines: [{ n: 9, text: 'the words', highlight: [4, 9] }] } })) }), files)
   for (const [key, items] of [['row-a', [mark(1, A), mark(2, A)]], ['row-b', [mark(1, B)]]] as const) {
     await newReply($, { key, turnId: key, rows: [key], startedAt: 0, settledAt: 1, items: [] })
     await editReply($, key, r => ({ ...r, items: [...items] }))
@@ -247,9 +249,11 @@ test('a pass stats each cited file once and reads only the replies whose citatio
   expect(seen.stdin.length).toBe(1)
   expect(seen.stdin[0].cited.map((c: Any) => c.sources.map((s: Any) => s.path))).toEqual([[B.path]])
   expect(new Set(seen.reads)).toEqual(new Set(['row-b']))
-  // its cited line changed: it is stale
+  // its lines moved: not stale, at their new numbers in its sources and in the place it shows
   const b = (await replyOf($, 'row-b'))!.items[0]!
-  expect(staleOf(b).length).toBe(1)
+  expect(staleOf(b)).toEqual([])
+  expect(b.sources![0]).toMatchObject({ line: '9', sha256: 'bb' })
+  expect(b.evidence).toMatchObject({ line: '9', lines: [{ n: 9 }] })
   expect((await citedFiles($))[B.path]!.seen).toEqual({ size: 23, mtime: 3 })
 
   // a check of it again takes it off the index while it runs; a file no citation rests on leaves the index

@@ -8,8 +8,8 @@ declare module 'claude-code' {
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
        *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite?, unread?: [{ tool:
-       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }], sources?: [{ file, path, line?, size, mtime, sha256,
-       *  changed?, gone? }] }] } (marks/store.ts Reply), kept on disk too */
+       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }], sources?: [{ file, path, line?, head?, size, mtime,
+       *  sha256, changed?, gone? }] }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** this conversation's cited files, by real path: what the last pass of marks/stale.ts saw of each ({ size,
        *  mtime } or { gone: true }; null when due), and the citations that rest on it by their reply's key

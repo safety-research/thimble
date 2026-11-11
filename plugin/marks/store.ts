@@ -65,10 +65,11 @@ export type MarkItem = {
   status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]
 }
 /** What a checked citation rests on (engine/kernel/evidence.py source): a file by the name a reason gives it, its real
- *  path, the cited lines when it rests on them alone, the file's size and mtime and the sha256 of what the check read.
- *  `changed` once what it rests on no longer reads so, `gone` once the file is not there (stale.ts): the citation is
- *  stale (tray/tray.mjs staleOf). */
-export type Source = { file: string; path: string; line?: string; size: number; mtime: number; sha256: string; changed?: true; gone?: true }
+ *  path, the cited lines when it rests on them alone (`head`: the hash of the first of several, which finds them where
+ *  they moved), the file's size and mtime and the sha256 of what the check read. `changed` once what it rests on no
+ *  longer reads so, `gone` once the file is not there (stale.ts): the citation is stale (tray/tray.mjs staleOf). Lines
+ *  that only moved take their new numbers. */
+export type Source = { file: string; path: string; line?: string; head?: string; size: number; mtime: number; sha256: string; changed?: true; gone?: true }
 /** A cited file as the last pass saw it (stale.ts): its size and mtime, or `gone`; null while no pass saw it since a
  *  resumed session read citations of it that their checks read at other times. */
 export type Seen = { size: number; mtime: number } | { gone: true } | null

@@ -110,7 +110,7 @@ def test_a_mark_whose_cited_line_changed_is_stale_and_repair_checks_it_against_t
     assert fresh == [False, True]
 
 
-def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed(_fresh, monkeypatch):
+def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed_and_moved_lines_take_their_numbers(_fresh, monkeypatch):
     folder = config.corpus_dir(CORPUS)
     notes, other = folder / "notes.md", folder / "other.md"
     notes.write_text("# app\nRun it on port 8000.\nThe tests use pytest.\n")
@@ -134,9 +134,15 @@ def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed(_
     # nothing changed: no reply read
     asyncio.run(marks.refresh_sources(CORPUS))
     assert read == []
-    # another line of one file changed: only that reply is read, and its mark stays verified
-    _edit(notes, "# app, the habit tracker\nRun it on port 8000.\nThe tests use pytest.\n")
+    # a line added above the cited one: only that reply is read, and its mark stays verified at the line it moved to
+    _edit(notes, "# app\nA habit tracker.\nRun it on port 8000.\nThe tests use pytest.\n")
     asyncio.run(marks.refresh_sources(CORPUS))
     assert set(read) == {a}
     (m,) = stored(CORPUS, a)["items"]
     assert m["status"] == "verified" and marks.stale_sources(m) == [], m
+    assert m["sources"][0]["line"] == "3" and m["evidence"]["line"] == "3"
+    assert [x["n"] for x in m["evidence"]["lines"]] == [3, 4]
+    # and the page reads it so from the chat's records
+    _, log_path = agents.paths(CORPUS, agents.MAIN_ID)
+    last = [r for r in agents.read_events(log_path) if r["type"] == "marks" and r["turn"] == a][-1]
+    assert last["items"][0]["evidence"]["line"] == "3"

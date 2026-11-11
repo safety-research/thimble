@@ -20,7 +20,7 @@ JSON on stdout. No model call, and no code run: kernel/evidence.py reads the fil
 
 With "index": a path instead, it writes the cards' places and values there for the checker to grep (card_index), the
 labels as they were at "at", and answers {"cards": the number of cards}. With "cited": checked citations instead, each
-{"sources"}, it answers {"cited": each as it stands now} (kernel/evidence.py examine), in the same order.
+{"sources", "evidence"?}, it answers {"cited": each as it stands now} (kernel/evidence.py examine), in the same order.
 """
 import json
 import math

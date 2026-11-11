@@ -96,13 +96,40 @@ def test_the_validator_answers_each_citation_as_it_stands_now(tmp_path: Path):
     assert a["sources"][0]["changed"] is True and b["sources"][0]["gone"] is True
 
 
-def test_a_log_that_grows_at_each_pass_is_never_hashed_whole(tmp_path: Path, monkeypatch):
+def test_cited_lines_that_moved_keep_their_words_at_their_new_numbers(tmp_path: Path):
+    readme = tmp_path / "README.md"
+    readme.write_text("# app\n## Run\nThe backend listens on port 8000.\nRun make dev.\n")
+    r = check_mark({"n": 1, "words": "port 8000"}, quote("README.md", 3, "port 8000"), [], str(tmp_path))
+    assert [x["n"] for x in r["evidence"]["lines"]] == [2, 3, 4]
+    # a line added at the top moves the cited line, and the lines around it, one down
+    touched(readme, "# app\nA habit tracker.\n## Run\nThe backend listens on port 8000.\nRun make dev.\n")
+    [got] = examine([{"sources": r["sources"], "evidence": r["evidence"]}])
+    [src] = got["sources"]
+    assert src["line"] == "4" and "changed" not in src and src["sha256"] == r["sources"][0]["sha256"]
+    assert got["evidence"]["line"] == "4"
+    assert [(x["n"], x["text"]) for x in got["evidence"]["lines"]] == [(3, "## Run"), (4, "The backend listens on port 8000."), (5, "Run make dev.")]
+    assert got["evidence"]["lines"][1]["highlight"] == r["evidence"]["lines"][1]["highlight"]
+    # a line added right above it: the line around it that reads otherwise now is left out, never shown as it reads
+    touched(readme, "# app\nA habit tracker.\n## Run\nTo start:\nThe backend listens on port 8000.\nRun make dev.\n")
+    [again] = examine([got])
+    assert again["sources"][0]["line"] == "5"
+    assert [x["n"] for x in again["evidence"]["lines"]] == [5, 6]
+    # a run of lines moves as one, found by its first line
+    two = check_mark({"n": 1, "words": "port 8000"}, quote("README.md", "5-6", "port 8000"), [], str(tmp_path))["sources"][0]
+    assert two["line"] == "5-6" and two["head"]
+    touched(readme, "# app\n\nA habit tracker.\n## Run\nTo start:\nThe backend listens on port 8000.\nRun make dev.\n")
+    assert now(two)["line"] == "6-7" and "changed" not in now(two)
+
+
+def test_a_log_that_grows_at_each_pass_is_never_hashed_whole_nor_searched(tmp_path: Path, monkeypatch):
     log = tmp_path / "run.log"
     log.write_text("".join(f"step {i}: loss {1 / (i + 1):.3f}\n" for i in range(2000)))
     whole = evidence.source(str(log), "run.log")
     lines = evidence.source(str(log), "run.log", "1999")
-    hashed = []
+    hashed, searched = [], []
     monkeypatch.setattr(evidence, "_file_hash", lambda f: hashed.append(1) or "")
+    find = evidence._find_lines
+    monkeypatch.setattr(evidence, "_find_lines", lambda f, srcs: searched.append(1) or find(f, srcs))
     for i in range(2000, 2003):
         with log.open("a") as f:
             f.write(f"step {i}: loss {1 / (i + 1):.3f}\n")
@@ -110,7 +137,14 @@ def test_a_log_that_grows_at_each_pass_is_never_hashed_whole(tmp_path: Path, mon
         w, s = examine([{"sources": [whole, lines]}])[0]["sources"]
         assert w["changed"] is True and "changed" not in s and s["line"] == "1999"
         whole = w
-    assert hashed == []
+    assert hashed == [] and searched == []
+    # cited lines found changed are searched for once, then read at their numbers only
+    touched(log, log.read_text().replace("step 1998: loss", "step 1998: LOSS"))
+    gone = now(lines)
+    assert gone["changed"] is True and searched == [1]
+    with log.open("a") as f:
+        f.write("step 2003: loss 0.000\n")
+    assert now(gone)["changed"] is True and searched == [1]
 
 
 def test_one_read_of_a_file_serves_every_source_that_rests_on_it(tmp_path: Path, monkeypatch):

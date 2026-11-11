@@ -9,9 +9,10 @@
 // has another size than its check read), else by the kernel (`thimble dev validate` with the citations that rest on
 // it, kernel/evidence.py examine), which reads it once for all of them. A source whose lines or file no longer read as
 // the check read them is `changed`, one whose file is not there `gone`, and its citation is stale (tray/tray.mjs
-// staleOf). A source that reads as the check read it again (an edit undone) is no longer stale. So a pass costs a stat
-// for each cited file, however many files the folder holds and however many citations rest on each, and the replies it
-// reads are only those whose citations rest on a file that changed.
+// staleOf). Cited lines that only moved (an edit above them) are no change: the citation takes their new numbers, in
+// its sources and in the place its evidence shows. A source that reads as the check read it again (an edit undone) is
+// no longer stale. So a pass costs a stat for each cited file, however many files the folder holds and however many
+// citations rest on each, and the replies it reads are only those whose citations rest on a file that changed.
 //
 // A stale citation draws as marks/view.ts says (its words in the warning color, ↻ after them); its card says stale and
 // which file changed (tray/tray.mjs staleLine), with x, which checks it again against the files as they are now
@@ -24,7 +25,7 @@ import type { EngineInterface } from 'claude-code'
 import { failNotice } from '../bar/notice'
 import { startDir } from '../core/env'
 import { errorWordsOf, validateArgv } from './checker'
-import { citedFiles, editReply, replyOf, sameSeen, sawFiles, type MarkItem, type Seen, type Source } from './store'
+import { citedFiles, editReply, replyOf, sameSeen, sawFiles, type Evidence, type MarkItem, type Seen, type Source } from './store'
 
 type Engine = EngineInterface
 
@@ -43,14 +44,14 @@ const confirmed = (m: MarkItem) => (m.status === 'verified' || m.status === 'cor
 
 const sameSource = (a: Source | undefined, b: Source) => !!a && a.path === b.path && a.sha256 === b.sha256 && a.line === b.line
 
-/** A citation's sources on the files a pass compares, as the kernel takes them (examine). */
-type Cited = { sources: Source[] }
+/** A citation's sources on the files a pass compares, and its evidence, as the kernel takes them (examine). */
+type Cited = { sources: Source[]; evidence?: Evidence }
 
 /** The failure lines a pass gave this load, each once. */
 const said = new Set<string>()
 
-/** The citations as they stand now (kernel/evidence.py examine), in order: their sources; null when the kernel could
- *  not answer (its failure line says so). */
+/** The citations as they stand now (kernel/evidence.py examine), in order: their sources, and their evidence when
+ *  lines they cite moved; null when the kernel could not answer (its failure line says so). */
 async function examined($: Engine, cited: Cited[]): Promise<Cited[] | null> {
   try {
     const ran = await $.process.run(validateArgv($), { cwd: await startDir($), timeoutMs: 120000, stdin: JSON.stringify({ cited }) })
@@ -66,7 +67,8 @@ async function examined($: Engine, cited: Cited[]): Promise<Cited[] | null> {
 }
 
 /** One pass: a stat of each cited file; the citations that rest on the files whose stat changed are compared with
- *  them (by the stat alone where it tells, else by the kernel), and each keeps its sources as they stand now. */
+ *  them (by the stat alone where it tells, else by the kernel), and each keeps its sources (and evidence) as they stand
+ *  now. */
 async function pass($: Engine): Promise<void> {
   const files = await citedFiles($)
   const now: Record<string, Seen> = {}
@@ -77,11 +79,11 @@ async function pass($: Engine): Promise<void> {
   const due = new Set(Object.keys(now))
   if (!due.size) return
   // the citations that rest on those files, from the replies that hold them: each with its sources there
-  const asked: { key: string; n: number; ks: number[]; sent: Source[] }[] = []
+  const asked: { key: string; n: number; ks: number[]; sent: Source[]; evidence?: Evidence }[] = []
   for (const key of new Set([...due].flatMap(p => Object.keys(files[p]!.by)))) {
     for (const m of (await replyOf($, key))?.items ?? []) {
       const ks = confirmed(m) ? m.sources!.flatMap((s, k) => (due.has(s.path) ? [k] : [])) : []
-      if (ks.length) asked.push({ key, n: m.n, ks, sent: ks.map(k => m.sources![k]!) })
+      if (ks.length) asked.push({ key, n: m.n, ks, sent: ks.map(k => m.sources![k]!), ...(m.evidence ? { evidence: m.evidence } : {}) })
     }
   }
   if (asked.length) {
@@ -96,11 +98,11 @@ async function pass($: Engine): Promise<void> {
       return null
     }
     const read = asked.filter(a => a.sent.some(s => !known(s)))
-    const got = read.length ? await examined($, read.map(a => ({ sources: a.sent }))) : []
+    const got = read.length ? await examined($, read.map(a => ({ sources: a.sent, ...(a.evidence ? { evidence: a.evidence } : {}) }))) : []
     if (!got) return
     const answers = new Map(read.map((a, i) => [a, got[i]!]))
     const changed = asked.map(a => ({ ...a, now: answers.get(a) ?? { sources: a.sent.map(s => known(s)!) } }))
-      .filter(a => JSON.stringify(a.now.sources) !== JSON.stringify(a.sent))
+      .filter(a => a.now.evidence || JSON.stringify(a.now.sources) !== JSON.stringify(a.sent))
     for (const key of new Set(changed.map(a => a.key))) {
       const mine = changed.filter(a => a.key === key)
       // a citation checked again meanwhile keeps the sources of its new check
@@ -109,7 +111,7 @@ async function pass($: Engine): Promise<void> {
         if (!a || !confirmed(m) || !a.ks.every((k, j) => sameSource(m.sources![k], a.sent[j]!))) return m
         const sources = [...m.sources!]
         a.ks.forEach((k, j) => { sources[k] = a.now.sources[j]! })
-        return { ...m, sources }
+        return { ...m, sources, ...(a.now.evidence ? { evidence: a.now.evidence } : {}) }
       }) }))
     }
   }
