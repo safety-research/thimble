@@ -3038,6 +3038,7 @@ def narrowed_part(new: str, words: str) -> tuple[str, str, str] | None:
 LEAD = re.compile(r"^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d{1,9}[.)]\s+|\|\s*)+")
 SENTENCE_END = re.compile(r"[.!?][\"'”’)*_]*\s+(?=\S)")
 QUOTED = re.compile(r"\"[^\"]*\"|“[^”]*”")
+CODE_SPAN = re.compile(r"(`+)(?:[^`\n]|[^`\n].*?[^`\n])\1(?!`)")  # inline code, as marks/message.js codeRanges reads it
 CITED = "⟨cited⟩"
 
 
@@ -3121,8 +3122,9 @@ def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | 
     if not fits:
         return "it changes the other citations of the sentence"
     j = k if k in fits else fits[0]
-    # the sentences a quote holds are the quote's
-    ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", x)))  # noqa: E731
+    # the sentences a quote holds are the quote's, and a `.` in code ends none, as in the reply's sentence
+    # (marks/message.js sentenceSpan)
+    ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", CODE_SPAN.sub("c", x))))  # noqa: E731
     if ends(rest_of(new, groups, j)) > ends(rest_of(sentence, old, k)):
         return "it adds a sentence"
     if not inner[j].strip():
