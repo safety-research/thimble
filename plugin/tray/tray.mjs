@@ -21,9 +21,8 @@
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it), or it is stale: x checks it again
-//   staleOf(item), staleLine(stale), staleFiles(stale)   the sources of a checked citation that changed after its
-//                                          check (marks/stale.ts), what the workbench's label says of them, and their
-//                                          files in a list, for what main reads
+//   staleOf(item), staleFiles(stale)       the sources of a checked citation that changed after its check
+//                                          (marks/stale.ts), and their files in a list, for what main reads
 //   checkStatus(item)                      a citation's check as each place that shows its card says it, in both modes
 //                                          (the tray's header, the evidence pane, the claims pane, the workbench's
 //                                          label): its sign and its word, all a card says of its state
@@ -236,17 +235,6 @@ const listed = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} an
 
 /** The files of a stale citation's sources, each once, in a list (`README.md and runs.csv`). */
 export const staleFiles = stale => listed([...new Set((stale || []).map(s => String(s.file)))])
-
-/** What a stale citation's label says of its sources (staleOf) in the workbench: `README.md changed after the check.`,
- *  and `runs.csv is gone.` for a file that is not there now. */
-export function staleLine(stale) {
-  const gone = [...new Set((stale || []).filter(s => s.gone).map(s => String(s.file)))]
-  const changed = [...new Set((stale || []).filter(s => !s.gone).map(s => String(s.file)))].filter(f => !gone.includes(f))
-  return [
-    changed.length ? `${listed(changed)} changed after the check.` : '',
-    gone.length ? `${listed(gone)} ${gone.length > 1 ? 'are' : 'is'} gone.` : '',
-  ].filter(Boolean).join(' ')
-}
 
 // a citation's check by its status: the sign the reply draws after the citation's words in that status (marks/view.ts
 // withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet, ↻ stale; a checked one has

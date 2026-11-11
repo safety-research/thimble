@@ -74,24 +74,21 @@
 .mark-pop .mark-ev-label + .mark-ev-edge { margin-top: 2px; }
 .mark-pop .mark-ev-edge + .refchip-lines { margin-top: 0; }
 .mark-pop .mark-ev-edge { font-size: 12px; line-height: 1.6; color: var(--text-tertiary); white-space: pre; }
-/* a failed mark's reason, whole: it may end with what changed in a label after the reply (backend marks.py) */
-.mark-pop-why {
-  overflow-wrap: anywhere;
-  color: var(--status-negative);
-}
 .mark-pop-state { color: var(--text-tertiary); }
 /* a card that changed after the check: said over what the label shows */
 .mark-ev-changed { margin: 2px 0 4px; }
-/* a failed mark's reason beside Repair, and a stale one's status and the files that changed; a corrected mark's earlier
-   words under nothing but its evidence */
-.mark-pop-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.mark-pop-head .mark-pop-why,
-.mark-pop-head .mark-pop-stale { flex: 1 1 auto; min-width: 0; }
-.mark-pop-stale { overflow-wrap: anywhere; color: var(--text-secondary); }
-.mark-pop-stale-word { color: var(--status-warning); }
+/* the mark's state at the right of its first place's head, or of a head of its own while no evidence shows: the
+   terminal's sign and word in its tone's color, all the label says of the check, and Repair beside a failed or a stale
+   one's (Mark.tsx MarkState) */
+.mark-pop-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mark-pop-side { display: flex; flex: none; align-items: center; gap: 8px; margin-left: auto; }
+.mark-pop-status { white-space: nowrap; }
+.mark-pop-status.is-good { color: var(--status-positive); }
+.mark-pop-status.is-bad { color: var(--status-negative); }
+.mark-pop-status.is-warn { color: var(--status-warning); }
+.mark-pop-status.is-dim { color: var(--text-tertiary); }
 .mark-pop-repair { flex: none; }
-.mark-pop-repair-error { color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mark-pop-was { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mark-pop-repair-error { max-width: 18em; color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mark-ev { display: flex; flex-direction: column; min-width: 0; }
 /* the code in a box as tall as four of its lines, the output in one as tall as ten, the rest a scroll away (Mark.tsx
    KeyBox): each the place its lines are laid out from, so a box counts the lines out of view */

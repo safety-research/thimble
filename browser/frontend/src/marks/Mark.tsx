@@ -33,11 +33,13 @@
 // are out of view there, as the terminal's tray marks the lines it leaves out (`⋯ 44 lines above`, `⋯ 13 lines
 // below`), and follow it as it scrolls.
 //
-// A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
-// terminal's x); a stale one's says `↻ stale` and which file changed after its check, with Repair, which checks it again
-// against the files as they are now; a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
-// each: their cells are marked in one table, their lines in one output. Escape, a press outside, or a second click
-// closes it.
+// The label says the mark's state in one word at its upper right, in the head of its first place, as the terminal's card
+// says it (marks.ts stateOf): ✓ verified (a corrected mark too), × failed, ↻ stale, or checking with a spinner while a
+// check runs; nothing else in it speaks of the check. A failed or a stale one has Repair beside that word, which checks
+// it again (the terminal's x): a failed one to make it correct, a stale one against the files as they are now. A failed
+// one's reason is the word's title, for a person who rests the pointer on it. Words that hold several values (a range,
+// a pair) cite a place for each: their cells are marked in one table, their lines in one output. Escape, a press
+// outside, or a second click closes it.
 //
 // Where the chips of its text carry the ⌘ pointer's anchor (chat/markdown ChipContext), the words carry it as a card's
 // citation does (components/RefChip): the card place the mark cites, else the ref of the text it stands in (a reply, a
@@ -66,7 +68,7 @@ import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
 import { printIndex } from '../../../../plugin/tray/printed.mjs'
 import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL, versionNote } from '../../../../plugin/tray/tray.mjs'
-import { canRepair, failedWhy, LOOK_WORD, lookOf, staleWhy, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
+import { canRepair, failedWhy, lookOf, stateOf, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
 export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[]; streaming: boolean }>({ items: [], streaming: false })
@@ -264,54 +266,39 @@ function wordsOf(node: ReactNode): string {
 }
 
 function MarkEvidence({ item, look, unchecked }: { item: MarkItem | undefined; look: MarkLook; unchecked: boolean }) {
-  const state = (
-    <div className="mark-pop-state">
-      {look === 'checking' && <Spinner size={10} label="checking" />} {LOOK_WORD[look]}
-    </div>
-  )
-  if (!item || (look === 'pending' && !unchecked) || look === 'checking') return state
+  // its state, at the right of its first place's head, or in a head of its own while no evidence shows (module note)
+  const state = <MarkState item={item} look={look} repair={!unchecked && (look === 'failed' || look === 'stale') && canRepair(item)} />
+  const alone = <div className="mark-pop-head">{state}</div>
+  if (!item || (look === 'pending' && !unchecked) || look === 'checking') return alone
   const given = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : [item.evidence]) : []
   // a card's places in another card or output (words with several values) show each in turn
   const evs = given.flatMap((ev) => (ev.kind === 'card' ? [ev, ...(ev.more ?? [])] : [ev]))
   const value = plain(item.shown ?? item.words)
-  // no check read it: the place it names, under the words that say so
-  if (unchecked)
-    return (
-      <>
-        {state}
-        {evs.map((ev, i) => (
-          <EvidenceView key={i} ev={ev} value={value} />
-        ))}
-      </>
-    )
-  const was = wasLine(item)
+  if (!evs.length) return alone
   return (
     <>
-      {look === 'failed' && (
-        <div className="mark-pop-head">
-          <div className="mark-pop-why" title={failedWhy(item)}>
-            {failedWhy(item)}
-          </div>
-          {canRepair(item) && <RepairButton item={item} />}
-        </div>
-      )}
-      {look === 'stale' && (
-        <div className="mark-pop-head">
-          <div className="mark-pop-stale" title={staleWhy(item)}>
-            <span className="mark-pop-stale-word">↻ {LOOK_WORD.stale}</span> {staleWhy(item)}
-          </div>
-          {canRepair(item) && <RepairButton item={item} />}
-        </div>
-      )}
-      {was && (
-        <div className="mark-pop-was" title={was}>
-          {was}
-        </div>
-      )}
       {evs.map((ev, i) => (
-        <EvidenceView key={i} ev={ev} value={value} />
+        <EvidenceView key={i} ev={ev} value={value} state={i === 0 ? state : null} />
       ))}
     </>
+  )
+}
+
+/** A mark's state as its label says it, at the right of a head (marks.ts stateOf): the terminal's sign, a spinner while
+ * a check runs, and its word, in its tone's color. A failed one's reason is its title, the one place the label keeps
+ * it. With `repair`, Repair after it. */
+function MarkState({ item, look, repair }: { item: MarkItem | undefined; look: MarkLook; repair: boolean }) {
+  const st = stateOf(item, look)
+  const sign = st.sign === 'spin' ? <Spinner size={10} label="checking" /> : st.sign
+  const why = look === 'failed' ? failedWhy(item) : ''
+  return (
+    <span className="mark-pop-side">
+      <span className={`mark-pop-status is-${st.tone}`} title={why || undefined}>
+        {sign && <>{sign} </>}
+        {st.word}
+      </span>
+      {repair && item && <RepairButton item={item} />}
+    </span>
   )
 }
 
@@ -347,9 +334,11 @@ async function quotedPlace(at: string, words: string): Promise<string> {
   }
 }
 
-function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
+/** One place of a mark's evidence under its head; `state`, the mark's state (MarkState), at the right of the head of
+ * the first. */
+function EvidenceView({ ev, value, state }: { ev: Evidence; value: string; state: ReactNode }) {
   const open = useContext(OpenPlace)
-  if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} />
+  if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} state={state} />
   // how the code got the value, in the check's words, as the terminal shows it over the code
   const method = ev.kind === 'computed' ? ev.method : undefined
   const printed = ev.kind === 'computed' ? printedTable(ev.table, value) : null
@@ -361,6 +350,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
             {ev.by === 'main' ? 'code Claude ran' : 'code the check ran'}
           </Chip>
           <span className="refchip-pop-value">{value}</span>
+          {state}
         </div>
         {method && <div className="mark-ev-method">{method}</div>}
         {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
@@ -376,6 +366,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
             {ev.by === 'main' ? 'code Claude ran' : 'code the check ran'}
           </Chip>
           <span className="refchip-pop-value">{value}</span>
+          {state}
         </div>
         {method && <div className="mark-ev-method">{method}</div>}
         {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
@@ -403,6 +394,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
                 {placeLabel(p.file, evidenceLine(p)?.n ?? p.line)}
               </Chip>
               {i === 0 && <span className="refchip-pop-value">{value}</span>}
+              {i === 0 && state}
             </div>
             <div className="refchip-lines mono">
               {rows.map((l) => {
@@ -472,8 +464,9 @@ export function labelOfPlace(card: string): string | null {
  * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `card output line 8` in the card,
  * after the card's title elsewhere; a click on the chip shows the line in the card's output. The check's own copy shows while the
  * card is read and stays when the card still shows the same (sameAsChecked). When the card changed, a note says so over
- * the cell as it is now, or over the copy when the place no longer holds what the check read. */
-function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
+ * the cell as it is now, or over the copy when the place no longer holds what the check read. `state`: the mark's state
+ * (MarkState), at the right of the head. */
+function CardEvidence({ ev, value, state }: { ev: Evidence; value: string; state: ReactNode }) {
   const open = useContext(OpenPlace)
   const home = useContext(CiteHome)
   const own = printedTable(ev.table, value)
@@ -533,6 +526,7 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
           {head}
         </Chip>
         {!table ? <span className="refchip-pop-value">{value}</span> : null}
+        {state}
       </div>
       {changed && <div className="mark-pop-state mark-ev-changed">{changed}</div>}
       {table ? (
