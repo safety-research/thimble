@@ -15,6 +15,7 @@ import { TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Menu, type MenuItem } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
+import { HelpTip } from '../components/Tooltip'
 import { api, type ClaudeAccess, type ClaudeAccessCheck } from '../lib/api'
 import { bus } from '../lib/bus'
 
@@ -161,8 +162,9 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
   )
 }
 
-/** Settings' first row. */
+/** Settings' first row, and what its ? says. */
 export const ACCESS_LABEL = 'Claude access'
+export const ACCESS_HELP = 'How the workbench reaches Claude: your Claude Code sign-in, an API key or Workload Identity Federation. Change it when the workbench should run on another account.'
 
 /** The ways in the row's menu, in the order of the install's question, by their short names. */
 export const ACCESS_WAYS: readonly { how: How; label: string }[] = [
@@ -187,14 +189,14 @@ export const problemWords = (p: { what?: string; fix?: string } | null | undefin
     .filter(Boolean)
     .join(' ')
 
-/** Settings' first row, Claude access: the way chosen, in a menu of the three ways. A pick that has what it needs
- * (accessNeeds) is saved and checked at once, with the setup step's one PUT, which makes the check's one small call; a
- * pick of the Claude Code sign-in is the consent to it. Under the row: while the way is the API key and
- * ANTHROPIC_API_KEY is not set where the workbench runs, a field to paste a key, which never shows the key saved; while
- * it is WIF, the config file's path; Enter in either, or leaving it, saves what is typed and checks it. Then what a
- * failed check or a refused save said, or, before either, what the saved way lacks (the status's problem, found
- * without a call). A pick that waits for its key or its file is saved only from that field: Settings closed before
- * then, the way saved before stays. */
+/** Settings' first row, Claude access: its name with its ?, then the way chosen, in a menu of the three ways. A pick
+ * that has what it needs (accessNeeds) is saved and checked at once, with the setup step's one PUT, which makes the
+ * check's one small call; a pick of the Claude Code sign-in is the consent to it. Under the row: while the way is the
+ * API key and ANTHROPIC_API_KEY is not set where the workbench runs, a field to paste a key, which never shows the key
+ * saved; while it is WIF, the config file's path; Enter in either, or leaving it, saves what is typed and checks it.
+ * Then what a failed check or a refused save said, or, before either, what the saved way lacks (the status's problem,
+ * found without a call). A pick that waits for its key or its file is saved only from that field: Settings closed
+ * before then, the way saved before stays. */
 export function ClaudeAccessRow() {
   const [status, setStatus] = useState<ClaudeAccess | null>(null)
   // the way the row shows: the one saved, or a pick that waits for its key or its file
@@ -277,7 +279,10 @@ export function ClaudeAccessRow() {
   return (
     <div className="settings-access" data-setting="claude-access" data-how={how || 'none'}>
       <div className="settings-line">
-        <span className="settings-name">{ACCESS_LABEL}</span>
+        <span className="settings-label">
+          <span className="settings-name">{ACCESS_LABEL}</span>
+          <HelpTip name={ACCESS_LABEL} text={ACCESS_HELP} />
+        </span>
         <span className="settings-access-state">
           {busy && <Spinner size={10} label="Checking" />}
           {said === '' && <Icon name="check" size={14} className="settings-access-ok" title="Claude answers" />}
