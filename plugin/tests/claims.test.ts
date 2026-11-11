@@ -1,6 +1,7 @@
 // Claims (claims/): the observer's claims lens places each answer's claims by their words; a look that fails leaves a
-// gap the pane names; w opens the pane, where a cluster chosen lists its claims and a claim picked takes the pane. All
-// data is made up. `claude plugin test plugin`.
+// gap the pane names; w opens the pane, where a cluster chosen lists its claims and a claim picked takes the pane. A
+// citation's card there says what its check found as the reply's card does. All data is made up.
+// `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { registerAnswers, resetAnswers } from '../core/answers'
@@ -8,6 +9,7 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
+import { cardOf, correctionsOf } from '../claims/graph.js'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { readStore } from '../claims/store.js'
 import { promptStub, tempRun } from './stubs'
@@ -296,6 +298,18 @@ test('a long claim is kept whole: its cluster lists it whole when current, a pre
   expect(other).not.toContain('past the contract.')
   // e opens it: the claim picked shows it whole
   expect(flat(await draw({ claim: 'c1' }))).toContain(LONG)
+})
+
+test("a citation whose check rewrote its sentence: its card in the pane says its status and nothing of what the sentence was; History still shows the sentence before and after", () => {
+  const lines = (s: Any) => cardOf(s, 90).rows.map((r: Any[]) => r.map((x: Any) => x.s).join(''))
+  const rewritten = { status: 'corrected', repair: true, shown: 'port 9000', was: 'The app runs on port 8000.', now: 'The app runs on port 9000.', rewritten: true, reason: 'the README says 9000' }
+  const card = lines(rewritten)
+  expect(card[0]).toContain('✓ repaired')
+  expect(card.join('\n')).not.toContain('sentence rewritten')
+  expect(card.join('\n')).not.toContain('port 8000')
+  // a citation whose words alone the check corrected still says what they were
+  expect(lines({ status: 'corrected', shown: '12 of 40', was: '15 of 40' })).toContain('was 15 of 40')
+  expect(correctionsOf({ id: 'c1', turn: 2, sources: [rewritten] }, new Map())).toMatchObject([{ old: 'The app runs on port 8000.', now: 'The app runs on port 9000.' }])
 })
 
 test('a store of v 2 kept a long claim cut at 200 characters, in a word: read, it ends after its last whole word, then …', () => {

@@ -273,11 +273,10 @@ export function checkStatus(m) {
   return { key, ...CHECKS[key] }
 }
 
-/** The line under a corrected citation's status: what it was (`was 15 of 40`). For a sentence the check rewrote, the
- *  sentence Claude wrote, which the caller gives as `was`, and `sentence rewritten; ` before it; for a citation it
- *  narrowed, `narrowed; `. */
-export const wasLine = ({ rewritten, narrowed, was }) =>
-  `${rewritten ? 'sentence rewritten; ' : narrowed ? 'narrowed; ' : ''}was ${String(was ?? '').replace(/\*\*|`/g, '')}`
+/** The line under a corrected citation's status: what it was (`was 15 of 40`), and for a citation it narrowed,
+ *  `narrowed; ` before it. A sentence the check rewrote has none: it reads as it is now. */
+export const wasLine = ({ narrowed, was }) =>
+  `${narrowed ? 'narrowed; ' : ''}was ${String(was ?? '').replace(/\*\*|`/g, '')}`
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
  *  it mattered here. A heads-up: its title in bold, then two to four bullets. */
