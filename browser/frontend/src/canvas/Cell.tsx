@@ -1,10 +1,10 @@
 // One card on the board: the card's face (CardFace.tsx) with the board's chrome around it. At rest a card is its face,
 // and its lock when locked. Hovered or selected, the chrome shows in a row above the question: `thread · time` at the
-// left, the details, chat, delete, star and lock icons at the right. Any edge or corner resizes it. A locked card is one
-// no model may change or delete. Selected alone, a click on its question or takeaway edits it in place (RefEditor); a
-// double click opens focus mode. ⌘↵ in the question typed in place saves it and sends it to main as a request on the
-// card (lib/agentKey), and the card says `sent to main` until main's work lands in it. The board (Canvas.tsx) owns
-// placement, selection, drag and resize. The card is its citations' home (`data-cite-home`).
+// left, the details, chat, export (CardExport.tsx), delete, star and lock icons at the right. Any edge or corner resizes
+// it. A locked card is one no model may change or delete. Selected alone, a click on its question or takeaway edits it
+// in place (RefEditor); a double click opens focus mode. ⌘↵ in the question typed in place saves it and sends it to
+// main as a request on the card (lib/agentKey), and the card says `sent to main` until main's work lands in it. The
+// board (Canvas.tsx) owns placement, selection, drag and resize. The card is its citations' home (`data-cite-home`).
 import { memo, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Button } from '../components/Button'
 import { askMain, whenMainIdle } from '../lib/agentKey'
@@ -13,6 +13,7 @@ import { bus } from '../lib/bus'
 import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
+import { CardExport } from './CardExport'
 import { CardFace, type CardField } from './CardFace'
 import { CITATION } from '../marks/marks'
 import { checkAgain } from './checkActions'
@@ -221,6 +222,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
               <Button variant="icon" size="sm" icon="code" title="Details" aria-label="Details" active={p.detailOpen} onClick={act('detail')} />
               <Button variant="icon" size="sm" icon="history" title="History" aria-label="History" className="bcell-history" onClick={act('history')} />
               <Button variant="icon" size="sm" icon="chat" title="Chat about this card" aria-label="Chat about this card" onClick={act('ask')} />
+              <CardExport ws={ctx.ws} card={cell.id} />
               <Button variant="icon" size="sm" icon="trash" title="Delete" aria-label="Delete" className="bcell-delete" onClick={act('delete')} />
               <Button variant="icon" size="sm" icon="star" title={cell.starred ? 'Starred' : 'Star'} aria-label={cell.starred ? 'Starred' : 'Star'} active={!!cell.starred} className="bcell-star" onClick={act('star')} />
               <Button variant="icon" size="sm" icon={cell.locked ? 'lock' : 'unlock'} title={cell.locked ? 'Locked' : 'Lock'} aria-label={cell.locked ? 'Locked' : 'Lock'} active={!!cell.locked} className="bcell-lock" onClick={act('lock')} />

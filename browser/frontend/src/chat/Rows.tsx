@@ -576,7 +576,7 @@ function CallRun({ tools, ws, pending }: { tools: readonly ToolRowT[]; ws: strin
 
 /** The thimble tools whose target is one or more refs (a card, a passage of the report): their chip line names the
  * tool alone and each ref follows it as its chip, which names a card by its name, never its id. */
-const REF_TARGET_TOOLS = new Set(['read_ref', 'screenshot', 'edit_card', 'delete_card', 'edit_document', 'add_comment'])
+const REF_TARGET_TOOLS = new Set(['read_ref', 'screenshot', 'edit_card', 'delete_card', 'export_card', 'edit_document', 'add_comment'])
 
 /** The refs a call's target names, when it is a thimble call whose target is refs alone; null otherwise. Pure. */
 export function targetRefs(name: string, summary: string): string[] | null {

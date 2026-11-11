@@ -423,6 +423,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
         str(inp.card ?? inp.cell ?? '')
       )
     case 'delete_card':
+    case 'export_card':
       return str(inp.card ?? inp.cell ?? '')
     case 'apply_label':
       return [str(inp.name), inp.scope ? `on ${str(inp.scope)}` : ''].filter(Boolean).join(' ')
@@ -517,6 +518,7 @@ export const TOOL_WORDS: Record<string, string> = {
   add_card: 'Add card',
   edit_card: 'Edit card',
   delete_card: 'Delete card',
+  export_card: 'Export card',
   read_ref: 'Look up',
   list_cards: 'List cards',
   apply_label: 'Apply label',
@@ -554,6 +556,7 @@ export const TOOL_GROUPS: Record<string, string> = {
   add_card: 'Cards',
   edit_card: 'Cards',
   delete_card: 'Cards',
+  export_card: 'Cards',
   list_cards: 'Cards',
   apply_label: 'Label',
   show_label: 'Label',
@@ -793,6 +796,8 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return with_('Edited card', oneLine(str(inp.question ?? inp.title)) || cellQ(inp.card ?? inp.cell) || takeawayLine(inp.takeaway))
     case 'delete_card':
       return with_('Deleted card', cellQ(inp.card ?? inp.cell))
+    case 'export_card':
+      return with_('Exported card', cellQ(inp.card ?? inp.cell))
     case 'list_cards': {
       const g = str(inp.group).trim()
       return g && g.toLowerCase() !== 'all' ? `Listed cards in ${g}` : 'Listed cards'

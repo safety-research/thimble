@@ -144,7 +144,7 @@ async def test_a_message_runs_a_turn_of_main_on_the_messages_api(on, monkeypatch
     assert got[-1][0] == "done"
     body = client.bodies[0]
     assert "<thimble-event" in json.dumps(body["messages"][-1])
-    assert {"Read", "Grep", "Glob", "list_cards"} <= {t["name"] for t in body["tools"] if "name" in t}
+    assert {"Read", "Grep", "Glob", "list_cards", "export_card"} <= {t["name"] for t in body["tools"] if "name" in t}
     from app import subagent_files as sf
 
     line = sf.find_caller(config.workspace_dir(CORPUS), "toolu_1")
@@ -216,6 +216,8 @@ async def test_claude_code_sign_in_runs_a_headless_session_with_the_same_records
     assert "Agent" not in opts.tools and "Read" in opts.tools
     assert seen["server"][0] == runtime_cc.SERVER
     assert "mcp__plugin_thimble_thimble__list_cards" in opts.allowed_tools
+    assert "mcp__plugin_thimble_thimble__export_card" in opts.allowed_tools
+    assert "export_card" in {t.name for t in seen["server"][1]}
     assert "<thimble-event" in seen["prompt"]
     assert json.loads(runtime._spaces[CORPUS].main.state_path("cc").read_text())["session_id"] == "sess-1"
 
