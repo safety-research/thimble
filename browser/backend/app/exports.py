@@ -1,4 +1,4 @@
-"""A written document exported as a file: Markdown, HTML or PDF.
+"""A written document exported as a file: Markdown, HTML, PDF or slides.
 
 Every format starts from one reading of the document (read_model): its title, units (a report's sections), their
 figures and the citations, numbered in order of first use;
@@ -6,12 +6,13 @@ a card a sentence names as a noun is written as the card's title (report_types.c
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
 the citations as numbered notes linked from the text, set as the report is on the page, in its faces and sizes on white,
 each figure the card's question, its art and its caption; PDF is that HTML printed by the browser on A4 pages,
-a heading kept with what follows it and a figure, a table row or a note never split.
+a heading kept with what follows it and a figure, a table row or a note never split. Slides are a .pptx (slides.py), a
+document with sections only.
 
 The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
 own Chromium when it is installed. A figure's art comes from the card harness (render.render_figure), drawn as the
-report's figure draws it; without a browser a figure is its card's table or its text, and PDF is offered disabled with
-the reason.
+report's figure draws it; without a browser a figure is its card's table or its text, and PDF and slides are offered
+disabled with the reason.
 """
 from __future__ import annotations
 
@@ -38,14 +39,15 @@ FORMAT_INFO = {
     "markdown": {"name": "Markdown", "ext": "md", "mime": "text/markdown; charset=utf-8"},
     "html": {"name": "HTML", "ext": "html", "mime": "text/html; charset=utf-8"},
     "pdf": {"name": "PDF", "ext": "pdf", "mime": "application/pdf"},
+    "pptx": {"name": "Slides", "ext": "pptx", "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
 }
-NEEDS_BROWSER = ("pdf",)  # its figures are pictures, which the card harness draws
+NEEDS_BROWSER = ("pdf", "pptx")  # their figures are pictures, which the card harness draws
 QUOTE_CHARS = 240  # of a cited record, in its note
 TEXT_CHARS = 1200  # of a card's text when it is shown without a picture
 TABLE_ROWS = 30
 FIGURE_W = 640  # px: the text column of the HTML and PDF, which a figure's art is laid out as wide as (render_figure)
 # how many times larger than its layout a figure's art is drawn: with the harness's 2 device px per px, a picture of 3
-# px per px, about 290 dpi in the PDF's column
+# px per px, about 290 dpi in the PDF's column and sharp on a slide
 FIGURE_ZOOM = 1.5
 # the page an export is set on, Neutral's white (frontend styles/tokens.css), which its figures' art is drawn on
 # (render.export_theme)
@@ -415,12 +417,13 @@ def _card_text(cell: dict[str, Any]) -> tuple[str, str]:
     return "", text[:TEXT_CHARS] + ("…" if len(text) > TEXT_CHARS else "")
 
 
-async def figure_pictures(c: str, cards: list[str], *, draw: bool) -> tuple[dict[str, dict[str, Any]], str]:
+async def figure_pictures(c: str, cards: list[str], *, draw: bool,
+                          chart_width: int = FIGURE_W) -> tuple[dict[str, dict[str, Any]], str]:
     """Each figure's card as the export shows it (card_html's input): its question, and its art as the report's figure
-    draws it (render.render_figure, FIGURE_ZOOM times as large), laid out FIGURE_W px wide, as `png` with the px it
-    stands in (`width`, `height`), else its table or its text; and why the art is not a picture when it is not. A card
-    that is gone says so, as on the page."""
-    from . import notebook, render  # noqa: PLC0415
+    draws it (render.render_figure, FIGURE_ZOOM times as large), laid out FIGURE_W px wide, a chart `chart_width` px, as
+    `png` with the px it stands in (`width`, `height`), else its table or its text; and why the art is not a picture when
+    it is not. A card that is gone says so, as on the page."""
+    from . import material, notebook, render  # noqa: PLC0415
 
     out: dict[str, dict[str, Any]] = {}
     why = "" if draw else "the browser is off"
@@ -432,7 +435,8 @@ async def figure_pictures(c: str, cards: list[str], *, draw: bool) -> tuple[dict
         pic: dict[str, Any] = {"question": _collapse(cell.get("title")) or f"card:{cid}"}
         if draw and not why:
             try:
-                r = await render.render_figure(c, cell, width=FIGURE_W, zoom=FIGURE_ZOOM)
+                width = chart_width if material.figure_kind(cell) == "chart" else FIGURE_W
+                r = await render.render_figure(c, cell, width=width, zoom=FIGURE_ZOOM)
             except render.Unavailable as e:
                 why = str(e)
             else:
@@ -517,11 +521,14 @@ async def print_pdf(html_text: str) -> bytes:
 # --------------------------------------------------------------------------- formats
 
 
-def formats() -> list[dict[str, Any]]:
-    """The formats a document offers, each {id, name, ext, ok, why?}: Markdown, HTML and PDF, the ones that need the
-    browser (NEEDS_BROWSER) marked not ok when there is none."""
+def formats(doc: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """The formats a document offers, each {id, name, ext, ok, why?}: Markdown, HTML, PDF and, but for a page, which has
+    no sections, Slides; the ones that need the browser (NEEDS_BROWSER) marked not ok when there is none."""
+    from .report_types import is_custom  # noqa: PLC0415
+
     kind, why_off = browser()
-    out = [{"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True} for i in ("markdown", "html", "pdf")]
+    ids = ("markdown", "html", "pdf") + (() if doc is not None and is_custom(doc) else ("pptx",))
+    out = [{"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True} for i in ids]
     for f in out:
         if f["id"] in NEEDS_BROWSER and kind == "off":
             f.update(ok=False, why=f"Needs a browser: {why_off}")
@@ -529,6 +536,11 @@ def formats() -> list[dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- export
+
+
+def _fetch_hint(why: str) -> str:
+    """The command that fetches the card harness's browser when `why` says it is not installed, else ''."""
+    return f". Fetch it: {headless.fetch_command(headless.HARNESS)}" if why == headless.NOT_INSTALLED else ""
 
 
 def _filename(title: str, slug: str, ext: str) -> str:
@@ -544,7 +556,7 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
     if doc is None:
         raise HTTPException(404, f"no {slug} yet")
-    offered = {f["id"]: f for f in await asyncio.to_thread(formats)}
+    offered = {f["id"]: f for f in await asyncio.to_thread(formats, doc)}
     f = offered.get(fmt)
     if f is None:
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
@@ -556,6 +568,14 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
     kind, _why = browser()
     cards = [x["card"] for u in m["units"] for x in u["figures"]]
+    if fmt == "pptx":
+        from . import slides  # noqa: PLC0415
+
+        pics, why = await figure_pictures(c, cards, draw=kind != "off", chart_width=slides.CHART_W)
+        if why and cards:
+            raise HTTPException(409, f"Slides show each figure as a picture, and the card harness cannot draw one: {why}"
+                                     + _fetch_hint(why))
+        return await asyncio.to_thread(slides.deck, m, pics), name("pptx"), FORMAT_INFO["pptx"]["mime"]
     pics, _ = await figure_pictures(c, cards, draw=kind != "off")
     html_text = await asyncio.to_thread(to_html, m, pics)
     if fmt == "html":
@@ -584,7 +604,7 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 
     slug = _slug(c, inv_id, slug)
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
-    return {"formats": await asyncio.to_thread(formats) if doc else []}
+    return {"formats": await asyncio.to_thread(formats, doc) if doc else []}
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")

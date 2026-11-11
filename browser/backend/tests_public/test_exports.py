@@ -1,10 +1,13 @@
 """A written document exported: Markdown with footnotes, one self-contained HTML file set as the report is on the page,
-and PDF offered disabled when there is no browser. No model call and no browser: the card harness's pictures are
-faked."""
+PDF and slides offered disabled when there is no browser, and slides as a .pptx of one slide per section. No model call
+and no browser: the card harness's pictures are faked."""
 from __future__ import annotations
 
 import base64
+import io
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 
 import pytest
 from fastapi import FastAPI
@@ -57,6 +60,8 @@ async def test_a_written_document_exports_as_markdown_with_footnotes_and_as_one_
 
 
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+NS = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+      "p": "http://schemas.openxmlformats.org/presentationml/2006/main"}
 
 
 @pytest.fixture()
@@ -117,3 +122,61 @@ async def test_the_html_and_pdf_set_each_figure_as_the_page_shows_it_and_keep_a_
     assert "h1,h2,h3,h4{break-after:avoid}" in html and "figure{margin:18px 0 22px;break-inside:avoid}" in html
     assert "figure img{max-height:230mm;width:auto}" in html
     assert "<ol><li>Why the account did it. Nobody asked.</li><li>Whether it acted alone.</li></ol>" in html
+
+
+async def test_a_report_exports_as_slides_one_per_section_with_its_figure_and_its_text_in_the_notes(chart, harness):
+    await _write_with_figure(chart)
+    client = TestClient(app)
+    by = {f["id"]: f for f in client.get(f"{BASE}/report/exports").json()["formats"]}
+    assert by["pptx"] == {"id": "pptx", "name": "Slides", "ext": "pptx", "ok": True}
+    r = client.get(f"{BASE}/report/export/pptx")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.presentationml")
+    assert 'filename="One-account-deleted-the-audit-pages.pptx"' in r.headers["content-disposition"]
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    for name in z.namelist():  # every part a viewer reads is well-formed
+        if name.endswith((".xml", ".rels")):
+            ET.fromstring(z.read(name))
+    types = z.read("[Content_Types].xml").decode()
+    slides = [n for n in z.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)]
+    assert len(slides) == 3 and all(f'PartName="/{n}"' in types for n in slides), "the title, then one per section"
+
+    def texts(name: str) -> list[str]:
+        """Each paragraph's words, without the mark of a sentence no check verified (no checker runs here)."""
+        root = ET.fromstring(z.read(name))
+        return ["".join(t.text or "" for t in p.iter(f"{{{NS['a']}}}t")).replace(" [unverified]", "")
+                for p in root.iter(f"{{{NS['a']}}}p")]
+
+    # the title slide holds the title and the opening section's lead
+    assert texts("ppt/slides/slide1.xml")[:2] == ["One account deleted the audit pages",
+                                                   "All 27 deletions came from one account."]
+    # a section's slide: its heading, the first sentence of each paragraph, its figure's question, picture and caption
+    two = texts("ppt/slides/slide2.xml")
+    assert two[:3] == ["The deletions came within one hour", "The account deleted every page within an hour.",
+                       "A second paragraph opens here."]
+    assert "When were the pages deleted?" in two and "The deletions by hour" in two
+    assert b"<p:pic>" in z.read("ppt/slides/slide2.xml") and z.read("ppt/media/image1.png") == PNG
+    assert "../media/image1.png" in z.read("ppt/slides/_rels/slide2.xml.rels").decode()
+    # its notes hold the section's whole text; a list's items keep their numbers on the slide
+    assert "Its second sentence stays in the notes." in " ".join(texts("ppt/notesSlides/notesSlide2.xml"))
+    assert texts("ppt/slides/slide3.xml")[1:] == ["Why the account did it.", "Whether it acted alone."]
+    assert b'<a:buAutoNum type="arabicPeriod"/>' in z.read("ppt/slides/slide3.xml")
+    # a chart is laid out narrower for a slide, so its labels read larger there
+    assert harness == [(chart, 480)]
+
+
+async def test_slides_need_the_browser_and_say_what_stops_the_pictures(chart, monkeypatch):
+    await _write_with_figure(chart)
+    client = TestClient(app)
+    monkeypatch.setattr(exports, "browser", lambda: ("off", "no browser is installed"))
+    by = {f["id"]: f for f in client.get(f"{BASE}/report/exports").json()["formats"]}
+    assert not by["pptx"]["ok"] and by["pptx"]["why"] == "Needs a browser: no browser is installed"
+    # a browser, but a card harness whose Chromium is missing: the slides are refused with the command that fetches it
+    monkeypatch.setattr(exports, "browser", lambda: ("bundled", ""))
+
+    async def missing(*a, **k):
+        raise render.Unavailable(exports.headless.NOT_INSTALLED)
+
+    monkeypatch.setattr(render, "render_figure", missing)
+    r = client.get(f"{BASE}/report/export/pptx")
+    assert r.status_code == 409
+    assert "the headless Chromium is not installed. Fetch it: " in r.json()["detail"]
