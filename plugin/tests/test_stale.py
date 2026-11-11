@@ -1,0 +1,88 @@
+"""What a checked citation rests on (engine/kernel/evidence.py sources, examine; engine/validate.py "sources"), on
+made-up files and calls."""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
+from kernel.evidence import check_mark, examine  # noqa: E402
+
+VALIDATE = Path(__file__).resolve().parents[1] / "engine" / "validate.py"
+
+
+def quote(file: str, line, sub: str) -> dict:
+    return {"kind": "quote", "status": "verified", "evidence": {"file": file, "line": line, "substring": sub}, "reason": "the file says so"}
+
+
+def touched(p: Path, text: str) -> None:
+    """The file written anew, its mtime a second later, as a later write leaves it."""
+    st = p.stat()
+    p.write_text(text)
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+
+
+def test_a_quote_rests_on_its_cited_lines_and_turns_stale_only_when_they_change(tmp_path: Path):
+    readme = tmp_path / "README.md"
+    readme.write_text("# app\nThe backend listens on port 8000.\nRun make dev.\n")
+    r = check_mark({"n": 1, "words": "port 8000"}, quote("README.md", 2, "port 8000"), [], str(tmp_path))
+    assert r["status"] == "verified"
+    [src] = r["sources"]
+    assert (src["file"], src["line"], src["path"]) == ("README.md", "2", str(readme.resolve()))
+    # what it rests on is not shown as evidence
+    assert "sources" not in r["evidence"] and "_path" not in r["evidence"]
+    assert examine(src) is src
+    # another line changed: the cited line reads as the check read it
+    touched(readme, "# app, the habit tracker\nThe backend listens on port 8000.\nRun make dev.\n")
+    other = examine(src)
+    assert "changed" not in other and "gone" not in other and other["mtime"] != src["mtime"]
+    # the cited line changed
+    touched(readme, "# app\nThe backend listens on port 9000.\nRun make dev.\n")
+    assert examine(other)["changed"] is True
+    # the file is gone, then back as the check read it
+    text = readme.read_text()
+    readme.unlink()
+    gone = examine(examine(other))
+    assert gone["gone"] is True
+    readme.write_text(text.replace("9000", "8000"))
+    assert "gone" not in examine(gone) and "changed" not in examine(gone)
+
+
+def test_computed_evidence_rests_on_the_files_its_code_names(tmp_path: Path):
+    (tmp_path / "prs.jsonl").write_text('{"merged": true}\n{"merged": false}\n')
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "runs.jsonl").write_text("{}\n")
+    (tmp_path / "notes.txt").write_text("not read\n")
+    code = 'import glob, json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nruns = glob.glob("*/runs.jsonl")\nprint(f"{sum(p[\'merged\'] for p in prs)} of {len(prs)}")'
+    call = {"command": f"cd {tmp_path} && python3 - <<'PY'\n{code}\nPY", "output": "1 of 2\n", "by": "checker"}
+    item = {"kind": "computed", "status": "verified", "evidence": {"output": "1 of 2"}, "reason": "counted"}
+    r = check_mark({"n": 1, "words": "1 of 2"}, item, [call], str(tmp_path))
+    assert r["status"] == "verified"
+    assert sorted(s["file"] for s in r["sources"]) == ["a/runs.jsonl", "prs.jsonl"]
+    assert all("line" not in s for s in r["sources"])
+    prs = next(s for s in r["sources"] if s["file"] == "prs.jsonl")
+    touched(tmp_path / "prs.jsonl", '{"merged": true}\n{"merged": true}\n')
+    assert examine(prs)["changed"] is True
+    # a mark the check could not confirm rests on nothing
+    wrong = check_mark({"n": 1, "words": "7 of 9"}, item, [call], str(tmp_path))
+    assert wrong["status"] == "failed" and "sources" not in wrong
+
+
+def test_a_check_after_a_change_takes_computed_evidence_only_from_its_own_calls(tmp_path: Path):
+    main = {"command": "python3 count.py", "output": "12 of 40\n", "by": "main"}
+    item = {"kind": "computed", "status": "verified", "evidence": {"output": "12 of 40"}, "reason": "counted"}
+    assert check_mark({"n": 1, "words": "12 of 40"}, item, [main], str(tmp_path))["status"] == "verified"
+    again = check_mark({"n": 1, "words": "12 of 40"}, item, [main], str(tmp_path), fresh=True)
+    assert again["status"] == "failed" and "sources" not in again
+
+
+def test_the_validator_answers_each_source_as_it_stands_now(tmp_path: Path):
+    f = tmp_path / "board.md"
+    f.write_text("agent-07: yes\n")
+    src = check_mark({"n": 1, "words": "yes"}, quote("board.md", 1, "yes"), [], str(tmp_path))["sources"][0]
+    touched(f, "agent-07: no\n")
+    out = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"sources": [src, {**src, "path": str(tmp_path / "x")}]}),
+                         capture_output=True, text=True, check=True)
+    now = json.loads(out.stdout)["sources"]
+    assert now[0]["changed"] is True and now[1]["gone"] is True
