@@ -514,6 +514,12 @@ def theme(c: str) -> dict[str, str]:
     return {"paper": paper, "accent": accent}
 
 
+def export_theme(c: str) -> dict[str, str]:
+    """The theme an export's figures are drawn in: the analyst's accent (theme) on Neutral, whose white is the page a
+    download is printed on and a slide is shown on."""
+    return {"paper": "neutral", "accent": theme(c)["accent"]}
+
+
 def label_data(c: str, cell: dict[str, Any]) -> dict[str, Any] | None:
     """What a label card's face reads from the API: the label and the workspace settings. The face shows none of the
     label's records (canvas/bodies.tsx LabelBody), so none is read. None for any other card or a label that is gone."""
@@ -546,10 +552,12 @@ def card_libs_part(c: str, cell: dict[str, Any]) -> dict[str, Any]:
     return {"cardLibs": {card_libs.key(payload["libs"]): card_libs.head(c, payload["libs"])}}
 
 
-def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> dict[str, Any]:
+def request_for(c: str, cell: dict[str, Any], *, width: int | None = None, figure: bool = False,
+                zoom: float = 1.0) -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
     resolved, the cards they name, the theme and the width, for a label card its label (label_data), and for a custom
-    card the libraries it names (card_libs_part)."""
+    card the libraries it names (card_libs_part). `figure`: the page draws the card's art as a report figure shows it, in
+    the export's theme (export_theme), in place of the card face, `zoom` times as large as its layout."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     w = width or cell.get("width") or CARD_W
@@ -562,10 +570,11 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
         "citations": resolve_all(c, refs),
         "names": card_names(c, refs, cell),
         "labels": label_names(c, cell),
-        "theme": theme(c),
+        "theme": export_theme(c) if figure else theme(c),
         "width": int(w) if isinstance(w, (int, float)) and w > 0 else CARD_W,
         **({"label": label} if label else {}),
         **card_libs_part(c, cell),
+        **({"figure": True, "zoom": zoom} if figure else {}),
     }
 
 
@@ -577,6 +586,17 @@ async def render_card(c: str, cell: dict[str, Any], *, width: int | None = None,
         raise Unavailable("THIMBLE_RENDER is off")
     req = await asyncio.to_thread(request_for, c, cell, width=width)
     return await pool().render(req, timeout_s=timeout_s, still=still)
+
+
+async def render_figure(c: str, cell: dict[str, Any], *, width: int, zoom: float = 1.0,
+                        timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
+    """The art of one card of workspace `c` as a report figure draws it, laid out `width` px wide and drawn `zoom` times
+    as large, on the paper of the export's theme (request_for `figure`): the picture an export shows for a figure, with a
+    table wider than `width` whole, its box in zoomed px. Unavailable when the harness cannot run."""
+    if not enabled():
+        raise Unavailable("THIMBLE_RENDER is off")
+    req = await asyncio.to_thread(request_for, c, cell, width=width, figure=True, zoom=zoom)
+    return await pool().render(req, timeout_s=timeout_s)
 
 
 # --------------------------------------------------------------------------- routes

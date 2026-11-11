@@ -1,6 +1,7 @@
 // The card harness's page (render.html; backend/app/render.py keeps a few open in headless Chromium): one card drawn
 // with the canvas's own CardFace, width, theme and stylesheet, so the picture the card check reads is what the analyst
-// sees. The page calls no API: each request carries the card with its refs resolved, cited calls, card and label names
+// sees; or, for an export, the card's art alone as a report figure draws it (report/FigureArt), on the export's paper.
+// The page calls no API: each request carries the card with its refs resolved, cited calls, card and label names
 // (and a label card's `label` data, a custom card's libraries), and a fetch stub answers the page's
 // requests from them, listing any it could not.
 import { flushSync } from 'react-dom'
@@ -16,6 +17,7 @@ import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { setAccent, setPaper, type Accent, type Paper } from './lib/theme'
 import type { Cell, Concept, ConceptDetail } from './lib/types'
+import { FigureArt } from './report/FigureArt'
 
 export interface RenderRequest {
   ws: string
@@ -32,6 +34,12 @@ export interface RenderRequest {
   label?: LabelData | null
   /** a custom card's libraries by its `libs` query, as GET /ws/{c}/card-libs returns them */
   cardLibs?: Record<string, { head: string; problems: string[] }>
+  /** draw the card's art as a report figure shows it, `width` wide, in place of the card face: the picture an export
+   * shows for the figure, whole where a wide table or chart would scroll on the page */
+  figure?: boolean
+  /** with `figure`, how many times larger than its layout the art is drawn, so the picture stays sharp printed or on a
+   * slide */
+  zoom?: number
 }
 
 export interface LabelData {
@@ -171,6 +179,9 @@ async function render(req: RenderRequest): Promise<RenderResult> {
     refresh: () => undefined,
     openThread: () => undefined,
   }
+  const figure = req.figure === true
+  // a figure's picture stands on the report's paper, past its width too, where a wide table goes on
+  stage.style.background = figure ? 'var(--surface-card)' : ''
   root.unmount()
   root = createRoot(host)
   try {
@@ -178,15 +189,33 @@ async function render(req: RenderRequest): Promise<RenderResult> {
       root.render(
         <CanvasContext.Provider value={ctx}>
           <ChipContext.Provider value={{ workspace: ws, broken: new Set(), anchor: true }}>
-            <div className={`bcell bcell-kind-${kindOf(cell)}`} style={{ position: 'relative', width }}>
-              <CardFace cell={cell} width={width - CARD_PAD_X} label={{ concept, error: null } as never} />
-            </div>
+            {figure ? (
+              <div className="render-figure" style={{ width, zoom: req.zoom && req.zoom > 0 ? req.zoom : 1 }}>
+                <FigureArt ws={ws} cell={cell} width={width} />
+              </div>
+            ) : (
+              <div className={`bcell bcell-kind-${kindOf(cell)}`} style={{ position: 'relative', width }}>
+                <CardFace cell={cell} width={width - CARD_PAD_X} label={{ concept, error: null } as never} />
+              </div>
+            )}
           </ChipContext.Provider>
         </CanvasContext.Provider>,
       ),
     )
   } catch (e) {
     return { box: null, fonts: false, requests: unanswered, error: `the card did not render: ${(e as Error).message}`, ms: { settle: 0 } }
+  }
+  if (figure) {
+    const art = host.querySelector<HTMLElement>('.render-figure')
+    if (!art?.firstElementChild) return { box: null, fonts: false, requests: unanswered, error: 'the card has no figure to draw', ms: { settle: 0 } }
+    await settled(art)
+    const fonts = await fontsLoaded()
+    // the box reaches as far as the art does, zoomed: a table wider than the figure is drawn whole (report.css
+    // .render-figure)
+    const box = boxOf(art)
+    const right = Math.max(...Array.from(art.querySelectorAll('*'), (el) => el.getBoundingClientRect().right))
+    box.width = Math.max(box.width, right + window.scrollX - box.x)
+    return { box, fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
   }
   const card = host.querySelector<HTMLElement>('article.canvas-card')
   if (!card) return { box: null, fonts: false, requests: unanswered, error: 'the card did not render', ms: { settle: 0 } }
