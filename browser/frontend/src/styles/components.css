@@ -689,6 +689,23 @@ a.card:hover {
   display: inline-flex;
   flex: none;
 }
+/* the ? that says what a setting does (Tooltip.tsx HelpTip): a borderless icon button the size of its name's text, in
+   the quiet ink until hovered, focused or kept open */
+.help-tip.btn {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+}
+.help-tip.btn .btn-ico {
+  width: 14px;
+  height: 14px;
+}
+.help-tip.btn:hover,
+.help-tip.btn:focus-visible,
+.help-tip.btn[data-kept] {
+  color: var(--text-primary);
+}
 .menu-ico {
   flex: none;
   color: var(--text-tertiary);

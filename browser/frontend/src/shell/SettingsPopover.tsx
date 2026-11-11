@@ -15,6 +15,9 @@
 // fast-mode bolt (FAST_ROLES). Main and side threads hold main's session's model, effort and fast mode, the same ones
 // as the composer's line under main's chat (chat/mainChoice), from main's next message; every other row is thimble's
 // config (saveRole), from that agent's next start. The other settings are thimble's config file's (docs/config.md).
+// After every name, the Models line's and each agent's too, a ? (components/Tooltip HelpTip) says in one or two
+// sentences what the setting does and when you would change it (each one's _HELP, MODEL_ROWS' `help`): its words show
+// on hover and keyboard focus, and stay open after a click or a tap.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -23,6 +26,7 @@ import { Icon } from '../components/Icon'
 import { Menu, Popover, type MenuItem } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
+import { HelpTip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, onSettingsChange, sameModel, saveRole } from '../lib/models'
@@ -37,29 +41,33 @@ import { ClaudeAccessRow } from './ClaudeAccess'
 /** The switch that keeps main and its thread forks from writing the corpus folder, per workspace: on while the
  * workspace's `corpus_edits` is false (backend ledger.EDITS_KEY). */
 export const READ_ONLY_LABEL = 'Read only'
+export const READ_ONLY_HELP = 'Keeps Claude in the chat and in side threads from changing the files in this folder. Turn it on when the files must stay as they are.'
 /** The ask key's choice (backend ledger.ASK_KEY): its name, and its options as the platform writes them (⌘-click and
  * ⌥-click on a Mac, Ctrl-click and Alt-click elsewhere). */
 export const ASK_KEY_LABEL = 'Ask Claude with'
+export const ASK_KEY_HELP = 'Hold this key and click anything on the page to ask Claude about it. Change it when your system already uses this click for something else.'
 export const askKeyOptions = (mac: boolean): { value: AskKey; label: string }[] =>
   (['meta', 'alt'] as const).map((k) => ({ value: k, label: `${askKeyLabel(mac, k)}-click` }))
 /** The switch of whether thimble proposes views (thimble's config `views.propose`, backend ledger.PROPOSE_KEY). */
 export const PROPOSE_LABEL = 'View proposals'
+export const PROPOSE_HELP = 'After your messages, thimble may propose a view: a page built to show your records more clearly. Turn it off to stop the proposals and the model call that looks for one.'
 export const MODELS_LABEL = 'Models'
+export const MODELS_HELP = 'The model and effort that each of thimble\'s agents runs on. Higher effort takes more care, but is slower and uses more tokens.'
 
 /** The Models rows in order, each an agent by its plain name and the role whose model and effort it runs (backend
- * config.MODEL_ROLES): main and its side threads, which are forks of main and run on its model; the writer that Write
- * and Revise start; the dev agent of view builds, view reviews and thimble fix; the checks (Heads up,
- * Explainers, Judgment calls and the analyst's own); the calls that read records for labels, label drafts and view fit;
- * the card check, which reads each card's picture; the view proposals after a turn and the viewers proposed for file
- * types. */
-export const MODEL_ROWS: readonly { role: string; name: string }[] = [
-  { role: 'main', name: 'Main and side threads' },
-  { role: 'writer', name: 'Writer' },
-  { role: 'dev', name: 'View builds' },
-  { role: 'checks', name: 'Comments' },
-  { role: 'labels', name: 'Labels' },
-  { role: 'verify', name: 'Card check' },
-  { role: 'suggest', name: 'View proposals' },
+ * config.MODEL_ROLES), with what its ? says: main and its side threads, which are forks of main and run on its model;
+ * the writer that Write and Revise start; the dev agent of view builds, view reviews and thimble fix; the checks (Heads
+ * up, Explainers, Judgment calls and the analyst's own); the calls that read records for labels, label drafts and view
+ * fit; the card check, which reads each card's picture; the view proposals after a turn and the viewers proposed for
+ * file types. */
+export const MODEL_ROWS: readonly { role: string; name: string; help: string }[] = [
+  { role: 'main', name: 'Main and side threads', help: 'Claude in the chat and in its side threads, the same choice as the line under the chat. Raise it for hard questions, or lower it for quick ones.' },
+  { role: 'writer', name: 'Writer', help: 'Writes and revises documents when you click Write or Revise. Raise it for more careful reports, or lower it for faster drafts.' },
+  { role: 'dev', name: 'View builds', help: 'Builds and reviews the views you accept. Raise it when views need more care, or lower it to build them faster.' },
+  { role: 'checks', name: 'Comments', help: 'Writes the comments of Heads up, Explainers, Judgment calls and your own categories. Raise it for more careful comments, or lower it for faster ones.' },
+  { role: 'labels', name: 'Labels', help: 'Reads your records for the labels that a question defines, and drafts new labels. A faster model labels many records sooner and at a lower cost.' },
+  { role: 'verify', name: 'Card check', help: 'Reads a picture of each new card and fixes real problems in place. Lower it if new cards take too long to check.' },
+  { role: 'suggest', name: 'View proposals', help: 'Decides after each of your messages whether to propose a view, and proposes viewers for file types. A faster model makes each of these calls cheaper.' },
 ]
 
 /** The rows with a fast mode of their own: main's session (the composer's bolt), and the roles thimble's config keeps
@@ -91,7 +99,17 @@ export function modelsGist(rows: readonly { model: string; effort: string }[]): 
 /** Whether the Models section is open in this browser: open until the person folds it. */
 export const MODELS_OPEN_KEY = 'thimble:settings-models'
 
-type Row = { role: string; name: string; model: string; effort: string; fast: boolean }
+type Row = { role: string; name: string; help: string; model: string; effort: string; fast: boolean }
+
+/** A setting's name, then its ?, which says what the setting does and when you would change it. */
+function SettingName({ name, help }: { name: string; help: string }) {
+  return (
+    <span className="settings-label">
+      <span className="settings-name">{name}</span>
+      <HelpTip name={name} text={help} />
+    </span>
+  )
+}
 
 /** The field that takes a model's id in place of its menu (the menu's Other): Enter or leaving it picks what is typed,
  * Escape leaves the model as it was and keeps the menu open. */
@@ -220,10 +238,10 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const frozen = !!settings?.config_error
   const shown = <T,>(key: string, server: T): T => (key in pending ? (pending[key] as T) : server)
   const rows: Row[] = settings
-    ? MODEL_ROWS.map(({ role, name }) => {
+    ? MODEL_ROWS.map(({ role, name, help }) => {
         const conf = settings.models?.[role]
         const server = role === 'main' ? { model: mainModel(attached), effort: mainEffort(attached), fast: mainFast(attached) } : { model: conf?.model ?? '', effort: conf?.effort ?? '', fast: !!conf?.fast }
-        return { role, name, model: shown(`${role}.model`, server.model), effort: shown(`${role}.effort`, server.effort), fast: shown(`${role}.fast`, server.fast) }
+        return { role, name, help, model: shown(`${role}.model`, server.model), effort: shown(`${role}.effort`, server.effort), fast: shown(`${role}.fast`, server.fast) }
       })
     : []
   const readOnly = shown('readOnly', settings?.corpus_edits === false)
@@ -266,11 +284,11 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         {settings && (
           <>
             <div className="settings-line" data-setting="read-only">
-              <span className="settings-name">{READ_ONLY_LABEL}</span>
+              <SettingName name={READ_ONLY_LABEL} help={READ_ONLY_HELP} />
               <Switch checked={readOnly} onChange={(on) => put('readOnly', on, { corpus_edits: on ? false : null }, 'Read only')} label={READ_ONLY_LABEL} />
             </div>
             <div className="settings-line" data-setting="ask-key" data-key={ask} data-frozen={frozen || undefined}>
-              <span className="settings-name">{ASK_KEY_LABEL}</span>
+              <SettingName name={ASK_KEY_LABEL} help={ASK_KEY_HELP} />
               <Segmented
                 className="settings-ask-key"
                 size="sm"
@@ -282,7 +300,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               />
             </div>
             <div className="settings-line" data-setting="propose-views" data-frozen={frozen || undefined}>
-              <span className="settings-name">{PROPOSE_LABEL}</span>
+              <SettingName name={PROPOSE_LABEL} help={PROPOSE_HELP} />
               <Switch
                 checked={propose}
                 disabled={frozen}
@@ -293,11 +311,17 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 label={PROPOSE_LABEL}
               />
             </div>
-            <button type="button" className="settings-fold" aria-expanded={modelsOpen} aria-controls={modelsOpen ? 'settings-models' : undefined} onClick={toggleModels}>
-              <span className="label">{MODELS_LABEL}</span>
+            {/* the fold's button reaches over the whole line (shell.css): a click anywhere but on the ? folds */}
+            <div className="settings-fold">
+              <span className="settings-label">
+                <button type="button" className="settings-fold-button" aria-expanded={modelsOpen} aria-controls={modelsOpen ? 'settings-models' : undefined} onClick={toggleModels}>
+                  <span className="label">{MODELS_LABEL}</span>
+                </button>
+                <HelpTip name={MODELS_LABEL} text={MODELS_HELP} />
+              </span>
               <span className="settings-gist">{modelsOpen ? '' : modelsGist(rows.map((r) => ({ model: r.model, effort: hasEffort(r.model) ? r.effort : '' })))}</span>
               <Icon name={modelsOpen ? 'chevron-up' : 'chevron-down'} size={14} className="settings-fold-chevron" />
-            </button>
+            </div>
             {modelsOpen && (
               <div className="settings-models" id="settings-models" role="group" aria-label={MODELS_LABEL}>
                 {rows.map((row) => {
@@ -305,7 +329,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   const effortless = !!row.model && !hasEffort(row.model)
                   return (
                     <div className="settings-row" key={row.role} data-role={row.role} data-frozen={locked || undefined}>
-                      <span className="settings-name">{row.name}</span>
+                      <SettingName name={row.name} help={row.help} />
                       <span className="settings-model-cell">
                         {typing === row.role ? (
                           <TypedModel

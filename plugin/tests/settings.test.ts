@@ -1,11 +1,12 @@
 // The settings pane: /thimble-settings opens it, its rows in the order of their keys on the bar, a thin line between
 // groups; a press on a choice sets it through Claude Code ($.config.set) and the preview of the bar follows; ↑ and ↓
-// move the pick over the rows, and tab along a row's choices; Minimal mode sets the modes of its preset, and off brings
-// back what the rows held; a mode saved under its old name reads as its new one. All data is made up.
+// move the pick over the rows, and tab along a row's choices, and the pane's bottom says what the row picked does;
+// Minimal mode sets the modes of its preset, and off brings back what the rows held; a mode saved under its old name
+// reads as its new one. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
-import { PRESET, setOptions } from '../settings/features.mjs'
+import { PRESET, setOptions, SWITCHES } from '../settings/features.mjs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -241,6 +242,35 @@ test('↑ and ↓ pick the rows in their order, docked or inline, the Verifier r
   await arrow(1)
   expect(tintedIn(await $.ui.render(inline))).toEqual(['labels'])
   expect(set.length).toBe(before)
+  await pane.unmount()
+  setOptions({})
+})
+
+test('the row picked says what it does and when you would change it, under the list at the bottom of the pane however far the rows scroll; the words follow ↑ and ↓ over every row', async ($, on) => {
+  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'auto', claimsMode: 'off', labels: true, coverage: false }
+  settingsWorld(on, rows)
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  const arrow = (by: number) => $.ui.scroll({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', by, origin: { kind: 'person' } } as never)
+  // a pane far shorter than its rows, which scroll under its top row
+  const short = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { offset: 0, bodyRows: 16 } } } as never
+  const said: Record<string, string> = {}
+  for (let i = 0; i < SWITCHES.length; i++) {
+    const tree = await $.ui.render(short)
+    // the frame's last part, under the rows that scroll: a thin line, then the row's name, bold, and its words, gray
+    const foot = keyed(tree, 'pane-frame').children.at(-1)
+    expect(foot.props.key).toBe('pane-under')
+    expect(textOf(keyed(foot, 'help-rule'))).toMatch(/^─+$/)
+    const help = nodesOf(foot).find(x => /^help-/.test(String(x.props?.key ?? '')) && x.props.key !== 'help-rule')
+    const [name, words] = nodesOf(help).filter(x => x.type === 'Text' && typeof (x.props?.children ?? x.children?.[0]) === 'string')
+    expect(name.props).toMatchObject({ bold: true })
+    expect(words.props).toMatchObject({ dimColor: true })
+    said[String(help.props.key).slice('help-'.length)] = textOf(help)
+    await arrow(1)
+  }
+  // every row, the Verifier rows under Citations too, each with its own words: the start of what /config says of it
+  expect(said).toEqual(Object.fromEntries(SWITCHES.map(s => [s.key, `${s.title}  ${s.help}`])))
+  expect(said.coverage).toBe('Coverage  The Coverage pane shows how much of each file Claude has read. Turn it on to see what an answer may have missed.')
   await pane.unmount()
   setOptions({})
 })

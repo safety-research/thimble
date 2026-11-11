@@ -3,10 +3,12 @@
 // goes with the pointer, the focus, a press or Escape. An icon Button takes its text from `title` (Button.tsx); other
 // icon-only controls use TipButton or a Tipped box; a disabled menu item uses Menu's `tip`. No control uses the
 // browser's own title. A mark that names a value, of which a file has as many as records (a record's labels and their
-// values), carries its text in `data-tip`, which the page's one HoverTips shows under the pointer.
+// values), carries its text in `data-tip`, which the page's one HoverTips shows under the pointer. A ? that says what
+// a setting does (HelpTip) shows its words in the same label, and a click or a tap keeps them open.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type PointerEvent, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { createPortal } from 'react-dom'
 import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
+import { Icon } from './Icon'
 
 const GAP = 6
 const MARGIN = 8
@@ -272,5 +274,91 @@ export function TipButton({ tip: text, children, ...rest }: Omit<ButtonHTMLAttri
       {children}
       {tip}
     </button>
+  )
+}
+
+/**
+ * A ? that says what a setting does: a borderless icon button in the quiet ink, its words in the one tooltip, wrapped
+ * to a few lines from its left edge. They show as an icon button's name does, on hover after a moment and at once on
+ * keyboard focus, and go with the pointer or the focus. A click or a tap keeps them open, as a touch screen has no
+ * hover, until the next press, Escape or the focus leaving the ?; Escape then closes the words alone, and the popover
+ * they stand in stays. A screen reader reads them as the ?'s description, the ? named `About <name>`.
+ */
+export function HelpTip({ name, text, className }: { name: string; text: string; className?: string }) {
+  const id = useId()
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const [kept, setKept] = useState(false)
+  const timer = useRef<number | null>(null)
+  const clear = () => {
+    if (timer.current != null) window.clearTimeout(timer.current)
+    timer.current = null
+  }
+  const hide = useCallback(() => {
+    clear()
+    setKept(false)
+    setAnchor((a) => {
+      if (a) lastClosed = Date.now()
+      return null
+    })
+  }, [])
+  useEffect(() => {
+    if (!anchor) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (kept) e.stopPropagation()
+      hide()
+    }
+    // kept open, a press anywhere but on the ? closes it; a press on the ? closes it there
+    const onDown = (e: Event) => kept && !anchor.contains(e.target as Node) && hide()
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('pointerdown', onDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('pointerdown', onDown, true)
+    }
+  }, [anchor, kept, hide])
+  useEffect(() => clear, [])
+  const place = useCallback(
+    (w: number, h: number) => (anchor ? placeTip(anchor.getBoundingClientRect(), w, h, window.innerWidth, window.innerHeight, 'start') : { left: MARGIN, top: MARGIN }),
+    [anchor],
+  )
+  return (
+    <>
+      <button
+        type="button"
+        className={`btn btn-ghost btn-sm btn-square help-tip${className ? ` ${className}` : ''}`}
+        aria-label={`About ${name}`}
+        aria-describedby={id}
+        data-kept={kept || undefined}
+        onPointerEnter={(e: PointerEvent<HTMLElement>) => {
+          if (e.pointerType === 'touch' || kept) return
+          const el = e.currentTarget
+          clear()
+          if (Date.now() - lastClosed < TIP_WARM_MS) setAnchor(el)
+          else timer.current = window.setTimeout(() => setAnchor(el), TIP_DELAY_MS)
+        }}
+        onPointerLeave={() => !kept && hide()}
+        onClick={(e) => {
+          if (kept) return hide()
+          clear()
+          setKept(true)
+          setAnchor(e.currentTarget)
+        }}
+        onFocus={(e: FocusEvent<HTMLElement>) => {
+          if (!e.currentTarget.matches(':focus-visible')) return
+          clear()
+          setAnchor(e.currentTarget)
+        }}
+        onBlur={hide}
+      >
+        <Icon name="circle-help" size={14} className="btn-ico" />
+      </button>
+      <span id={id} hidden>
+        {text}
+      </span>
+      {anchor && <Tip text={text} place={place} className="tip-lines" />}
+    </>
   )
 }
