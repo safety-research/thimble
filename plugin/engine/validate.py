@@ -24,8 +24,8 @@ With "index": a path instead, it writes the cards' places and values there for t
 labels as they were at "at", and answers {"cards": the number of cards}. With "cited": checked citations instead, each
 {"sources", "evidence"?, "rerun"?}, with "cwd", "root" and "tmp" as above, it answers {"cited": each as it stands now}
 (kernel/evidence.py examine, which runs again the code of computed evidence whose files changed), in the same order.
-With "run": {"script", "folder", "python", "folders"} instead, it runs that script once, as sandboxed does, and answers
-{"ran": what sandboxed's run answers}: the browser workbench's way to the same sandbox.
+With "run": {"script", "folder", "python", "flags", "argv", "folders"} instead, it runs that script once, as sandboxed
+does, and answers {"ran": what sandboxed's run answers}: the browser workbench's way to the same sandbox.
 """
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ RERUN_S = 60  # seconds a citation's script may run again: the hooks give this c
 NOT_SET_UP = "the sandbox could not be"  # how run.mjs's own failure to set the sandbox up opens (its exit 3)
 # what runs a script again in the sandbox: an audit hook notes each file the script opens to read (a database it
 # connects to too; never one it writes, lists or stats), and writes their absolute paths, one a line, to $THIMBLE_READS
-# as the script ends; the files of Python and of its packages are none of them. Then the script runs from stdin as
-# `python3 -` runs it: as __main__, with sys.argv ["-"].
+# as the script ends; the files of Python and of its packages are none of them. Then the script runs from stdin as the
+# call ran it: as __main__, with the call's sys.argv (its first word in $THIMBLE_ARGV0, `-` or `-c`).
 PRELUDE = r"""
 import atexit, os, sys
 def _thimble_reads(out=os.environ.pop("THIMBLE_READS", "")):
@@ -92,7 +92,7 @@ def _thimble_reads(out=os.environ.pop("THIMBLE_READS", "")):
 START = os.getcwd()
 _code = sys.stdin.read()
 sys.stdin = open(os.devnull)
-sys.argv = ["-"]
+sys.argv[0] = os.environ.pop("THIMBLE_ARGV0", "-")
 _thimble_reads()
 del _thimble_reads
 exec(compile(_code, "<stdin>", "exec"), {"__name__": "__main__", "__builtins__": __builtins__})
@@ -129,12 +129,12 @@ def python_of(word: str, folder: str) -> str | None:
     return shutil.which(os.path.basename(word)) or shutil.which("python3")
 
 
-def sandboxed(srt: str | None, folders: list[str]) -> Callable[[str, str, str], dict[str, Any] | None] | None:
-    """The runner of computed evidence's code (kernel/evidence.py Runner): run(script, folder, python) runs the script
-    by the Python the call named, from the folder it ran in, in thimble's sandbox (codebox.rules, sandbox/run.mjs), and
-    answers {output: what it printed, then its errors, as Claude Code's Bash tool gives them, reads: the files it opened
-    to read inside `folders` or that folder, ok: whether it ended well}, or None when the sandbox could not be set up or
-    the script ran out of time. It reads the system, its Python, `folders` and that folder; it writes only a temp folder
+def sandboxed(srt: str | None, folders: list[str]) -> Callable[..., dict[str, Any] | None] | None:
+    """The runner of computed evidence's code (kernel/evidence.py Runner): run(script, folder, python, flags, argv) runs
+    the script by the Python the call named, with the call's options and sys.argv, from the folder it ran in, in
+    thimble's sandbox (codebox.rules, sandbox/run.mjs), and answers {output: what it printed, then its errors, as Claude
+    Code's Bash tool gives them, reads: the files it opened to read inside `folders` or that folder, ok: whether it
+    ended well}, or None when the sandbox could not be set up or the script ran out of time. It reads the system, its Python, `folders` and that folder; it writes only a temp folder
     of its own, removed after; it reaches no network. None when Node or srt is missing: srt is in `srt`, else in
     thimble's home at the pin of the plugin's sandbox/package.json (sandbox/setup.mjs installs it there at each session
     start)."""
@@ -150,8 +150,9 @@ def sandboxed(srt: str | None, folders: list[str]) -> Callable[[str, str, str], 
     linux = platform.system().lower() == "linux"
     shown = [f for f in folders if f]
 
-    def run(script: str, folder: str, python: str = "python3") -> dict[str, Any] | None:
+    def run(script: str, folder: str, python: str = "python3", flags: Any = (), argv: Any = ("-",)) -> dict[str, Any] | None:
         py = python_of(python, folder) or sys.executable
+        argv = [str(a) for a in argv] or ["-"]
         tmp = tempfile.mkdtemp(prefix="thimble-rerun-")
         reads = os.path.join(tmp, "reads")
         try:
@@ -159,7 +160,8 @@ def sandboxed(srt: str | None, folders: list[str]) -> Callable[[str, str, str], 
                                   home=str(Path.home()), th=str(thimble_home()))
             tz = [f"TZ={os.environ['TZ']}"] if os.environ.get("TZ") else []
             inner = ["/usr/bin/env", "-i", f"PATH={os.path.dirname(py)}:/usr/bin:/bin", f"HOME={tmp}", f"TMPDIR={tmp}",
-                     "LANG=C.UTF-8", *tz, f"THIMBLE_READS={reads}", py, "-B", "-c", PRELUDE]
+                     "LANG=C.UTF-8", *tz, f"THIMBLE_READS={reads}", f"THIMBLE_ARGV0={argv[0]}", py, "-B", *map(str, flags),
+                     "-c", PRELUDE, *argv[1:]]
             p = subprocess.run(["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", str(node), str(codebox.SANDBOX / "run.mjs"),
                                 "--srt", str(srt), json.dumps(rules), "--", *inner], input=script, capture_output=True,
                                text=True, errors="replace", cwd=folder, timeout=RERUN_S)
@@ -186,7 +188,8 @@ def main() -> int:
     if isinstance(req.get("run"), dict):
         r = req["run"]
         run = sandboxed(req.get("srt") or None, [str(f) for f in r.get("folders") or [] if f])
-        out = run(str(r.get("script") or ""), str(r.get("folder") or cwd), str(r.get("python") or "python3")) if run else None
+        out = run(str(r.get("script") or ""), str(r.get("folder") or cwd), str(r.get("python") or "python3"),
+                  list(r.get("flags") or []), list(r.get("argv") or ["-"])) if run else None
         json.dump({"ran": out}, sys.stdout, ensure_ascii=False)
         return 0
     # the code of computed evidence runs again where the session's folders are known

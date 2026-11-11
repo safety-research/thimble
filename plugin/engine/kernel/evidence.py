@@ -986,10 +986,9 @@ def without_texts(out: str, texts: list[str]) -> str:
 
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
 RUNS_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;|\n)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
-# a call that runs one script from a here-document and nothing else, its errors joined to its output or not: the Python
-# it names is group 1 (script_of)
-ONE_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;|\n)\s*)?(\S*python[\d.]*)\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\2[ \t]*(?:2>&1[ \t]*)?")
+HEREDOC_OP = re.compile(r"<<-?[ \t]*(['\"]?)\w+\1")
 PYTHON_WORD = re.compile(r"\S*python[\d.]*")
+PY_FLAG = re.compile(r"-[A-Za-z]+")  # Python's options before its script (-I, -u), but -c and -m, which take one
 
 
 def scripts(command: str) -> list[str]:
@@ -1005,22 +1004,37 @@ def scripts(command: str) -> list[str]:
     return out or [command]
 
 
-def script_of(command: str) -> tuple[str, str] | None:
-    """(the Python it names, the script) of a call that runs one Python script and nothing else, after a `cd` at most: a
-    here-document (`python3 - <<'PY'`, the script, `PY`) or a `-c` argument. None for any other call: a run of its
-    script alone would not run all of its code."""
+def script_of(command: str) -> dict[str, Any] | None:
+    """A call that runs one Python script and nothing else, after a `cd` at most: {python: the Python it names, script,
+    flags: its options before the script (-I, -u), argv: the script's sys.argv}. The script is a here-document
+    (`python3 - <<'PY'`, the script, `PY`, its errors joined to its output or not) or a `-c` argument; the words after it
+    are its arguments, such as a file it reads by sys.argv[1]. None for any other call (a pipe, a second command, a
+    module run with -m): a run of its script alone would not run all of its code."""
     m = HEREDOC.search(command)
-    if m:
-        head = (command[:m.start()] + m.group(0).split("\n", 1)[0]).strip()
-        one = ONE_SCRIPT.fullmatch(head)
-        return (one.group(1), m.group(3)) if one and not command[m.end():].strip() else None
+    if m and command[m.end():].strip():
+        return None
+    head = re.sub(r"\s2>&1(?=\s|$)", " ", HEREDOC_OP.sub(" ", command[:m.start()] + m.group(0).split("\n", 1)[0])) if m else command
     try:
-        words = shlex.split(command)
+        lex = shlex.shlex(head, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        words = list(lex)
     except ValueError:
         return None
     if len(words) > 3 and words[0] == "cd" and words[2] in ("&&", ";"):
         words = words[3:]
-    return (words[0], words[2]) if len(words) == 3 and PYTHON_WORD.fullmatch(words[0]) and words[1] == "-c" else None
+    if not words or not PYTHON_WORD.fullmatch(words[0]) or any(w and set(w) <= set("();<>|&") for w in words):
+        return None
+    i, flags = 1, []
+    while i < len(words) and words[i] not in ("-", "-c"):
+        n = 2 if words[i] in ("-X", "-W") else 1
+        if not PY_FLAG.fullmatch(words[i]) or words[i] == "-m" or i + n > len(words):
+            return None
+        flags, i = flags + words[i:i + n], i + n
+    if m and i < len(words) and words[i] == "-":
+        return {"python": words[0], "script": m.group(3), "flags": flags, "argv": ["-", *words[i + 1:]]}
+    if not m and i + 1 < len(words) and words[i] == "-c":
+        return {"python": words[0], "script": words[i + 1], "flags": flags, "argv": ["-c", *words[i + 2:]]}
+    return None
 
 
 ABS_PATH = re.compile(r"(?<![\w./~$-])/[^\s'\"`;&|()<>,]*")
@@ -1783,9 +1797,10 @@ SOURCES = "sources"  # the key a place's or a call's evidence carries its source
 RERUN = "rerun"  # the key computed evidence carries what runs its code again under, until check_mark takes it
 READ_PATH = "_path"  # the key a place carries the path read under, until check_quote takes it
 WILDCARD = re.compile(r"[*?[]")
-# the caller's run of a call's script (validate.py sandboxed): run(script, folder, python) answers what it printed, the
-# files it opened to read and whether it ended well, {output, reads, ok}, or None when it could not run
-Runner = Callable[[str, str, str], "dict[str, Any] | None"]
+# the caller's run of a call's script (validate.py sandboxed): run(script, folder, python, flags, argv), the call's own
+# (run_key), answers what it printed, the files it opened to read and whether it ended well, {output, reads, ok}, or None
+# when it could not run
+Runner = Callable[[str, str, str, tuple, tuple], "dict[str, Any] | None"]
 
 
 def run_folder(again: dict[str, Any]) -> str:
@@ -1796,11 +1811,11 @@ def run_folder(again: dict[str, Any]) -> str:
     return os.path.normpath(os.path.join(shell, d)) if d else shell
 
 
-def run_key(again: Any) -> tuple[str, str, str] | None:
-    """One run of a call's code: (its script, the folder it ran in, the Python it names); None for a call that runs no
-    single Python script (script_of)."""
+def run_key(again: Any) -> tuple[str, str, str, tuple, tuple] | None:
+    """One run of a call's code: (its script, the folder it ran in, the Python it names, its options, its sys.argv);
+    None for a call that runs no single Python script (script_of)."""
     got = script_of(str(again.get("command") or "")) if isinstance(again, dict) else None
-    return (got[1], run_folder(again), got[0]) if got else None
+    return (got["script"], run_folder(again), got["python"], tuple(got["flags"]), tuple(got["argv"])) if got else None
 
 
 def ran_reads(again: dict[str, Any], ran: Any) -> list[str] | None:
@@ -1812,13 +1827,14 @@ def ran_reads(again: dict[str, Any], ran: Any) -> list[str] | None:
 
 
 def once_each(run: Runner) -> Runner:
-    """`run`, each code run once: a second run of one script in one folder answers what the first one did."""
-    ran: dict[tuple[str, str, str], Any] = {}
+    """`run`, each code run once: a second run of one script in one folder, with the same arguments, answers what the
+    first one did."""
+    ran: dict[tuple, Any] = {}
 
-    def once(script: str, folder: str, python: str) -> Any:
-        if (script, folder, python) not in ran:
-            ran[(script, folder, python)] = run(script, folder, python)
-        return ran[(script, folder, python)]
+    def once(*key: Any) -> Any:
+        if key not in ran:
+            ran[key] = run(*key)
+        return ran[key]
 
     return once
 
@@ -2132,7 +2148,7 @@ def ran_again(items: list[Any], out: list[Any], run: Runner) -> None:
     if not keys:
         return
 
-    def one(key: tuple[str, str, str]) -> Any:
+    def one(key: tuple) -> Any:
         try:
             return run(*key)
         except Exception:  # noqa: BLE001 — a run that breaks is one that could not run: the citation stays stale

@@ -20,12 +20,12 @@ def plain_runner(runs: list | None = None):
     """A runner with no sandbox, for the logic alone: the script run by this Python with the validator's prelude, which
     notes the files it opens to read (validate.py sandboxed runs the same in thimble's sandbox). Each run's script goes
     to `runs`."""
-    def run(script: str, folder: str, python: str = "python3") -> dict:
+    def run(script: str, folder: str, python: str = "python3", flags=(), argv=("-",)) -> dict:
         if runs is not None:
             runs.append(script)
         reads = Path(folder).parent / f"reads-{len(runs or [])}.txt"
-        p = subprocess.run([sys.executable, "-B", "-c", validate.PRELUDE], input=script, capture_output=True, text=True,
-                           cwd=folder, env={**os.environ, "THIMBLE_READS": str(reads)})
+        p = subprocess.run([sys.executable, "-B", *flags, "-c", validate.PRELUDE, *argv[1:]], input=script, capture_output=True,
+                           text=True, cwd=folder, env={**os.environ, "THIMBLE_READS": str(reads), "THIMBLE_ARGV0": argv[0]})
         got = reads.read_text().splitlines() if reads.exists() else []
         return {"output": p.stdout + p.stderr, "reads": got, "ok": p.returncode == 0}
     return run
@@ -245,6 +245,22 @@ def test_a_computed_citation_whose_file_changed_holds_when_its_code_prints_the_s
     assert examine([{"sources": held["rests"], "rerun": r["rerun"]}])[0]["sources"][0]["changed"] is True
     assert examine([{"sources": held["rests"], "rerun": r["rerun"]}], lambda *a: None)[0]["sources"][0]["changed"] is True
 
+
+
+def test_a_file_the_code_reads_by_its_arguments_is_a_source_and_its_run_again_takes_them(tmp_path: Path):
+    data, review = builds(tmp_path)
+    run = plain_runner()
+    code = "\nimport json, sys, collections\nc = collections.Counter(f['severity'] for f in json.load(open(sys.argv[1]))['fixed'])\nprint('major:', c['major'])\n"
+    command = f'cd {data} && python3 -I -c "{code}" build-a/report/review-results.json'
+    out = run(code, str(data), "python3", ("-I",), ("-c", "build-a/report/review-results.json"))
+    assert out["output"] == "major: 1\n" and out["ok"]
+    item = {"kind": "computed", "status": "verified", "evidence": {"output": "major: 1"}, "reason": "counted"}
+    r = check_mark({"n": 1, "words": "1"}, item, [{"command": command, "output": out["output"], "by": "main"}], str(data), str(data), run=run)
+    # the file it opened by sys.argv[1], which no string of its code names
+    assert [s["file"] for s in r["sources"]] == ["build-a/report/review-results.json"] and r["rerun"]
+    touched(review, review.read_text().replace('"major"', '"minor"'))
+    [got] = examine([{"sources": r["sources"], "rerun": r["rerun"]}], run)
+    assert got["sources"][0]["changed"] is True and "rests" not in got
 
 def test_one_run_of_a_code_serves_every_citation_that_rests_on_it_at_the_check_and_after(tmp_path: Path):
     data, review = builds(tmp_path)

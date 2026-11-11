@@ -357,7 +357,7 @@ def _srt_folder() -> str | None:
     return str(at) if (at / "node_modules").is_dir() else None
 
 
-def runner(c: str, folders: tuple[str, str]) -> Callable[[str, str, str], dict[str, Any] | None]:
+def runner(c: str, folders: tuple[str, str]) -> Callable[..., dict[str, Any] | None]:
     """The runner the validator takes (evidence.Runner): a mark's code run again in the terminal's sandbox, through the
     validator as a command (validate.py "run"), which reads the check's folders (`folders`, check_folders) and the
     workspace's temp folders, writes only a temp folder of its own and reaches no network. A run that cannot start
@@ -365,8 +365,9 @@ def runner(c: str, folders: tuple[str, str]) -> Callable[[str, str, str], dict[s
     shown = [f for f in (*folders, *_temp_dirs(c)) if f]
     srt = _srt_folder()
 
-    def run(script: str, folder: str, python: str = "python3") -> dict[str, Any] | None:
-        req = {"run": {"script": script, "folder": folder, "python": python, "folders": shown}, "srt": srt}
+    def run(script: str, folder: str, python: str = "python3", flags: Any = (), argv: Any = ("-",)) -> dict[str, Any] | None:
+        req = {"run": {"script": script, "folder": folder, "python": python, "flags": list(flags), "argv": list(argv),
+                       "folders": shown}, "srt": srt}
         try:
             done = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True,
                                   env=config.passed_environ(), timeout=RUN_S, cwd=folder)
