@@ -2,9 +2,9 @@
 // thimble's config has an error the error comes first, its paths from the home folder as ~ (backend userconf.problem),
 // and the config takes no write until the file is fixed, so Ask Claude with, View proposals and every Models row but
 // main's are dimmed. Then Claude access, how the workbench reaches Claude, one choice for the install
-// (shell/ClaudeAccess ClaudeAccessRow); "Claude can edit files in this folder", whether main and its thread forks may
-// write the corpus folder of this workspace (the workspace's settings.json `corpus_edits`, on by default; thimble's
-// other agents never write it); "Ask Claude with", the key held with a click to ask Claude about what the pointer is
+// (shell/ClaudeAccess ClaudeAccessRow); Read only, which keeps main and its thread forks from writing the corpus folder
+// of this workspace (on while the workspace's settings.json `corpus_edits` is false, off by default; thimble's other
+// agents never write it); "Ask Claude with", the key held with a click to ask Claude about what the pointer is
 // on, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the canvas
 // (thimble's config `askKey`, lib/platform); View proposals, whether thimble proposes views after a turn and viewers
 // for file types (thimble's config `views.propose`), which a view proposal's Don't ask again turns off too
@@ -34,8 +34,9 @@ import { chooseMain, type MainChoice } from '../chat/mainChoice'
 import { EFFORT_CHOICES, FastBolt, effortWord, mainEffort, mainFast, mainModel } from '../chat/ModelLine'
 import { ClaudeAccessRow } from './ClaudeAccess'
 
-/** The switch that lets main and its thread forks write the corpus folder, per workspace (backend ledger.EDITS_KEY). */
-export const EDITS_LABEL = 'Claude can edit files in this folder'
+/** The switch that keeps main and its thread forks from writing the corpus folder, per workspace: on while the
+ * workspace's `corpus_edits` is false (backend ledger.EDITS_KEY). */
+export const READ_ONLY_LABEL = 'Read only'
 /** The ask key's choice (backend ledger.ASK_KEY): its name, and its options as the platform writes them (⌘-click and
  * ⌥-click on a Mac, Ctrl-click and Alt-click elsewhere). */
 export const ASK_KEY_LABEL = 'Ask Claude with'
@@ -131,7 +132,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [settings, setSettings] = useState<Settings | null>(null)
   const [attached, setAttached] = useState<Attached | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // what a pick shows until the server holds it, by `${role}.${field}`, `edits` or `ask`
+  // what a pick shows until the server holds it, by `${role}.${field}`, `readOnly` or `ask`
   const [pending, setPending] = useState<Record<string, unknown>>({})
   const turns = useRef<Record<string, number>>({})
   // the row whose model is being typed rather than picked
@@ -225,7 +226,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         return { role, name, model: shown(`${role}.model`, server.model), effort: shown(`${role}.effort`, server.effort), fast: shown(`${role}.fast`, server.fast) }
       })
     : []
-  const edits = shown('edits', settings?.corpus_edits !== false)
+  const readOnly = shown('readOnly', settings?.corpus_edits === false)
   const ask = shown<AskKey>('ask', settings?.ask_key === 'alt' ? 'alt' : 'meta')
   const propose = shown('propose', settings?.propose_views !== false)
   const problem = error || settings?.config_error || ''
@@ -264,9 +265,9 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {settings && (
           <>
-            <div className="settings-line" data-setting="corpus-edits">
-              <span className="settings-name">{EDITS_LABEL}</span>
-              <Switch checked={edits} onChange={(on) => put('edits', on, { corpus_edits: on ? null : false }, 'whether Claude can edit files in this folder')} label={EDITS_LABEL} />
+            <div className="settings-line" data-setting="read-only">
+              <span className="settings-name">{READ_ONLY_LABEL}</span>
+              <Switch checked={readOnly} onChange={(on) => put('readOnly', on, { corpus_edits: on ? false : null }, 'Read only')} label={READ_ONLY_LABEL} />
             </div>
             <div className="settings-line" data-setting="ask-key" data-key={ask} data-frozen={frozen || undefined}>
               <span className="settings-name">{ASK_KEY_LABEL}</span>

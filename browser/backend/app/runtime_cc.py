@@ -7,7 +7,7 @@ thimble's prompt as the whole system prompt; the role's model and effort. thimbl
 named so that the tools read as 0.8's plugin named them (tools.thimble_tool); Claude Code's built-in tools are the
 same set the Messages API runtime gives (Spec.builtins), Bash in Claude Code's sandbox (no Bash where it cannot run),
 Edit and Write allowed only in the agent's write folders (the corpus among them for main and its thread forks while
-Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits).
+Settings' Read only is off, runtime.Spec.corpus_edits).
 
 Permissions. The session runs in Claude Code's default mode with a permission callback (options' `ask`), so a command's
 request to a host the analyst's Claude Code settings do not allow asks the analyst in the chat, as Claude Code asks in
@@ -384,7 +384,7 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None, speed))
     out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path(), **kernel_wrap.NO_SIDE_WRITES}
     no_write = list(getattr(spec, "no_write", []) or [])
-    corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
+    corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings' Read only is off
     out["permissions"] = {
         "allow": [f"Edit(/{w}/**)" for w in spec.write_roots],
         "deny": [*([] if corpus else [f"Edit(/{spec.cwd}/**)"]),

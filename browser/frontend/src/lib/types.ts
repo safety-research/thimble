@@ -1134,8 +1134,8 @@ export interface Settings {
   /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
    * Mac) or "alt" (⌥, Alt) */
   ask_key?: 'meta' | 'alt'
-  /** "Claude can edit files in this folder": whether main and its thread forks may write the corpus folder (the
-   * workspace's settings.json `corpus_edits`, on by default) */
+  /** whether main and its thread forks may write the corpus folder (the workspace's settings.json `corpus_edits`, true
+   * by default); Settings' Read only is on while it is false */
   corpus_edits?: boolean
   /** The Labels sidebar's Label tool: whether Claude makes labels in this workspace, as the terminal's Labels setting
    * (the workspace's settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of
@@ -1180,7 +1180,7 @@ export interface SettingsPatch {
   propose_views?: boolean | null
   /** the ask key: "alt", or null to put back the default ("meta") */
   ask_key?: 'meta' | 'alt' | null
-  /** "Claude can edit files in this folder": false turns it off, null puts back the default (on) */
+  /** Read only: false turns it on, null puts back the default (off) */
   corpus_edits?: boolean | null
   /** Labels: false turns it off, null puts back the default (on) */
   labels?: boolean | null

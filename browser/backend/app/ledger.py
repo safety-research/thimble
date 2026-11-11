@@ -368,9 +368,9 @@ def last_seq(path: Path, key: str = "seq") -> int:
 
 
 def corpus_edits(c: str | None) -> bool:
-    """Whether main and its thread forks may write the corpus folder of workspace `c` (EDITS_KEY, Settings' "Claude can
-    edit files in this folder"): on unless the workspace's settings.json sets it false, and on for no workspace or a
-    settings file that cannot be read."""
+    """Whether main and its thread forks may write the corpus folder of workspace `c` (EDITS_KEY, false while Settings'
+    Read only is on): true unless the workspace's settings.json sets it false, and true for no workspace or a settings
+    file that cannot be read."""
     if not c:
         return True
     try:
@@ -467,8 +467,8 @@ PROPOSE_KEY = "propose_views"
 # (userconf.ask_key); null takes the key out, which is "meta". Settings' Ask key choice changes it
 ASK_KEY = "ask_key"
 # true, false or null: the workspace's settings.json `corpus_edits`, whether main and its thread forks may write the
-# corpus folder (corpus_edits); null takes the key out, which is on. Settings' "Claude can edit files in this folder"
-# switch changes it, from the analyst's browser alone, so an agent cannot turn its own edits on
+# corpus folder (corpus_edits); null takes the key out, which is true. Settings' Read only switch changes it, false
+# while on and null while off, from the analyst's browser alone, so an agent cannot turn Read only off
 EDITS_KEY = "corpus_edits"
 # true, false or null: the workspace's settings.json `labels`, whether Claude makes labels there (labels_on); null takes
 # the key out, which is on. The Labels sidebar's Label tool switch changes it, from the analyst's browser alone
@@ -573,7 +573,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     stored = stored if isinstance(stored, dict) else {}
     merged = {**stored, **settings}
     for key in (EDITS_KEY, LABELS_KEY):
-        if merged.get(key, False) is None:  # null puts the switch back on its default, on
+        if merged.get(key, False) is None:  # null puts the key back on its default, true (Read only off, Labels on)
             merged.pop(key)
     # main's model settings merge within main, so a PUT of its effort keeps its fast mode
     if isinstance(settings.get(config.MODELS_KEY), dict):
