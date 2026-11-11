@@ -9,11 +9,13 @@
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
 //                    reload of the plugin left running (checker.ts resumeChecks), and the tour hears those that gave up
-//                    (tour/tour.ts tourChecked)
+//                    (tour/tour.ts tourChecked); the files the citations rest on, compared with what their checks read
+//                    (stale.ts examineSources)
 //   session.append   main's text rows, as they are stored
 //   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others); the
 //                    answer of the tour's cite step is checked now in every mode that cites, and the tour hears that
-//                    the turn ended (tour/tour.ts tourCites, tourChecked)
+//                    the turn ended (tour/tour.ts tourCites, tourChecked); then the files the citations rest on, as at
+//                    session start
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does. After each, the tour hears that a check ended (tour/tour.ts
@@ -21,6 +23,8 @@
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
 //                    Claude Code refused is noted as it ends (checker.ts readEnded), and so is its Python that don't
 //                    ask mode refused (checker.ts pythonEnded)
+//   tool.call        any other call that can write a file (stale.ts WRITES): after it, the files the citations rest on,
+//                    as at session start
 //   turn.step        the checker's requests: the model and the effort that Verifier model and Verifier effort name
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
@@ -56,8 +60,9 @@ import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../
 import { firstPartyApi } from '../settings/term'
 import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, pythonEnded, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
+import { examineSources, WRITES } from './stale'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
-import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
+import { lostSpansEl, messageEl, staleLook, type LostSpan, type MarkLook } from './view'
 // the tour's cite step (tour/tour.ts)
 import { tourChecked, tourCites } from '../tour/tour'
 
@@ -88,7 +93,7 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
     const it = free.splice(k, 1)[0]!
     // a rewrite's cited words belong to its own sentence, not to the one this text says them in
     if (it.status === 'corrected' && it.rewrite) return { n: it.n, status: 'failed' }
-    return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
+    return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}), ...staleLook(it) }
   })
   return marks.map((m, i) => {
     const done = looks[i]
@@ -96,7 +101,7 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
     const k = free.findIndex(it => sameClaim(m.words, it.words) || (it.status === 'corrected' && sameClaim(m.words, it.shown)))
     if (k < 0) return { n: 0, status: runs ? 'pending' : 'unchecked' }
     const it = free.splice(k, 1)[0]!
-    if (it.status !== 'corrected') return { n: it.n, status: it.status }
+    if (it.status !== 'corrected') return { n: it.n, status: it.status, ...staleLook(it) }
     // a corrected mark: the corrected values confirmed, the values Claude first wrote not
     return { n: it.n, status: !it.rewrite && sameClaim(m.words, it.shown) ? 'verified' : 'failed' }
   })
@@ -153,6 +158,8 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     try { await restoreMarks($) } catch { /* the marks of earlier replies draw failed: their check did not run */ }
     try { await resumeChecks($) } catch { /* the checks that run end as they would */ }
+    // a file a citation rests on may have changed while the session was closed
+    void examineSources($).catch(() => undefined)
     // a check that gave up as the plugin loaded can be the last result the tour's cite step waits for
     await tourChecked($).catch(() => undefined)
     return r
@@ -179,6 +186,8 @@ export const registerMarks: Register = on => {
       try { await startCheck($, e, row => tourCites($, row)) } catch { /* the reply stands; its marks stay drawn as written */ }
       // that answer cited nothing, or its check started: the tour hears the turn ended
       await tourChecked($, true).catch(() => undefined)
+      // the turn may have changed a file an earlier citation rests on
+      void examineSources($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -221,6 +230,14 @@ export const registerMarks: Register = on => {
     const no = denial(e)
     return no ? { deny: no } : next(e)
   })
+
+  // a call that can write a file, but the checker's (it only reads): the files the citations rest on are compared with
+  // what their checks read (stale.ts), after the call, which waits for none of it
+  on('tool.call', { tool: WRITES }, async ($, e, next) => {
+    const r = await next(e)
+    if (forkOf(e.agentId)?.kind !== 'checker') void examineSources($).catch(() => undefined)
+    return r
+  }).catch(($, e, next) => next(e))
 
   // the checker's requests on the model the setting Verifier model names, at the effort Verifier effort names
   // (settings/features.mjs checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its
@@ -351,7 +368,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
       // a rewrite that cannot stand in the text leaves Claude's sentence, whose words the check did not confirm: its
       // cited words alone in that sentence would read wrong
       if (it.status === 'corrected' && it.rewrite && !rewrote.placed.has(k)) return { n: it.n, status: 'failed' }
-      return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
+      return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}), ...staleLook(it) }
     })
     : looksByWords(marks, reply?.items ?? [], runs)
   const looks = quietLooks(byStatus, own ? items : reply?.items ?? [], own)

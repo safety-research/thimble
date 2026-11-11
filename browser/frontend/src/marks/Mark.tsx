@@ -34,7 +34,8 @@
 // below`), and follow it as it scrolls.
 //
 // A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
-// terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
+// terminal's x); a stale one's says `↻ stale` and which file changed after its check, with Repair, which checks it again
+// against the files as they are now; a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
 // each: their cells are marked in one table, their lines in one output. Escape, a press outside, or a second click
 // closes it.
 //
@@ -65,7 +66,7 @@ import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
 import { printIndex } from '../../../../plugin/tray/printed.mjs'
 import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL, versionNote } from '../../../../plugin/tray/tray.mjs'
-import { canRepair, failedWhy, LOOK_WORD, lookOf, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
+import { canRepair, failedWhy, LOOK_WORD, lookOf, staleWhy, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
 export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[]; streaming: boolean }>({ items: [], streaming: false })
@@ -227,6 +228,7 @@ export function Mark({ k, item: given, unchecked = false, anchor, children }: { 
         )}
       </span>
       {look === 'failed' && <span className="mark-glyph">×</span>}
+      {look === 'stale' && <span className="mark-glyph is-stale">↻</span>}
       {look === 'checking' && <Spinner size={9} className="mark-spin" label="checking" />}
       {pop &&
         createPortal(
@@ -289,6 +291,14 @@ function MarkEvidence({ item, look, unchecked }: { item: MarkItem | undefined; l
         <div className="mark-pop-head">
           <div className="mark-pop-why" title={failedWhy(item)}>
             {failedWhy(item)}
+          </div>
+          {canRepair(item) && <RepairButton item={item} />}
+        </div>
+      )}
+      {look === 'stale' && (
+        <div className="mark-pop-head">
+          <div className="mark-pop-stale" title={staleWhy(item)}>
+            <span className="mark-pop-stale-word">↻ {LOOK_WORD.stale}</span> {staleWhy(item)}
           </div>
           {canRepair(item) && <RepairButton item={item} />}
         </div>

@@ -110,7 +110,11 @@ the checker's own words, which this module shows and does not check.
 
   check_all(marks, answer, calls, cwd, root, tmp, cards, rules, at)  -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp, cards, rules, at)    -> {n, status, shown, reason, failedBy?,
-                                                                         evidence?, note?, was?, narrowed?, rewrite?}
+                                                                         evidence?, note?, was?, narrowed?, rewrite?,
+                                                                         sources?}
+  examine(source)                                                -> one of a checked mark's sources as it stands now:
+                                                                     `changed` or `gone` when what the mark rests on
+                                                                     differs from what the check read
   card_index(cards, at)                                          -> the cards' tables, places and values, one per
                                                                      line, for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
@@ -126,6 +130,8 @@ from __future__ import annotations
 
 import ast
 import difflib
+import glob
+import hashlib
 import io
 import json
 import keyword
@@ -1064,12 +1070,14 @@ def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list
     return lead + text[a:b] + ("…" if b < len(text) else ""), [[x - a + len(lead), y - a + len(lead)] for x, y in spans if x >= a and y <= b]
 
 
-def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "", folder: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "", folder: str | None = None, cwd: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of computed evidence, and the evidence to show. The check names a call by the output it printed;
     the calls of the session whose real output holds that text are the candidates, and the first whose output shows
     the words, and whose code types none of them in, is the evidence: its code and its whole output, the words
     highlighted from the cited place on. When no call printed that output, the check's own last call is shown. For a
-    correction, `was` is the marked words: the output also shows each run of words the correction puts in."""
+    correction, `was` is the marked words: the output also shows each run of words the correction puts in. Evidence
+    that holds keeps the files its code names (code_files) as what it rests on; `cwd` is the shell's folder, `folder`
+    the one the session started in."""
     if not output_parts(given):
         return ["the check showed no printed result for it"], None
     runs = [(c, at) for c in calls for at in [printed(given, str(c.get("output") or ""))] if at is not None]
@@ -1112,7 +1120,9 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
                 continue
             # the words in the cited lines, else the cited lines themselves
             spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out)] or [at]
-            return [], shown(c, spans)
+            folders = [f for f in (folder, cwd) if f]
+            files = code_files(str(c.get("command") or ""), cwd or folder or ".", folder)
+            return [], {**shown(c, spans), SOURCES: [x for p in files for x in [source(p, file_named(p, folders) or os.path.basename(p))] if x]}
         else:
             problem = problem or instead("the result", target, [out], approx)
     return [problem], shown(runs[0][0], [runs[0][1]])
@@ -1652,7 +1662,8 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None, 
     rel = path if not inside(path, [top, cwd]) else os.path.relpath(path, top)
     if rel.startswith("../"):
         rel = os.path.relpath(_real(path) or path, _real(top) or top)
-    return problems, {"file": rel, "line": line, "lines": rows}, hay
+    # the path read, which check_quote keeps as the place's source and takes out of the place it shows
+    return problems, {"file": rel, "line": line, "lines": rows, READ_PATH: path}, hay
 
 
 def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
@@ -1694,7 +1705,137 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
         missing = unshown_change(was, target, "\n".join(hay))
         if missing:
             problems.append(f"{where} does not show “{short(' … '.join(missing), 60)}”")
-    return problems, {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
+    read = [s.pop(READ_PATH, None) for s in shown]
+    out = {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
+    if not problems:
+        # each cited place, as the check read it: what the citation rests on
+        out[SOURCES] = [x for p, s in zip(read, shown) if p for x in [source(p, s["file"], s["line"])] if x]
+    return problems, out
+
+
+# ------------------------------------------------------------------------------------------------ what a citation rests on
+#
+# A citation the check confirmed rests on files: the lines that quote and code evidence cite, and the files that the
+# code of computed evidence names. For each, check_mark keeps what identifies the version the check read (`sources`):
+# the file's size and mtime, and the sha256 of the cited lines, or of the whole file for code that reads it. examine()
+# says whether a source still reads that way: a stat first, and the hash only when the stat changed since it last
+# looked. The plugin and the workbench call it at the moments they show citations, so a citation whose source changed
+# after its check shows that it is stale (the plugin's marks/stale.ts, the workbench's marks.refresh_sources).
+
+SOURCES = "sources"  # the key a place's or a call's evidence carries its sources under, until check_mark takes them
+READ_PATH = "_path"  # the key a place carries the path read under, until check_quote takes it
+WILDCARD = re.compile(r"[*?[]")
+
+
+def _mtime_ms(st: os.stat_result) -> float:
+    """A stat's mtime in milliseconds, as the plugin's hooks read a file's (`mtimeMs`)."""
+    return st.st_mtime_ns / 1e6
+
+
+def digest(path: str, line: Any = None) -> str | None:
+    """The sha256 of what a source rests on: the cited lines of the file (`line`, `12` or `8-11`), each without its line
+    break, or the whole file; None when it cannot be read, is no regular file (a pipe would never end), or has no such
+    lines."""
+    span = line_span(line) if line else None
+    if line and not span:
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    except (OSError, ValueError):
+        return None
+    from stat import S_ISREG  # noqa: PLC0415
+
+    h = hashlib.sha256()
+    try:
+        with os.fdopen(fd, "rb") as f:
+            if not S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
+            if not span:
+                for block in iter(lambda: f.read(BLOCK), b""):
+                    h.update(block)
+                return h.hexdigest()
+            a, b = span
+            n = 0
+            for n, raw in enumerate(f, 1):
+                if n >= a:
+                    h.update(raw.rstrip(b"\r\n") + b"\n")
+                if n >= b:
+                    break
+            return h.hexdigest() if n >= b else None
+    except OSError:
+        return None
+
+
+def source(path: str, file: str, line: Any = None) -> dict[str, Any] | None:
+    """A source as the check read it: the file by the name a reason gives it (`file`), its real path, the cited lines
+    (`line`) when it rests on them alone, its size and mtime, and the sha256 of what it rests on (digest); None when it
+    cannot be read."""
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    sha = digest(path, line)
+    if sha is None:
+        return None
+    return {"file": file, "path": _real(path) or path, **({"line": str(line)} if line else {}), "size": st.st_size,
+            "mtime": _mtime_ms(st), "sha256": sha}
+
+
+def code_files(command: str, cwd: str, root: str | None = None) -> list[str]:
+    """The files that the code of a call names, which computed evidence rests on: each string of its code (scripts())
+    that names a regular file inside the session's folders, read from the folder the call ran in (its leading `cd`,
+    else the shell's folder or the one the session started in), and each file that a string with a wildcard matches
+    there (`*/runs.jsonl`, `**` too) when the string names a folder or a kind of file, with a `/` or a `.` (a `"*"`
+    the code prints names none). A path the code builds from parts names none."""
+    m = LEADING_CD.match(command)
+    d = m.group(1).strip("'\"") if m else ""
+    bases = [f for f in (cwd, root) if f]
+    if d:
+        bases = [d] if os.path.isabs(d) else [os.path.join(b, d) for b in bases]
+    folders = [f for f in (root, cwd) if f]
+    out: dict[str, None] = {}
+    for code in scripts(command):
+        try:
+            toks = tokens(code)
+        except (tokenize.TokenError, SyntaxError, IndentationError):
+            continue
+        for t in toks:
+            s = string_value(t.string) if t.type == tokenize.STRING else ""
+            if not s.strip() or "\n" in s or "\0" in s:
+                continue
+            for b in bases:
+                full = os.path.normpath(os.path.join(b, s))
+                wild = WILDCARD.search(s)
+                if wild and not re.search(r"[/.]", s):
+                    continue
+                for p in sorted(glob.glob(full, recursive=True)) if wild else [full]:
+                    if os.path.isfile(p) and inside(p, folders):
+                        out.setdefault(_real(p) or p)
+    return list(out)
+
+
+def examine(src: dict[str, Any]) -> dict[str, Any]:
+    """A source as it stands now: the same while its file's size and mtime are those it last saw; else with the size and
+    mtime now, and `changed` when what it rests on no longer hashes to what the check read. `gone` when the file is not
+    there, or is no regular file."""
+    from stat import S_ISREG  # noqa: PLC0415
+
+    base = {k: v for k, v in src.items() if k not in ("changed", "gone")}
+    path = str(src.get("path") or "")
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return {**base, "gone": True}
+    if not S_ISREG(st.st_mode):
+        return {**base, "gone": True}
+    try:
+        seen = abs(_mtime_ms(st) - float(src.get("mtime") or 0)) < 1 and st.st_size == src.get("size")
+    except (TypeError, ValueError):
+        seen = False
+    if seen and not src.get("gone"):
+        return src
+    now = {**base, "size": st.st_size, "mtime": _mtime_ms(st)}
+    return now if digest(path, src.get("line")) == src.get("sha256") else {**now, "changed": True}
 
 
 # ------------------------------------------------------------------------------------------------ tables and cards
@@ -2806,7 +2947,7 @@ def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]],
     if kind == "card":
         return check_card(target, ev, cards, approx, was, sentence, at)
     if kind == "computed":
-        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd)
+        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd, cwd)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
         return check_quote(target, kind, evs, cwd, root, tmp, calls, was, rules) if evs else (["the check named no place in a file"], None)
@@ -3039,11 +3180,13 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
-    rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
-    calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
-    session's (check_quote).
+    rewrite?, sources?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real
+    Bash calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
+    session's (check_quote). A mark verified or corrected keeps what its evidence rests on (`sources`, each a source()).
+    `fresh`: a check of a citation whose source changed after its first check, whose computed evidence is only a call
+    this check ran, since output printed before the change shows the files as they were.
 
     The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
     `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
@@ -3070,6 +3213,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return out
     status, kind = item.get("status"), item.get("kind")
     ev = item.get("evidence") if isinstance(item.get("evidence"), (dict, list)) else {}
+    if fresh and kind == "computed":
+        calls = [c for c in calls if c.get("by") == "checker"]
     # the check's own reason says why when the check found the claim wrong or could not confirm it; when its evidence
     # does not hold, the reason is this module's (its reason then says why the claim held, which it did not)
     reason = check_reason(item.get("reason") or "", words)
@@ -3086,6 +3231,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         if ev:
             _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards,
                                          rules=rules, at=at, sentence=str(mark.get("sentence") or ""))
+            if evidence:
+                evidence.pop(SOURCES, None)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 res["evidence"] = with_method(evidence, method)
         return res
@@ -3154,6 +3301,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     sentence_now = str(rewrite["sentence"] if rewrite else mark.get("sentence") or "")
     problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules,
                                         at, sentence_now)
+    rests = evidence.pop(SOURCES, None) if evidence else None
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = with_method(evidence, method)
@@ -3182,6 +3330,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
             res["narrowed"] = True
         if rewrite:
             res["rewrite"] = rewrite["sentence"]
+    if rests:
+        res["sources"] = rests
     return res
 
 
@@ -3200,11 +3350,12 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
     folders (one, or a list); `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps
     its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions); `at` when the
-    marks' words were written (seconds since the epoch), the time a card that keeps its versions is read at (None: now).
+    marks' words were written (seconds since the epoch), the time a card that keeps its versions is read at (None: now);
+    `fresh`, a check of citations whose source changed after their first check (check_mark).
     A mark the validator fails on fails as a check that did not run, with why; the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
@@ -3217,7 +3368,7 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
     results = []
     for m in marks:
         try:
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at))
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at, fresh))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
@@ -3237,6 +3388,7 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
                 r.update(status="verified", shown=words)
             else:
                 r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
+                r.pop("sources", None)
             for k in ("rewrite", "was", "narrowed"):
                 r.pop(k, None)
             continue

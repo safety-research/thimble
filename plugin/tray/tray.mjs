@@ -20,7 +20,9 @@
 //   stopWhat(stop), stopKind(stop), stepWords(ends), restWords(next, first), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
-//                                          did not run: x starts it)
+//                                          did not run: x starts it), or it is stale: x checks it again
+//   staleOf(item), staleLine(stale), staleFiles(stale)   the sources of a checked citation that changed after its
+//                                          check (marks/stale.ts), and what its card says of them, in both modes
 //   checkStatus(item), wasLine(item)       a citation's check as each place that shows its card says it (the tray's
 //                                          header, the evidence pane, the claims pane), and what it was before the
 //                                          check corrected it
@@ -217,33 +219,57 @@ export function aboutOf(f, info = {}) {
   return `the explainer of ${q(cut(plain(g.term), 80))}`
 }
 
-/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run), and something the
- *  person does here lets its check run (`runs`, marks/checker.ts repairOk; where nothing does, the failure line or the
- *  card says why in its place). */
-export const canRepair = (m, runs) => !!m && m.status === 'failed' && runs === true
+/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run) or it is stale
+ *  (staleOf), and something the person does here lets its check run (`runs`, marks/checker.ts repairOk; where nothing
+ *  does, the failure line or the card says why in its place). */
+export const canRepair = (m, runs) => !!m && (m.status === 'failed' || staleOf(m).length > 0) && runs === true
+
+/** The sources of a citation that changed after its check (marks/store.ts Source `changed` or `gone`, marks/stale.ts):
+ *  none unless the check confirmed it, verified or corrected, since only then does the citation say the records show
+ *  it. */
+export const staleOf = m =>
+  m && (m.status === 'verified' || m.status === 'corrected') && Array.isArray(m.sources) ? m.sources.filter(s => s && (s.changed || s.gone)) : []
+
+/** Names in a list: `a`, `a and b`, `a, b and c`. */
+const listed = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '')
+
+/** The files of a stale citation's sources, each once, in a list (`README.md and runs.csv`). */
+export const staleFiles = stale => listed([...new Set((stale || []).map(s => String(s.file)))])
+
+/** What a stale citation's card says of its sources (staleOf), wherever it shows: `README.md changed after the check.`,
+ *  and `runs.csv is gone.` for a file that is not there now. */
+export function staleLine(stale) {
+  const gone = [...new Set((stale || []).filter(s => s.gone).map(s => String(s.file)))]
+  const changed = [...new Set((stale || []).filter(s => !s.gone).map(s => String(s.file)))].filter(f => !gone.includes(f))
+  return [
+    changed.length ? `${listed(changed)} changed after the check.` : '',
+    gone.length ? `${listed(gone)} ${gone.length > 1 ? 'are' : 'is'} gone.` : '',
+  ].filter(Boolean).join(' ')
+}
 
 /** What a failed citation's card says of a file its check could not read (marks/store.ts MarkItem `unread`), in the tray
  *  and the Claims pane alike: the file that x repair's OK, or Claude Code's ask as the repair reads it, is about. */
 export const unreadLine = file => `The check could not read ${file}.`
 
 // a citation's check by its status: the sign the reply draws after the citation's words in that status (marks/view.ts
-// withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet; a checked one has none there,
-// and ✓ here), its word, and its tone
+// withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet, ↻ stale; a checked one has
+// none there, and ✓ here), its word, and its tone
 const CHECKS = {
   checking: { sign: 'spin', word: 'checking', tone: 'dim' },
   deferred: { sign: '?', word: 'not checked', tone: 'dim' },
   verified: { sign: '✓', word: 'verified', tone: 'good' },
   corrected: { sign: '✓', word: 'corrected', tone: 'good' },
   repaired: { sign: '✓', word: 'repaired', tone: 'good' },
+  stale: { sign: '↻', word: 'stale', tone: 'warn' },
   failed: { sign: '×', word: 'failed', tone: 'bad' },
 }
 
 /** A citation's check as every place that shows the citation's card says it: the tray's header, the evidence pane and
  *  the claims pane, so they never disagree. {key, sign, word, tone}: a citation the check corrected (its right words in
- *  place of the ones Claude wrote) says corrected, or repaired when x corrected it; a status no check gave (none ran) is
- *  failed (marks/store.ts notRun). */
+ *  place of the ones Claude wrote) says corrected, or repaired when x corrected it; one whose source changed after the
+ *  check says stale (staleOf); a status no check gave (none ran) is failed (marks/store.ts notRun). */
 export function checkStatus(m) {
-  const key = m?.status === 'corrected' && m.repair ? 'repaired' : CHECKS[m?.status] ? m.status : 'failed'
+  const key = staleOf(m).length ? 'stale' : m?.status === 'corrected' && m.repair ? 'repaired' : CHECKS[m?.status] ? m.status : 'failed'
   return { key, ...CHECKS[key] }
 }
 

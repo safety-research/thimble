@@ -36,7 +36,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, inverse, part}.
 import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
-import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, unreadLine, wasLine } from '../tray/tray.mjs'
+import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, staleLine, staleOf, unreadLine, wasLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -495,9 +495,10 @@ function layOf(claims, groups, edges, W, h, cols) {
 const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
 const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)
 
-/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair); the pane
- *  offers x only where something the person does here lets its check run too (marks/checker.ts repairOk). */
-export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
+/** Whether x can repair a citation: the check could not confirm it, or did not run, or a file it rests on changed after
+ *  its check (tray/tray.mjs canRepair); the pane offers x only where something the person does here lets its check run
+ *  too (marks/checker.ts repairOk). */
+export const repairable = s => !!s && (s.status === 'failed' || staleOf(s).length > 0) && !!s.row && !!s.n
 
 /** Whether x checks a citation for the first time: it waits to be opened (`deferred`). */
 export const checkable = s => !!s && s.status === 'deferred' && !!s.row && !!s.n
@@ -623,9 +624,10 @@ export function cardOf(s, W, { whole = false } = {}) {
   const kind = ' · citation'
   const right = [{ s: '   ' }, { s: word, tone }, { s: kind, tone: 'dim' }]
   const words = one(s.shown || s.label)
-  const look = key === 'failed' ? { tone: 'bad', underline: true } : { tint: true }
+  const look = key === 'failed' ? { tone: 'bad', underline: true } : key === 'stale' ? { tone: 'warn', underline: true } : { tint: true }
   const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - len(kind))), ...look, bold: true }, ...right]]
   const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
+  if (key === 'stale') dim(one(staleLine(staleOf(s))))
   if (s.status === 'corrected' && s.was) dim(wasLine({ rewritten: s.rewritten, narrowed: s.narrowed, was: one(s.was) }))
   else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
   if (s.status === 'failed') for (const file of new Set((s.unread || []).map(u => u.file))) dim(unreadLine(file))
