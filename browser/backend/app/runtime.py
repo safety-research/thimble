@@ -237,6 +237,7 @@ class Conv:
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
     switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
     cc: Any = None  # its Claude Code session, open past its turn while a background command runs (runtime_cc.Held)
+    tools: list[str] | None = None  # the tools its last Claude Code session listed as it started (runtime_cc)
 
     @property
     def c(self) -> str:
@@ -461,7 +462,8 @@ class Space:
         if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
             self.attach()
             return False
-        self.drop_waiting()
+        for text in self.drop_waiting():
+            _turn_ended(self.c, text, None)  # an export's request that went unread ends unpublished
         self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
@@ -554,12 +556,14 @@ class Space:
         if words is not None:
             agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
 
-    def drop_waiting(self) -> None:
+    def drop_waiting(self) -> list[str]:
         """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
-        analyst's messages among it still get their lines in main's chat, as they sent them."""
-        for text in self.main.queue:
+        analyst's messages among it still get their lines in main's chat, as they sent them. What went, oldest first."""
+        gone = list(self.main.queue)
+        for text in gone:
             self.said_line(text, read=False)
         self.main.queue.clear()
+        return gone
 
     def take_back(self, logged: dict[str, str], rewound: str) -> list[tuple[str, str]]:
         """What a rewind to the analyst's message `rewound` takes back of what waits for main (rewind_main): each
@@ -602,8 +606,8 @@ class Space:
         return [home / n for n in PRIVATE_FILES]
 
     def spec_of(self, conv: Conv) -> Spec:
-        from . import (cc_settings, config, events, labels_off, ledger, runtime_tools, subagents,  # noqa: PLC0415
-                       tools, userconf)
+        from . import (artifact_export, cc_settings, config, events, labels_off, ledger, runtime_tools,  # noqa: PLC0415
+                       subagents, tools, userconf)
 
         tmp = self.dir / "tmp" / conv.id
         nofollow.makedirs(tmp)
@@ -621,6 +625,10 @@ class Space:
                      if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)
                      and (labels or s.name not in labels_off.TOOLS)]
             builtins = list(MAIN_BUILTINS)
+            if conv.kind == "main" and engine() == "cc" and conv.cc is None and artifact_export.waiting(self.c):
+                # an export waits for main to publish it: the turns it waits for have Claude Code's Artifact tool
+                # (artifact_export.py), and a session kept open for a command in the background goes on without it
+                builtins.append(artifact_export.TOOL)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
             # the composer's effort, else the one Claude Code in a terminal runs the model at by the analyst's
@@ -854,12 +862,13 @@ async def forget(c: str) -> None:
     (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
     place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
     brought back)."""
-    from . import runtime_cc  # noqa: PLC0415
+    from . import artifact_export, runtime_cc  # noqa: PLC0415
 
     sp = _spaces.pop(c, None)
     if sp is None:
         return
     sp.drop_waiting()
+    artifact_export.forget(c)  # its exports end with no word, which the folder that takes its place would keep
     for conv in [sp.main, *sp.convs.values()]:
         if conv.running:
             conv.queue.clear()
@@ -1035,14 +1044,31 @@ async def _main_loop(sp: Space) -> None:
         t0 = time.monotonic()
         main.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "task-notification"}})
         sp.said_line(text)
+        end: TurnEnd | None = None
         try:
             # each label as main can read it in this turn is a version, which a citation of it is checked against
             await asyncio.to_thread(_keep_label_versions, sp.c)
-            await _run(main, text)
+            end = await _run(main, text)
         except asyncio.CancelledError:
             sp.read()
             raise
+        finally:
+            _turn_ended(sp.c, text, end)
         main.emit({"type": "system", "subtype": "turn_duration", "durationMs": int((time.monotonic() - t0) * 1000)})
+
+
+def _turn_ended(c: str, text: str, end: TurnEnd | None) -> None:
+    """Main's turn on `text` ended (`end`; None when it stopped or never ran): an export whose request it was ends with
+    it (artifact_export.turn_ended). Never raises."""
+    from . import artifact_export  # noqa: PLC0415
+
+    m = EVENT_ID_RE.match(text)
+    if m is None:
+        return
+    try:
+        artifact_export.turn_ended(c, m.group(1), end)
+    except Exception:  # noqa: BLE001 — main's turn is over either way
+        log.exception("%s: the end of main's turn did not reach its export", c)
 
 
 def _keep_label_versions(c: str) -> None:
@@ -1563,12 +1589,13 @@ async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
     (_agent_loop, _ended), and what waited for main goes (Space.drop_waiting). It waits up to `wait_s` for them, then
     the mirror keeps where each stands (session.keep_places), so the next server neither shows them running nor takes
     them up again. The ids stopped."""
-    from . import session  # noqa: PLC0415
+    from . import artifact_export, session  # noqa: PLC0415
 
     stopping: list[tuple[str, Any]] = []
     mains = [sp.c for sp in _spaces.values() if sp.main.running]
     for sp in list(_spaces.values()):
         sp.drop_waiting()
+        artifact_export.forget(sp.c)  # an export that waits ends with the server, with no word for a page that is gone
         for conv in [sp.main, *sp.convs.values()]:
             if conv.running:
                 conv.queue.clear()

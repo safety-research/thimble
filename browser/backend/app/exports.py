@@ -1,4 +1,4 @@
-"""A written document exported as a file: Markdown, HTML or PDF.
+"""A written document exported as a file: Markdown, HTML or PDF, or as a page to publish as a Claude artifact.
 
 Every format starts from one reading of the document (read_model): its title, units (a report's sections), their
 figures and the citations, numbered in order of first use;
@@ -6,7 +6,10 @@ a card a sentence names as a noun is written as the card's title (report_types.c
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
 the citations as numbered notes linked from the text, set as the report is on the page, in its faces and sizes on white,
 each figure the card's question, its art and its caption; PDF is that HTML printed by the browser on A4 pages,
-a heading kept with what follows it and a figure, a table row or a note never split.
+a heading kept with what follows it and a figure, a table row or a note never split. The artifact's page (to_artifact)
+is that HTML made to claude.ai's rules for an artifact: nothing loaded from elsewhere, light and dark from tokens, each
+figure's art drawn on both papers, readable at a phone's width; main publishes it (artifact_export.py), and where it
+cannot, the page downloads. A page document, whose HTML is its own, has no artifact export.
 
 The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
 own Chromium when it is installed. A figure's art comes from the card harness (render.render_figure), drawn as the
@@ -38,6 +41,8 @@ FORMAT_INFO = {
     "markdown": {"name": "Markdown", "ext": "md", "mime": "text/markdown; charset=utf-8"},
     "html": {"name": "HTML", "ext": "html", "mime": "text/html; charset=utf-8"},
     "pdf": {"name": "PDF", "ext": "pdf", "mime": "application/pdf"},
+    # published as a link (artifact_export.py), which the menu notes in place of an extension
+    "artifact": {"name": "Claude artifact", "ext": "html", "mime": "text/html; charset=utf-8", "note": "link"},
 }
 NEEDS_BROWSER = ("pdf",)  # its figures are pictures, which the card harness draws
 QUOTE_CHARS = 240  # of a cited record, in its note
@@ -50,6 +55,7 @@ FIGURE_ZOOM = 1.5
 # the page an export is set on, Neutral's white (frontend styles/tokens.css), which its figures' art is drawn on
 # (render.export_theme)
 PAPER = "#ffffff"
+DARK = "dark"  # the paper the art of an artifact's figures is drawn on for its dark theme (to_artifact)
 _MARK_RE = re.compile(r"\[([^\]]*)\]\(#\)")  # a citation mark in a card's text, `[words](#)`
 _INLINE_RE = re.compile(r"\*\*(.+?)\*\*|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|`([^`]+)`|\[([^\]]+)\]\((https?://[^)\s]+)\)")
 
@@ -316,22 +322,32 @@ def _para_html(p: dict[str, Any]) -> str:
     return f"<p>{' '.join(_sentence_html(s) for s in p['sentences'])}</p>"
 
 
-def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]]) -> str:
+def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]] | None = None) -> str:
     """A figure as the report's page shows it: its card's question, its art and its caption."""
     pic = pics.get(f["card"]) or {}
     q = f'<div class="fig-q">{_esc(pic["question"])}</div>' if pic.get("question") else ""
     cap = (f'<figcaption><span>{inline_html(f["caption"])}{_cites_html(f["notes"])}</span></figcaption>' if f["caption"]
            else "")
-    return f'<figure id="card-{_esc(f["card"])}">{q}{card_html(pic)}{cap}</figure>'
+    art = card_html(pic, (dark or {}).get(f["card"]))
+    return f'<figure id="card-{_esc(f["card"])}">{q}{art}{cap}</figure>'
 
 
-def card_html(pic: dict[str, Any]) -> str:
-    """A figure's art as the export shows it: its picture, else its card's table, else its card's text."""
+def card_html(pic: dict[str, Any], dark: dict[str, Any] | None = None) -> str:
+    """A figure's art as the export shows it: its picture, else its card's table, else its card's text. With `dark`, the
+    same art drawn on Dark (to_artifact), both pictures, each shown in its theme (ARTIFACT_CSS)."""
     if pic.get("png"):
-        size = "".join(f' {k}="{int(pic[k])}"' for k in ("width", "height") if pic.get(k))
-        return f'<img alt="{_esc(pic.get("question"))}"{size} src="data:image/png;base64,{pic["png"]}">'
+        if dark and dark.get("png"):
+            return _img(pic, pic, "art-light") + _img(pic, dark, "art-dark")
+        return _img(pic, pic)
     body = pic.get("table") or (f"<pre>{_esc(pic['text'])}</pre>" if pic.get("text") else "")
     return f'<div class="fig-text">{body}</div>' if body else ""
+
+
+def _img(pic: dict[str, Any], drawn: dict[str, Any], cls: str = "") -> str:
+    """The picture of `drawn` (a figure_pictures entry) at the px it stands in, its alt text the question of `pic`."""
+    size = "".join(f' {k}="{int(drawn[k])}"' for k in ("width", "height") if drawn.get(k))
+    named = f' class="{cls}"' if cls else ""
+    return f'<img{named} alt="{_esc(pic.get("question"))}"{size} src="data:image/png;base64,{drawn["png"]}">'
 
 
 def _notes_html(m: dict[str, Any]) -> str:
@@ -359,8 +375,8 @@ def unit_blocks(u: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     return out + [("figure", f) for f in rest if f["after"] is None or f["after"] not in ids]
 
 
-def _unit_body(u: dict[str, Any], pics: dict[str, dict[str, Any]]) -> str:
-    return "".join(_para_html(x) if kind == "paragraph" else _figure_html(x, pics) for kind, x in unit_blocks(u))
+def _unit_body(u: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]] | None = None) -> str:
+    return "".join(_para_html(x) if kind == "paragraph" else _figure_html(x, pics, dark) for kind, x in unit_blocks(u))
 
 
 def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | None = None) -> str:
@@ -368,6 +384,11 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
     faces = font_faces() if faces is None else faces
     if m["page_html"] is not None:
         return _page_html(m, faces)
+    return _document(m["title"], faces, TOKENS_CSS + BASE_CSS, _main_html(m, pics))
+
+
+def _main_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]] | None = None) -> str:
+    """The document's title, sections, figures and notes, as `<main>`; with `dark`, each figure's art on Dark too."""
     parts = [f"<h1>{inline_html(m['title'])}</h1>"]
     if m["claims"]:
         parts.append("<ul>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in m["claims"]) + "</ul>")
@@ -375,9 +396,9 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
         if u["heading"]:
             lvl = min(4, max(2, u["level"]))
             parts.append(f"<h{lvl}>{inline_html(u['heading'])}</h{lvl}>")
-        parts.append(_unit_body(u, pics))
+        parts.append(_unit_body(u, pics, dark))
     parts.append(_notes_html(m))
-    return _document(m["title"], faces, TOKENS_CSS + BASE_CSS, "<main>" + "".join(parts) + "</main>")
+    return "<main>" + "".join(parts) + "</main>"
 
 
 def _document(title: str, faces: str, css: str, body: str) -> str:
@@ -393,6 +414,75 @@ def _page_html(m: dict[str, Any], faces: str) -> str:
     if re.search(r"<head[^>]*>", page, re.I):
         return re.sub(r"(<head[^>]*>)", lambda mm: mm.group(1) + '<meta charset="utf-8">' + head, page, count=1, flags=re.I)
     return _document(m["title"], faces, TOKENS_CSS, page)
+
+
+# --------------------------------------------------------------------------- a Claude artifact's page
+
+# The report as the page sets it (BASE_CSS) in the two themes an artifact shows: Neutral's white and inks, and Dark's
+# card and inks (frontend styles/tokens.css), as tokens that the viewer's theme picks (its data-theme, else the system's
+# scheme). Each figure's art is drawn on both papers and the theme shows one (--art-light, --art-dark). The column is as
+# wide as a figure's art, with the side gutter claude.ai asks for at a phone's width; a picture, a table or a long name
+# never widens the page.
+ARTIFACT_DARK = ("--paper:#25252a;--ink-900:#fdfcfa;--ink-700:#e2dfd8;--ink-500:#b8b5ad;--ink-rgb:248,246,242;"
+                 "--art-light:none;--art-dark:block;color-scheme:dark")
+ARTIFACT_CSS = f"""
+:root{{--paper:{PAPER};--ink-900:#000000;--ink-700:#47474c;--ink-500:#636368;--ink-rgb:24,24,27;--art-light:block;
+--art-dark:none;--font-body:'Hanken Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
+--font-mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}}
+@media (prefers-color-scheme:dark){{:root:not([data-theme="light"]){{{ARTIFACT_DARK}}}}}
+:root[data-theme="dark"]{{{ARTIFACT_DARK}}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:var(--paper);color:var(--ink-900);font-family:var(--font-body);font-size:15px;line-height:1.7;
+-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;padding-left:max(16px,env(safe-area-inset-left,0px));
+padding-right:max(16px,env(safe-area-inset-right,0px))}}
+main{{max-width:{FIGURE_W}px;margin:0 auto;padding-block:48px 72px}}
+h1{{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;margin:0 0 18px;text-wrap:balance}}
+h2{{font-size:18px;line-height:1.3;font-weight:600;letter-spacing:-.01em;margin:30px 0 8px;text-wrap:balance}}
+h3,h4{{font-size:14px;line-height:1.4;font-weight:500;margin:20px 0 6px}}
+p{{margin:0 0 10px}}
+ul,ol{{margin:0 0 10px;padding-left:22px}}
+li{{margin:0 0 2px}}
+strong{{font-weight:500}}
+a{{color:inherit}}
+code{{font-family:var(--font-mono);font-size:.86em;background:rgba(var(--ink-rgb),.06);padding:1px 4px;border-radius:2px;
+overflow-wrap:anywhere}}
+sup.cite{{font-size:.68em;line-height:0;margin-left:1px;color:var(--ink-500)}}
+sup.cite a{{text-decoration:none;color:var(--ink-500);font-weight:500}}
+sup.cite a:hover,sup.cite a:focus-visible{{color:var(--ink-900)}}
+figure{{margin:18px 0 22px}}
+.fig-q{{font-size:14px;line-height:1.35;font-weight:500;margin:0 0 10px}}
+figure img{{display:block;max-width:100%;height:auto}}
+.art-light{{display:var(--art-light)}}
+.art-dark{{display:var(--art-dark)}}
+figcaption{{display:flex;gap:10px;margin-top:10px;font-size:13px;line-height:1.55;color:var(--ink-700)}}
+figcaption::before{{content:'';flex:none;width:2px;background:var(--ink-900)}}
+figcaption span{{min-width:0}}
+.fig-text{{overflow-x:auto}}
+.fig-text pre{{font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;
+color:var(--ink-700)}}
+.fig-text table{{border-collapse:collapse;font-size:13px;line-height:1.5}}
+.fig-text th,.fig-text td{{text-align:left;padding:3px 8px;border-bottom:1px solid rgba(var(--ink-rgb),.1);
+font-variant-numeric:tabular-nums}}
+.fig-text th{{font-weight:500;color:var(--ink-500)}}
+.notes{{margin-top:44px;padding-top:14px;border-top:1px solid rgba(var(--ink-rgb),.14);font-size:12px;line-height:1.5;
+color:var(--ink-700)}}
+.notes h2{{font-size:13px;margin:0 0 8px;color:var(--ink-500);font-weight:500;letter-spacing:0}}
+.notes ol{{padding-left:24px;margin:0}}
+.notes .ref{{font-family:var(--font-mono);font-size:11px;color:var(--ink-900);overflow-wrap:anywhere}}
+.notes q{{color:var(--ink-500)}}
+"""
+
+
+def to_artifact(m: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]], *,
+                faces: str | None = None) -> str:
+    """The document as a page to publish as a claude.ai artifact (module note): no doctype, html, head or body tag,
+    since the artifact wraps the page in its own; the page's title first, where claude.ai reads it; then its styles
+    (ARTIFACT_CSS) with its faces inlined, and the report as to_html sets it, each figure's art drawn on Neutral (`pics`)
+    and on Dark (`dark`) as data URLs, so it loads nothing."""
+    faces = font_faces() if faces is None else faces
+    return ('<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n'
+            f'<meta name="claude:viewport-fit-sides" content="cover">\n<title>{_esc(m["title"])}</title>\n'
+            f'<style>{ARTIFACT_CSS}{faces}</style>\n{_main_html(m, pics, dark)}\n')
 
 
 # --------------------------------------------------------------------------- pictures of the cards
@@ -415,11 +505,12 @@ def _card_text(cell: dict[str, Any]) -> tuple[str, str]:
     return "", text[:TEXT_CHARS] + ("…" if len(text) > TEXT_CHARS else "")
 
 
-async def figure_pictures(c: str, cards: list[str], *, draw: bool) -> tuple[dict[str, dict[str, Any]], str]:
+async def figure_pictures(c: str, cards: list[str], *, draw: bool,
+                          paper: str = "neutral") -> tuple[dict[str, dict[str, Any]], str]:
     """Each figure's card as the export shows it (card_html's input): its question, and its art as the report's figure
-    draws it (render.render_figure, FIGURE_ZOOM times as large), laid out FIGURE_W px wide, as `png` with the px it
-    stands in (`width`, `height`), else its table or its text; and why the art is not a picture when it is not. A card
-    that is gone says so, as on the page."""
+    draws it (render.render_figure, FIGURE_ZOOM times as large, on `paper`), laid out FIGURE_W px wide, as `png` with the
+    px it stands in (`width`, `height`), else its table or its text; and why the art is not a picture when it is not. A
+    card that is gone says so, as on the page."""
     from . import notebook, render  # noqa: PLC0415
 
     out: dict[str, dict[str, Any]] = {}
@@ -432,7 +523,7 @@ async def figure_pictures(c: str, cards: list[str], *, draw: bool) -> tuple[dict
         pic: dict[str, Any] = {"question": _collapse(cell.get("title")) or f"card:{cid}"}
         if draw and not why:
             try:
-                r = await render.render_figure(c, cell, width=FIGURE_W, zoom=FIGURE_ZOOM)
+                r = await render.render_figure(c, cell, width=FIGURE_W, zoom=FIGURE_ZOOM, paper=paper)
             except render.Unavailable as e:
                 why = str(e)
             else:
@@ -517,11 +608,16 @@ async def print_pdf(html_text: str) -> bytes:
 # --------------------------------------------------------------------------- formats
 
 
-def formats() -> list[dict[str, Any]]:
-    """The formats a document offers, each {id, name, ext, ok, why?}: Markdown, HTML and PDF, the ones that need the
-    browser (NEEDS_BROWSER) marked not ok when there is none."""
+def formats(doc: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """The formats a document offers, each {id, name, ext, note?, ok, why?}: Markdown, HTML, PDF and, but for a page,
+    whose HTML is its own, a Claude artifact; the ones that need the browser (NEEDS_BROWSER) marked not ok when there is
+    none."""
+    from .report_types import is_custom  # noqa: PLC0415
+
     kind, why_off = browser()
-    out = [{"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True} for i in FORMAT_INFO]
+    ids = [i for i in FORMAT_INFO if i != "artifact" or doc is None or not is_custom(doc)]
+    out = [{"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"],
+            **({"note": FORMAT_INFO[i]["note"]} if FORMAT_INFO[i].get("note") else {}), "ok": True} for i in ids]
     for f in out:
         if f["id"] in NEEDS_BROWSER and kind == "off":
             f.update(ok=False, why=f"Needs a browser: {why_off}")
@@ -541,24 +637,46 @@ def _filename(title: str, slug: str, ext: str) -> str:
     return f"{base}.{ext}"
 
 
-async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, str]:
-    """(content, file name, mime) of the document in format `fmt`. HTTPException 404 for no document or no such format,
-    409 for a format that cannot run here, with the reason."""
+async def read_for(c: str, inv_id: str, slug: str, fmt: str) -> dict[str, Any]:
+    """The document read for format `fmt` (read_model). HTTPException 404 for no document or no such format, 409 for a
+    format that cannot run here, with the reason."""
     from . import report_types  # noqa: PLC0415
 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
     if doc is None:
         raise HTTPException(404, f"no {slug} yet")
-    offered = {f["id"]: f for f in await asyncio.to_thread(formats)}
+    offered = {f["id"]: f for f in await asyncio.to_thread(formats, doc)}
     f = offered.get(fmt)
     if f is None:
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
     if not f["ok"]:
         raise HTTPException(409, f["why"])
-    m = await asyncio.to_thread(read_model, c, doc)
+    return await asyncio.to_thread(read_model, c, doc)
+
+
+async def artifact_page(c: str, m: dict[str, Any]) -> str:
+    """The artifact page of the document read as `m` (to_artifact), each figure's art drawn on Neutral and on Dark."""
+    kind, _why = browser()
+    cards = [x["card"] for u in m["units"] for x in u["figures"]]
+    (pics, _), (dark, _) = await asyncio.gather(figure_pictures(c, cards, draw=kind != "off"),
+                                                figure_pictures(c, cards, draw=kind != "off", paper=DARK))
+    return await asyncio.to_thread(to_artifact, m, pics, dark)
+
+
+def artifact_name(m: dict[str, Any], slug: str) -> str:
+    """The file name of the artifact page of the document read as `m`, which a download saves it as."""
+    return _filename(m["title"], slug, "artifact.html")
+
+
+async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, str]:
+    """(content, file name, mime) of the document in format `fmt`: for a Claude artifact, the page main publishes. The
+    HTTPExceptions of read_for."""
+    m = await read_for(c, inv_id, slug, fmt)
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
     if fmt == "markdown":
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
+    if fmt == "artifact":
+        return (await artifact_page(c, m)).encode("utf-8"), artifact_name(m, slug), FORMAT_INFO["artifact"]["mime"]
     kind, _why = browser()
     cards = [x["card"] for u in m["units"] for x in u["figures"]]
     pics, _ = await figure_pictures(c, cards, draw=kind != "off")
@@ -589,7 +707,7 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 
     slug = _slug(c, inv_id, slug)
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
-    return {"formats": await asyncio.to_thread(formats) if doc else []}
+    return {"formats": await asyncio.to_thread(formats, doc) if doc else []}
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")

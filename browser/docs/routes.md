@@ -24,7 +24,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-200 routes, 109 of them writes: 9 token, 1 code, 99 cookie, 88 cookie or token, 1 media key, 2 none.
+201 routes, 110 of them writes: 9 token, 1 code, 100 cookie, 88 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -156,6 +156,7 @@ knows the key.
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments` | report_types | cookie |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export` | report_types | cookie or token |
+| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export/artifact` | artifact_export | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}` | exports | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/exports` | exports | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame` | report_types | cookie or token |

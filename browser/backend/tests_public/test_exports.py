@@ -1,10 +1,11 @@
 """A written document exported: Markdown with footnotes, one self-contained HTML file set as the report is on the page,
-and PDF offered disabled when there is no browser. No model call and no browser: the card harness's pictures are
-faked."""
+PDF offered disabled when there is no browser, and the page a Claude artifact publishes, in claude.ai's rules for one.
+No model call and no browser: the card harness's pictures are faked."""
 from __future__ import annotations
 
 import base64
 import re
+from html.parser import HTMLParser
 
 import pytest
 from fastapi import FastAPI
@@ -44,8 +45,11 @@ async def test_a_written_document_exports_as_markdown_with_footnotes_and_as_one_
     monkeypatch.setattr(exports, "browser", lambda: ("off", "the browser is off in thimble's config"))
     client = TestClient(app)
     by = {f["id"]: f for f in client.get(f"{BASE}/report/exports").json()["formats"]}
-    assert list(by) == ["markdown", "html", "pdf"], "no slides"
+    assert list(by) == ["markdown", "html", "pdf", "artifact"], "no slides"
     assert by["markdown"]["ok"] and by["html"]["ok"] and not by["pdf"]["ok"], "PDF needs the browser"
+    assert by["artifact"] == {"id": "artifact", "name": "Claude artifact", "ext": "html", "note": "link", "ok": True}
+    # a page, whose HTML is its own, offers no Claude artifact
+    assert [f["id"] for f in exports.formats({"renderer": "custom"})] == ["markdown", "html", "pdf"]
     r = client.get(f"{BASE}/report/export/markdown")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")
     assert 'filename="One-account-did-it.md"' in r.headers["content-disposition"] and r.text.startswith("# One account")
@@ -58,6 +62,7 @@ async def test_a_written_document_exports_as_markdown_with_footnotes_and_as_one_
 
 
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+DARK_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
 
 @pytest.fixture()
@@ -76,12 +81,13 @@ def chart(workspaces_tmp):
 @pytest.fixture()
 def harness(monkeypatch):
     """A browser to export with, and a card harness that draws each figure's art as a picture twice as wide as tall,
-    recording the width each card's art was laid out at."""
-    asked: list[tuple[str, int]] = []
+    recording the width each card's art was laid out at and the paper it was drawn on."""
+    asked: list[tuple[str, int, str]] = []
 
-    async def render_figure(c, cell, *, width, zoom=1.0, timeout_s=0):
-        asked.append((cell["id"], width))
-        return render.Rendered(png=PNG, box={"x": 0, "y": 0, "width": width * zoom, "height": width * zoom / 2})
+    async def render_figure(c, cell, *, width, zoom=1.0, paper="neutral", timeout_s=0):
+        asked.append((cell["id"], width, paper))
+        return render.Rendered(png=DARK_PNG if paper == "dark" else PNG,
+                               box={"x": 0, "y": 0, "width": width * zoom, "height": width * zoom / 2})
 
     monkeypatch.setattr(exports, "browser", lambda: ("bundled", ""))
     monkeypatch.setattr(render, "render_figure", render_figure)
@@ -112,9 +118,117 @@ async def test_the_html_and_pdf_set_each_figure_as_the_page_shows_it_and_keep_a_
     assert '<div class="fig-q">When were the pages deleted?</div>' in fig
     assert re.search(rf'<img alt="When were the pages deleted\?" width="{exports.FIGURE_W}" height="\d+" src="data:image/png', fig)
     assert fig.count("The deletions by hour") == 1 and "within one hour" not in fig, "the takeaway is not drawn twice"
-    assert harness == [(chart, exports.FIGURE_W)]
+    assert harness == [(chart, exports.FIGURE_W, "neutral")]
     # in print a heading stays with what follows it, a figure is never split and its art is never taller than a page; a
     # numbered list keeps its numbers
     assert "h1,h2,h3,h4{break-after:avoid}" in html and "figure{margin:18px 0 22px;break-inside:avoid}" in html
     assert "figure img{max-height:230mm;width:auto}" in html
     assert "<ol><li>Why the account did it. Nobody asked.</li><li>Whether it acted alone.</li></ol>" in html
+
+
+# what a claude.ai artifact may load (the Artifact tool's page contract): stylesheets from Google Fonts with the font
+# files they pull, and scripts from these hosts; everything else is inline
+STYLE_HOSTS = ("https://fonts.googleapis.com/",)
+SCRIPT_HOSTS = ("https://cdnjs.cloudflare.com/", "https://cdn.jsdelivr.net/npm/", "https://unpkg.com/",
+                "https://cdn.tailwindcss.com/", "https://code.jquery.com/")
+CSS_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]*)|@import\s+['\"]([^'\"]+)")
+
+
+class Loads(HTMLParser):
+    """What a page loads: (what, address) of each script, stylesheet, picture, frame and media it names, and of each
+    url() and @import of its styles; and the skeleton tags it has of its own."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.loads: list[tuple[str, str]] = []
+        self.skeleton: list[str] = []
+        self._style = False
+
+    def handle_decl(self, decl: str) -> None:
+        self.skeleton.append(f"<!{decl}>")
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = {k: v or "" for k, v in attrs}
+        if tag in ("html", "head", "body"):
+            self.skeleton.append(f"<{tag}>")
+        self._style = tag == "style"
+        for key in ("src", "href", "data", "poster", "srcset"):
+            if a.get(key) and not (tag == "a" and key == "href"):  # a link the reader follows loads nothing
+                self.loads.append((tag, a[key].split()[0]))
+        self.loads += [("style", u) for m in CSS_URL_RE.finditer(a.get("style", "")) for u in m.groups() if u]
+
+    def handle_endtag(self, tag: str) -> None:
+        self._style = False if tag == "style" else self._style
+
+    def handle_data(self, data: str) -> None:
+        if self._style:
+            self.loads += [("css", u) for m in CSS_URL_RE.finditer(data) for u in m.groups() if u]
+
+
+def artifact_rules(page: str) -> list[str]:
+    """The rules of a claude.ai artifact's page the page breaks: it loads only what the hosts above serve and data URLs,
+    has no skeleton of its own, names itself in its first 8 KB, defines its colors as light tokens that both dark blocks
+    redefine, sets the body's background from a token, keeps the side gutter it promises, and stays under 16 MB."""
+    seen = Loads()
+    seen.feed(page)
+    broken = [f"loads {what} {url}" for what, url in seen.loads
+              if not url.startswith(("data:", "#"))
+              and not (what == "link" and url.startswith(STYLE_HOSTS))
+              and not (what == "script" and url.startswith(SCRIPT_HOSTS))]
+    broken += [f"has its own {tag}" for tag in seen.skeleton]
+    if not re.search(r"<title>[^<]+</title>", page[:8192]):
+        broken.append("no title in its first 8 KB")
+    css = "".join(re.findall(r"<style>(.*?)</style>", page, re.S))
+    if not re.search(r":root\{[^}]*--paper:", css):
+        broken.append("no light tokens on :root")
+    if '@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){' not in css or ':root[data-theme="dark"]{' not in css:
+        broken.append("no dark tokens for the system's dark scheme and for a dark choice")
+    if css.count("color-scheme:dark") < 2:
+        broken.append("the dark blocks leave color-scheme light")
+    if not re.search(r"body\{[^}]*background:var\(--", css):
+        broken.append("the body's background is no token")
+    gutter = ("padding-left:max(16px,env(safe-area-inset-left,0px))" in css
+              and "padding-right:max(16px,env(safe-area-inset-right,0px))" in css)
+    if gutter != ('<meta name="claude:viewport-fit-sides" content="cover">' in page):
+        broken.append("the side gutter and its promise do not go together")
+    if len(page.encode()) > 16 * 1024 * 1024:
+        broken.append("over 16 MB")
+    return broken
+
+
+def test_the_rules_find_what_an_artifact_may_not_load():
+    """The check above finds a page's loads from elsewhere and its own skeleton, so a page that passes it loads none."""
+    bad = ('<!doctype html><html><head><link rel="stylesheet" href="https://example.test/a.css"></head><body>'
+           '<img src="https://example.test/a.png"><script src="https://example.test/a.js"></script>'
+           '<style>p{background:url(https://example.test/b.png)}@import "https://example.test/c.css";</style>'
+           '<a href="https://example.test/">a link</a></body></html>')
+    got = artifact_rules(bad)
+    assert {"loads link https://example.test/a.css", "loads img https://example.test/a.png",
+            "loads script https://example.test/a.js", "loads css https://example.test/b.png",
+            "loads css https://example.test/c.css", "has its own <!doctype html>", "has its own <html>",
+            "has its own <head>", "has its own <body>"} <= set(got)
+    assert not any("example.test/\"" in g or g.endswith("example.test/") for g in got), "a link loads nothing"
+
+
+async def test_a_claude_artifact_s_page_keeps_claude_ai_s_rules_and_draws_each_figure_in_both_themes(chart, harness):
+    await _write_with_figure(chart)
+    client = TestClient(app)
+    r = client.get(f"{BASE}/report/export/artifact")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert 'filename="One-account-deleted-the-audit-pages.artifact.html"' in r.headers["content-disposition"]
+    page = r.text
+    assert artifact_rules(page) == []
+    assert page.startswith('<meta charset="utf-8">')
+    assert "<title>One account deleted the audit pages</title>" in page[:8192]
+    # the report as the HTML sets it: its sections, its notes and its figure, the art drawn on each paper and shown in
+    # its theme
+    assert "<h2>The deletions came within one hour</h2>" in page and 'id="note-2"' in page
+    assert sorted(harness) == [(chart, exports.FIGURE_W, "dark"), (chart, exports.FIGURE_W, "neutral")]
+    fig = re.search(r'<figure id="card-[0-9a-f]{8}">(.*?)</figure>', page, re.S).group(1)
+    light = re.search(r'<img class="art-light" [^>]*src="data:image/png;base64,([^"]+)"', fig).group(1)
+    dark = re.search(r'<img class="art-dark" [^>]*src="data:image/png;base64,([^"]+)"', fig).group(1)
+    assert base64.b64decode(light) == PNG and base64.b64decode(dark) == DARK_PNG
+    assert ".art-light{display:var(--art-light)}" in page and ".art-dark{display:var(--art-dark)}" in page
+    # its faces inlined, as the HTML's are
+    assert "@font-face{font-family:'Hanken Grotesk'" in page and "src:url(data:font/" in page
+

@@ -1235,6 +1235,14 @@ This agent ran in an earlier version of thimble and cannot be continued.
 
 The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Stop it with TaskStop.
 
+## export-artifact
+
+The analyst chose Export, Claude artifact, on the {doc} “{title}”. thimble wrote the {doc} as one page: {page}. Publish that file as it is, with your Artifact tool. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
+
+## artifact-refused
+
+In thimble, the Artifact tool publishes only the page of a document the analyst exported as a Claude artifact.
+
 ## main-stopped-note
 
 thimble: the analyst pressed Stop in thimble and ended your turn. Any command that turn was running was stopped too. Leave that work stopped. Do not run its calls again or take up its request unless the analyst asks again.

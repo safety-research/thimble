@@ -145,8 +145,8 @@ ROUTER_MODULES = [
     # the agent engine (main, threads, background agents)
     "agents", "jobs", "verify", "fixes",
     # documents, and the report checks that comment on them (their runs shut down with the server); the citation
-    # checks' Repair; a card exported as figure files
-    "report_types", "exports", "card_export", "checks", "canvas_comments", "marks",
+    # checks' Repair; a card exported as figure files; a document published as a Claude artifact
+    "report_types", "exports", "card_export", "artifact_export", "checks", "canvas_comments", "marks",
     # the developer agent, telemetry, the workspace export, the problem report
     "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents
