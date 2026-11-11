@@ -160,6 +160,9 @@ export type FixLine = {
   kept?: boolean
   /** update: the session loads what changed */
   loads?: boolean
+  /** applied, off: the fix changes what thimble-browser runs, which loads it when it starts again (the kernel's
+   *  `browser`: stale) */
+  browser?: boolean
 }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
@@ -256,7 +259,7 @@ export async function reloaded($: Engine): Promise<void> {
   if (l?.kind === 'applied' && l.reload === 'pending') {
     // the fix is on: the line says so, with u to undo it, until the person's next prompt (line.ts lineSeen), and the
     // transcript keeps one line that says so
-    await setFixLine($, { id: l.id, kind: 'applied' })
+    await setFixLine($, { id: l.id, kind: 'applied', ...(l.browser ? { browser: true } : {}) })
     const f = await fixOf($, l.id)
     $.ui.log(`thimble reloaded its plugins: ${f ? `“${f.title}”` : `fix ${l.id}`} is on.`)
   }
@@ -310,16 +313,18 @@ export async function applyFix($: Engine, id: number): Promise<string | null> {
   // a --plugin-dir session loads its own folder: the line names the restart. Mid-reply, the reload waits for the turn's
   // end (turn.complete runs reloadIfDue), and the line says so until the new load (reloaded)
   const reload = (await pluginDirSession($)) ? 'restart' : d.reload && (await mainRuns($)) ? 'pending' : undefined
+  // a thimble-browser that runs now keeps the code it started with: the line names its restart, as after an update
+  const browser = d.browser === 'stale' ? { browser: true } : {}
   // the line says the fix is on, with u to undo it, until the person's next prompt (line.ts lineSeen); $.state keeps it
   // across the reload
-  await setFixLine($, { id, kind: 'applied', ...(reload ? { reload } : {}) })
+  await setFixLine($, { id, kind: 'applied', ...(reload ? { reload } : {}), ...browser })
   if (d.reload && !reload) $.ui.log(`thimble reloaded its plugins: ${f ? `“${f.title}”` : `fix ${id}`} is on${d.changed ? ', in its new version' : ''}.`)
   await tellAtNextPrompt($, `fix-${id}`, `The person applied their thimble fix "${f?.title ?? id}"${d.changed ? ' in its new version' : ''}: it is now part of their thimble${d?.version ? ` (${d.version})` : ''}.`)
   if (reload === 'pending') {
     reloadDue = true
     // the turn ended while the fix went on: its end found nothing due, so the reload runs now
     if (!(await mainRuns($))) {
-      await setFixLine($, { id, kind: 'applied' })
+      await setFixLine($, { id, kind: 'applied', ...browser })
       await load($, d)
     }
   } else if (!reload) await load($, d)
@@ -335,8 +340,9 @@ export async function undoFix($: Engine, id: number): Promise<string | null> {
   const d = jsonOf<Any>(r.out) ?? {}
   await refreshFixes($)
   const l = await fixLineNow($)
+  const browser = d.browser === 'stale' ? { browser: true } : {}
   // a fix changed in place goes back to its version before the change; else it goes off
-  if (l?.id === id) await setFixLine($, { id, kind: 'off', ...(d.back ? { back: true } : {}) })
+  if (l?.id === id) await setFixLine($, { id, kind: 'off', ...(d.back ? { back: true } : {}), ...browser })
   if (d.reload) $.ui.log(`thimble reloaded its plugins: ${name} ${d.back ? 'is back to its version before' : 'is off'}.`)
   await tellAtNextPrompt($, `fix-${id}`, d.back
     ? `The person undid the last change to their thimble fix "${was?.title ?? id}": its version before is back.`

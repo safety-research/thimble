@@ -43,8 +43,9 @@ function admits(m: Any, e: Any): boolean {
 let now = 0
 
 /** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. `refuse`: the
- *  kernel's check does not use the fixer's first change, with this refusal. */
-function setup(refuse: Any = null) {
+ *  kernel's check does not use the fixer's first change, with this refusal. `path`: the file the fixer's change is in;
+ *  as the kernel does, y and u on a fix to the browser workbench say that a thimble-browser that runs is stale. */
+function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx') {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
@@ -67,6 +68,7 @@ function setup(refuse: Any = null) {
   let made = false
   const all = () => (made && fix.state !== 'removed' ? [fix] : [])
   const list = () => ({ fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true, due: null })
+  const stale = path.startsWith('browser/') ? { browser: 'stale' } : {}
   const kernel = (argv: string[], stdin?: string) => {
     const ok = (out: unknown) => ({ exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '' })
     const verb = argv[argv.indexOf('fix') + 1]
@@ -89,7 +91,7 @@ function setup(refuse: Any = null) {
       if (refuse && !fix.commit) return ok(Object.assign(fix, { state: 'failed', commit: 'c0ffee0', tests: 'failed', error: refuse.why, refused: refuse }))
       // the fix takes the fixer's title
       const t = argv.indexOf('--title')
-      Object.assign(fix, { state: 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', error: null, refused: null, files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], title: t > 0 ? argv[t + 1] : fix.title })
+      Object.assign(fix, { state: 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', error: null, refused: null, files: [{ path, add: 1, del: 1 }], title: t > 0 ? argv[t + 1] : fix.title })
       return ok(fix)
     }
     // another round in the same copy, which keeps the refusal for its fixer
@@ -98,11 +100,11 @@ function setup(refuse: Any = null) {
       // the kernel checks the press's secret against the sha256 the plugin wrote
       if (!JSON.parse(files.get(`${HOME}/fixes/asks/1.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix apply: only the person's key press in thimble does that" }
       Object.assign(fix, { state: 'on', work: null })
-      return ok({ id: 1, reload: true, version: '0.10.2+fix.c0ffee1' })
+      return ok({ id: 1, reload: true, version: '0.10.2+fix.c0ffee1', ...stale })
     }
     if (verb === 'undo') {
       Object.assign(fix, { state: 'off' })
-      return ok({ id: 1, title: fix.title, reload: true, version: '0.10.2' })
+      return ok({ id: 1, title: fix.title, reload: true, version: '0.10.2', ...stale })
     }
     if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.2', newer: false })
     return ok({})
@@ -339,6 +341,46 @@ test("y while Claude's turn runs: the line says the fix loads when Claude finish
   await s.call('prompt.submit', { text: 'thanks', origin: { kind: 'composer' } }, async (e: Any) => e)
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
   expect(await fixKey(s.$, 'u')).toBe(null)
+})
+
+test('y and u on a fix to the browser workbench: the line names the restart of thimble-browser in a row of its own, which a reload that waited keeps; a fix to the terminal plugin has no such row', async () => {
+  const s = setup(null, 'browser/frontend/src/chat/Notice.tsx')
+  await requested(s)
+  // y while Claude's turn runs: the reload waits, and the row is there before it and after it
+  const TURN = { plugin: 'thimble', key: 'mainTurn' }
+  await s.$.state.set(TURN, 't-main')
+  await (await fixKey(s.$, 'y'))!.later()
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual([
+    '  ✓ Bar says read for coverage is on · reloads when Claude finishes · u undo',
+    '    For the browser: restart thimble-browser',
+    `    If thimble stops loading: sh ${HOME}/fixes/off.sh`,
+  ])
+  await s.$.state.set(TURN, null)
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual([
+    '  ✓ Bar says read for coverage is on · thimble reloaded · u undo',
+    '    For the browser: restart thimble-browser',
+    `    If thimble stops loading: sh ${HOME}/fixes/off.sh`,
+  ])
+  // u: the browser keeps the fix until it starts again, so the off line has the row too
+  await (await fixKey(s.$, 'u'))!.later()
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual([
+    '  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again',
+    '    For the browser: restart thimble-browser',
+  ])
+  // a fix to the terminal plugin alone: the line as it was
+  const t = setup()
+  await requested(t)
+  await (await fixKey(t.$, 'y'))!.later()
+  expect((await fixLineRows(t.$, ELS, 110)).map(textOf)).toEqual([
+    '  ✓ Bar says read for coverage is on · thimble reloaded · u undo',
+    `    If thimble stops loading: sh ${HOME}/fixes/off.sh`,
+  ])
+  await (await fixKey(t.$, 'u'))!.later()
+  expect((await fixLineRows(t.$, ELS, 110)).map(textOf)).toEqual(['  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again'])
 })
 
 test("a change whose tests failed: a new fixer gets another round in the same copy, told the end of the tests' output and the file that holds all of it; the person sees the fix only once it passes", async () => {

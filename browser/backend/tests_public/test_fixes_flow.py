@@ -355,6 +355,88 @@ async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_an
     assert fixes.status(every=True)["fixes"][0]["state"] == "on"
 
 
+def _live_git(*args: str) -> str:
+    """git in the made-up live checkout, as thimble makes its commits there."""
+    return subprocess.run(["git", "-C", str(fixes.live_root().parent), "-c", "user.name=thimble",
+                           "-c", "user.email=thimble@example.invalid", "-c", "commit.gpgsign=false", *args],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture()
+def from_live(fixing, monkeypatch):
+    """This server runs from live, a git checkout of made-up files, and started at live's first commit. The fixture
+    gives `on(fid, title, path)`: a fix that changes `path` went on after that, somewhere else (y in a Claude Code
+    session), as a commit of live and a record of the kernel's."""
+    top = fixes.live_root().parent
+    for path in ("browser/backend/app/main.py", "browser/frontend/src/App.tsx", "plugin/engine/thimble.py",
+                 "plugin/bar/bar.tsx", "plugin/tray/tray.mjs"):
+        (top / path).parent.mkdir(parents=True, exist_ok=True)
+        (top / path).write_text("made up\n")
+    _live_git("init", "-q", "-b", "mine")
+    _live_git("add", "-A")
+    _live_git("commit", "-q", "-m", "thimble")
+    monkeypatch.setattr(config, "REPO_ROOT", fixes.live_root())
+    monkeypatch.setattr(config, "BOOT_COMMIT", _live_git("rev-parse", "HEAD"))
+
+    def on(fid: int, title: str, path: str) -> None:
+        (top / path).write_text(f"made up, with fix {fid}\n")
+        _live_git("commit", "-q", "-am", title)
+        fixing.recs[fid] = {"id": fid, "title": title, "words": [title], "state": "on", "files": [{"path": path}],
+                            "commit": _live_git("rev-parse", "HEAD"), "updated": float(fid)}
+
+    return on
+
+
+def _shown() -> dict[int, tuple[str, str | None]]:
+    """Each fix of Your fixes: its state there, and why it is off."""
+    return {r["id"]: (r["state"], r["why"]) for r in fixes.status(every=True)["fixes"]}
+
+
+async def test_a_fix_that_went_on_in_the_terminal_after_this_server_started_is_off_here_until_use_it_starts_it_again(
+        fixing, from_live, analyst, monkeypatch):
+    from_live(1, "Bigger minimap button", "browser/frontend/src/App.tsx")
+    from_live(2, "Bar says read", "plugin/bar/bar.tsx")
+    from_live(3, "Tray keeps its order", "plugin/tray/tray.mjs")
+    # the fix to the page and the fix to a module of the plugin the page bundles are not in the code this server runs;
+    # the fix to the terminal plugin alone is on, as the server runs none of it
+    assert _shown() == {1: ("off", fixes.NOT_YET), 2: ("on", None), 3: ("off", fixes.NOT_YET)}
+    # Use it leaves the fix as it is, which the kernel would not apply again, and starts the server again from live
+    await fixes.apply_route(1, analyst)
+    await _went_on()
+    await _restarted(fixing, "Use it")
+    assert "apply" not in [c[0] for c in fixing.calls] and fixing.recs[1]["state"] == "on"
+    assert fixing.restarts == [("fix 1: Bigger minimap button", fixes.live_root() / "backend")]
+    fixes._phase.clear()
+    # the server that started again is at live's commit now: every fix is on
+    booted = config.BOOT_COMMIT
+    monkeypatch.setattr(config, "BOOT_COMMIT", _live_git("rev-parse", "HEAD"))
+    assert _shown() == {1: ("on", None), 2: ("on", None), 3: ("on", None)}
+    # and stays on when its commit was made anew with the same change (another fix went off), which the commit the
+    # server started at does not hold
+    fixing.recs[1]["commit"] = "f" * 40
+    assert _shown()[1] == ("on", None)
+    # a fix that went on before the server started and one after it, in the same file: only the later one is off
+    from_live(4, "Minimap button has a label", "browser/frontend/src/App.tsx")
+    fixing.recs[1]["commit"] = config.BOOT_COMMIT
+    assert (_shown()[1], _shown()[4]) == (("on", None), ("off", fixes.NOT_YET))
+    # a copy without git knows no commit of its start: each fix is on, as before, and Use it asks the kernel
+    monkeypatch.setattr(config, "BOOT_COMMIT", "")
+    assert set(_shown().values()) == {("on", None)} and fixes.on_elsewhere(4) is None
+    monkeypatch.setattr(config, "BOOT_COMMIT", booted)
+    assert fixes.on_elsewhere(4)["id"] == 4 and fixes.on_elsewhere(2) is None
+
+
+def test_the_kernel_names_the_browser_s_restart_for_the_plugin_files_this_server_runs():
+    # two lists, one in each program: a fix to one of these files is stale in a thimble-browser that runs
+    import ast  # noqa: PLC0415
+
+    tree = ast.parse((config.REPO_ROOT.parent / "plugin" / "engine" / "kernel" / "fixes.py").read_text())
+    [theirs] = [ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "BROWSER_RUNS" for t in n.targets)]
+    assert sorted(theirs) == sorted(fixes.BROWSER_RUNS)
+    assert all(p in fixes.BROWSER_RUNS for p in fixes.PAGE_SOURCES if p.startswith("plugin/"))
+
+
 def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():
     end = fixes.end_of("It already is.\n\n```\nTitle: Bar word is bold\nRequest: The bar's word is bold already.\n```")
     assert end == {"title": "Bar word is bold", "summary": "The bar's word is bold already.", "request": True}

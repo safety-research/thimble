@@ -39,6 +39,25 @@ def git_dir(root: Path | None = None) -> Path | None:
 # new for every start of the server's code, an execv restart and a reload among them: /api/health carries it, so the
 # watch over a restart (restart_watch.py) tells the restarted server from the one before it
 BOOT_ID = os.urandom(4).hex()
+
+
+def checkout_head(root: Path | None = None) -> str:
+    """The commit the git checkout that holds thimble's browser folder `root` (REPO_ROOT) is at; '' in a copy that is no
+    checkout (git_dir), such as an installed release, and when git gives none."""
+    if git_dir(root) is None:
+        return ""
+    try:
+        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C",
+                            str(REPO_ROOT if root is None else root), "rev-parse", "-q", "--verify", "HEAD^{commit}"],
+                           capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+
+# the commit the server's code was at when it started, '' in a copy that is no checkout: a fix that went on after it is
+# not in the code this server runs until it starts again (fixes.not_here)
+BOOT_COMMIT = checkout_head()
 # opens thimble's requests to its own server on 127.0.0.1 without any proxy the shell sets (HTTP_PROXY and the like):
 # urllib would send them to that proxy unless no_proxy names the host
 LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))

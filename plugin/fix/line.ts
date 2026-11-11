@@ -14,7 +14,10 @@
 //               Note        This fix changes the sandbox (plugin/cards/argv.mjs).
 //               y use it now · n later
 //   applied   ✓ <title> is on · thimble reloaded · u undo (or: reloads when Claude finishes; or, in a session that
-//               If thimble stops loading: sh …/off.sh       loads thimble with --plugin-dir, the restart that loads it)
+//               For the browser: restart thimble-browser    loads thimble with --plugin-dir, the restart that loads it)
+//               If thimble stops loading: sh …/off.sh
+//             (For the browser: only for a fix that changes what thimble-browser runs, which keeps the code it
+//             started with; an off line of such a fix has the row too)
 //   off       ○ <title> is off · thimble reloaded           (until the next prompt)
 //             ↺ <title> is back to its version before · thimble reloaded   (u after y on a changed fix)
 //   failed    × <title> did not pass · <why>                y try again · d ask Claude · n dismiss   (until the
@@ -215,6 +218,10 @@ function failedKeys(els: Any, f: Fix | null, open: boolean, press: (k: string) =
   return keysRow(els, keys, press)
 }
 
+/** What the line says under a fix that went on or off and changes what thimble-browser runs, in the words of the line
+ *  after an update (fixes.ts carriedLine). */
+export const BROWSER_HINT = 'For the browser: restart thimble-browser'
+
 /** The line's rows, `width` cells wide, or none. */
 export async function fixLineRows($: Engine, els: Any, width: number): Promise<Any[]> {
   const l = await fixLineNow($)
@@ -240,6 +247,10 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   let second: Any[] = []
   let why: Any[] = []
   let note: Any[] = []
+  // a fix that changes what thimble-browser runs went on or off: a thimble-browser that runs now loads the change when
+  // it starts again, in a row of its own, as the first row has room for the title and its keys alone
+  const browser = (l.kind === 'applied' || l.kind === 'off') && l.browser
+    ? [Text({ key: 'b', wrap: 'wrap', children: `  ${BROWSER_HINT}` })] : []
   if (l.kind === 'ready' && f) {
     // a round of a fix the person has: its new version, which y puts in place of the one they have; a fix that changes
     // the files the person is told of says which, in a row of its own, before they press y
@@ -280,5 +291,6 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `${f ? `“${fixName(f)}”` : `fix ${l.id}`} did not go through`}` })]
   } else return []
   return [row('fix-line-1', first), ...(why.length ? [row('fix-line-why', why)] : []), ...(note.length ? [row('fix-line-notice', note)] : []),
+    ...(browser.length ? [row('fix-line-browser', browser)] : []),
     ...(second.length ? [Box({ key: 'fix-line-2', flexDirection: 'row', flexWrap: 'wrap', width, children: second })] : [])]
 }
