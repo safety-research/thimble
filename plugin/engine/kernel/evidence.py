@@ -105,6 +105,8 @@ cited place's file and line count) and none the citation cited before. The check
 evidence in every case, whatever call or place the reply pointed at. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
+Its method, how the code of computed evidence got the value, stays on that evidence, over the code the person reads:
+the checker's own words, which this module shows and does not check.
 
   check_all(marks, answer, calls, cwd, root, tmp, cards, rules, at)  -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp, cards, rules, at)    -> {n, status, shown, reason, failedBy?,
@@ -3006,6 +3008,13 @@ def evidence_text(evidence: dict[str, Any] | None) -> str:
     return "\n".join(parts)
 
 
+def with_method(evidence: dict[str, Any], method: str) -> dict[str, Any]:
+    """Computed evidence with the check's `method`: how its code got the value (what it counted or computed, in which
+    records, by what rule), in the check's own words, which the person reads over the code. Other evidence shows no
+    code, so it takes none. No value of it is evidence (evidence_text leaves it out)."""
+    return {**evidence, "method": method} if method and evidence.get("kind") == "computed" else evidence
+
+
 def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: bool = False) -> tuple[str, str] | None:
     """The first run of words outside the citation that the check put in (a narrowing's words it left out, a rewrite's
     new words around the citation) and that states a value of the data: a number, a day or a record's name. It holds
@@ -3044,7 +3053,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     evidence is real, so the person sees what the check found. `failedBy` is `check` when the checker found the claim
     wrong, `evidence` when the claim is only not confirmed: the checker could not see it, or its evidence did not hold,
     `none` when the check gave no answer this module can judge (the plugin's marks/store.ts notRun).
-    A `note` is what the checker found wrong in the sentence outside the mark's own claim.
+    A `note` is what the checker found wrong in the sentence outside the mark's own claim. Computed evidence carries
+    the checker's `method`, how its code got the value (with_method).
 
     One path makes a citation correct: the check gives the cited words as they end (`correction.words`), and when other
     words of the sentence change too, the whole sentence as it ends (`correction.sentence`, the cited words in
@@ -3065,6 +3075,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     reason = check_reason(item.get("reason") or "", words)
     note = norm_ws(item.get("note") or "")
     extra = {"note": note} if note else {}
+    method = norm_ws(item["method"]) if isinstance(item.get("method"), str) else ""
     approx = approximate(mark)
     corr = item.get("correction") if isinstance(item.get("correction"), dict) else None
 
@@ -3076,7 +3087,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
             _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards,
                                          rules=rules, at=at, sentence=str(mark.get("sentence") or ""))
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
-                res["evidence"] = evidence
+                res["evidence"] = with_method(evidence, method)
         return res
 
     # the sentence as the check ends it: a correction, a narrowing or a rewrite
@@ -3145,7 +3156,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
                                         at, sentence_now)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
-        res["evidence"] = evidence
+        res["evidence"] = with_method(evidence, method)
     did = "cited only a part of these words" if narrow else "reworded the sentence" if rewrite else "offered other words"
     if problems and new:
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the

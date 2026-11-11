@@ -58,6 +58,8 @@
 }
 /* the lines wrap in the label, so a long one reads whole (Mark.tsx lineWindow cuts it at words around the marked ones) */
 .mark-pop .refchip-lines { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* how the code got the value, in the check's words: the label's own text, over the code's quieter lines */
+.mark-pop .mark-ev-method { margin-top: 6px; overflow-wrap: anywhere; }
 /* the label over each part of the evidence, as the terminal labels it (`code · 7 lines`, `output · 62 lines`), the
    box under it; and at each edge of a box with lines out of view there, how many (Mark.tsx KeyBox) */
 .mark-pop .mark-ev-label { margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--text-tertiary); }
