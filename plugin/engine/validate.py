@@ -19,8 +19,8 @@ JSON on stdout. No model call, and no code run: kernel/evidence.py reads the fil
              file may lie in (kernel/evidence.py uncitable)}
 
 With "index": a path instead, it writes the cards' places and values there for the checker to grep (card_index), the
-labels as they were at "at", and answers {"cards": the number of cards}. With "sources": the sources of checked
-citations instead, it answers {"sources": each as it stands now} (kernel/evidence.py examine), in the same order.
+labels as they were at "at", and answers {"cards": the number of cards}. With "cited": checked citations instead, each
+{"sources"}, it answers {"cited": each as it stands now} (kernel/evidence.py examine), in the same order.
 """
 import json
 import math
@@ -33,8 +33,8 @@ from kernel.evidence import card_index, check_all, examine, terminal_cards, term
 
 def main() -> int:
     req = json.load(sys.stdin)
-    if isinstance(req.get("sources"), list):
-        json.dump({"sources": [examine(s) if isinstance(s, dict) else s for s in req["sources"]]}, sys.stdout)
+    if isinstance(req.get("cited"), list):
+        json.dump({"cited": examine(req["cited"])}, sys.stdout, ensure_ascii=False)
         return 0
     cards = req.get("cards") if isinstance(req.get("cards"), list) else terminal_cards(req.get("cards_dir"))
     cards = [*cards, *terminal_label_cards(req.get("labels_dir"))]

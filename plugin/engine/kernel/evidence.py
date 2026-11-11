@@ -112,9 +112,9 @@ the checker's own words, which this module shows and does not check.
   check_mark(mark, item, calls, cwd, root, tmp, cards, rules, at)    -> {n, status, shown, reason, failedBy?,
                                                                          evidence?, note?, was?, narrowed?, rewrite?,
                                                                          sources?}
-  examine(source)                                                -> one of a checked mark's sources as it stands now:
-                                                                     `changed` or `gone` when what the mark rests on
-                                                                     differs from what the check read
+  examine(items)                                                 -> checked marks' sources as they stand now, one read
+                                                                     of each file: `changed` or `gone` when what a mark
+                                                                     rests on differs from what the check read
   card_index(cards, at)                                          -> the cards' tables, places and values, one per
                                                                      line, for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
@@ -143,6 +143,7 @@ import shlex
 import tokenize
 from collections import Counter
 from decimal import Decimal, InvalidOperation
+from stat import S_ISREG
 from typing import Any
 from urllib.parse import unquote
 
@@ -1717,10 +1718,19 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
 #
 # A citation the check confirmed rests on files: the lines that quote and code evidence cite, and the files that the
 # code of computed evidence names. For each, check_mark keeps what identifies the version the check read (`sources`):
-# the file's size and mtime, and the sha256 of the cited lines, or of the whole file for code that reads it. examine()
-# says whether a source still reads that way: a stat first, and the hash only when the stat changed since it last
-# looked. The plugin and the workbench call it at the moments they show citations, so a citation whose source changed
-# after its check shows that it is stale (the plugin's marks/stale.ts, the workbench's marks.refresh_sources).
+# the file's size and mtime then, and the sha256 of the cited lines, or of the whole file for code that reads it.
+# examine() says how each reads now. The plugin and the workbench keep one index of the cited files, stat each file
+# once at the moments they show citations, and call examine() only for a file whose stat changed since they last
+# looked (the plugin's marks/stale.ts, the workbench's marks.refresh_sources), so a citation whose source changed after
+# its check shows that it is stale.
+#
+# examine() reads each file once at most, for all the sources that rest on it:
+#   cited lines   the lines at their numbers, reached by counting line breaks in blocks: as the check read them, the
+#                 source stands; else it changed.
+#   a whole file  its size first: another size than the check read is another file, changed with no read; the same
+#                 size, its hash.
+# So a log that grows at each pass costs a stat, and for a citation of its lines a read up to those lines: never a hash
+# of the whole log.
 
 SOURCES = "sources"  # the key a place's or a call's evidence carries its sources under, until check_mark takes them
 READ_PATH = "_path"  # the key a place carries the path read under, until check_quote takes it
@@ -1732,53 +1742,94 @@ def _mtime_ms(st: os.stat_result) -> float:
     return st.st_mtime_ns / 1e6
 
 
-def digest(path: str, line: Any = None) -> str | None:
-    """The sha256 of what a source rests on: the cited lines of the file (`line`, `12` or `8-11`), each without its line
-    break, or the whole file; None when it cannot be read, is no regular file (a pipe would never end), or has no such
-    lines."""
-    span = line_span(line) if line else None
-    if line and not span:
-        return None
+def _open_file(path: str) -> Any:
+    """The regular file at `path`, open to read as bytes, or None: not there, not readable, or no regular file (a pipe
+    would never end)."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
     except (OSError, ValueError):
         return None
-    from stat import S_ISREG  # noqa: PLC0415
-
-    h = hashlib.sha256()
+    f = os.fdopen(fd, "rb")
     try:
-        with os.fdopen(fd, "rb") as f:
-            if not S_ISREG(os.fstat(f.fileno()).st_mode):
-                return None
-            if not span:
-                for block in iter(lambda: f.read(BLOCK), b""):
-                    h.update(block)
-                return h.hexdigest()
-            a, b = span
-            n = 0
-            for n, raw in enumerate(f, 1):
-                if n >= a:
-                    h.update(raw.rstrip(b"\r\n") + b"\n")
-                if n >= b:
-                    break
-            return h.hexdigest() if n >= b else None
+        if S_ISREG(os.fstat(f.fileno()).st_mode):
+            return f
     except OSError:
-        return None
+        pass
+    f.close()
+    return None
+
+
+def _hashed(raw: bytes) -> bytes:
+    """A line as the hash of cited lines takes it: without its line break, then one line break."""
+    return raw.rstrip(b"\r\n") + b"\n"
+
+
+def _file_hash(f: Any) -> str:
+    """The sha256 of the whole of open file f."""
+    f.seek(0)
+    h = hashlib.sha256()
+    for block in iter(lambda: f.read(BLOCK), b""):
+        h.update(block)
+    return h.hexdigest()
+
+
+def _skip_to(f: Any, line: int, a: int) -> int:
+    """From the start of line `line` of open file f to the start of line `a`, the line breaks counted in blocks as
+    read_lines counts them; answers the line it reached, short of `a` when the file ends first."""
+    while line < a:
+        block = f.read(BLOCK)
+        if not block:
+            return line
+        n = block.count(b"\n")
+        if line + n < a:
+            line += n
+            continue
+        at = -1
+        for _ in range(a - line):
+            at = block.index(b"\n", at + 1)
+        f.seek(f.tell() - (len(block) - at - 1))
+        line = a
+    return line
+
+
+def _lines_hash(f: Any, k: int, starts: dict[int, int] | None = None, first: int = 0) -> str | None:
+    """The sha256 of the next k lines of open file f; None when it has fewer. `starts` takes where each line read
+    starts, the first numbered `first`."""
+    h = hashlib.sha256()
+    for i in range(k):
+        if starts is not None:
+            starts[first + i] = f.tell()
+        raw = f.readline()
+        if not raw:
+            return None
+        h.update(_hashed(raw))
+    return h.hexdigest()
 
 
 def source(path: str, file: str, line: Any = None) -> dict[str, Any] | None:
     """A source as the check read it: the file by the name a reason gives it (`file`), its real path, the cited lines
-    (`line`) when it rests on them alone, its size and mtime, and the sha256 of what it rests on (digest); None when it
-    cannot be read."""
-    try:
-        st = os.stat(path)
-    except (OSError, ValueError):
+    (`line`) when it rests on them alone, its size and mtime, and the sha256 of what it rests on; None when it cannot be
+    read or has no such lines."""
+    span = line_span(line) if line else None
+    if line and not span:
         return None
-    sha = digest(path, line)
-    if sha is None:
+    f = _open_file(path)
+    if f is None:
         return None
-    return {"file": file, "path": _real(path) or path, **({"line": str(line)} if line else {}), "size": st.st_size,
-            "mtime": _mtime_ms(st), "sha256": sha}
+    with f:
+        try:
+            st = os.fstat(f.fileno())
+            if not span:
+                got: str | None = _file_hash(f)
+            else:
+                got = _lines_hash(f, span[1] - span[0] + 1) if _skip_to(f, 1, span[0]) == span[0] else None
+        except OSError:
+            return None
+    if got is None:
+        return None
+    out = {"file": file, "path": _real(path) or path, **({"line": str(line)} if line else {}), "size": st.st_size,
+           "mtime": _mtime_ms(st), "sha256": got}
+    return out
 
 
 def code_files(command: str, cwd: str, root: str | None = None) -> list[str]:
@@ -1814,28 +1865,70 @@ def code_files(command: str, cwd: str, root: str | None = None) -> list[str]:
     return list(out)
 
 
-def examine(src: dict[str, Any]) -> dict[str, Any]:
-    """A source as it stands now: the same while its file's size and mtime are those it last saw; else with the size and
-    mtime now, and `changed` when what it rests on no longer hashes to what the check read. `gone` when the file is not
-    there, or is no regular file."""
-    from stat import S_ISREG  # noqa: PLC0415
+def _spans_read(f: Any, spans: list[tuple[int, int]]) -> dict[tuple[int, int], str | None]:
+    """The sha256 of each span of lines of open file f (as _lines_hash), in one pass from its start: the lines before a
+    span counted in blocks, a line read again only where two spans share it; None for a span the file is too short
+    for."""
+    out: dict[tuple[int, int], str | None] = {}
+    starts: dict[int, int] = {}
+    f.seek(0)
+    line = 1
+    for a, b in sorted(set(spans)):
+        if a in starts:
+            f.seek(starts[a])
+            line = a
+        else:
+            line = _skip_to(f, line, a)
+        out[(a, b)] = _lines_hash(f, b - a + 1, starts, a) if line == a else None
+        line = b + 1
+    return out
 
-    base = {k: v for k, v in src.items() if k not in ("changed", "gone")}
-    path = str(src.get("path") or "")
-    try:
-        st = os.stat(path)
-    except (OSError, ValueError):
-        return {**base, "gone": True}
-    if not S_ISREG(st.st_mode):
-        return {**base, "gone": True}
-    try:
-        seen = abs(_mtime_ms(st) - float(src.get("mtime") or 0)) < 1 and st.st_size == src.get("size")
-    except (TypeError, ValueError):
-        seen = False
-    if seen and not src.get("gone"):
-        return src
-    now = {**base, "size": st.st_size, "mtime": _mtime_ms(st)}
-    return now if digest(path, src.get("line")) == src.get("sha256") else {**now, "changed": True}
+
+def examine_file(path: str, srcs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The sources of one file as it stands now, in order (examine), from one read of it: `gone` when the file is not
+    there or is no regular file, `changed` when what a source rests on no longer reads as the check read it. A source
+    that reads as the check read it has neither."""
+    clear = [{k: v for k, v in s.items() if k not in ("changed", "gone")} for s in srcs]
+    f = _open_file(path)
+    if f is None:
+        return [{**c, "gone": True} for c in clear]
+    out: list[dict[str, Any]] = []
+    with f:
+        try:
+            size = os.fstat(f.fileno()).st_size
+            whole = ""
+            spans = _spans_read(f, [sp for s in srcs if s.get("line") for sp in [line_span(s["line"])] if sp])
+            for i, s in enumerate(srcs):
+                if not s.get("line"):
+                    # another size is another file; the same size, its hash
+                    if size == s.get("size"):
+                        whole = whole or _file_hash(f)
+                    same = size == s.get("size") and whole == s.get("sha256")
+                else:
+                    same = spans.get(line_span(s["line"]) or (0, 0)) == s.get("sha256")
+                out.append(clear[i] if same else {**clear[i], "changed": True})
+        except OSError:
+            return [{**c, "changed": True} for c in clear]
+    return out
+
+
+def examine(items: list[Any]) -> list[Any]:
+    """Checked marks' sources as they stand now: for each item {sources}, in order, {sources} as examine_file answers
+    each. The sources of every item that rest on one file are read together, once. A value that is no such item comes
+    back as it is."""
+    marks = [(i, it["sources"]) for i, it in enumerate(items) if isinstance(it, dict) and isinstance(it.get("sources"), list)]
+    by_path: dict[str, list[tuple[int, int]]] = {}
+    for i, srcs in marks:
+        for k, s in enumerate(srcs):
+            if isinstance(s, dict):
+                by_path.setdefault(str(s.get("path") or ""), []).append((i, k))
+    now: dict[tuple[int, int], dict[str, Any]] = {}
+    for path, places in by_path.items():
+        now.update(zip(places, examine_file(path, [items[i]["sources"][k] for i, k in places])))
+    out = list(items)
+    for i, srcs in marks:
+        out[i] = {"sources": [now.get((i, k), s) for k, s in enumerate(srcs)]}
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ tables and cards

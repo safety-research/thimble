@@ -1,46 +1,40 @@
 // stale.ts: a citation whose source changed after its check. The validator keeps what each citation it verified or
 // corrected rests on (store.ts Source, engine/kernel/evidence.py source): the cited lines of a quote or of code, and
 // the files that the code of computed evidence names, each with its size, mtime and the hash of what the check read.
-// Nothing watches the files all the time. After each call of Claude's that can write a file (main's, a subagent's or
-// a side thread's; never the checker's, which only reads), at the end of each of main's turns and at session start,
-// examineSources stats each source's file. Only a source whose stat changed since it last looked goes to the kernel
-// (`thimble dev validate` with its sources, kernel/evidence.py examine), which hashes what it rests on again: a source
-// whose lines or file no longer hash as the check read them is `changed`, one whose file is not there `gone`, and its
-// citation is stale (tray/tray.mjs staleOf). A source that reads as the check read it again (an edit undone) is no
-// longer stale.
+// Nothing watches the files. After each call of Claude's that can write a file (main's, a subagent's or a side
+// thread's; never the checker's, which only reads), at the end of each of main's turns and at session start,
+// examineSources makes one pass over the conversation's cited files (store.ts citedFiles: one entry a file, with the
+// citations that rest on it): a stat of each file, once. Only a file whose stat changed since a pass last saw it is
+// compared with what its citations rest on: by the stat alone when it tells (the file is gone, or a file cited whole
+// has another size than its check read), else by the kernel (`thimble dev validate` with the citations that rest on
+// it, kernel/evidence.py examine), which reads it once for all of them. A source whose lines or file no longer read as
+// the check read them is `changed`, one whose file is not there `gone`, and its citation is stale (tray/tray.mjs
+// staleOf). A source that reads as the check read it again (an edit undone) is no longer stale. So a pass costs a stat
+// for each cited file, however many files the folder holds and however many citations rest on each, and the replies it
+// reads are only those whose citations rest on a file that changed.
 //
 // A stale citation draws as marks/view.ts says (its words in the warning color, ↻ after them); its card says stale and
 // which file changed (tray/tray.mjs staleLine), with x, which checks it again against the files as they are now
 // (checker.ts repairOf): the usual result, verified, corrected or failed, with sources of its own.
 //
-//   examineSources($)   one pass over the conversation's sourced replies (store.ts sourcedReplies); a pass asked for
-//                       while one runs runs once after it
+//   examineSources($)   one pass over the cited files; a pass asked for while one runs runs once after it
 //   WRITES              the tools whose calls can write a file, after which a pass runs (marks/register.ts)
 import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { startDir } from '../core/env'
 import { errorWordsOf, validateArgv } from './checker'
-import { editReply, replyOf, sourcedReplies, type MarkItem, type Source } from './store'
+import { citedFiles, editReply, replyOf, sameSeen, sawFiles, type MarkItem, type Seen, type Source } from './store'
 
 type Engine = EngineInterface
 
 /** The tools whose calls can write a file. */
 export const WRITES = /^(Bash|Edit|MultiEdit|Write|NotebookEdit)$/
 
-/** A file's stat as the hooks read it, or null when it is not there or is no regular file. */
-type Stat = { size: number; mtimeMs: number } | null
-
-async function statOf($: Engine, path: string): Promise<Stat> {
+/** A file as the hooks see it now: its size and mtime, or `gone` when it is not there or is no regular file. */
+async function seenOf($: Engine, path: string): Promise<Seen> {
   const st = await $.fs.stat(path).catch(() => null)
-  return st && st.kind === 'file' ? { size: Number(st.size), mtimeMs: Number(st.mtimeMs) } : null
-}
-
-/** Whether a source's file stands otherwise than it last saw it: gone now and not then, or back, or another size or
- *  mtime (to the millisecond, as the kernel and the hooks each read it). */
-function moved(st: Stat, s: Source): boolean {
-  if (!st) return !s.gone
-  return !!s.gone || st.size !== s.size || Math.abs(st.mtimeMs - s.mtime) >= 1
+  return st && st.kind === 'file' ? { size: Number(st.size), mtime: Number(st.mtimeMs) } : { gone: true }
 }
 
 /** Whether a citation rests on what its check read: verified or corrected (a citation checked now, failed or not
@@ -49,17 +43,20 @@ const confirmed = (m: MarkItem) => (m.status === 'verified' || m.status === 'cor
 
 const sameSource = (a: Source | undefined, b: Source) => !!a && a.path === b.path && a.sha256 === b.sha256 && a.line === b.line
 
+/** A citation's sources on the files a pass compares, as the kernel takes them (examine). */
+type Cited = { sources: Source[] }
+
 /** The failure lines a pass gave this load, each once. */
 const said = new Set<string>()
 
-/** The sources as they stand now (kernel/evidence.py examine), in order, or null when the kernel could not answer
- *  (its failure line says so). */
-async function examined($: Engine, sources: Source[]): Promise<Source[] | null> {
+/** The citations as they stand now (kernel/evidence.py examine), in order: their sources; null when the kernel could
+ *  not answer (its failure line says so). */
+async function examined($: Engine, cited: Cited[]): Promise<Cited[] | null> {
   try {
-    const ran = await $.process.run(validateArgv($), { cwd: await startDir($), timeoutMs: 120000, stdin: JSON.stringify({ sources }) })
-    const out = JSON.parse(String(ran.stdout || '')) as { sources?: Source[] }
-    if (ran.exitCode !== 0 || !Array.isArray(out.sources) || out.sources.length !== sources.length) throw new Error(String(ran.stderr || 'no answer').trim().split('\n').pop())
-    return out.sources
+    const ran = await $.process.run(validateArgv($), { cwd: await startDir($), timeoutMs: 120000, stdin: JSON.stringify({ cited }) })
+    const out = JSON.parse(String(ran.stdout || '')) as { cited?: Cited[] }
+    if (ran.exitCode !== 0 || !Array.isArray(out.cited) || out.cited.length !== cited.length) throw new Error(String(ran.stderr || 'no answer').trim().split('\n').pop())
+    return out.cited
   } catch (err) {
     const line = `thimble could not compare the cited files with what its checks read (${await errorWordsOf($, err)}), so a citation does not show when its file changed. Reinstall thimble.`
     if (!said.has(line)) failNotice($, line, 'marks:stale')
@@ -68,39 +65,61 @@ async function examined($: Engine, sources: Source[]): Promise<Source[] | null> 
   }
 }
 
-/** One pass: each source of the sourced replies' confirmed citations whose file stands otherwise than it last saw it
- *  goes to the kernel, and its citation keeps the source as it stands now. */
+/** One pass: a stat of each cited file; the citations that rest on the files whose stat changed are compared with
+ *  them (by the stat alone where it tells, else by the kernel), and each keeps its sources as they stand now. */
 async function pass($: Engine): Promise<void> {
-  const due: { key: string; n: number; k: number; s: Source }[] = []
-  const stats = new Map<string, Stat>()
-  for (const key of await sourcedReplies($)) {
+  const files = await citedFiles($)
+  const now: Record<string, Seen> = {}
+  for (const [path, f] of Object.entries(files)) {
+    const seen = await seenOf($, path)
+    if (!sameSeen(seen, f.seen)) now[path] = seen
+  }
+  const due = new Set(Object.keys(now))
+  if (!due.size) return
+  // the citations that rest on those files, from the replies that hold them: each with its sources there
+  const asked: { key: string; n: number; ks: number[]; sent: Source[] }[] = []
+  for (const key of new Set([...due].flatMap(p => Object.keys(files[p]!.by)))) {
     for (const m of (await replyOf($, key))?.items ?? []) {
-      if (!confirmed(m)) continue
-      for (const [k, s] of m.sources!.entries()) {
-        if (!stats.has(s.path)) stats.set(s.path, await statOf($, s.path))
-        if (moved(stats.get(s.path)!, s)) due.push({ key, n: m.n, k, s })
-      }
+      const ks = confirmed(m) ? m.sources!.flatMap((s, k) => (due.has(s.path) ? [k] : [])) : []
+      if (ks.length) asked.push({ key, n: m.n, ks, sent: ks.map(k => m.sources![k]!) })
     }
   }
-  if (!due.length) return
-  const now = await examined($, due.map(d => d.s))
-  if (!now) return
-  for (const key of new Set(due.map(d => d.key))) {
-    const mine = due.map((d, i) => ({ ...d, now: now[i]! })).filter(d => d.key === key)
-    // a citation checked again meanwhile keeps the sources of its new check
-    await editReply($, key, r => ({ ...r, items: r.items.map(m => {
-      const ds = mine.filter(d => d.n === m.n && confirmed(m) && sameSource(m.sources![d.k], d.s))
-      if (!ds.length) return m
-      const sources = m.sources!.map((s, k) => ds.find(d => d.k === k)?.now ?? s)
-      return { ...m, sources }
-    }) }))
+  if (asked.length) {
+    // what the stat alone says, as the kernel would say it (kernel/evidence.py examine_file): a file that is gone, and
+    // a file cited whole whose size is not the one its check read, which has changed; the kernel reads the rest. So a
+    // log cited whole that grows at each pass costs a stat, and no process
+    const known = (s: Source): Source | null => {
+      const seen = now[s.path]
+      const { changed: _c, gone: _g, ...base } = s
+      if (seen && 'gone' in seen) return { ...base, gone: true }
+      if (seen && !s.line && seen.size !== s.size) return { ...base, changed: true }
+      return null
+    }
+    const read = asked.filter(a => a.sent.some(s => !known(s)))
+    const got = read.length ? await examined($, read.map(a => ({ sources: a.sent }))) : []
+    if (!got) return
+    const answers = new Map(read.map((a, i) => [a, got[i]!]))
+    const changed = asked.map(a => ({ ...a, now: answers.get(a) ?? { sources: a.sent.map(s => known(s)!) } }))
+      .filter(a => JSON.stringify(a.now.sources) !== JSON.stringify(a.sent))
+    for (const key of new Set(changed.map(a => a.key))) {
+      const mine = changed.filter(a => a.key === key)
+      // a citation checked again meanwhile keeps the sources of its new check
+      await editReply($, key, r => ({ ...r, items: r.items.map(m => {
+        const a = mine.find(x => x.n === m.n)
+        if (!a || !confirmed(m) || !a.ks.every((k, j) => sameSource(m.sources![k], a.sent[j]!))) return m
+        const sources = [...m.sources!]
+        a.ks.forEach((k, j) => { sources[k] = a.now.sources[j]! })
+        return { ...m, sources }
+      }) }))
+    }
   }
+  await sawFiles($, now)
 }
 
 let running: Promise<void> | null = null
 let again = false
 
-/** A pass over the sourced replies (pass); one asked for while a pass runs runs once after it. */
+/** A pass over the cited files (pass); one asked for while a pass runs runs once after it. */
 export function examineSources($: Engine): Promise<void> {
   if (running) {
     again = true

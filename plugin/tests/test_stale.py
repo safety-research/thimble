@@ -1,4 +1,4 @@
-"""What a checked citation rests on (engine/kernel/evidence.py sources, examine; engine/validate.py "sources"), on
+"""What a checked citation rests on (engine/kernel/evidence.py sources, examine; engine/validate.py "cited"), on
 made-up files and calls."""
 import json
 import os
@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
+from kernel import evidence  # noqa: E402
 from kernel.evidence import check_mark, examine  # noqa: E402
 
 VALIDATE = Path(__file__).resolve().parents[1] / "engine" / "validate.py"
@@ -23,6 +24,11 @@ def touched(p: Path, text: str) -> None:
     os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
 
 
+def now(src: dict) -> dict:
+    """One source as it stands now."""
+    return examine([{"sources": [src]}])[0]["sources"][0]
+
+
 def test_a_quote_rests_on_its_cited_lines_and_turns_stale_only_when_they_change(tmp_path: Path):
     readme = tmp_path / "README.md"
     readme.write_text("# app\nThe backend listens on port 8000.\nRun make dev.\n")
@@ -32,21 +38,22 @@ def test_a_quote_rests_on_its_cited_lines_and_turns_stale_only_when_they_change(
     assert (src["file"], src["line"], src["path"]) == ("README.md", "2", str(readme.resolve()))
     # what it rests on is not shown as evidence
     assert "sources" not in r["evidence"] and "_path" not in r["evidence"]
-    assert examine(src) is src
+    assert now(src) == src
     # another line changed: the cited line reads as the check read it
     touched(readme, "# app, the habit tracker\nThe backend listens on port 8000.\nRun make dev.\n")
-    other = examine(src)
-    assert "changed" not in other and "gone" not in other and other["mtime"] != src["mtime"]
+    other = now(src)
+    assert other == src
     # the cited line changed
     touched(readme, "# app\nThe backend listens on port 9000.\nRun make dev.\n")
-    assert examine(other)["changed"] is True
+    changed = now(other)
+    assert changed["changed"] is True
     # the file is gone, then back as the check read it
     text = readme.read_text()
     readme.unlink()
-    gone = examine(examine(other))
+    gone = now(changed)
     assert gone["gone"] is True
     readme.write_text(text.replace("9000", "8000"))
-    assert "gone" not in examine(gone) and "changed" not in examine(gone)
+    assert "gone" not in now(gone) and "changed" not in now(gone)
 
 
 def test_computed_evidence_rests_on_the_files_its_code_names(tmp_path: Path):
@@ -64,7 +71,7 @@ def test_computed_evidence_rests_on_the_files_its_code_names(tmp_path: Path):
     assert all("line" not in s for s in r["sources"])
     prs = next(s for s in r["sources"] if s["file"] == "prs.jsonl")
     touched(tmp_path / "prs.jsonl", '{"merged": true}\n{"merged": true}\n')
-    assert examine(prs)["changed"] is True
+    assert now(prs)["changed"] is True
     # a mark the check could not confirm rests on nothing
     wrong = check_mark({"n": 1, "words": "7 of 9"}, item, [call], str(tmp_path))
     assert wrong["status"] == "failed" and "sources" not in wrong
@@ -78,12 +85,41 @@ def test_a_check_after_a_change_takes_computed_evidence_only_from_its_own_calls(
     assert again["status"] == "failed" and "sources" not in again
 
 
-def test_the_validator_answers_each_source_as_it_stands_now(tmp_path: Path):
+def test_the_validator_answers_each_citation_as_it_stands_now(tmp_path: Path):
     f = tmp_path / "board.md"
     f.write_text("agent-07: yes\n")
     src = check_mark({"n": 1, "words": "yes"}, quote("board.md", 1, "yes"), [], str(tmp_path))["sources"][0]
     touched(f, "agent-07: no\n")
-    out = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"sources": [src, {**src, "path": str(tmp_path / "x")}]}),
-                         capture_output=True, text=True, check=True)
-    now = json.loads(out.stdout)["sources"]
-    assert now[0]["changed"] is True and now[1]["gone"] is True
+    cited = [{"sources": [src]}, {"sources": [{**src, "path": str(tmp_path / "x")}]}]
+    out = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"cited": cited}), capture_output=True, text=True, check=True)
+    a, b = json.loads(out.stdout)["cited"]
+    assert a["sources"][0]["changed"] is True and b["sources"][0]["gone"] is True
+
+
+def test_a_log_that_grows_at_each_pass_is_never_hashed_whole(tmp_path: Path, monkeypatch):
+    log = tmp_path / "run.log"
+    log.write_text("".join(f"step {i}: loss {1 / (i + 1):.3f}\n" for i in range(2000)))
+    whole = evidence.source(str(log), "run.log")
+    lines = evidence.source(str(log), "run.log", "1999")
+    hashed = []
+    monkeypatch.setattr(evidence, "_file_hash", lambda f: hashed.append(1) or "")
+    for i in range(2000, 2003):
+        with log.open("a") as f:
+            f.write(f"step {i}: loss {1 / (i + 1):.3f}\n")
+        # the file cited whole has another size: changed, with no read; its cited lines stand where they were
+        w, s = examine([{"sources": [whole, lines]}])[0]["sources"]
+        assert w["changed"] is True and "changed" not in s and s["line"] == "1999"
+        whole = w
+    assert hashed == []
+
+
+def test_one_read_of_a_file_serves_every_source_that_rests_on_it(tmp_path: Path, monkeypatch):
+    notes = tmp_path / "notes.md"
+    notes.write_text("".join(f"line {i}\n" for i in range(1, 30)))
+    srcs = [evidence.source(str(notes), "notes.md", line) for line in ("3", "7-9", "20")] + [evidence.source(str(notes), "notes.md")]
+    opened: list[str] = []
+    real = os.open
+    monkeypatch.setattr(os, "open", lambda p, *a, **k: (opened.append(str(p)), real(p, *a, **k))[1])
+    got = examine([{"sources": srcs[:2]}, {"sources": srcs[2:]}])
+    assert [s for g in got for s in g["sources"]] == srcs
+    assert opened == [str(notes.resolve())]

@@ -29,11 +29,13 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    (_check_share, the terminal's autoRepair); a repair's own end starts none, so a mark that fails again waits for
    Repair.
 6. A mark the check verified or corrected keeps what its evidence rests on (`sources`, the validator's: the cited lines
-   of a quote or of code, the files its code names, as the check read them). Whenever the page reads a chat
-   (agents.py), refresh_soon compares them with their files in the background, as the terminal does after Claude's
-   calls that can write (plugin/marks/stale.ts): a stat first, the hash only when the stat changed
-   (evidence.examine). A mark whose source changed is stale, which the page draws (marks.ts lookOf), and Repair checks
-   it again against the files as they are now, its computed evidence only a call of that check's own (`fresh`).
+   of a quote or of code, the files its code names, as the check read them), and one index of the cited files lists
+   the marks that rest on each (`<workspace>/marks/cited.json`, kept as each reply is saved: _note_cited). Whenever the
+   page reads a chat (agents.py), refresh_soon makes one pass in the background, as the terminal does after Claude's
+   calls that can write (plugin/marks/stale.ts): a stat of each cited file, and only for a file whose stat changed
+   since the last pass, the marks that rest on it, from the replies that hold them, to evidence.examine, which reads
+   the file once for all of them. A mark whose source changed is stale, which the page draws (marks.ts lookOf), and Repair
+   checks it again against the files as they are now, its computed evidence only a call of that check's own (`fresh`).
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -78,6 +80,7 @@ import os
 import re
 import secrets
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -345,10 +348,14 @@ def stored(c: str, turn: str) -> dict[str, Any] | None:
     return got if isinstance(got, dict) else None
 
 
-def _save(c: str, reply: dict[str, Any]) -> None:
+def _save(c: str, reply: dict[str, Any], cited: dict[str, dict[str, Any]] | None = None) -> None:
+    """Write a reply's marks, and the index of cited files when the files its marks rest on changed from `cited`, those
+    of the reply as it was (_cited_by; a new reply rests on none)."""
     p = _path(c, reply["turn"])
     nofollow.makedirs(p.parent)
     ledger.write_json(p, reply)
+    if {f: sorted(x["ns"]) for f, x in _cited_by(reply).items()} != {f: sorted(x["ns"]) for f, x in (cited or {}).items()}:
+        _note_cited(c, reply)
     thread = (reply.get("thread") or {}).get("chat")
     if thread:  # a side thread's answer, which its chat draws
         agents.Recorder(c, thread).record("marks", turn=reply["turn"], items=reply["items"])
@@ -445,11 +452,12 @@ async def _edit(c: str, turn: str, change: Callable[[dict[str, Any]], dict[str, 
             return None
         was_open = any(m["status"] == "checking" for m in reply["items"])
         was_checked = any(_checked(m) for m in reply["items"])
+        cited = _cited_by(reply)
         reply = change(reply)
         settled = was_open and not any(m["status"] == "checking" for m in reply["items"])
         if settled:
             reply.setdefault("times", {})["settled"] = time.time()
-        _save(c, reply)
+        _save(c, reply, cited)
     if reply.get("thread"):
         return reply
     if tell and was_checked and not any(_checked(m) for m in reply["items"]):
@@ -1038,31 +1046,149 @@ def _confirmed(m: dict[str, Any]) -> bool:
     return m.get("status") in ("verified", "corrected") and isinstance(m.get("sources"), list) and bool(m["sources"])
 
 
+def _seen_of(path: str) -> dict[str, Any]:
+    """A cited file as the server sees it now: its size and mtime (in milliseconds, as the validator keeps them), or
+    gone when it is not there or is no regular file."""
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return {"gone": True}
+    return {"size": st.st_size, "mtime": st.st_mtime_ns / 1e6} if stat.S_ISREG(st.st_mode) else {"gone": True}
+
+
+def _same_seen(a: Any, b: Any) -> bool:
+    """Whether two sights of a file are the same: both gone, or the same size and mtime to the millisecond. None is no
+    sight (a file the index made due): it matches nothing."""
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if a.get("gone") or b.get("gone"):
+        return bool(a.get("gone") and b.get("gone"))
+    try:
+        return a.get("size") == b.get("size") and abs(float(a["mtime"]) - float(b["mtime"])) < 1
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _cited_path(c: str) -> Path:
+    return config.workspace_dir(c) / "marks" / "cited.json"
+
+
+def _cited_by(reply: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """The files a reply's marks rest on: by real path, the numbers of the marks that rest on each (`ns`) and the stat
+    their checks read it at (`read`, None when they read it at different times)."""
+    out: dict[str, dict[str, Any]] = {}
+    for m in (reply or {}).get("items") or []:
+        for src in m.get("sources") or [] if isinstance(m, dict) else []:
+            if not isinstance(src, dict) or not src.get("path"):
+                continue
+            read = {"size": src.get("size"), "mtime": src.get("mtime")}
+            x = out.setdefault(str(src["path"]), {"ns": [], "read": read})
+            if m.get("n") not in x["ns"]:
+                x["ns"].append(m.get("n"))
+            if not _same_seen(x["read"], read):
+                x["read"] = None
+    return out
+
+
+def _cited(c: str) -> dict[str, Any]:
+    """The workspace's index of cited files, {files: {path: {seen, by: {turn: [n, ...]}}}}: what the last pass saw of
+    each file (_seen_of; None when due), and the marks that rest on it, by their reply's turn. A workspace with no index
+    yet gets one from its replies, once."""
+    path = _cited_path(c)
+    got = ledger.read_json(path, None)
+    if isinstance(got, dict) and isinstance(got.get("files"), dict):
+        return got
+    files: dict[str, Any] = {}
+    for p in sorted(path.parent.glob("*.json")):
+        for f, x in _cited_by(stored(c, p.stem)).items():
+            had = files.get(f)
+            seen = None if had and not _same_seen(had["seen"], x["read"]) else x["read"]
+            files[f] = {"seen": seen, "by": {**(had or {}).get("by", {}), p.stem: x["ns"]}}
+    index = {"files": files}
+    nofollow.makedirs(path.parent)
+    ledger.write_json(path, index)
+    return index
+
+
+def _note_cited(c: str, reply: dict[str, Any]) -> None:
+    """The index after reply `reply` was saved: its marks put on the files they rest on now and taken off those they no
+    longer rest on, a file new to the index as their checks read it, a file no mark rests on any more left out. Written
+    only when it changes."""
+    turn, mine = reply["turn"], _cited_by(reply)
+    path = _cited_path(c)
+    with ledger.locked(path):
+        index = _cited(c)
+        files = index["files"]
+        changed = False
+        for p in set(files) | set(mine):
+            f = files.get(p)
+            by = dict((f or {}).get("by") or {})
+            ns = mine[p]["ns"] if p in mine else []
+            if sorted(by.get(turn, [])) == sorted(ns):
+                continue
+            changed = True
+            by.pop(turn, None)
+            if ns:
+                by[turn] = ns
+            if by:
+                files[p] = {"seen": f["seen"] if f else mine[p]["read"], "by": by}
+            else:
+                files.pop(p, None)
+        if changed:
+            ledger.write_json(path, index)
+
+
+def _saw(c: str, seen: dict[str, dict[str, Any]]) -> None:
+    """What a pass saw of the files it compared, kept for the next pass."""
+    path = _cited_path(c)
+    with ledger.locked(path):
+        index = _cited(c)
+        for p, s in seen.items():
+            if p in index["files"]:
+                index["files"][p]["seen"] = s
+        ledger.write_json(path, index)
+
+
+def _same_source(a: Any, b: dict[str, Any]) -> bool:
+    return isinstance(a, dict) and all(a.get(k) == b.get(k) for k in ("path", "sha256", "line"))
+
+
 async def refresh_sources(c: str) -> None:
-    """Each source of the workspace's replies' checked marks as it stands now (evidence.examine: a stat, and the hash
-    only when the stat changed since it last looked); a reply whose sources changed is written again, so the page draws
-    its marks stale, or no longer stale."""
-    ev = evidence()
-    for p in sorted((config.workspace_dir(c) / "marks").glob("*.json")):
-        reply = stored(c, p.stem)
-        due = [(m["n"], k, src) for m in (reply or {}).get("items") or [] if _confirmed(m)
-               for k, src in enumerate(m["sources"]) if isinstance(src, dict)]
-        if not due:
-            continue
-        now = await asyncio.to_thread(lambda d=due: [ev.examine(src) for _, _, src in d])
-        moved = [(n, k, src, x) for (n, k, src), x in zip(due, now) if x != src]
-        if not moved:
-            continue
+    """One pass over the workspace's cited files (_cited): a stat of each, and only for the files whose stat changed
+    since the last pass, the marks that rest on them, from the replies that hold them, to evidence.examine, which reads
+    each file once for all of them. A reply whose marks changed is written again, so the page draws them stale, or no
+    longer stale."""
+    files = (await asyncio.to_thread(_cited, c))["files"]
+    now = await asyncio.to_thread(lambda: {p: _seen_of(p) for p in files})
+    due = {p: s for p, s in now.items() if not _same_seen(s, files[p].get("seen"))}
+    if not due:
+        return
+    # the marks that rest on those files, each with its sources there: (turn, n, places in its sources, sent)
+    asked: list[tuple[str, int, list[int], list[dict[str, Any]]]] = []
+    for turn in sorted({t for p in due for t in files[p].get("by") or {}}):
+        for m in (stored(c, turn) or {}).get("items") or []:
+            ks = [k for k, src in enumerate(m["sources"]) if isinstance(src, dict) and src.get("path") in due] if _confirmed(m) else []
+            if ks:
+                asked.append((turn, m["n"], ks, [m["sources"][k] for k in ks]))
+    if asked:
+        ev = evidence()
+        got = await asyncio.to_thread(ev.examine, [{"sources": sent} for *_, sent in asked])
+        changed = [(a, x) for a, x in zip(asked, got) if x["sources"] != a[3]]
+        for turn in sorted({a[0] for a, _ in changed}):
+            mine = [(a, x) for a, x in changed if a[0] == turn]
 
-        def change(r: dict[str, Any], moved: list[tuple[int, int, dict[str, Any], dict[str, Any]]] = moved) -> dict[str, Any]:
-            # a mark checked again meanwhile keeps the sources of its new check
-            for m in r["items"]:
-                for n, k, src, x in moved:
-                    if m.get("n") == n and _confirmed(m) and k < len(m["sources"]) and m["sources"][k] == src:
-                        m["sources"][k] = x
-            return r
+            def change(r: dict[str, Any], mine: list[tuple[Any, dict[str, Any]]] = mine) -> dict[str, Any]:
+                # a mark checked again meanwhile keeps the sources of its new check
+                for m in r["items"]:
+                    for (_, n, ks, sent), x in mine:
+                        if m.get("n") == n and _confirmed(m) and all(k < len(m["sources"]) and _same_source(m["sources"][k], s)
+                                                                     for k, s in zip(ks, sent)):
+                            for k, s in zip(ks, x["sources"]):
+                                m["sources"][k] = s
+                return r
 
-        await _edit(c, p.stem, change, tell=False)
+            await _edit(c, turn, change, tell=False)
+    await asyncio.to_thread(_saw, c, due)
 
 
 def refresh_soon(c: str) -> None:

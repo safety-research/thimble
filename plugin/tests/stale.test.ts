@@ -1,12 +1,12 @@
-// A citation whose source changed after its check (marks/stale.ts): the pass compares each checked citation's sources
-// with their files, a stat first and the kernel only for a stat that changed; a citation whose cited lines changed
-// draws stale in the answer, and its card says which file changed and offers x, which checks it again against the files
-// as they are now. All data is made up. `claude plugin test plugin`.
+// A citation whose source changed after its check (marks/stale.ts): the pass stats each cited file once, from the index
+// of cited files (store.ts citedFiles), and sends the kernel only the citations that rest on a file whose stat changed;
+// a citation whose cited lines changed draws stale in the answer, and its card says which file changed and offers x,
+// which checks it again against the files as they are now. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
 import { examineSources } from '../marks/stale'
-import { rowMarks } from '../marks/store'
+import { citedFiles, editReply, newReply, replyOf, rowMarks, type MarkItem } from '../marks/store'
 import { setOptions } from '../settings/features.mjs'
 import { staleOf } from '../tray/tray.mjs'
 import { test } from './kit'
@@ -48,7 +48,9 @@ const QUOTED = {
 
 const settle = () => new Promise(r => setTimeout(r, 5))
 
-test('a citation whose cited lines changed after its check draws stale; its card says which file changed and offers x', CITES, async ($, on) => {
+/** A session whose kept reply holds `item` (reply row-t1, turn t1), with the cited file as `file()` says it stands and
+ *  a kernel that answers `cited(req)`; each request it gets is in `asked`. */
+async function session($: Any, on: Any, item: Any, file: () => Any, cited: (req: Any) => Any = req => ({ cited: req.cited })) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-stale' }))
@@ -56,7 +58,7 @@ test('a citation whose cited lines changed after its check draws stale; its card
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
   const kept: Record<string, string> = {
-    'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [QUOTED] }),
+    'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [item] }),
     'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: TEXT, at: 1 }] }),
   }
   const keptOf = (path: string) => Object.keys(kept).find(k => path.endsWith(`/${k}`))
@@ -64,17 +66,14 @@ test('a citation whose cited lines changed after its check draws stale; its card
   on('fs.write', () => ({ value: undefined }))
   on('fs.list', (_$: unknown, e: { path: string }) => ({ value: [...new Set(Object.keys(kept).filter(k => String(e.path).endsWith(`/${k.split('/')[0]}`)).map(k => k.split('/').slice(0, 3).join('/')))].map(k => ({ name: k.split('/')[1], kind: k.split('/').length > 2 ? 'dir' : 'file' })) }))
   on('fs.exists', () => ({ value: false }))
-  // the cited file as it stands: as the check read it, until Claude's edit changes its size and mtime
-  let file = { kind: 'file', size: 30, mtimeMs: 1000.0004, isLink: false }
-  on('fs.stat', (_$: unknown, e: { path: string }) => ({ value: e.path === FILE ? file : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false } }))
-  // the kernel: each source it is given, its lines hashed again, now another hash
+  on('fs.stat', (_$: unknown, e: { path: string }) => ({ value: e.path === FILE ? file() : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false } }))
   const asked: Any[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     const t = tempRun(e.argv)
     if (t) return { value: { ...t, isStdoutTruncated: false, isStderrTruncated: false } }
     const req = JSON.parse(String(e.init?.stdin || '{}'))
-    if (Array.isArray(req.sources)) asked.push(req.sources)
-    const out = Array.isArray(req.sources) ? { sources: req.sources.map((s: Any) => ({ ...s, size: file.size, mtime: file.mtimeMs, changed: true })) } : {}
+    if (Array.isArray(req.cited)) asked.push(req.cited)
+    const out = Array.isArray(req.cited) ? cited(req) : {}
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   for (const ev of ['env.set', 'config.list', 'ui.panes'] as const) on(ev, () => ({ value: ev === 'env.set' ? {} : [] }) as never)
@@ -89,30 +88,39 @@ test('a citation whose cited lines changed after its check draws stale; its card
   on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text }))
   on('tool.call', () => ({ result: '' }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
-  // Claude's Bash call, after which the hooks compare the sources with their files, waiting for none of it
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  // Claude's Bash call, after which the hooks compare the cited files with what their checks read, waiting for none of
+  // it
   let calls = 0
   const bash = async () => {
     await $.tool.call({ tool: 'Bash', tool_use_id: `toolu_${++calls}`, command: 'make report' } as never)
     for (let i = 0; i < 20; i++) await settle()
   }
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  return { asked, bash }
+}
+
+test('a citation whose cited lines changed after its check draws stale; its card says which file changed and offers x', CITES, async ($, on) => {
+  // the cited file as it stands: as the check read it, until Claude's edit changes its size and mtime
+  let file = { kind: 'file', size: 30, mtimeMs: 1000.0004, isLink: false }
+  // the kernel: the cited lines hashed again, now another hash
+  const { asked, bash } = await session($, on, QUOTED, () => file, req => ({ cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }))
 
   // the file stands as the check read it: no kernel call, and the citation is verified
   await bash()
   expect(asked).toEqual([])
   expect(textOf(await $.ui.render(answer('row-t1', TEXT)))).not.toContain('↻')
 
-  // the file changed: its stat goes to the kernel, which finds the cited lines changed
+  // the file changed: the citation that rests on it goes to the kernel, which finds the cited lines changed
   file = { ...file, size: 31, mtimeMs: 2000 }
   await bash()
   expect(asked.length).toBe(1)
-  expect(asked[0][0]).toMatchObject({ path: FILE, line: '4', sha256: 'a1' })
+  expect(asked[0][0].sources[0]).toMatchObject({ path: FILE, line: '4', sha256: 'a1' })
   // its own mark changes in the answer: the words in the warning color, ↻ after them
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
   expect(textOf(drawn)).toContain('12 of 40 ↻')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === '12 of 40')?.props).toMatchObject({ color: 'warning', underline: true })
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === ' ↻')?.props).toMatchObject({ color: 'warning' })
-  // a stat as last seen goes to the kernel no more
+  // a file as the last pass saw it goes to the kernel no more
   await bash()
   expect(asked.length).toBe(1)
 
@@ -128,12 +136,13 @@ const FORK = 'a0f0e0d0c0b0a0901'
 const REPLY = 'The backend listens on [port 8000](#).'
 const CHECKED = { file: 'README.md', path: '/made-up/data/README.md', line: '2', size: 40, mtime: 5, sha256: 'b2' }
 
-/** An engine with versioned state, a fork that starts, and a validator that answers `validated(stdin)`. */
-function engine(validated: (req: Any) => Any) {
-  const files = new Map<string, string>()
+/** An engine with versioned state (each read of a reply counted in `reads`), files that stand as `files` says, a fork
+ *  that starts, and a validator that answers `validated(stdin)`. */
+function engine(validated: (req: Any) => Any, files: Record<string, { size: number; mtimeMs: number }> = {}) {
+  const written = new Map<string, string>()
   const state = new Map<string, { value: unknown; version: number }>()
   let forks = 0
-  const seen = { spawned: [] as Any[], stdin: [] as Any[] }
+  const seen = { spawned: [] as Any[], stdin: [] as Any[], stats: [] as string[], reads: [] as string[] }
   let now = 1000
   const $: Any = {
     env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' } as Any)[k] },
@@ -143,18 +152,25 @@ function engine(validated: (req: Any) => Any) {
       read: async (p: string) => {
         if (p.endsWith('/prompts/checker.md')) return 'CHECK\n{{MARKS}}'
         if (p.endsWith('/prompts/notices.md')) return NOTICES
-        if (files.has(p)) return files.get(p)
+        if (written.has(p)) return written.get(p)
         throw new Error(`no file ${p}`)
       },
-      write: async (p: string, text: string) => { files.set(p, text) },
+      write: async (p: string, text: string) => { written.set(p, text) },
       list: async () => [],
       exists: async () => false,
-      stat: async () => ({ kind: 'file', size: 41, mtimeMs: 9 }),
+      stat: async (p: string) => {
+        seen.stats.push(p)
+        const f = files[p] ?? { size: 41, mtimeMs: 9 }
+        return { kind: 'file', ...f }
+      },
     },
     process: { run: async (argv: string[], init: Any) => { const t = tempRun(argv); if (t) return t; const req = JSON.parse(String(init?.stdin ?? '{}')); seen.stdin.push(req); return { exitCode: 0, stdout: JSON.stringify(validated(req)), stderr: '' } } },
     agent: { spawn: async (a: Any) => { seen.spawned.push(a); return { model: 'claude-opus-5-5', agentId: `${FORK}${forks++}` } }, list: async () => [] },
     state: {
-      get: async (k: Any) => state.get(JSON.stringify(k)) ?? { value: undefined, version: 0 },
+      get: async (k: Any) => {
+        if (k?.key === 'marks' && k.id) seen.reads.push(k.id)
+        return state.get(JSON.stringify(k)) ?? { value: undefined, version: 0 }
+      },
       set: async (k: Any, value: unknown, o?: { ifVersion?: number }) => {
         const cur = state.get(JSON.stringify(k))
         if (o?.ifVersion !== undefined && o.ifVersion !== (cur?.version ?? 0)) return { isSet: false, version: cur?.version ?? 0 }
@@ -172,7 +188,7 @@ test('x on a stale citation checks it again against the files as they are now; o
   setOptions({ citations: 'auto + verify' })
   let checks = 0
   const { $, seen } = engine(req => {
-    if (Array.isArray(req.sources)) return { sources: req.sources.map((s: Any) => ({ ...s, size: 41, mtime: 9, changed: true })) }
+    if (Array.isArray(req.cited)) return { cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }
     checks++
     return { parsed: true, results: [{ n: 1, status: checks === 1 ? 'verified' : 'corrected', shown: checks === 1 ? 'port 8000' : 'port 9000', reason: 'line 2 says so', ...(checks === 1 ? { sources: [CHECKED] } : { was: 'port 8000', sources: [{ ...CHECKED, size: 41, mtime: 9, sha256: 'c3' }] }) }] }
   })
@@ -198,4 +214,45 @@ test('x on a stale citation checks it again against the files as they are now; o
   const done = (await rowMarks($, 'row-1'))!.items[0]!
   expect(done).toMatchObject({ status: 'corrected', shown: 'port 9000', sources: [{ sha256: 'c3' }] })
   expect(staleOf(done)).toEqual([])
+})
+
+test('a pass stats each cited file once and reads only the replies whose citations rest on a file that changed', async () => {
+  setOptions({ citations: 'auto + verify' })
+  const A = { file: 'a.md', path: '/made-up/data/a.md', line: '3', size: 10, mtime: 1, sha256: 'aa' }
+  const B = { file: 'b.md', path: '/made-up/data/b.md', line: '7', size: 20, mtime: 2, sha256: 'bb' }
+  const place = (s: Any, n: number) => ({ kind: 'quote', file: s.file, line: String(n), lines: [{ n, text: 'the words', highlight: [4, 9] }] })
+  const mark = (n: number, s: Any): MarkItem => ({ n, row: 'r', words: 'the words', start: 0, end: 9, sentence: 's', status: 'verified', shown: 'the words', evidence: place(s, Number(s.line)) as never, sources: [s] })
+  const files: Record<string, { size: number; mtimeMs: number }> = { [A.path]: { size: 10, mtimeMs: 1 }, [B.path]: { size: 20, mtimeMs: 2 } }
+  // the kernel finds b.md's cited line changed
+  const { $, seen } = engine(req => ({ cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }), files)
+  for (const [key, items] of [['row-a', [mark(1, A), mark(2, A)]], ['row-b', [mark(1, B)]]] as const) {
+    await newReply($, { key, turnId: key, rows: [key], startedAt: 0, settledAt: 1, items: [] })
+    await editReply($, key, r => ({ ...r, items: [...items] }))
+  }
+  expect(Object.keys(await citedFiles($)).sort()).toEqual([A.path, B.path])
+  expect((await citedFiles($))[A.path]!.by).toEqual({ 'row-a': [1, 2] })
+
+  // nothing changed: a stat of each file, no reply read, no kernel call
+  seen.reads.length = 0
+  await examineSources($)
+  expect(seen.stats.sort()).toEqual([A.path, B.path])
+  expect(seen.reads).toEqual([])
+  expect(seen.stdin).toEqual([])
+
+  // b.md changed: only its citation goes to the kernel, and only its reply is read
+  files[B.path] = { size: 23, mtimeMs: 3 }
+  seen.stats.length = 0
+  await examineSources($)
+  expect(seen.stats.sort()).toEqual([A.path, B.path])
+  expect(seen.stdin.length).toBe(1)
+  expect(seen.stdin[0].cited.map((c: Any) => c.sources.map((s: Any) => s.path))).toEqual([[B.path]])
+  expect(new Set(seen.reads)).toEqual(new Set(['row-b']))
+  // its cited line changed: it is stale
+  const b = (await replyOf($, 'row-b'))!.items[0]!
+  expect(staleOf(b).length).toBe(1)
+  expect((await citedFiles($))[B.path]!.seen).toEqual({ size: 23, mtime: 3 })
+
+  // a check of it again takes it off the index while it runs; a file no citation rests on leaves the index
+  await editReply($, 'row-b', r => ({ ...r, items: r.items.map(m => { const { sources: _s, ...rest } = m; return { ...rest, status: 'checking' as const } }) }))
+  expect(Object.keys(await citedFiles($))).toEqual([A.path])
 })
