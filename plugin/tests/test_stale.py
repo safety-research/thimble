@@ -54,11 +54,12 @@ def test_computed_evidence_rests_on_the_files_its_code_names(tmp_path: Path):
     (tmp_path / "a").mkdir()
     (tmp_path / "a" / "runs.jsonl").write_text("{}\n")
     (tmp_path / "notes.txt").write_text("not read\n")
-    code = 'import glob, json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nruns = glob.glob("*/runs.jsonl")\nprint(f"{sum(p[\'merged\'] for p in prs)} of {len(prs)}")'
-    call = {"command": f"cd {tmp_path} && python3 - <<'PY'\n{code}\nPY", "output": "1 of 2\n", "by": "checker"}
+    code = 'import glob, json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nruns = glob.glob("*/runs.jsonl")\nprint("*" * 3)\nprint(f"{sum(p[\'merged\'] for p in prs)} of {len(prs)}")'
+    call = {"command": f"cd {tmp_path} && python3 - <<'PY'\n{code}\nPY", "output": "***\n1 of 2\n", "by": "checker"}
     item = {"kind": "computed", "status": "verified", "evidence": {"output": "1 of 2"}, "reason": "counted"}
     r = check_mark({"n": 1, "words": "1 of 2"}, item, [call], str(tmp_path))
     assert r["status"] == "verified"
+    # the files it opens and globs, not every file a printed "*" would match
     assert sorted(s["file"] for s in r["sources"]) == ["a/runs.jsonl", "prs.jsonl"]
     assert all("line" not in s for s in r["sources"])
     prs = next(s for s in r["sources"] if s["file"] == "prs.jsonl")

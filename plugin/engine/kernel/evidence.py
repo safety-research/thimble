@@ -1783,7 +1783,8 @@ def code_files(command: str, cwd: str, root: str | None = None) -> list[str]:
     """The files that the code of a call names, which computed evidence rests on: each string of its code (scripts())
     that names a regular file inside the session's folders, read from the folder the call ran in (its leading `cd`,
     else the shell's folder or the one the session started in), and each file that a string with a wildcard matches
-    there (`*/runs.jsonl`, `**` too). A path the code builds from parts names none."""
+    there (`*/runs.jsonl`, `**` too) when the string names a folder or a kind of file, with a `/` or a `.` (a `"*"`
+    the code prints names none). A path the code builds from parts names none."""
     m = LEADING_CD.match(command)
     d = m.group(1).strip("'\"") if m else ""
     bases = [f for f in (cwd, root) if f]
@@ -1802,7 +1803,10 @@ def code_files(command: str, cwd: str, root: str | None = None) -> list[str]:
                 continue
             for b in bases:
                 full = os.path.normpath(os.path.join(b, s))
-                for p in sorted(glob.glob(full, recursive=True)) if WILDCARD.search(s) else [full]:
+                wild = WILDCARD.search(s)
+                if wild and not re.search(r"[/.]", s):
+                    continue
+                for p in sorted(glob.glob(full, recursive=True)) if wild else [full]:
                     if os.path.isfile(p) and inside(p, folders):
                         out.setdefault(_real(p) or p)
     return list(out)
@@ -3171,7 +3175,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?, sources?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real
     Bash calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
-    session's (check_quote). A mark verified or corrected keeps what its evidence rests on (`sources`: sources()).
+    session's (check_quote). A mark verified or corrected keeps what its evidence rests on (`sources`, each a source()).
     `fresh`: a check of a citation whose source changed after its first check, whose computed evidence is only a call
     this check ran, since output printed before the change shows the files as they were.
 
