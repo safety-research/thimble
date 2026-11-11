@@ -210,6 +210,20 @@ def test_a_card_s_cell_is_evidence_and_shows_as_its_table_with_the_cell_cited():
 
 # ------------------------------------------------------------------------------------------------ one path to a correct citation
 
+def test_a_period_in_code_ends_no_sentence_of_a_rewrite_but_a_sentence_put_in_is_one_too_many(tmp_path: Path):
+    (tmp_path / "README.md").write_text("cd backend && uv run uvicorn app.main:app --port 9000\n")
+    was = {"n": 1, "words": "port 8000", "sentence": "The app runs on [port 8000]: start it with `uvicorn app.main:app --port 8000`."}
+
+    def reworded(sentence: str) -> dict:
+        item = {**quote("README.md", 1, "--port 9000"), "status": "corrected", "reason": "",
+                "correction": {"words": "port 9000", "sentence": sentence}}
+        return check_mark(was, item, [], str(tmp_path))
+
+    ok = reworded("The app runs on [port 9000]: start it with `uvicorn ... --port 9000`.")
+    assert (ok["status"], ok["rewrite"]) == ("corrected", "The app runs on [port 9000]: start it with `uvicorn ... --port 9000`.")
+    more = reworded("The app runs on [port 9000]. Start it with `uvicorn ... --port 9000`.")
+    assert more["status"] == "failed" and more["reason"] == "The check reworded the sentence, but it adds a sentence."
+
 
 # ------------------------------------------------------------------------------------------------ why a citation failed
 
