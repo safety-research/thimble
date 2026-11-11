@@ -2,7 +2,8 @@
 index of cited files lists the marks that rest on each; when the page reads a chat, the server stats each cited file
 and compares only the marks that rest on a file whose stat changed (refresh_sources). Repair checks a stale mark again
 against the files as they are now, only its own calls counting as computed evidence, and so each Repair of it until one
-of those checks passes. The fork is replaced here; the marks, the validator and the records are real."""
+of those checks passes; that check takes the other stale marks of its sentence with it. The fork is replaced here; the
+marks, the validator and the records are real."""
 from __future__ import annotations
 
 import asyncio
@@ -141,6 +142,36 @@ def test_a_stale_mark_whose_repair_failed_is_repaired_against_the_file_now_until
     assert fresh == [False, True, True]
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "corrected" and m["shown"] == "port 9000" and "fresh" not in m, m
+
+
+def test_repair_of_one_of_two_stale_marks_of_a_sentence_repairs_both_with_one_rewrite(_fresh, monkeypatch):
+    folder = config.corpus_dir(CORPUS)
+    notes = folder / "notes.md"
+    notes.write_text("# app\nuvicorn app:app --port 8000\nOpen http://localhost:8000.\n")
+    _main(monkeypatch, folder)
+    prompts: list[str] = []
+    was = "The app runs on [port 8000]: start it with `uvicorn ... --port 8000`, then open [http://localhost:8000]."
+    now = "The app runs on [port 9000]: start it with `uvicorn ... --port 9000`, then open [http://localhost:9000]."
+
+    async def fork(c, main, cut, prompt):
+        prompts.append(prompt)
+        port = "9000" if "9000" in notes.read_text() else "8000"
+        out = [{"mark": n, "kind": "quote", "evidence": {"file": "notes.md", "line": n + 1, "substring": sub}, "reason": "it says so",
+                **({"status": "corrected", "correction": {"words": sub, "sentence": now}} if port == "9000" else {"status": "verified"})}
+               for n, sub in ((1, f"port {port}"), (2, f"http://localhost:{port}"))]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = _check(folder, "The app runs on [port 8000](#): start it with `uvicorn ... --port 8000`, then open [http://localhost:8000](#).", fork)
+    _edit(notes, "# app\nuvicorn app:app --port 9000\nOpen http://localhost:9000.\n")
+    asyncio.run(marks.refresh_sources(CORPUS))
+    assert [len(marks.stale_sources(m)) for m in marks.stored(CORPUS, turn)["items"]] == [1, 1]
+    # Repair on the first: one check of both, its request naming the second
+    _repair(turn, fork)
+    assert f"1. [port 8000] in: {was}\n2. [http://localhost:8000] in: {was}" in prompts[-1]
+    assert "Citation 2 stands in the same sentence, and notes.md changed after its first check too." in prompts[-1]
+    items = marks.stored(CORPUS, turn)["items"]
+    assert [(m["status"], m["shown"], m.get("rewrite")) for m in items] == [("corrected", "port 9000", now), ("corrected", "http://localhost:9000", now)], items
+    assert all(marks.stale_sources(m) == [] and "fresh" not in m for m in items), items
 
 
 def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed_and_moved_lines_take_their_numbers(_fresh, monkeypatch):

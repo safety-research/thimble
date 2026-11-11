@@ -53,7 +53,8 @@
 //   repairOf($, row, n, auto) x on a failed or stale citation (tray), or autoRepair (`auto`): what a check of that one
 //                             mark again needs; for a mark whose check did not run, the check itself; for a stale
 //                             one (stale.ts), a check against the files as they are now, and so for each check of it
-//                             until one passes (store.ts MarkItem `fresh`)
+//                             until one passes (store.ts MarkItem `fresh`), with each other such mark of its sentence,
+//                             so that one rewrite of the sentence corrects them all
 //   launchRepair($, r, hold)  that check's fork, with a request to find the right value and correct the cited words;
 //                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
@@ -872,8 +873,9 @@ export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
 /** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
 export type RepairHold = { until: number; cancelled: boolean }
 /** What a check of one mark again needs: its reply, its mark, and the checker's text with the request; `again`: the
- *  mark is stale, or a check of it since it went stale has not passed yet (Check `again`). */
-export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean; wroteAt?: number; again?: boolean }
+ *  mark is stale, or a check of it since it went stale has not passed yet (Check `again`); `also`: the other such marks
+ *  of its sentence, which the check takes with it. */
+export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean; wroteAt?: number; again?: boolean; also?: number[] }
 
 let held: RepairHold | null = null
 const starting = new Set<string>()
@@ -887,14 +889,18 @@ export function heldRepair(): RepairHold | null {
  *  check did not run, the check; for a stale one, a check against the files as they are now, and so for a failed one
  *  whose check after it went stale did not pass: store.ts MarkItem `fresh`), with the request that says who asked it
  *  (notices.mjs repairRequest); null when there is nothing to repair (it did not fail and is not stale, or a check of
- *  it runs), or why none can start. */
+ *  it runs), or why none can start. A stale one's check takes each other such mark of its sentence with it (`also`):
+ *  the check rewrites a sentence whole, and a rewrite that changed another citation's words would not stand alone. */
 export async function repairOf($: Engine, row: string, n: number, auto = false): Promise<Repair | string | null> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   const m = r?.items.find(x => x.n === n)
-  const fresh = staleOf(m).length > 0 || !!m?.fresh?.length
+  const stale = (x: MarkItem | undefined) => staleOf(x).length > 0 || !!x?.fresh?.length
+  const fresh = stale(m)
   if (!key || !r || !m || (m.status !== 'failed' && !staleOf(m).length) || starting.has(`${key}:${n}`)) return null
-  if (Object.values(await running($)).some(c => c.key === key && c.marks.includes(n))) return null
+  const runs = Object.values(await running($)).filter(c => c.key === key)
+  if (runs.some(c => c.marks.includes(n))) return null
+  const also = fresh ? r.items.filter(x => x.n !== n && x.row === m.row && x.sentence === m.sentence && x.status !== 'checking' && stale(x) && !starting.has(`${key}:${x.n}`) && !runs.some(c => c.marks.includes(x.n))) : []
   let template = ''
   let p: Record<string, string>
   try {
@@ -906,15 +912,17 @@ export async function repairOf($: Engine, row: string, n: number, auto = false):
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
-  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), ...(fresh ? { again: true } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto)}` }
+  const checked = [m, ...also].sort((a, b) => a.n - b.n)
+  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), ...(fresh ? { again: true } : {}), ...(also.length ? { also: also.map(x => x.n) } : {}), prompt: `${checkerPrompt(template, checked, cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto, also)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
  *  press's): the plugin's other hooks then serve the fork as they serve a reply's check. Answers why it did not start,
  *  or '' (it started, or the person typed a word and the spawn was refused). */
 export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Promise<string> {
-  const id = `${r.key}:${r.n}`
-  starting.add(id)
+  const marks = [r.n, ...(r.also ?? [])]
+  const ids = marks.map(n => `${r.key}:${n}`)
+  for (const id of ids) starting.add(id)
   held = hold
   try {
     const fork = await spawnFork($, { kind: 'checker', prompt: r.prompt, description: REPAIR_DESCRIPTION })
@@ -930,24 +938,24 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     await checkStarted($)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
-    // the mark is checked again: its earlier result goes, its place and words stay; a stale one keeps the files that
-    // changed, so each check of it reads them fresh until one passes
+    // the marks are checked again: their earlier results go, their places and words stay; a stale one keeps the files
+    // that changed, so each check of it reads them fresh until one passes
     await editReply($, r.key, rep => ({
       ...rep, settledAt: null,
       items: rep.items.map(m => {
-        if (m.n !== r.n) return m
+        if (!marks.includes(m.n)) return m
         const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, sources: _o, ...base } = m
         const fresh = staleOf(m).length ? [...new Set(staleOf(m).map((s: { file: string }) => s.file))] : m.fresh
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const, ...(r.again && fresh?.length ? { fresh } : {}) }
       }),
     }))
-    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : { asked: true }), ...(r.thread ? { thread: r.thread } : {}), ...(r.wroteAt ? { wroteAt: r.wroteAt } : {}), ...(r.again ? { again: true } : {}) }
+    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks, cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : { asked: true }), ...(r.thread ? { thread: r.thread } : {}), ...(r.wroteAt ? { wroteAt: r.wroteAt } : {}), ...(r.again ? { again: true } : {}) }
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
-    await showRunning($, r.key, 1, [agentId])
+    await showRunning($, r.key, marks.length, [agentId])
     return ''
   } finally {
     if (held === hold) held = null
-    starting.delete(id)
+    for (const id of ids) starting.delete(id)
   }
 }
 

@@ -5,7 +5,8 @@
 //
 //   stdin   {"kind": "tell", "items": [...]}                 after a reply's check (notices.mjs tellText)
 //           {"kind": "repair", "items": [...], "auto": bool} after a repair (repairTellText)
-//           {"kind": "request", "mark": {...}, "n": N, "auto": bool}   a repair's request (repairRequest)
+//           {"kind": "request", "mark": {...}, "n": N, "auto": bool, "also": [...]}   a repair's request
+//                                                            (repairRequest)
 //   stdout  {"text": "…", "frame": "…"}: the text ('' for nothing to tell), and the frame that heads thimble's reports
 import { partsOf, repairRequest, repairTellText, tellText } from '../../../plugin/marks/notices.mjs'
 import { textOf } from '../../../plugin/prompts/node.mjs'
@@ -18,7 +19,7 @@ process.stdin.on('end', async () => {
   const p = partsOf(await textOf('notices', 'browser'))
   const text = a.kind === 'tell' ? tellText(p, a.items ?? [])
     : a.kind === 'repair' ? repairTellText(p, a.items ?? [], !!a.auto)
-      : a.kind === 'request' ? repairRequest(p, a.mark ?? {}, a.n ?? 1, !!a.auto)
+      : a.kind === 'request' ? repairRequest(p, a.mark ?? {}, a.n ?? 1, !!a.auto, a.also ?? [])
         : ''
   process.stdout.write(JSON.stringify({ text, frame: p.frame }))
 })

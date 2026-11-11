@@ -70,6 +70,9 @@ The analyst {{REPAIR_ASKED}} citation {{N}}, whose first check did not run.
 <!-- request stale -->
 The analyst {{REPAIR_ASKED}} citation {{N}}, since {{FILES}} changed after its first check. What this session read or printed before that change may be out of date.
 
+<!-- request stale also -->
+Citation {{N}} stands in the same sentence, and {{FILES}} changed after its first check too. Check it again as well.
+
 <!-- request where -->
 It may stand in an earlier reply than your last.
 

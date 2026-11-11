@@ -99,7 +99,8 @@ cites only a part of the marked words, which the evidence shows, and leaves the 
 translation, a gloss): it holds only when its words are a part of the marked ones, the evidence shows them, and the
 words it leaves out state no number or day, which would be a claim of the data. A rewrite (`correction.sentence`)
 changes the words around the citation too, such as a paraphrase no record shows or a wrong line number: it holds only
-when it stays within the sentence (one line, no sentence added, every other citation of it as it was), the evidence
+when it stays within the sentence (one line, no sentence added, every other citation of it as it was, or as its own
+result has it when the same check judges it, which then takes the same rewrite), the evidence
 shows its cited words, and each number, day or record name it puts outside the citation is one the evidence shows (a
 cited place's file and line count) and none the citation cited before. The check's evidence is the citation's
 evidence in every case, whatever call or place the reply pointed at. A mark the checker could
@@ -3218,6 +3219,7 @@ SENTENCE_END = re.compile(r"[.!?][\"'”’)*_]*\s+(?=\S)")
 QUOTED = re.compile(r"\"[^\"]*\"|“[^”]*”")
 CODE_SPAN = re.compile(r"(`+)(?:[^`\n]|[^`\n].*?[^`\n])\1(?!`)")  # inline code, as marks/message.js codeRanges reads it
 CITED = "⟨cited⟩"
+JUDGED = "⟨judged⟩"  # another citation of the sentence, which the same check judges on its own (sentence_rewrite)
 
 
 def citations_of(s: str) -> list[tuple[int, int]]:
@@ -3250,21 +3252,25 @@ def loose(s: str) -> str:
     return " ".join(k for x in unmark(s).split() for k in [one_quote(x).strip(' "().,;:!?').lower()] if k)
 
 
-def rest_of(s: str, groups: list[tuple[int, int]], k: int) -> str:
-    """A sentence's words outside its citation k (CITED in its place), the other citations' words as plain words."""
+def rest_of(s: str, groups: list[tuple[int, int]], k: int, hide: set[int] | None = None) -> str:
+    """A sentence's words outside its citation k (CITED in its place), the other citations' words as plain words, but
+    those of `hide`, citations the check judges on their own (JUDGED in their place)."""
     out, at = "", 0
     for i, (a, b) in enumerate(groups):
-        out += s[at:a] + (f" {CITED} " if i == k else s[a + 1:b - 1])
+        out += s[at:a] + (f" {CITED} " if i == k else f" {JUDGED} " if hide and i in hide else s[a + 1:b - 1])
         at = b
     return norm_ws(out + s[at:])
 
 
-def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | str:
+def sentence_rewrite(given: str, sentence: str, words: str, judged: dict[str, str] | None = None) -> dict[str, Any] | str:
     """The check's new sentence for a citation (`correction.sentence`), in the form of the mark's own (each citation
-    `[words]`): {sentence, cited, rest, was_rest}, the new sentence, its cited words, and the words outside the citation
-    in the new sentence and in the old one; or why it cannot stand in place of the old one. It stays within the old
-    sentence: one line, no sentence added, the block's marker kept, and every other citation of the sentence with its
-    words as they were (a sentence that writes them with no brackets has them bracketed where they stand)."""
+    `[words]`): {sentence, cited, rest, was_rest, judged}, the new sentence, its cited words, the words outside the
+    citation in the new sentence and in the old one, and the words each judged citation has in the new sentence; or why
+    it cannot stand in place of the old one. It stays within the old sentence: one line, no sentence added, the block's
+    marker kept, and every other citation of the sentence with its words as they were (a sentence that writes them with
+    no brackets has them bracketed where they stand). `judged`: the other citations of the sentence that the same check
+    judges, each by its words, with the words its own answer gives it. Their words may change, and they are no words
+    outside the citation: check_all holds each to its own result."""
     if re.search(r"\n\s*\S", given.strip()):
         return "its sentence runs over more than one line"
     old = citations_of(sentence)
@@ -3277,37 +3283,50 @@ def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | 
     if lead and not new.startswith(lead.group(0).strip()):
         new = lead.group(0) + new
     others = [sentence[a + 1:b - 1] for i, (a, b) in enumerate(old) if i != k]
+    answered = {loose(w): str(x) for w, x in (judged or {}).items()}
+    free = [loose(w) in answered for w in others]
     groups = citations_of(new)
     if len(groups) == 1 and others:
-        # the other citations written as plain words: bracketed where they stand, in order
+        # the other citations written as plain words: bracketed where they stand, in order; a judged one as its words
+        # stand or as its own answer gives them
         a0, b0 = groups[0]
         spans, at = [], 0
-        for w in others:
-            j = new.find(w, at)
-            if j >= 0 and a0 <= j < b0:
-                j = new.find(w, b0)
+        for w, f in zip(others, free):
+            j, x = -1, w
+            for x in [y for y in dict.fromkeys([w, answered[loose(w)]] if f else [w]) if y]:
+                j = new.find(x, at)
+                if j >= 0 and a0 <= j < b0:
+                    j = new.find(x, b0)
+                if j >= 0:
+                    break
             if j < 0:
                 return "it leaves out another citation of the sentence"
-            spans.append((j, j + len(w)))
-            at = j + len(w)
+            spans.append((j, j + len(x)))
+            at = j + len(x)
         for a, b in sorted(spans, reverse=True):
             new = f"{new[:a]}[{new[a:b]}]{new[b:]}"
         groups = citations_of(new)
     if len(groups) != len(old):
         return "it changes the other citations of the sentence"
     inner = [new[a + 1:b - 1] for a, b in groups]
-    fits = [j for j in range(len(groups)) if [loose(w) for i, w in enumerate(inner) if i != j] == [loose(w) for w in others]]
+    # the other citations in order, each with its words as they were, but a judged one
+    fits = [j for j in range(len(groups))
+            if all(f or loose(x) == loose(w) for x, w, f in zip([x for i, x in enumerate(inner) if i != j], others, free))]
     if not fits:
         return "it changes the other citations of the sentence"
     j = k if k in fits else fits[0]
+    now_at, was_at = [i for i in range(len(groups)) if i != j], [i for i in range(len(old)) if i != k]
+    hide_now, hide_was = {now_at[p] for p, f in enumerate(free) if f}, {was_at[p] for p, f in enumerate(free) if f}
     # the sentences a quote holds are the quote's, and a `.` in code ends none, as in the reply's sentence
     # (marks/message.js sentenceSpan)
     ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", CODE_SPAN.sub("c", x))))  # noqa: E731
-    if ends(rest_of(new, groups, j)) > ends(rest_of(sentence, old, k)):
+    if ends(rest_of(new, groups, j, hide_now)) > ends(rest_of(sentence, old, k, hide_was)):
         return "it adds a sentence"
     if not inner[j].strip():
         return "it cites no words"
-    return {"sentence": new, "cited": norm_ws(inner[j]), "rest": rest_of(new, groups, j), "was_rest": rest_of(sentence, old, k)}
+    return {"sentence": new, "cited": norm_ws(inner[j]), "rest": rest_of(new, groups, j, hide_now),
+            "was_rest": rest_of(sentence, old, k, hide_was),
+            "judged": {others[p]: norm_ws(inner[now_at[p]]) for p, f in enumerate(free) if f}}
 
 
 def evidence_text(evidence: dict[str, Any] | None) -> str:
@@ -3360,13 +3379,14 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False, judged_too: dict[str, str] | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?, sources?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real
     Bash calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
     session's (check_quote). A mark verified or corrected keeps what its evidence rests on (`sources`, each a source()).
     `fresh`: a check of a citation whose source changed after its first check, whose computed evidence is only a call
-    this check ran, since output printed before the change shows the files as they were.
+    this check ran, since output printed before the change shows the files as they were. `judged_too`: the other
+    citations of its sentence that the same check judges (sentence_rewrite `judged`), whose words a rewrite may change.
 
     The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
     `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
@@ -3421,7 +3441,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     rewrite: dict[str, Any] | None = None
     given = str(corr.get("sentence") or "") if corr else ""
     if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
-        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words)
+        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words, judged_too)
         if isinstance(got, str):
             # a rewording that cannot stand still leaves what the check found wrong, which the person reads in its
             # own reason (the records show it false); with no such reason, why the rewording could not stand
@@ -3536,7 +3556,8 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
     its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions); `at` when the
     marks' words were written (seconds since the epoch), the time a card that keeps its versions is read at (None: now);
     `fresh`, a check of citations whose source changed after their first check (check_mark).
-    A mark the validator fails on fails as a check that did not run, with why; the other marks are judged."""
+    A mark the validator fails on fails as a check that did not run, with why; the other marks are judged. The marks of
+    one sentence are judged together: a rewrite of it may change the words of each, as its own result has them."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -3545,32 +3566,75 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
             by_n.setdefault(int(it.get("mark")), it)
         except (TypeError, ValueError):
             continue
-    results = []
-    for m in marks:
+    of: dict[str, list[int]] = {}
+    for i, m in enumerate(marks):
+        of.setdefault(norm_ws(m.get("sentence") or ""), []).append(i)
+
+    def answered(m: dict[str, Any]) -> str:
+        """The words a mark's own answer gives it: its correction's words, else its words as written."""
         try:
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at, fresh))
+            it = by_n.get(int(m.get("n"))) or {}
+        except (TypeError, ValueError):
+            it = {}
+        corr = it.get("correction") if isinstance(it.get("correction"), dict) else {}
+        return norm_ws(corr.get("words") or "") or str(m.get("words", ""))
+
+    results = []
+    for i, m in enumerate(marks):
+        try:
+            judged = {str(marks[j].get("words", "")): answered(marks[j]) for j in of[norm_ws(m.get("sentence") or "")] if j != i}
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at, fresh, judged))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
                             "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {said[:120]})."})
-    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's. The same new
-    # sentence for a second citation undoes nothing: a rewrite keeps the other citations' words, so the second
-    # citation's words stand in it as written, and the first rewrite places them
-    rewritten: dict[str, str] = {}
-    for m, r in zip(marks, results):
-        if not r.get("rewrite"):
-            continue
-        key = norm_ws(m.get("sentence") or "")
-        if key in rewritten:
-            words = str(m.get("words", ""))
-            same = norm_ws(str(r["rewrite"])) == rewritten[key]
-            if same:
-                r.update(status="verified", shown=words)
-            else:
-                r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
-                r.pop("sources", None)
-            for k in ("rewrite", "was", "narrowed"):
-                r.pop(k, None)
-            continue
-        rewritten[key] = norm_ws(str(r["rewrite"]))
+    for key, idx in of.items():
+        one_rewrite(key, [marks[i] for i in idx], [results[i] for i in idx])
     return {"parsed": items is not None, "results": results}
+
+
+def ended_words(m: dict[str, Any], r: dict[str, Any]) -> str:
+    """A mark's words as its check ends them: a correction's words, else its words as written (a narrowing keeps them
+    in the sentence)."""
+    return str(r.get("shown") or "") if r.get("status") == "corrected" and not r.get("narrowed") else str(m.get("words", ""))
+
+
+def one_rewrite(sentence: str, marks: list[dict[str, Any]], results: list[dict[str, Any]]) -> None:
+    """The results of the marks of one sentence (`sentence`, as each mark has it), held to one rewrite of it: a second
+    rewrite would undo the first one's. The first rewrite stands when each other citation of the sentence reads in it
+    as written or as its own result has it; one that gives a citation other words cannot stand. A citation whose words
+    it changes is corrected with it, the same rewrite on each (marks/message.js rewritesIn draws it once). The same new
+    sentence for a later citation undoes nothing: the citation's words stand in it as written, and the first rewrite
+    places them. Another new sentence is left out."""
+    stands: dict[str, Any] | None = None
+    held: set[int] = set()
+    for i, (m, r) in enumerate(zip(marks, results)):
+        if not r.get("rewrite") or i in held:
+            continue
+        words = str(m.get("words", ""))
+        if stands is None:
+            got = sentence_rewrite(str(r["rewrite"]), sentence, md_unescaped(words),
+                                   {str(x.get("words", "")): "" for j, x in enumerate(marks) if j != i})
+            gives = {loose(w): x for w, x in got["judged"].items()} if isinstance(got, dict) else {}
+            now = {j: gives.get(loose(str(x.get("words", ""))), str(x.get("words", ""))) for j, x in enumerate(marks) if j != i}
+            if any(loose(w) not in (loose(str(marks[j].get("words", ""))), loose(ended_words(marks[j], results[j]))) for j, w in now.items()):
+                r.update(status="failed", failedBy="evidence", shown=words,
+                         reason="The check reworded the sentence, but it changes the other citations of the sentence.")
+                for k in ("rewrite", "was", "narrowed", "sources"):
+                    r.pop(k, None)
+                continue
+            stands = r
+            for j, w in now.items():
+                if loose(w) != loose(str(marks[j].get("words", ""))):
+                    # its words changed with the rewrite, as its own check corrected them
+                    results[j].update(status="corrected", rewrite=r["rewrite"], was=str(marks[j].get("words", "")))
+                    results[j].pop("narrowed", None)
+                    held.add(j)
+            continue
+        if norm_ws(str(r["rewrite"])) == norm_ws(str(stands["rewrite"])):
+            r.update(status="verified", shown=words)
+        else:
+            r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
+            r.pop("sources", None)
+        for k in ("rewrite", "was", "narrowed"):
+            r.pop(k, None)

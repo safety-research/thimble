@@ -13,7 +13,7 @@ import { partsOf } from '../notices.mjs'
 const PARTS = ['frame', 'check', 'check asked', 'seen', 'unseen', 'check end', 'repair', 'repair auto', 'repair end',
   'corrected', 'narrowed', 'rewritten', 'not confirmed', 'wrong', 'verified', 'still not confirmed', 'still wrong',
   'not checked', 'not checked again', 'why', 'request', 'request auto', 'request not run', 'request stale',
-  'request where', 'found not confirmed', 'found wrong', 'request task']
+  'request stale also', 'request where', 'found not confirmed', 'found wrong', 'request task']
 
 const parts = async mode => partsOf(await textOf('notices', mode))
 

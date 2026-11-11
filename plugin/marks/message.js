@@ -201,8 +201,10 @@ export function sentenceSpan(text, mark) {
  * The text with the sentences its checks rewrote: `items` are the text's marks' checks by their place (marks/store.ts
  * MarkItem), and a corrected one's `rewrite` is the sentence that stands in place of its own, written as sentenceOf
  * writes one (each citation `[words]`, engine/kernel/evidence.py sentence_rewrite). The white space around the sentence
- * stays; a second rewrite of one sentence is left out. Each rewrite stands or not on its own: one that would not hold
- * the marks of the sentence it replaces leaves that sentence as it was. `placed`: the marks whose rewrite stands.
+ * stays; a second rewrite of one sentence is left out, but the same new sentence, which a check that corrected several
+ * citations of the sentence gives each of them (evidence.py one_rewrite), stands for each. Each rewrite stands or not on
+ * its own: one that would not hold the marks of the sentence it replaces leaves that sentence as it was. `placed`: the
+ * marks whose rewrite stands.
  */
 export function rewritesIn(text, items) {
   const s = String(text || '')
@@ -210,9 +212,13 @@ export function rewritesIn(text, items) {
     .sort((x, y) => y.span[0] - x.span[0])
   let out = s
   let floor = Infinity
+  let last = null
   const placed = new Set()
   for (const { k, span: [a, b], sentence } of spans) {
-    if (b > floor) continue
+    if (b > floor) {
+      if (last && a === last.a && sentence === last.sentence) placed.add(k)
+      continue
+    }
     const raw = s.slice(a, b)
     const lead = raw.match(/^\s*/)[0]
     const trail = raw.slice(lead.length).match(/\s*$/)[0]
@@ -220,6 +226,7 @@ export function rewritesIn(text, items) {
     if (body == null) continue
     out = out.slice(0, a) + lead + body + trail + out.slice(b)
     floor = a
+    last = { a, sentence }
     placed.add(k)
   }
   return { text: out, placed }

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
-from kernel.evidence import check_mark  # noqa: E402
+from kernel.evidence import check_all, check_mark  # noqa: E402
 
 CODE = 'import json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nprint(f"{sum(p[\'merged\'] for p in prs)} of {len(prs)}")'
 
@@ -223,6 +223,41 @@ def test_a_period_in_code_ends_no_sentence_of_a_rewrite_but_a_sentence_put_in_is
     assert (ok["status"], ok["rewrite"]) == ("corrected", "The app runs on [port 9000]: start it with `uvicorn ... --port 9000`.")
     more = reworded("The app runs on [port 9000]. Start it with `uvicorn ... --port 9000`.")
     assert more["status"] == "failed" and more["reason"] == "The check reworded the sentence, but it adds a sentence."
+
+
+def test_one_check_of_two_citations_of_a_sentence_rewrites_it_once_for_both(tmp_path: Path):
+    """Both citations of the sentence went out of date with one edit. A check of one alone could not rewrite the
+    sentence: the rewrite changed the other citation's words. One check of both rewrites it once, each citation held
+    to its own evidence, and a rewrite that gives a citation other words than its own result cannot stand."""
+    (tmp_path / "README.md").write_text("cd backend && uv run uvicorn app.main:app --port 9000\nOpen http://localhost:9000.\n")
+    was = "The app runs on [port 8000]: start it with `uvicorn ... --port 8000`, then open [http://localhost:8000]."
+    now = "The app runs on [port 9000]: start it with `uvicorn ... --port 9000`, then open [http://localhost:9000]."
+    marks = [{"n": 1, "words": "port 8000", "sentence": was}, {"n": 2, "words": "http://localhost:8000", "sentence": was}]
+
+    def item(n: int, line: int, words: str, sentence: str | None = now, status: str = "corrected") -> dict:
+        return {"mark": n, **quote("README.md", line, words), "status": status, "reason": "the README says 9000 now",
+                "correction": {"words": words, **({"sentence": sentence} if sentence else {})} if status == "corrected" else None}
+
+    def check(*items: dict, of: list[dict] = marks) -> list[dict]:
+        return check_all(of, "```json\n" + json.dumps(list(items)) + "\n```", [], str(tmp_path))["results"]
+
+    # the same new sentence for both, or the sentence for one and the words for the other, or each bracketing only
+    # its own words: both corrected, the one rewrite on each
+    one = now.replace("[http://localhost:9000]", "http://localhost:9000")
+    two = now.replace("[port 9000]", "port 9000")
+    for answers in ((item(1, 1, "port 9000"), item(2, 2, "http://localhost:9000")),
+                    (item(1, 1, "port 9000"), item(2, 2, "http://localhost:9000", None)),
+                    (item(1, 1, "port 9000", one), item(2, 2, "http://localhost:9000", two))):
+        got = check(*answers)
+        assert [(r["status"], r["shown"], r.get("was"), r.get("rewrite")) for r in got] == [
+            ("corrected", "port 9000", "port 8000", now), ("corrected", "http://localhost:9000", "http://localhost:8000", now)], got
+    # a check of one alone cannot change the other's words
+    (alone,) = check(item(1, 1, "port 9000"), of=marks[:1])
+    assert alone["status"] == "failed" and "rewrite" not in alone
+    # a rewrite that gives the other citation words its own check does not confirm cannot stand
+    first, second = check(item(1, 1, "port 9000"), item(2, 2, "http://localhost:8000", status="verified"))
+    assert (first["status"], first["reason"]) == ("failed", "The check reworded the sentence, but it changes the other citations of the sentence.")
+    assert second["status"] == "failed" and "rewrite" not in first
 
 
 # ------------------------------------------------------------------------------------------------ why a citation failed

@@ -1,12 +1,13 @@
 // A citation whose source changed after its check (marks/stale.ts): the pass stats each cited file once, from the index
 // of cited files (store.ts citedFiles), and sends the kernel only the citations that rest on a file whose stat changed;
 // a citation whose cited lines changed draws stale in the answer, and its card says which file changed and offers x,
-// which checks it again against the files as they are now, and so each x after it until one of those checks passes.
-// Cited lines that only moved take their new numbers. A rewritten sentence's card says its status and no more. All data
-// is made up. `claude plugin test plugin`.
+// which checks it again against the files as they are now, and so each x after it until one of those checks passes,
+// with the other stale citations of its sentence. Cited lines that only moved take their new numbers. A rewritten
+// sentence's card says its status and no more. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
+import { rewritesIn } from '../marks/message.js'
 import { examineSources } from '../marks/stale'
 import { citedFiles, editReply, newReply, replyOf, rowMarks, type MarkItem } from '../marks/store'
 import { setOptions } from '../settings/features.mjs'
@@ -263,6 +264,47 @@ test('a stale citation whose check again failed stays on checks of the files as 
   const done = (await rowMarks($, 'row-1'))!.items[0]!
   expect(done).toMatchObject({ status: 'corrected', shown: 'port 9000' })
   expect(done.fresh).toBeUndefined()
+})
+
+test('x on one of two stale citations of a sentence checks both in one check, and the one rewrite of the sentence repairs both', async () => {
+  setOptions({ citations: 'auto + verify' })
+  const reply = 'The app runs on [port 8000](#): start it, then open [http://localhost:8000](#).'
+  const url = { ...CHECKED, line: '3', sha256: 'b3' }
+  const rewrite = 'The app runs on [port 9000]: start it, then open [http://localhost:9000].'
+  let checks = 0
+  const { $, seen } = engine(req => {
+    if (Array.isArray(req.cited)) return { cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }
+    if (++checks === 1) return { parsed: true, results: [{ n: 1, status: 'verified', shown: 'port 8000', sources: [CHECKED] }, { n: 2, status: 'verified', shown: 'http://localhost:8000', sources: [url] }] }
+    return { parsed: true, results: [
+      { n: 1, status: 'corrected', shown: 'port 9000', was: 'port 8000', rewrite, reason: 'line 2 says 9000', sources: [{ ...CHECKED, sha256: 'c2' }] },
+      { n: 2, status: 'corrected', shown: 'http://localhost:9000', was: 'http://localhost:8000', rewrite, reason: 'line 3 says 9000', sources: [{ ...url, sha256: 'c3' }] },
+    ] }
+  })
+  await noteRow($, 'row-1', reply)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: `${FORK}0`, reason: 'answer', answer: '```json\n[]\n```' })
+  await examineSources($)
+  expect((await rowMarks($, 'row-1'))!.items.map(m => staleOf(m).length)).toEqual([1, 1])
+  // x on the first: the check takes the second with it, and its request says why
+  const r = await repairOf($, 'row-1', 1)
+  expect(r).toMatchObject({ n: 1, also: [2], again: true })
+  const sentence = 'The app runs on [port 8000]: start it, then open [http://localhost:8000].'
+  expect((r as Any).prompt).toContain(`CHECK\n1. [port 8000] in: ${sentence}\n2. [http://localhost:8000] in: ${sentence}`)
+  expect((r as Any).prompt).toContain('It may stand in an earlier reply than your last. Citation 2 stands in the same sentence, and README.md changed after its first check too. Check it again as well.\nCheck it again from the start.')
+  expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
+  expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['checking', 'checking'])
+  // a second x on either finds the check running
+  expect(await repairOf($, 'row-1', 2)).toBe(null)
+  await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
+  const last = seen.stdin.filter(x => x.marks).pop()
+  expect(last.marks.map((m: Any) => m.n)).toEqual([1, 2])
+  expect(last.fresh).toBe(true)
+  // both repaired, the one rewrite in place of the sentence
+  const items = (await rowMarks($, 'row-1'))!.items
+  expect(items.map(m => [m.status, m.shown, staleOf(m).length])).toEqual([['corrected', 'port 9000', 0], ['corrected', 'http://localhost:9000', 0]])
+  const shown = rewritesIn(reply, items)
+  expect(shown.text).toBe('The app runs on [port 9000](#): start it, then open [http://localhost:9000](#).')
+  expect([...shown.placed]).toEqual([0, 1])
 })
 
 test('a pass stats each cited file once and reads only the replies whose citations rest on a file that changed; moved lines take their new numbers', async () => {

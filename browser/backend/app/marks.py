@@ -37,7 +37,8 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    the file once for all of them. A mark whose source changed is stale, which the page draws (marks.ts lookOf); cited
    lines that only moved take their new numbers, with no other sign. Repair checks a stale mark again against the
    files as they are now, its computed evidence only a call of that check's own (`fresh`), and so each Repair of it
-   until one of those checks passes (the mark's `fresh`: the files that changed).
+   until one of those checks passes (the mark's `fresh`: the files that changed). That check takes the other such
+   marks of its sentence with it, so that one rewrite of the sentence corrects them all.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -710,10 +711,10 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                        cards: list[dict[str, Any]] | None = None, index: str = "", request: str = "",
                        auto: bool = False, at: float | None = None, fresh: bool = False) -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
-    mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its one mark
-    ended, unless the mark is a side thread's. A check that is no repair repairs each mark it found wrong or could not
+    mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its marks
+    ended, unless they are a side thread's. A check that is no repair repairs each mark it found wrong or could not
     confirm, as soon as it ends. `folders`: the check's (cwd, root), check_folders; `at`: when the marks' words were
-    written, the time the validator reads a label at (None: now); `fresh`: a repair of a stale mark, whose computed
+    written, the time the validator reads a label at (None: now); `fresh`: a repair of stale marks, whose computed
     evidence is only a call of this check's own (the validator's check_all)."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
@@ -931,12 +932,12 @@ def _transcript_messages(path: Any) -> list[dict[str, Any]]:
 # ---- repair: a failed mark checked again (the terminal's x, marks/checker.ts repairOf, launchRepair; the request and
 # what main hears after it, plugin/marks/notices.mjs repairRequest and repairTellText)
 
-def repair_request(m: dict[str, Any], n: int, auto: bool = False) -> str:
+def repair_request(m: dict[str, Any], n: int, auto: bool = False, also: list[dict[str, Any]] | None = None) -> str:
     """What follows the checker's text for a repair of mark `m`, numbered `n` in it (the terminal's repairRequest): who
     asked, the analyst with Repair or thimble (`auto`, as the check failed it), what the first check found (its reason
     quoted, since it may quote the records), and the task. A mark whose check did not run (unchecked, or failed by
-    none) is checked as any reply's is."""
-    return notices({"kind": "request", "mark": m, "n": n, "auto": auto})["text"]
+    none) is checked as any reply's is; a stale one with the other stale marks of its sentence (`also`)."""
+    return notices({"kind": "request", "mark": m, "n": n, "auto": auto, "also": also or []})["text"]
 
 
 def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
@@ -976,15 +977,16 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
                  fork: Callable[..., Awaitable[dict[str, Any]]] | None = None, auto: bool = False) -> str:
     """Repair a failed or stale mark: a reply's (`turn`, `n`) or a card's takeaway's (`card`, its order `k`). It is
     `checking` again while a fork of main checks it with the terminal's repair request, and the validator decides its
-    end as for any check. '' when it started, else why not. The check runs in the background. `auto`: the check that
-    failed it started it, not the analyst (main hears so)."""
+    end as for any check; a stale mark's check takes the other stale marks of its sentence with it. '' when it started,
+    else why not. The check runs in the background. `auto`: the check that failed it started it, not the analyst (main
+    hears so)."""
     from . import notebook  # noqa: PLC0415
 
     got = _main_now(c)
     if isinstance(got, str):
         return got
     main, cut = got
-    share: dict[str, Any] | None = None
+    shares: list[dict[str, Any]] = []
     again = False  # a stale mark, or one whose check since it went stale did not pass: checked against the files now
     if card:
         cell = notebook.get_cell(c, card)
@@ -995,8 +997,8 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
             return NOT_FAILED
         request = await asyncio.to_thread(repair_request, m, 1, auto)
         base = {key: v for key, v in m.items() if key not in CLEARED}
-        share = {**base, "n": 1, "status": "checking", "shown": m["words"], "card": card,
-                 "title": str(cell.get("title") or ""), "takeaway": text}
+        shares = [{**base, "n": 1, "status": "checking", "shown": m["words"], "card": card,
+                   "title": str(cell.get("title") or ""), "takeaway": text}]
 
         def change(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return [{**base, "status": "checking", "shown": it["words"], "repair": True} if it.get("k") == k else it
@@ -1006,34 +1008,43 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         turn = new_turn()
     else:
         reply = stored(c, turn or "")
-        m = next((x for x in (reply or {}).get("items") or [] if x.get("n") == n), None)
+        items = (reply or {}).get("items") or []
+        m = next((x for x in items if x.get("n") == n), None)
         stale = stale_sources(m) if m else []
         if not m or (m.get("status") not in REPAIRABLE and not stale):
             return NOT_FAILED
         again = bool(stale or m.get("fresh"))
-        request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto)
-        base = {key: v for key, v in m.items() if key not in CLEARED}
-        # a stale mark keeps the files that changed, so each check of it reads them fresh until one passes
-        if stale:
-            base["fresh"] = list(dict.fromkeys(str(src.get("file")) for src in stale))
-        share = {**base, "status": "checking", "shown": m["words"]}
+        # a stale mark's check takes each other such mark of its sentence with it: the check rewrites a sentence whole,
+        # and a rewrite that changed another citation's words would not stand alone (the terminal's repairOf)
+        also = [x for x in items if again and x.get("n") != n and x.get("piece") == m.get("piece")
+                and x.get("sentence") == m.get("sentence") and x.get("status") != "checking"
+                and (stale_sources(x) or x.get("fresh"))]
+        request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto, also)
+        bases: dict[int, dict[str, Any]] = {}
+        for x in sorted([m, *also], key=lambda x: int(x["n"])):
+            base = {key: v for key, v in x.items() if key not in CLEARED}
+            # a stale mark keeps the files that changed, so each check of it reads them fresh until one passes
+            if stale_sources(x):
+                base["fresh"] = list(dict.fromkeys(str(src.get("file")) for src in stale_sources(x)))
+            bases[x["n"]] = base
+        shares = [{**base, "status": "checking", "shown": base["words"]} for base in bases.values()]
 
         def change_reply(r: dict[str, Any]) -> dict[str, Any]:
-            r["items"] = [{**base, "status": "checking", "shown": x["words"], "repair": True} if x["n"] == n else x
-                          for x in r["items"]]
+            r["items"] = [{**bases[x["n"]], "status": "checking", "shown": x["words"], "repair": True}
+                          if x["n"] in bases else x for x in r["items"]]
             return r
 
         await _edit(c, str(turn), change_reply, tell=False)
 
     # the time its words were written, which the first check kept: a label is read as it was then, never as a later
     # change made it (a mark checked before thimble kept the time is read as its labels are now)
-    key = _time_key(card=card, text=str(share.get("takeaway") or "")) if card else _time_key(turn=turn)
+    key = _time_key(card=card, text=str(shares[0].get("takeaway") or "")) if card else _time_key(turn=turn)
 
     async def run() -> None:
         at = await asyncio.to_thread(_time_of, c, key)
         cards, index = await _cards_and_index(c, at)
         try:
-            await _check_share(c, main, str(turn), cut, [share], check_folders(c, main), fork or run_fork, cards, index,
+            await _check_share(c, main, str(turn), cut, shares, check_folders(c, main), fork or run_fork, cards, index,
                                request, auto, at, again)
         finally:
             _drop_index(index)
