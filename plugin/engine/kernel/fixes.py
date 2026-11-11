@@ -139,11 +139,12 @@ PROTECTED_KINDS = {
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
 }
 PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
-# the plugin's files thimble-browser runs too: the modules its page bundles (PAGE_SOURCES in the browser's fixes.py) and
-# the one its server imports (marks.py). The browser tells a fix that changes what it runs by the same list
-# (BROWSER_RUNS there): change both.
+# the plugin's files a thimble-browser that runs keeps as they were at its start: the modules its page bundles
+# (PAGE_SOURCES in the browser's fixes.py) and the files its server loads once (SERVER_KEEPS there). The browser tells a
+# fix that changes what it runs by the same list (BROWSER_RUNS there), and its tests fail when the two differ or when
+# the browser loads a file that is in neither.
 BROWSER_RUNS = ("plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js", "plugin/tray/printed.mjs",
-                "plugin/tray/tray.mjs", "plugin/engine/kernel/evidence.py")
+                "plugin/tray/tray.mjs", "plugin/engine/kernel/evidence.py", "plugin/fix/changeable.mjs")
 # the files a fix may change that the person is told of before they use it, by what each one is: the rest of what keeps
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
