@@ -68,7 +68,7 @@ thimble asks you to repair citation {{N}}.
 The analyst {{REPAIR_ASKED}} citation {{N}}, whose first check did not run.
 
 <!-- request stale -->
-The analyst {{REPAIR_ASKED}} citation {{N}}, since {{FILES}} changed after its first check. What this session read or printed before that change may be out of date.
+The analyst {{REPAIR_ASKED}} citation {{N}}, since {{FILES}} changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence.
 
 <!-- request stale also -->
 Citation {{N}} stands in the same sentence, and {{FILES}} changed after its first check too. Check it again as well.

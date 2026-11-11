@@ -104,7 +104,8 @@ def test_a_mark_whose_cited_line_changed_is_stale_and_repair_checks_it_against_t
     assert last["items"][0]["sources"][0]["changed"] is True
 
     _repair(turn, fork)
-    assert "The analyst pressed Repair on citation 1, since notes.md changed after its first check." in prompts[-1]
+    assert ("The analyst pressed Repair on citation 1, since notes.md changed after its first check. What this session read or "
+            "printed before that change may be out of date. A copy of a file from before the change is no evidence.") in prompts[-1]
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "corrected" and m["shown"] == "port 9000" and marks.stale_sources(m) == [], m
     assert "fresh" not in m
