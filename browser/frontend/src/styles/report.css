@@ -1592,6 +1592,17 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   pointer-events: none;
   background: linear-gradient(to right, transparent, var(--surface-card));
 }
+/* the card harness's picture of a figure for an export (render.tsx): the art whole where the page scrolls a wide table
+   or chart in its box, and without the fade that says it goes on */
+.render-figure .wu-fig-scroll,
+.render-figure .wu-fig-chart.wu-fig-table,
+.render-figure .wu-fig-chart.wu-fig-wide,
+.render-figure .wu-fig-chart .outputs-vega {
+  overflow: visible;
+}
+.render-figure .wu-fig-scroll.wu-fig-overflow::after {
+  content: none;
+}
 /* BlockNote sizes every table in the editor to the column (fixed layout, hidden overflow); a figure's table keeps its own */
 .wu-root .wu-editor .bn-editor .wu-fig-table table {
   table-layout: auto;
