@@ -87,7 +87,7 @@ import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, errorWordsOf, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
-import { blocks, cardRef, marksIn, plainSentence, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
+import { blocks, cardRef, marksIn, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
@@ -830,8 +830,9 @@ function repairRow(els: Any, m: MarkItem): Unit {
 type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; gap?: Unit }
 
 /** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
- *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a rewritten
- *  sentence or a narrowed citation says which, as the header says only corrected or repaired); a failed one why in one
+ *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a narrowed
+ *  citation says so, as the header says only corrected or repaired); a sentence the check rewrote says nothing more,
+ *  since the reply shows its new words; a failed one why in one
  *  sentence, and each file its check could not read (tray.mjs unreadLine); after a repair (x) that verified it as
  *  written, why; all dim, and under it `x repair` (repairRow) while something the person does here lets its check run
  *  (`runs`, marks/checker.ts repairOk). For a value code computed: how the code got it, in the check's words and the
@@ -855,8 +856,8 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   // a stale one: which files changed after its check (tray.mjs staleLine)
   const stale = staleOf(m)
   if (stale.length) dim('stale', printable(staleLine(stale)))
-  // a rewrite's history is the sentence Claude wrote
-  if (m.status === 'corrected' && m.was) dim('was', wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }))
+  // a rewritten sentence reads anew in the reply: the header's status is all its card says of the change
+  if (m.status === 'corrected' && m.was) { if (!m.rewrite) dim('was', wasLine({ narrowed: !!m.narrowed, was: m.was })) }
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)

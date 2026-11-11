@@ -215,7 +215,8 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   ] })
   const rows: Any[] = [head]
   if (stale.length) rows.push(Text({ key: 'stale', wrap: 'wrap', color: 'warning', children: printable(staleLine(stale)) }))
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }) }))
+  // a rewritten sentence shows as it reads now, under these lines: the status is all they say of the change
+  if (m.status === 'corrected' && m.was && !m.rewrite) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: wasLine({ narrowed: !!m.narrowed, was: m.was }) }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person reads it (a rewrite's, once the check rewrote it), the cited words in bold

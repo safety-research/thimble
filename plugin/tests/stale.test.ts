@@ -2,7 +2,8 @@
 // of cited files (store.ts citedFiles), and sends the kernel only the citations that rest on a file whose stat changed;
 // a citation whose cited lines changed draws stale in the answer, and its card says which file changed and offers x,
 // which checks it again against the files as they are now, and so each x after it until one of those checks passes.
-// Cited lines that only moved take their new numbers. All data is made up. `claude plugin test plugin`.
+// Cited lines that only moved take their new numbers. A rewritten sentence's card says its status and no more. All data
+// is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
@@ -132,6 +133,19 @@ test('a citation whose cited lines changed after its check draws stale; its card
   expect(band).toContain('↻ stale')
   expect(band).toContain('runs/summary.txt changed after the check.')
   expect(band).toContain('x repair: check it again against the file as it is now')
+})
+
+test("a sentence the check rewrote: its card says repaired and shows its evidence, with no line of what the sentence was", CITES, async ($, on) => {
+  const rewrite = 'Of the runs, [15 of 40] failed on the p95 check.'
+  const item = { ...QUOTED, status: 'corrected', shown: '15 of 40', was: '12 of 40', rewrite, repair: true, evidence: { ...QUOTED.evidence, lines: [{ n: 4, text: 'failed: 15', highlight: [8, 10] }] } }
+  await session($, on, item, () => ({ kind: 'file', size: 30, mtimeMs: 1000, isLink: false }))
+  expect(textOf(await $.ui.render(answer('row-t1', TEXT)))).toContain('15 of 40')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('✓ repaired')
+  expect(band).toContain('failed: 15')
+  expect(band).not.toContain('sentence rewritten')
+  expect(band).not.toContain('was ')
 })
 
 const FORK = 'a0f0e0d0c0b0a0901'

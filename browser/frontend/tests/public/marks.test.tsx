@@ -85,7 +85,13 @@ test("the check's repairs: a corrected mark shows its new words and what it was,
   expect(el.textContent).toBe('Opus took 0.5 to 1.7 hours, over 40 runs. Then 12 of 40 merged.')
   await open(el.querySelector<HTMLElement>('.mark-words')!)
   await settle()
-  expect(document.querySelector('.mark-pop .mark-pop-was')?.textContent).toBe('sentence rewritten; was Opus took 2.5 to 3.7 hours on 40 runs.')
+  // a rewritten sentence reads anew in the text: its label says corrected, and no more of what it was
+  expect(document.querySelector('.mark-pop .mark-pop-was')?.textContent).toBe('corrected')
+  unmountAll()
+  const plain = await mount(<ChatMarkdown text="Then [15 of 40](#) merged." checks={[item(0, '15 of 40', { status: 'corrected', shown: '12 of 40', was: '15 of 40' })]} />)
+  await open(plain.querySelector<HTMLElement>('.mark-words')!)
+  await settle()
+  expect(document.querySelector('.mark-pop .mark-pop-was')?.textContent).toBe('corrected; was 15 of 40')
   unmountAll()
 
   const { marksApi } = await import('../../src/lib/api.ts')
