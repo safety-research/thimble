@@ -14,12 +14,12 @@ fork's or an agent's is <workspace>/runtime/<sid>/subagents/agent-<id>.jsonl wit
 finds a subagent's. So the page cannot tell the two ways apart.
 
 Writes (spec_of). Main and its thread forks write the corpus folder, as Claude Code does in its own folder, unless the
-analyst turns Settings' "Claude can edit files in this folder" off for the workspace (ledger.corpus_edits); their
-prompt and their Bash, Write and Edit descriptions say which, and name that switch when it is off. thimble's other
-agents (writers, view builds and reviews, checks) and the checker's and proposer's forks never write it. No agent
-writes thimble's private files (PRIVATE_FILES) or the workspace's protected files (protected), with one carve-out: a
-view's builder and its reviewer write that view's folder in the protected extension/, and their own folder, alone
-(agent_writes), by the slug of the start the server recorded for them, so no other agent writes a view's files.
+analyst turns on Settings' Read only for the workspace (ledger.corpus_edits false); their prompt and their Bash, Write
+and Edit descriptions say which, and name that switch when it is on. thimble's other agents (writers, view builds and
+reviews, checks) and the checker's and proposer's forks never write it. No agent writes thimble's private files
+(PRIVATE_FILES) or the workspace's protected files (protected), with one carve-out: a view's builder and its reviewer
+write that view's folder in the protected extension/, and their own folder, alone (agent_writes), by the slug of the
+start the server recorded for them, so no other agent writes a view's files.
 
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
 - a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end; a message the
@@ -189,8 +189,8 @@ class Spec:
     # (runtime_cc.workspace_tmp). None for thimble's other agents, whose commands have a TMPDIR of their own
     temp: Path | None = None
     fast: bool = False
-    # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
-    # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
+    # whether the corpus is among write_roots (False while Settings' Read only is on): True or False for main and its
+    # thread forks, which the switch reaches, None for thimble's other agents, which never write it
     corpus_edits: bool | None = None
     no_write: list[Path] = field(default_factory=list)  # the workspace's protected files, never written (protected)
     # the workspace's Label tool switch (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
@@ -614,7 +614,7 @@ class Space:
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
         if conv.kind in ("main", "fork"):
             # main and its thread forks write the corpus, as Claude Code does in its folder, unless the analyst turned
-            # "Claude can edit files in this folder" off in Settings (ledger.corpus_edits)
+            # on Read only in Settings (ledger.corpus_edits)
             edits: bool | None = ledger.corpus_edits(self.c)
             system = events.session_prompt(str(self.corpus), edits=edits)
             names = [s.name for s in tools.REGISTRY.values()
@@ -1504,10 +1504,10 @@ async def access_changed() -> None:
 
 def settings_changed(c: str) -> None:
     """Settings changed for workspace `c`: when main may do less now than in its session kept open for a background
-    command (narrows, such as "Claude can edit files in this folder" turned off), that session closes at once, and the
-    command with it, so no command keeps a permission taken back; a turn that runs keeps its session only while main
-    may do as much as in it (runtime_cc._session). A change that only widens leaves it to main's next turn
-    (runtime_cc.turn). From any thread: the check runs on the server's loop."""
+    command (narrows, such as Read only turned on), that session closes at once, and the command with it, so no command
+    keeps a permission taken back; a turn that runs keeps its session only while main may do as much as in it
+    (runtime_cc._session). A change that only widens leaves it to main's next turn (runtime_cc.turn). From any thread:
+    the check runs on the server's loop."""
     from . import runtime_cc  # noqa: PLC0415
 
     sp = _spaces.get(c)

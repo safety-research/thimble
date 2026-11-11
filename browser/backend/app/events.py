@@ -24,7 +24,7 @@ from typing import Any, Callable, NamedTuple
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cc_plugin, config, labels_off, ledger, nofollow, permission_updates, prompts
+from . import cc_plugin, config, labels_off, ledger, nofollow, permission_updates, prompts, runtime_tools
 
 log = logging.getLogger("thimble.events")
 
@@ -88,17 +88,18 @@ def session_prompt(workdir: str, edits: bool | None = None) -> str:
     return render_prompts(SESSION_PROMPTS, workdir, edits)
 
 
-# main.md's {{corpus_writes}} in the browser: what main's sandbox lets it write, by Settings' switch (ledger.corpus_edits);
-# None for a main the server does not run (the launcher's), whose sandbox the switch does not reach
+# main.md's {{corpus_writes}} in the browser: what main's sandbox lets it write, by Settings' Read only switch
+# (ledger.corpus_edits, false while it is on); None for a main the server does not run (the launcher's), whose sandbox
+# the switch does not reach
 CORPUS_WRITES: dict[bool | None, str] = {
     None: "Bash reads the corpus and writes only your own folders, and file edits go only there.",
     True: ("Bash reads and writes the corpus folder and your own folders, and file edits go there too. thimble's own "
-           "files stay unwritable. The analyst can turn this off in Settings with \"Claude can edit files in this "
-           "folder\"."),
-    False: ("Bash reads the corpus folder but cannot write it, since the analyst turned \"Claude can edit files in this "
-            "folder\" off in Settings; it writes only your own folders, and file edits go only there. When a file has "
-            "to go into the corpus folder, tell the analyst they can turn \"Claude can edit files in this folder\" "
-            "back on in Settings."),
+           f"files stay unwritable. The analyst can turn on \"{runtime_tools.READ_ONLY_SWITCH}\" in Settings to stop "
+           "this."),
+    False: ("Bash reads the corpus folder but cannot write it, since the analyst turned on "
+            f"\"{runtime_tools.READ_ONLY_SWITCH}\" in Settings; it writes only your own folders, and file edits go "
+            "only there. When a file has to go into the corpus folder, tell the analyst they can turn "
+            f"\"{runtime_tools.READ_ONLY_SWITCH}\" off in Settings."),
 }
 
 # main.md's {{network}} in the browser (network_words), by the way main reaches Claude and whether Settings leaves main

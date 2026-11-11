@@ -98,20 +98,21 @@ DEFS: dict[str, dict[str, Any]] = {
 }
 
 
-# Settings' switch that lets main and its thread forks write the corpus folder (ledger.corpus_edits), by its name
-EDITS_SWITCH = "Claude can edit files in this folder"
+# Settings' switch that keeps main and its thread forks from writing the corpus folder (on while ledger.corpus_edits is
+# false), by its name, as their tools' texts and their prompt (events.CORPUS_WRITES) name it
+READ_ONLY_SWITCH = "Read only"
 # what the built-in tools' descriptions say of the corpus folder (definitions), by Spec.corpus_edits: True and False
 # for main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
 CORPUS_WORDS: dict[bool | None, dict[str, str]] = {
     True: {"Bash": "which it reads and writes; it also writes your own folders",
            "Write": "The corpus folder and your own folders can be written; thimble's own files cannot.",
            "Edit": "The corpus folder and your own folders can be edited; thimble's own files cannot."},
-    False: {"Bash": (f"which it reads but cannot write while the analyst's Settings switch \"{EDITS_SWITCH}\" is off; "
-                     "it writes only your own folders"),
+    False: {"Bash": (f"which it reads but cannot write while the analyst's Settings switch \"{READ_ONLY_SWITCH}\" is "
+                     "on; it writes only your own folders"),
             "Write": (f"Only your own folders can be written: the corpus folder is read-only while the analyst's "
-                      f"Settings switch \"{EDITS_SWITCH}\" is off, which they can turn on."),
+                      f"Settings switch \"{READ_ONLY_SWITCH}\" is on, which they can turn off."),
             "Edit": (f"Only your own folders can be edited: the corpus folder is read-only while the analyst's "
-                     f"Settings switch \"{EDITS_SWITCH}\" is off, which they can turn on.")},
+                     f"Settings switch \"{READ_ONLY_SWITCH}\" is on, which they can turn off.")},
     None: {"Bash": "which it reads but cannot write; it writes only your own folders",
            "Write": "Only your own folders can be written.",
            "Edit": "Only your own folders can be edited."},
@@ -155,7 +156,7 @@ class Box:
             what = "write" if write else "read"
             if write and self.corpus_edits is False and self._inside(q, [self.cwd.resolve()]):
                 raise ValueError(f"{p} is in the corpus folder, which is read-only while the analyst's Settings switch "
-                                 f"\"{EDITS_SWITCH}\" is off; they can turn it on there")
+                                 f"\"{READ_ONLY_SWITCH}\" is on; they can turn it off there")
             raise ValueError(f"{p} is outside the folders this agent may {what}")
         return q
 
