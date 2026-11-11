@@ -7,6 +7,18 @@ import test from 'node:test'
 
 import { SWITCHES, choiceOf, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, RENAMED, atPreset, currentValues, renamedTo, setOptions, switchesFrom, valueIn } from '../features.mjs'
 
+test('each setting says what it does and when you would change it, in one or two sentences: the settings pane shows them under its rows for the row picked, and /config starts with them, then says what each mode gives', () => {
+  for (const s of SWITCHES) {
+    const sentences = s.help.split(/(?<=[.!?])\s+/)
+    assert.ok(sentences.length >= 1 && sentences.length <= 2 && /[.!?]$/.test(s.help), `${s.key}: ${s.help}`)
+    assert.equal(s.does, s.modes ? `${s.help} ${s.modes}` : s.help, s.key)
+    // /config names each mode a feature with modes has, as the pane's choices name them
+    for (const c of s.choices ?? []) assert.ok(s.modes.includes(c), `${s.key}: ${c}`)
+  }
+  // a switch's help says what it gives alone, and so names nothing after it
+  assert.deepEqual(SWITCHES.filter(s => !s.modes).map(s => s.key), ['minimal', 'squeezeAnswers', 'catchUp', 'labels', 'coverage'])
+})
+
 test("the manifest's userConfig is the features, each at its default until an option sets it; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
   {

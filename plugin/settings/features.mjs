@@ -26,26 +26,30 @@ const CHECKER_MODELS = ALIASES.map(shownName)
 /** The features, in the order the settings pane lists them, which is the order of their keys on the bar. `key`: the
  *  userConfig field; `title`: its name; `group`: the rows the pane draws together, a thin line between one group and
  *  the next (a key keeps its name, so a saved setting still applies); `letter`: the key on the bar that acts for it
- *  (`v visualize`), which the pane shows after its name; `does`: what /config says of it, the field's description (a
- *  test checks), in the words of the pane's lines. `choices`: the modes of a feature that has more than on and off, its
- *  default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the look runs while
- *  one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims: `auto`; in `on
- *  demand`, a look of their own runs when the person asks). `says`: what each mode gives (`on` and `off` for a
- *  switch), the line the settings pane shows with the row for the one set. `under`: the feature whose work this setting
- *  changes (Verifier model and Verifier effort: the checks of Citations); the settings pane shows its row, with no line
- *  of its own, only while that feature is on. `firstParty`: the setting names models by the ids of Anthropic's
- *  first-party API (core/models.js), which Bedrock, Vertex and Foundry do not take, or the effort of the model Verifier
- *  model names: where Claude Code runs on one of them (settings/term.ts firstPartyApi), neither the pane nor /config
- *  shows its row, and what it holds does nothing. */
+ *  (`v visualize`), which the pane shows after its name. `help`: what the setting does and when you would change it,
+ *  in one or two short sentences: the line under the pane's rows while its row is picked, and the start of what
+ *  /config says of it. `modes`: what each mode gives, in the words of the pane's lines, which /config says after the
+ *  help (a switch has none: its help says it). `does`: what /config says of it, the field's description (a test
+ *  checks): its help, then its modes. `choices`: the modes of a feature that has more than on and off, its default one
+ *  of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the look runs while one such
+ *  feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims: `auto`; in `on demand`, a
+ *  look of their own runs when the person asks). `says`: what each mode gives (`on` and `off` for a switch), the line
+ *  the settings pane shows with the row for the one set. `under`: the feature whose work this setting changes
+ *  (Verifier model and Verifier effort: the checks of Citations); the settings pane shows its row, with no line of its
+ *  own, only while that feature is on. `firstParty`: the setting names models by the ids of Anthropic's first-party API
+ *  (core/models.js), which Bedrock, Vertex and Foundry do not take, or the effort of the model Verifier model names:
+ *  where Claude Code runs on one of them (settings/term.ts firstPartyApi), neither the pane nor /config shows its row,
+ *  and what it holds does nothing. */
 export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal mode', group: 'minimal', default: false,
-    does: MINIMAL_SAYS,
+    help: 'Sets the rows below in one step, for plainer answers with fewer extras. Turn it off to put back the modes they had.',
     says: { on: MINIMAL_SAYS, off: MINIMAL_SAYS },
   },
   {
     key: 'cards', title: 'Cards', group: 'cards', letter: 'v', default: 'auto', choices: ['auto', 'on demand', 'off'],
-    does: 'auto: Claude draws charts and tables of your data. on demand: Claude draws a card only when you ask for one. Press v for the last answer. off: no cards.',
+    help: 'A card is a chart or a table of the data behind an answer. Choose on demand when you would rather read answers as plain text.',
+    modes: 'auto: Claude draws charts and tables of your data. on demand: Claude draws a card only when you ask for one. Press v for the last answer. off: no cards.',
     says: {
       'auto': 'Claude draws charts and tables of your data.',
       'on demand': 'Claude draws a card only when you ask for one. Press v for the last answer.',
@@ -54,17 +58,18 @@ export const SWITCHES = [
   },
   {
     key: 'squeezeAnswers', title: 'Simplify', group: 'rewrites', letter: 's', default: true,
-    does: 'A shorter, plainer version of the last answer.',
+    help: 'Press s when an answer is too long or too technical, and a shorter, plainer version shows under it. Turn it off to take s off the bar.',
     says: { on: 'A shorter, plainer version of the last answer.', off: 'No simpler versions.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'rewrites', letter: 'b', default: true,
-    does: 'One note on the replies that came in while you were away.',
+    help: 'When several replies came in since your last message, press b to read them as one note. Turn it off if you read each reply as it comes.',
     says: { on: 'One note on the replies that came in while you were away.', off: 'No catch-up.' },
   },
   {
     key: 'citations', title: 'Citations', group: 'citations', letter: 'c', default: 'manual', choices: ['auto + verify', 'auto', 'manual', 'off'],
-    does: 'auto + verify: Claude cites what each answer rests on. The verifier checks every citation after each answer. auto: Claude cites what each answer rests on. The verifier checks a citation when you open it. manual: select words and press c. The verifier checks them against your files. off: no citations.',
+    help: 'A citation links words of an answer to the lines of your files they rest on. Choose an auto mode to have Claude cite every answer.',
+    modes: 'auto + verify: Claude cites what each answer rests on. The verifier checks every citation after each answer. auto: Claude cites what each answer rests on. The verifier checks a citation when you open it. manual: select words and press c. The verifier checks them against your files. off: no citations.',
     says: {
       'auto + verify': 'Claude cites what each answer rests on. The verifier checks every citation after each answer.',
       'auto': 'Claude cites what each answer rests on. The verifier checks a citation when you open it.',
@@ -74,15 +79,18 @@ export const SWITCHES = [
   },
   {
     key: 'checkerModel', title: 'Verifier model', group: 'citations', under: 'citations', firstParty: true, default: 'same as Claude', choices: ['same as Claude', ...CHECKER_MODELS],
-    does: `The model of the verifier, which checks citations. same as Claude: the model of the conversation. ${listed(CHECKER_MODELS)}: that model, which reads the conversation without the cache of the conversation's model.`,
+    help: 'The model of the verifier, a second Claude that checks each citation against your files. Pick a stronger model for harder checks, or a smaller one for faster checks.',
+    modes: `same as Claude: the model of the conversation. ${listed(CHECKER_MODELS)}: that model, which reads the conversation without the cache of the conversation's model.`,
   },
   {
     key: 'checkerEffort', title: 'Verifier effort', group: 'citations', under: 'citations', firstParty: true, default: 'same as Claude', choices: ['same as Claude', ...EFFORTS],
-    does: `How hard the verifier thinks. same as Claude: the effort of the conversation. ${listed(EFFORTS)}: that effort, of the levels Claude Code offers for the verifier's model.`,
+    help: 'How long the verifier thinks before it rules on a citation. Raise it for harder checks, or lower it for faster ones.',
+    modes: `same as Claude: the effort of the conversation. ${listed(EFFORTS)}: that effort, of the levels Claude Code offers for the verifier's model.`,
   },
   {
     key: 'explain', title: 'Explainers', group: 'comments', letter: 'e', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['explain'], lensesIn: 'auto',
-    does: 'auto: short notes on terms you may not know. on demand: select words and press e for a short note. off: no explainers.',
+    help: 'An explainer is a short note on what a term in an answer means. Choose on demand to get one only for the words you select.',
+    modes: 'auto: short notes on terms you may not know. on demand: select words and press e for a short note. off: no explainers.',
     says: {
       'auto': 'Short notes on terms you may not know.',
       'on demand': 'Select words and press e for a short note.',
@@ -91,7 +99,8 @@ export const SWITCHES = [
   },
   {
     key: 'details', title: 'Heads-ups', group: 'comments', default: 'auto', choices: ['auto', 'off'], lenses: ['heads'],
-    does: 'auto: notes on details that may mislead. off: no heads-ups.',
+    help: 'A heads-up flags a detail you should know before you rely on an answer. Turn it off to read answers without these notes.',
+    modes: 'auto: notes on details that may mislead. off: no heads-ups.',
     says: {
       'auto': 'Notes on details that may mislead.',
       'off': 'No heads-ups.',
@@ -99,12 +108,13 @@ export const SWITCHES = [
   },
   {
     key: 'labels', title: 'Labels', group: 'panes', letter: 'l', default: true,
-    does: 'The labels Claude made, with their values and records. off: no Labels pane, and Claude makes no labels.',
+    help: 'A label gives each record a value by a rule or a question, such as how each run ended. Turn it off if you do not want Claude to make labels.',
     says: { on: 'The labels Claude made, with their values and records.', off: 'No Labels pane, and Claude makes no labels.' },
   },
   {
     key: 'claimsMode', title: 'Claims', group: 'panes', letter: 'w', default: 'off', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
-    does: 'auto: everything the session concluded. on demand: everything the session concluded, when you press f in the pane. off: no Claims pane.',
+    help: 'The Claims pane lists what the session has concluded, grouped by topic. Turn it on to review a long analysis claim by claim.',
+    modes: 'auto: everything the session concluded. on demand: everything the session concluded, when you press f in the pane. off: no Claims pane.',
     says: {
       'auto': 'Everything the session concluded.',
       'on demand': 'Everything the session concluded, when you press f in the pane.',
@@ -113,10 +123,10 @@ export const SWITCHES = [
   },
   {
     key: 'coverage', title: 'Coverage', group: 'panes', letter: 'r', default: false,
-    does: 'Which files Claude has read.',
+    help: 'The Coverage pane shows how much of each file Claude has read. Turn it on to see what an answer may have missed.',
     says: { on: 'Which files Claude has read.', off: 'No Coverage pane.' },
   },
-]
+].map(s => ({ ...s, does: s.modes ? `${s.help} ${s.modes}` : s.help }))
 
 const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
 

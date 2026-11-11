@@ -4,7 +4,7 @@
 //   evidence   ../marks/evidence.tsx    one mark's evidence
 //   labels     ../labels/pane.tsx       the folder's labels and their records
 //   coverage   ../panes/coverage.tsx    what Claude read of the folder
-//   settings   ../panes/settings.tsx    the three switches
+//   settings   ../panes/settings.tsx    the settings, and the help on the one picked
 //   claims     ../claims/seam.ts        the conversation's claims (w)
 //   threads    ../threads/seam.ts       the side threads (t)
 //   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
@@ -260,6 +260,12 @@ let picked: Picked | null = null
 export function keepsInView(part: Picked | null): void {
   picked = part
 }
+/** A drawing that keeps a part of itself at the frame's bottom, under its body however far that scrolls (the settings'
+ *  help on the row picked), names it while it draws: it stands where a pane's side thread keeps its input bar. */
+let foot: Any[] | null = null
+export function keepsAtFoot(part: Any[] | null): void {
+  foot = part
+}
 /** How far the drawing above the input bar is scrolled, in the pane it was scrolled in, and the pick it last showed. */
 let scrolled: { id: string; by: number; conv: number; pick?: string } = { id: '', by: 0, conv: 0 }
 
@@ -340,6 +346,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     own = null
     arrows = null
     picked = null
+    foot = null
     // the top row names the pane esc goes back to: one the trail can still show, as paneBack finds it
     const live: PaneEntry[] = []
     for (const x of now.trail ?? []) if (await canShow($, x)) live.push(x)
@@ -364,6 +371,8 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
       }
       drawn = await drawKind($, e, now, kels, Math.max(4, H - T - (OWN_ROOM.has(now.kind) ? 0 : treeRows(under, W))))
     }
+    // the part the drawing keeps at the bottom (keepsAtFoot) stands over the input bar
+    if (foot) under = [...foot, ...under]
     const U = under.length ? treeRows(under, W) : 0
     const id = idOf(now)
     const C = conv.length ? treeRows(conv, W) : 0
