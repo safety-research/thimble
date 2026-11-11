@@ -1,5 +1,8 @@
 """The card harness: a card drawn offscreen with the app's own card face and shot as a PNG, so the card check
-(card_check.py) sees the card as the analyst will.
+(card_check.py) sees the card as the analyst will; or a card's figure as an export shows it (render_figure), for a
+report's export (exports.py) and a card's own (card_export.py). A figure's request may also name files to make from the
+same drawing (FIGURE_FILES): the picture as WebP, encoded in the page; the figure alone printed as a PDF at its own size;
+its chart as an SVG.
 
 One headless Chromium keeps POOL_PAGES pages loaded on `render.html` (frontend/src/render.tsx), which mounts CardFace
 with a stub canvas context. Each request carries everything the page needs (the card, its resolved refs, card and
@@ -15,6 +18,7 @@ than its first frames. card_fit, which needs the card's size alone, takes the fi
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import mimetypes
@@ -55,6 +59,8 @@ THEMES_FILE = "render-theme.json"  # workspaces/<c>/: the theme the analyst's br
 PAPERS = ("warm", "neutral", "dark")  # frontend/src/lib/theme.ts
 ACCENTS = ("pink", "orange", "yellow", "lime", "blue", "iris", "graphite")
 DEFAULT_THEME = {"paper": "warm", "accent": "iris"}
+FIGURE_FILES = ("webp", "pdf", "svg")  # what a figure's request may also make besides its PNG (render_figure)
+NO_MARGIN = {"top": "0", "right": "0", "bottom": "0", "left": "0"}  # a figure's PDF: the figure alone, edge to edge
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", urlsplit(RENDER_ORIGIN).hostname})  # what the page may reach
 _TAKEAWAY_REF = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]|]+?)\]\]")
 
@@ -70,7 +76,8 @@ class Rendered:
     scroll boxes hold past their height, and a table's rows past the ones it shows first, past what the canvas shows at
     rest; card_size, card_fit), the width its widest content lays out at and the room it has (`width` and `frame`, px,
     both 0 when nothing lays out wider than its room), whether the fonts the card asks for were loaded, the API paths
-    the page asked for that the request did not answer, and the times in ms."""
+    the page asked for that the request did not answer, the files a figure's request named (`webp`, `pdf`, `svg`: None
+    when not asked for, and `svg` for a figure with no chart), and the times in ms."""
 
     png: bytes | None = None
     box: dict[str, float] = field(default_factory=dict)
@@ -79,6 +86,9 @@ class Rendered:
     frame: float = 0.0
     fonts: bool = True
     requests: list[str] = field(default_factory=list)
+    webp: bytes | None = None
+    pdf: bytes | None = None
+    svg: str | None = None
     ms: dict[str, float] = field(default_factory=dict)
     error: str = ""
 
@@ -298,6 +308,7 @@ class Pool:
             res.width, res.frame = float(wide["width"]), float(wide["frame"])
         res.fonts = bool(out.get("fonts", True))
         res.requests = list(out.get("requests") or [])
+        res.svg = out["svg"] if isinstance(out.get("svg"), str) and out["svg"] else None
         res.error = str(out.get("error") or "")
         if not res.fonts and not self._warned_fonts:
             # a fallback face changes every width the card is drawn at: the page's own faces did not load
@@ -310,10 +321,30 @@ class Pool:
             anim = "allow" if moving else "disabled"
             res.png = (await self._still(page, clip) if moving else
                        await page.screenshot(clip=clip, full_page=True, type="png", animations=anim, caret="hide"))
+            await self._files(page, clip, res, request.get("files") or ())
         t2 = time.perf_counter()
         page_ms = {k: v for k, v in (out.get("ms") or {}).items() if isinstance(v, (int, float))}
         res.ms = {"page": round((t1 - t0) * 1000, 1), "shot": round((t2 - t1) * 1000, 1),
                   "total": round((t2 - t0) * 1000, 1), **page_ms}
+
+    @staticmethod
+    async def _files(page: Any, clip: dict[str, float], res: Rendered, files: Any) -> None:
+        """The files a figure's request names besides its PNG, made from the drawing the PNG shows: the WebP encoded in
+        the page from the PNG, and the PDF printed on one page of the picture's size that holds the figure alone, in the
+        page's screen styles, edge to edge (the page's print). The page put the SVG in its result."""
+        if "webp" in files and res.png:
+            png = base64.b64encode(res.png).decode("ascii")
+            data = await page.evaluate("(png) => window.__thimbleRender.webp(png)", png)
+            res.webp = base64.b64decode(data) if isinstance(data, str) and data else None
+        if "pdf" in files:
+            await page.evaluate("(box) => window.__thimbleRender.print(box)", clip)
+            try:
+                await page.emulate_media(media="screen")
+                res.pdf = await page.pdf(width=f"{clip['width']}px", height=f"{clip['height']}px",
+                                         print_background=True, margin=NO_MARGIN, page_ranges="1")
+            finally:
+                await page.emulate_media(media="null")
+                await page.evaluate("() => window.__thimbleRender.print(null)")
 
     @staticmethod
     async def _still(page: Any, clip: dict[str, float]) -> bytes:
@@ -553,11 +584,13 @@ def card_libs_part(c: str, cell: dict[str, Any]) -> dict[str, Any]:
 
 
 def request_for(c: str, cell: dict[str, Any], *, width: int | None = None, figure: bool = False,
-                zoom: float = 1.0) -> dict[str, Any]:
+                zoom: float = 1.0, whole: bool = False, files: tuple[str, ...] = ()) -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
     resolved, the cards they name, the theme and the width, for a label card its label (label_data), and for a custom
     card the libraries it names (card_libs_part). `figure`: the page draws the card's art as a report figure shows it, in
-    the export's theme (export_theme), in place of the card face, `zoom` times as large as its layout."""
+    the export's theme (export_theme), in place of the card face, `zoom` times as large as its layout; `whole` with the
+    card's question over it and its takeaway beside the rule under it; `files` the ones of FIGURE_FILES to make of the
+    drawing (render_figure)."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     w = width or cell.get("width") or CARD_W
@@ -575,6 +608,8 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None, figur
         **({"label": label} if label else {}),
         **card_libs_part(c, cell),
         **({"figure": True, "zoom": zoom} if figure else {}),
+        **({"whole": True} if figure and whole else {}),
+        **({"files": list(dict.fromkeys(files))} if figure and files else {}),
     }
 
 
@@ -588,14 +623,19 @@ async def render_card(c: str, cell: dict[str, Any], *, width: int | None = None,
     return await pool().render(req, timeout_s=timeout_s, still=still)
 
 
-async def render_figure(c: str, cell: dict[str, Any], *, width: int, zoom: float = 1.0,
-                        timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
+async def render_figure(c: str, cell: dict[str, Any], *, width: int, zoom: float = 1.0, whole: bool = False,
+                        files: tuple[str, ...] = (), timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
     """The art of one card of workspace `c` as a report figure draws it, laid out `width` px wide and drawn `zoom` times
     as large, on the paper of the export's theme (request_for `figure`): the picture an export shows for a figure, with a
-    table wider than `width` whole, its box in zoomed px. Unavailable when the harness cannot run."""
+    table wider than `width` whole, its box in zoomed px. `whole`: the figure as one picture, `width` px wide, the card's
+    question over its art and its takeaway beside the rule under it, as an export of the card alone shows it
+    (card_export.py). `files`: the ones of FIGURE_FILES to make of the same drawing besides the PNG (Rendered.webp, pdf,
+    svg); one it does not know is a ValueError. Unavailable when the harness cannot run."""
+    if unknown := [f for f in files if f not in FIGURE_FILES]:
+        raise ValueError(f"a figure's files are of {', '.join(FIGURE_FILES)}, not {', '.join(map(repr, unknown))}")
     if not enabled():
         raise Unavailable("THIMBLE_RENDER is off")
-    req = await asyncio.to_thread(request_for, c, cell, width=width, figure=True, zoom=zoom)
+    req = await asyncio.to_thread(request_for, c, cell, width=width, figure=True, zoom=zoom, whole=whole, files=files)
     return await pool().render(req, timeout_s=timeout_s)
 
 
