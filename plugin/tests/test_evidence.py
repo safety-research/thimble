@@ -40,6 +40,19 @@ def test_computed_evidence_is_the_real_call_that_printed_the_output_the_check_ga
     assert check_mark(mark("12 of 40"), computed("rows: 40 … merged: 12 of 40"), [call(CODE, long)], "/data")["status"] == "verified"
 
 
+def test_computed_evidence_carries_the_checks_method_and_a_quote_carries_none(tmp_path: Path):
+    how = "Counted the lines of prs.jsonl whose merged field is true, out of all its lines, one line per pull request."
+    ok = check_mark(mark("12 of 40"), {**computed("12 of 40"), "method": f"  {how}\n"}, [call(CODE, "12 of 40\n")], "/data")
+    assert ok["status"] == "verified" and ok["evidence"]["method"] == how
+    # a claim the check found wrong keeps its real evidence, and the method with it
+    wrong = check_mark(mark("15 of 40"), {**computed("12 of 40", status="wrong"), "method": how}, [call(CODE, "12 of 40\n")], "/data")
+    assert wrong["status"] == "failed" and wrong["evidence"]["method"] == how
+    # a quote shows no code, so it carries no method
+    (tmp_path / "board.md").write_text("agent-07: yes, that was me\n")
+    said = check_mark(mark('"yes, that was me"'), {**quote("board.md", 1, "yes, that was me"), "method": how}, [], str(tmp_path))
+    assert said["status"] == "verified" and "method" not in said["evidence"]
+
+
 def test_a_typed_in_value_is_no_evidence_but_a_bound_is_a_condition():
     typed = 'n = 15\nprint(f"{n} of 40")'
     assert "by hand" in check_mark(mark("15 of 40"), computed("15 of 40"), [call(typed, "15 of 40")], "/data")["reason"]
