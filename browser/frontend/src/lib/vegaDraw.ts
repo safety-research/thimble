@@ -677,6 +677,18 @@ export function nothingDrawn(root: unknown): NothingDrawn | null {
   return marks && rows ? 'size' : 'rows'
 }
 
+/** A drawn chart's view as an SVG document of its own (Vega's View.toSVG). */
+export type SvgView = { toSVG: (scale?: number) => Promise<string> }
+
+/** The view drawChart last drew in each box, for the card harness, which writes a figure's chart as an SVG file of its
+ * own (render.tsx). */
+const views = new WeakMap<Element, SvgView>()
+
+/** The Vega view drawChart last drew in `el`; null for a box it drew nothing in. */
+export function drawnView(el: Element): SvgView | null {
+  return views.get(el) ?? null
+}
+
 /** A chart as drawChart left it in its box: its view, which a resize refits (refitChart), and how to take it away. */
 export interface DrawnChart {
   view: FitView
@@ -729,6 +741,7 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     const container = usesContainerWidth(sized)
     const scene = (r.view as { scenegraph?: () => { root?: unknown } }).scenegraph?.()
     current = { view: r.view as unknown as FitView, finalize: r.finalize, container, nothing: nothingDrawn(scene?.root) }
+    views.set(el, r.view as unknown as SvgView)
     opts.drawn?.(current)
     const over = measureOverrun(el)
     const box = el.clientWidth

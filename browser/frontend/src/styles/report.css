@@ -1603,6 +1603,21 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .render-figure .wu-fig-scroll.wu-fig-overflow::after {
   content: none;
 }
+/* an export of a card alone (render.tsx `whole`): the figure as the report's export sets one, its question over its art
+   and its takeaway beside the ink rule, with white around them */
+.render-figure-whole {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  box-sizing: border-box;
+  background: var(--surface-card);
+  font: var(--type-body);
+  color: var(--text-primary);
+}
+.render-figure-whole .wu-fig-q {
+  flex: none;
+}
 /* BlockNote sizes every table in the editor to the column (fixed layout, hidden overflow); a figure's table keeps its own */
 .wu-root .wu-editor .bn-editor .wu-fig-table table {
   table-layout: auto;
