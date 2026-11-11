@@ -28,6 +28,12 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    ended. A check that finds a mark wrong or cannot confirm it starts that repair itself, as soon as it ends
    (_check_share, the terminal's autoRepair); a repair's own end starts none, so a mark that fails again waits for
    Repair.
+6. A mark the check verified or corrected keeps what its evidence rests on (`sources`, the validator's: the cited lines
+   of a quote or of code, the files its code names, as the check read them). Whenever the page reads a chat
+   (agents.py), refresh_soon compares them with their files in the background, as the terminal does after Claude's
+   calls that can write (plugin/marks/stale.ts): a stat first, the hash only when the stat changed
+   (evidence.examine). A mark whose source changed is stale, which the page draws (marks.ts lookOf), and Repair checks
+   it again against the files as they are now, its computed evidence only a call of that check's own (`fresh`).
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -692,12 +698,13 @@ async def _takeaways_change(c: str, takes: list[dict[str, Any]], judged: Callabl
 async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]],
                        folders: tuple[str, str], fork: Callable[..., Awaitable[dict[str, Any]]],
                        cards: list[dict[str, Any]] | None = None, index: str = "", request: str = "",
-                       auto: bool = False, at: float | None = None) -> None:
+                       auto: bool = False, at: float | None = None, fresh: bool = False) -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
     mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its one mark
     ended, unless the mark is a side thread's. A check that is no repair repairs each mark it found wrong or could not
     confirm, as soon as it ends. `folders`: the check's (cwd, root), check_folders; `at`: when the marks' words were
-    written, the time the validator reads a label at (None: now)."""
+    written, the time the validator reads a label at (None: now); `fresh`: a repair of a stale mark, whose computed
+    evidence is only a call of this check's own (the validator's check_all)."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
     lines = "\n".join(_line(m) for m in share)
@@ -727,7 +734,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)), at)
+                                         answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)), at,
+                                         fresh)
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
@@ -741,7 +749,9 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                     return m
                 if res is None:
                     return {**m, "status": "unchecked", "reason": "the check gave no answer for this citation"}
-                return {**m, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
+                # what it rests on is what this check read, if anything
+                was = {k: v for k, v in m.items() if k != "sources"}
+                return {**was, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
 
             r["items"] = [judged(m) for m in r["items"]]
             return r
@@ -925,10 +935,18 @@ def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
 
 
 REPAIRABLE = ("failed", "unchecked")
-# repair's answer for a mark that is not failed now: checked as it stands, or under a check again
+# repair's answer for a mark that is not failed or stale now: checked as it stands, or under a check again
 NOT_FAILED = "this citation is not one that failed"
 # what a repair clears of a mark: its earlier result goes, its place and words stay
-CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed", "rewrite", "shown")
+CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed", "rewrite", "shown", "sources")
+
+
+def stale_sources(m: dict[str, Any]) -> list[dict[str, Any]]:
+    """The sources of a mark that changed after its check (the terminal's plugin/tray/tray.mjs staleOf): none unless
+    the check verified or corrected it."""
+    if m.get("status") not in ("verified", "corrected") or not isinstance(m.get("sources"), list):
+        return []
+    return [s for s in m["sources"] if isinstance(s, dict) and (s.get("changed") or s.get("gone"))]
 
 
 def _main_now(c: str) -> tuple[dict[str, Any], str] | str:
@@ -945,10 +963,10 @@ def _main_now(c: str) -> tuple[dict[str, Any], str] | str:
 
 async def repair(c: str, turn: str | None = None, n: int | None = None, card: str | None = None, k: int | None = None,
                  fork: Callable[..., Awaitable[dict[str, Any]]] | None = None, auto: bool = False) -> str:
-    """Repair a failed mark: a reply's (`turn`, `n`) or a card's takeaway's (`card`, its order `k`). It is `checking`
-    again while a fork of main checks it with the terminal's repair request, and the validator decides its end as for
-    any check. '' when it started, else why not. The check runs in the background. `auto`: the check that failed it
-    started it, not the analyst (main hears so)."""
+    """Repair a failed or stale mark: a reply's (`turn`, `n`) or a card's takeaway's (`card`, its order `k`). It is
+    `checking` again while a fork of main checks it with the terminal's repair request, and the validator decides its
+    end as for any check. '' when it started, else why not. The check runs in the background. `auto`: the check that
+    failed it started it, not the analyst (main hears so)."""
     from . import notebook  # noqa: PLC0415
 
     got = _main_now(c)
@@ -956,6 +974,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         return got
     main, cut = got
     share: dict[str, Any] | None = None
+    again = False  # a stale mark: checked against the files as they are now
     if card:
         cell = notebook.get_cell(c, card)
         kept = (cell or {}).get("takeaway_marks") or {}
@@ -977,7 +996,8 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     else:
         reply = stored(c, turn or "")
         m = next((x for x in (reply or {}).get("items") or [] if x.get("n") == n), None)
-        if not m or m.get("status") not in REPAIRABLE:
+        again = bool(m and stale_sources(m))
+        if not m or (m.get("status") not in REPAIRABLE and not again):
             return NOT_FAILED
         request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto)
         base = {key: v for key, v in m.items() if key not in CLEARED}
@@ -999,12 +1019,73 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         cards, index = await _cards_and_index(c, at)
         try:
             await _check_share(c, main, str(turn), cut, [share], check_folders(c, main), fork or run_fork, cards, index,
-                               request, auto, at)
+                               request, auto, at, again)
         finally:
             _drop_index(index)
 
     _spawn(run())
     return ""
+
+
+# ---- 6: a citation whose source changed after its check (the terminal's plugin/marks/stale.ts)
+
+# the workspaces whose comparison runs now, each with whether another was asked for meanwhile
+_refreshing: dict[str, bool] = {}
+
+
+def _confirmed(m: dict[str, Any]) -> bool:
+    """Whether a mark rests on what its check read: verified or corrected, with sources."""
+    return m.get("status") in ("verified", "corrected") and isinstance(m.get("sources"), list) and bool(m["sources"])
+
+
+async def refresh_sources(c: str) -> None:
+    """Each source of the workspace's replies' checked marks as it stands now (evidence.examine: a stat, and the hash
+    only when the stat changed since it last looked); a reply whose sources changed is written again, so the page draws
+    its marks stale, or no longer stale."""
+    ev = evidence()
+    for p in sorted((config.workspace_dir(c) / "marks").glob("*.json")):
+        reply = stored(c, p.stem)
+        due = [(m["n"], k, src) for m in (reply or {}).get("items") or [] if _confirmed(m)
+               for k, src in enumerate(m["sources"]) if isinstance(src, dict)]
+        if not due:
+            continue
+        now = await asyncio.to_thread(lambda d=due: [ev.examine(src) for _, _, src in d])
+        moved = [(n, k, src, x) for (n, k, src), x in zip(due, now) if x != src]
+        if not moved:
+            continue
+
+        def change(r: dict[str, Any], moved: list[tuple[int, int, dict[str, Any], dict[str, Any]]] = moved) -> dict[str, Any]:
+            # a mark checked again meanwhile keeps the sources of its new check
+            for m in r["items"]:
+                for n, k, src, x in moved:
+                    if m.get("n") == n and _confirmed(m) and k < len(m["sources"]) and m["sources"][k] == src:
+                        m["sources"][k] = x
+            return r
+
+        await _edit(c, p.stem, change, tell=False)
+
+
+def refresh_soon(c: str) -> None:
+    """refresh_sources in the background, as the page reads a chat; one asked for while one runs runs once after it.
+    Never raises."""
+    if c in _refreshing:
+        _refreshing[c] = True
+        return
+    _refreshing[c] = False
+
+    async def run() -> None:
+        try:
+            while True:
+                _refreshing[c] = False
+                await refresh_sources(c)
+                if not _refreshing.get(c):
+                    break
+        except Exception:  # noqa: BLE001 — a mark not compared now is compared at the next read
+            log.exception("%s: the cited files were not compared with what their checks read", c)
+        finally:
+            _refreshing.pop(c, None)
+
+    _spawn(run())
 
 
 class RepairBody(BaseModel):

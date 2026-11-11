@@ -7,10 +7,13 @@
 //   verified   the plain look; a corrected mark shows its corrected words and looks verified too
 //   failed     the check could not confirm it (wrong, not confirmed, or no check could run): red words, underlined,
 //              `×` after them and a soft red tint on hover, as the terminal draws it
+// and a verified one whose source changed after its check is `stale`: amber words, underlined, `↻` after them, as the
+// terminal draws it (plugin/marks/stale.ts); its label says which file changed, and Repair checks it again.
 // While its check runs (`checking`) it has the plain look and a spinner. Before any check said anything of it
 // (`pending`: the reply still streams, or no check has begun on it) its underline is dotted: not checked, so it never
 // reads as a checked mark.
 import { marksIn, plainSentence, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
+import { staleLine, staleOf } from '../../../../plugin/tray/tray.mjs'
 
 /** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them
  * (c = -1: the row's name), and how many rows are left out above and below. */
@@ -79,17 +82,22 @@ export interface MarkItem {
   rewrite?: string
   /** the check runs because the analyst pressed Repair */
   repair?: boolean
+  /** what a verified or corrected mark rests on, as its check read it (the terminal's plugin/marks/store.ts Source):
+   * `changed` or `gone` once that differs from the file now, which makes the mark stale */
+  sources?: { file: string; path: string; line?: string; size: number; mtime: number; sha256: string; changed?: boolean; gone?: boolean }[]
   /** where the mark is kept, which Repair names: a reply's turn, or the card whose takeaway holds it */
   turn?: string
   card?: string
 }
 
-export type MarkLook = 'pending' | 'checking' | 'verified' | 'failed'
+export type MarkLook = 'pending' | 'checking' | 'verified' | 'stale' | 'failed'
 
 /** How a mark draws now: `pending` while its reply streams or no check has said anything yet; a corrected mark is
- * verified, and a mark the check found wrong, could not confirm or could not check is failed. Pure. */
+ * verified, one whose source changed after its check stale, and a mark the check found wrong, could not confirm or
+ * could not check is failed. Pure. */
 export function lookOf(item: MarkItem | undefined): MarkLook {
   if (!item) return 'pending'
+  if (staleOf(item).length) return 'stale'
   if (item.status === 'corrected') return 'verified'
   if (item.status === 'failed' || item.status === 'unchecked') return 'failed'
   return item.status
@@ -107,10 +115,15 @@ export function asChecked(text: string, checks: readonly (MarkItem | undefined)[
   return { text: withCorrections(rewritten, out), checks: out }
 }
 
-/** Whether Repair can check a mark again: it failed (or no check ran), no check of it runs, and its place is known. */
+/** Whether Repair can check a mark again: it failed (or no check ran) or it is stale, no check of it runs, and its
+ * place is known. */
 export function canRepair(item: MarkItem | undefined): boolean {
-  return !!item && (item.status === 'failed' || item.status === 'unchecked') && !!(item.turn || item.card)
+  return !!item && (item.status === 'failed' || item.status === 'unchecked' || staleOf(item).length > 0) && !!(item.turn || item.card)
 }
+
+/** What a stale mark's label says of the files that changed after its check, as the terminal's card says it
+ * (plugin/tray/tray.mjs staleLine). Pure. */
+export const staleWhy = (item: MarkItem | undefined): string => staleLine(staleOf(item))
 
 /** What a corrected mark was, as the terminal says it under the words: `corrected; was 15 of 40`. Pure. */
 export function wasLine(item: MarkItem | undefined): string {
@@ -132,6 +145,7 @@ export const LOOK_WORD: Record<MarkLook, string> = {
   pending: 'not checked yet',
   checking: 'checking',
   verified: 'verified',
+  stale: 'stale',
   failed: 'not confirmed',
 }
 

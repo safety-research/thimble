@@ -823,9 +823,18 @@ def _main_state(c: str) -> dict:
     return {"unread": runtime.unread(c)}
 
 
+def _citations_read(c: str) -> None:
+    """The page reads a chat, which shows citations: the files they rest on are compared with what their checks read
+    (marks.refresh_soon), in the background."""
+    from . import marks  # noqa: PLC0415 — marks imports this module
+
+    marks.refresh_soon(c)
+
+
 @router.get("/ws/{c}/chats/main")
 async def main_route(c: str) -> Response:
     meta = ensure_main(c)
+    _citations_read(c)
     meta["running"] = _running(c, MAIN_ID)
     _with_asks(c, meta)
     meta.update(_main_state(c))
@@ -864,6 +873,7 @@ async def get_route(c: str, chat_id: str) -> Response:
         with contextlib.suppress(ValueError):
             runtime.ensure(c)
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
+    _citations_read(c)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)
     _with_asks(c, meta)

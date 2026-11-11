@@ -2,10 +2,11 @@
    words in the text's own color, underlined in that color, no tint at rest; the citations' light purple tint
    (--cite-tint) behind them on hover and while its label is open, so the open one is easy to find. A mark the check
    could not confirm: red words, underlined, × after them, and a soft red tint (--cite-tint-failed) on hover and while
-   open. A mark no check has said anything of yet: its underline dotted. Back-to-back marks keep a small gap, so they
+   open. A stale one (its source changed after its check): amber words, underlined, ↻ after them, and a soft amber tint
+   (--cite-tint-stale). A mark no check has said anything of yet: its underline dotted. Back-to-back marks keep a small gap, so they
    read as two. Its label is RefChip's (.refchip-pop), at most 560 px wide. */
-:root { --cite-line: #8b3fd9; --cite-tint: rgba(135, 0, 255, 0.1); --cite-tint-failed: rgba(201, 58, 40, 0.1); }
-:root[data-paper='dark'] { --cite-line: #b36bff; --cite-tint: rgba(179, 107, 255, 0.24); --cite-tint-failed: rgba(255, 138, 122, 0.2); }
+:root { --cite-line: #8b3fd9; --cite-tint: rgba(135, 0, 255, 0.1); --cite-tint-failed: rgba(201, 58, 40, 0.1); --cite-tint-stale: rgba(154, 101, 18, 0.1); }
+:root[data-paper='dark'] { --cite-line: #b36bff; --cite-tint: rgba(179, 107, 255, 0.24); --cite-tint-failed: rgba(255, 138, 122, 0.2); --cite-tint-stale: rgba(224, 176, 74, 0.2); }
 .mark { position: relative; }
 /* a claim's mark is words of the sentence: inline in the text's own face, so it wraps with the line and its underline
    sits under the words, never the small inline-block of the status marks (components.css .mark) */
@@ -37,6 +38,11 @@
 .mark.is-failed .mark-words:focus-visible,
 .mark.is-failed.is-open .mark-words { background: var(--cite-tint-failed); }
 .mark-glyph { margin-left: 0.3em; margin-right: 1.5px; color: var(--status-negative); }
+.mark.is-stale .mark-words { color: var(--status-warning); text-decoration-color: currentColor; }
+.mark.is-stale .mark-words:hover,
+.mark.is-stale .mark-words:focus-visible,
+.mark.is-stale.is-open .mark-words { background: var(--cite-tint-stale); }
+.mark-glyph.is-stale { color: var(--status-warning); }
 .mark-spin { margin-left: 2px; vertical-align: -1px; color: var(--text-tertiary); }
 /* the links toggle is off (lib/links): a mark reads as plain text, as a cited number does */
 :root[data-links='off'] .mark .mark-words,
@@ -74,9 +80,13 @@
 .mark-pop-state { color: var(--text-tertiary); }
 /* a card that changed after the check: said over what the label shows */
 .mark-ev-changed { margin: 2px 0 4px; }
-/* a failed mark's reason beside Repair; a corrected mark's earlier words under nothing but its evidence */
+/* a failed mark's reason beside Repair, and a stale one's status and the files that changed; a corrected mark's earlier
+   words under nothing but its evidence */
 .mark-pop-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.mark-pop-head .mark-pop-why { flex: 1 1 auto; min-width: 0; }
+.mark-pop-head .mark-pop-why,
+.mark-pop-head .mark-pop-stale { flex: 1 1 auto; min-width: 0; }
+.mark-pop-stale { overflow-wrap: anywhere; color: var(--text-secondary); }
+.mark-pop-stale-word { color: var(--status-warning); }
 .mark-pop-repair { flex: none; }
 .mark-pop-repair-error { color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mark-pop-was { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
