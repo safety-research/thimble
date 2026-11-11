@@ -87,7 +87,7 @@ export const TEXTS = {
     terminal: 'core/tell.ts',
     browser: 'browser/backend/app/notices_of.mjs',
     use: "parts (each opened by a `<!-- name -->` line) that marks/notices.mjs builds the notices from in both modes, for marks/checker.ts in the terminal; the frame heads each report of thimble's (core/tell.ts), and the workbench's `citations` event",
-    fills: ['WAS', 'SHOWN', 'WHY', 'SENTENCE', 'REWRITE', 'WORDS', 'REASON', 'N'],
+    fills: ['WAS', 'SHOWN', 'WHY', 'SENTENCE', 'REWRITE', 'WORDS', 'REASON', 'N', 'FILES'],
   },
   designer: {
     about: 'list forms for the answer, pick one, draw it as a card, read it back and fix it',

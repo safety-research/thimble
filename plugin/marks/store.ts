@@ -11,6 +11,7 @@
 //   restoreMarks($)          the replies a resumed session's transcript holds, back in the state; a check that ran
 //                            when the session ended did not run (notRun)
 //   notRun(m, why)           a mark whose check did not run or gave no answer: failed, with why
+//   sourcedReplies($)        the keys of this conversation's replies whose citations rest on sources (stale.ts)
 import { update, type EngineInterface } from 'claude-code'
 
 import { keptDir } from '../core/env'
@@ -53,11 +54,17 @@ export type Evidence =
  *  `asked`: words the analyst selected and asked about (c, marks/cite.ts), not a mark Claude wrote:
  *  `start` and `end` are the words' place in the row's text as Claude wrote it (message.js withAsked).
  *  `unread`: the files a failed mark's check could not read and needed, as Claude Code refused them (checker.ts
- *  readEnded, endCheck). */
+ *  readEnded, endCheck).
+ *  `sources`: what a verified or corrected mark rests on, as its check read it (Source). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]
 }
+/** What a checked citation rests on (engine/kernel/evidence.py source): a file by the name a reason gives it, its real
+ *  path, the cited lines when it rests on them alone, its size and mtime as last seen, and the sha256 of what the check
+ *  read. `changed` once what it rests on no longer hashes so, `gone` once the file is not there (stale.ts): the
+ *  citation is stale (tray/tray.mjs staleOf). */
+export type Source = { file: string; path: string; line?: string; size: number; mtime: number; sha256: string; changed?: true; gone?: true }
 /** A read of one file (checker.ts oneRead): a Read of it, or a Grep of it alone, by its absolute path. */
 export type OneRead = { tool: 'Read' | 'Grep'; file: string }
 /** A file a check could not read, by the tool that read it, and what lets it read the file (checker.ts readFix): `ok`,
@@ -76,6 +83,21 @@ export type Counts = { total: number; checking: number; verified: number; correc
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
+const SOURCED = { plugin: 'thimble', key: 'marksSourced' } as const
+
+/** Whether a reply has a citation that rests on sources. */
+const sourced = (r: Reply | null | undefined) => !!r?.items?.some(m => m.sources?.length)
+
+/** The keys of this conversation's replies whose citations rest on sources, which stale.ts compares with their files. */
+export async function sourcedReplies($: Engine): Promise<string[]> {
+  return ((await $.state.get(SOURCED)).value ?? []) as string[]
+}
+
+/** A reply's key among the sourced ones, once one of its citations rests on sources. */
+async function noteSourced($: Engine, r: Reply | null): Promise<void> {
+  if (!r || !sourced(r)) return
+  await update($, SOURCED, cur => ((cur ?? []).includes(r.key) ? cur : [...(cur ?? []), r.key]) as never)
+}
 
 async function fileOf($: Engine, key: string): Promise<string> {
   return `${await keptDir($)}/marks/${safeName(key)}.json`
@@ -109,6 +131,7 @@ export async function newReply($: Engine, r: Reply): Promise<void> {
 export async function editReply($: Engine, key: string, edit: (r: Reply) => Reply): Promise<Reply | null> {
   const out = await update($, { ...MARKS, id: key }, cur => (cur ? edit(cur as Reply) : cur) as unknown)
   await persist($, key)
+  await noteSourced($, (out ?? null) as Reply | null)
   return (out ?? null) as Reply | null
 }
 
@@ -142,7 +165,7 @@ export const NOT_RUN = 'The check did not run.'
 /** A mark whose check did not run or gave no answer (`why`, a sentence or none): failed, as the person sees it, and x
  *  starts its check (checker.ts repairOf). Its earlier result goes, its place and words stay. */
 export function notRun(m: MarkItem, why = ''): MarkItem {
-  const { was: _w, evidence: _e, note: _n, ...base } = m
+  const { was: _w, evidence: _e, note: _n, sources: _s, ...base } = m
   return { ...base, status: 'failed', failedBy: 'none', shown: m.words, reason: why ? `${NOT_RUN} ${why}` : NOT_RUN }
 }
 
@@ -163,15 +186,20 @@ export async function rowMarks($: Engine, row: string): Promise<RowMarks | null>
 export async function restoreMarks($: Engine): Promise<void> {
   const dir = `${await keptDir($)}/marks`
   let entries: { name: string; kind: string }[] = []
-  try { entries = (await $.fs.list(dir)) as { name: string; kind: string }[] } catch { return }
+  // the sourced replies are this conversation's own, so a /clear or a /resume leaves the earlier one's
+  const keys: string[] = []
+  try { entries = (await $.fs.list(dir)) as { name: string; kind: string }[] } catch { entries = [] }
   for (const x of entries) {
     if (x.kind !== 'file' || !x.name.endsWith('.json')) continue
     let r: Reply
     try { r = JSON.parse(String(await $.fs.read(`${dir}/${x.name}`))) as Reply } catch { continue }
-    if (!r?.key || !Array.isArray(r.items) || (await replyOf($, r.key))) continue
+    if (!r?.key || !Array.isArray(r.items)) continue
+    if (sourced(r)) keys.push(r.key)
+    if (await replyOf($, r.key)) continue
     const open = (m: MarkItem) => m.status === 'checking'
     const ended = r.items.some(open)
     await setReply($, ended ? { ...r, items: r.items.map(m => (open(m) ? notRun(m, 'The session ended before it did.') : m)) } : r)
     if (ended) await persist($, r.key)
   }
+  await $.state.set(SOURCED, keys)
 }

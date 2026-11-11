@@ -50,8 +50,9 @@
 //                             the same tool's read of one file the person let thimble's checks read this session
 //                             (repairOk), where Claude Code itself would ask and asks nobody
 //   awaitsCheck($, row)       whether a row of main's is in the turn that runs or the one whose check starts now
-//   repairOf($, row, n, auto) x on a failed citation (tray), or autoRepair (`auto`): what a check of that one mark
-//                             again needs; for a mark whose check did not run, the check itself
+//   repairOf($, row, n, auto) x on a failed or stale citation (tray), or autoRepair (`auto`): what a check of that one
+//                             mark again needs; for a mark whose check did not run, the check itself; for a stale
+//                             one (stale.ts), a check against the files as they are now
 //   launchRepair($, r, hold)  that check's fork, with a request to find the right value and correct the cited words;
 //                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
@@ -149,6 +150,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { choiceOf, claudeCites } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
+import { staleOf } from '../tray/tray.mjs'
 import { marksIn, sentenceOf } from './message.js'
 import { repairRequest, repairTellText, tellText } from './notices.mjs'
 import { counts, editReply, type MarkItem, type MarkStatus, newReply, notRun, type OneRead, type Reply, replyKeyOf, replyOf, type Unread } from './store'
@@ -162,8 +164,10 @@ type Any = any
  *  the evidence is read from either. `wroteAt`: when the marks' words were written, the time a label is read at (the
  *  validator's `at`): the label as it was then, never as a later run or check made it. `asked`: a check the person asked
  *  for (opening a citation, g, x), whose line says each time why it could not run (sayCannotStart); `note`: the words
- *  its prompt ends with (an opened citation's), which g's check of it again keeps. */
-type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number; asked?: boolean; note?: string }
+ *  its prompt ends with (an opened citation's), which g's check of it again keeps. `again`: a repair of a stale
+ *  citation, whose computed evidence is only a call of its own (the validator's `fresh`): output printed before its
+ *  file changed shows the file as it was. */
+type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number; asked?: boolean; note?: string; again?: boolean }
 
 /** When the words of reply `r`'s marks were written: its own time, else when its check began (a reply kept before
  *  thimble kept that time). */
@@ -243,8 +247,9 @@ export function checkerPrompt(template: string, items: MarkItem[], cwd: string, 
   return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd, ROOT: root, CARDS: cards, REPLY: reply })
 }
 
-/** The command that validates a check's answer (engine/validate.py), which also writes the cards' index. */
-function validateArgv($: Engine): string[] {
+/** The command that validates a check's answer (engine/validate.py), which also writes the cards' index and says how
+ *  a checked citation's sources stand now (stale.ts). */
+export function validateArgv($: Engine): string[] {
   return [`${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`, 'dev', 'validate']
 }
 
@@ -488,7 +493,7 @@ export type RepairOk = { give: () => Promise<void>; undo: () => Promise<void> }
  *  nobody here can let it read (the citation's card names it), or a citation that did not fail; the tray and the
  *  Claims pane offer x only where it is not null. */
 export async function repairOk($: Engine, m: MarkItem | null): Promise<RepairOk | null> {
-  if (m?.status !== 'failed') return null
+  if (m?.status !== 'failed' && !staleOf(m).length) return null
   const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
   if ((line && !line.offers) || m.unread?.some(u => u.fix === null)) return null
   const allow = !(await checksAllowed($))
@@ -865,8 +870,9 @@ export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
 
 /** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
 export type RepairHold = { until: number; cancelled: boolean }
-/** What a check of one mark again needs: its reply, its mark, and the checker's text with the request. */
-export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean; wroteAt?: number }
+/** What a check of one mark again needs: its reply, its mark, and the checker's text with the request; `again`: the
+ *  mark is stale (Check `again`). */
+export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean; wroteAt?: number; again?: boolean }
 
 let held: RepairHold | null = null
 const starting = new Set<string>()
@@ -877,13 +883,15 @@ export function heldRepair(): RepairHold | null {
 }
 
 /** x on citation `n` of `row`, or autoRepair's repair of it (`auto`): what a check of it again needs (for one whose
- *  check did not run, the check), with the request that says who asked it (notices.mjs repairRequest); null when there
- *  is nothing to repair (it did not fail, or a check of it runs), or why none can start. */
+ *  check did not run, the check; for a stale one, a check against the files as they are now), with the request that
+ *  says who asked it (notices.mjs repairRequest); null when there is nothing to repair (it did not fail and is not
+ *  stale, or a check of it runs), or why none can start. */
 export async function repairOf($: Engine, row: string, n: number, auto = false): Promise<Repair | string | null> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   const m = r?.items.find(x => x.n === n)
-  if (!key || !r || !m || m.status !== 'failed' || starting.has(`${key}:${n}`)) return null
+  const stale = staleOf(m).length > 0
+  if (!key || !r || !m || (m.status !== 'failed' && !stale) || starting.has(`${key}:${n}`)) return null
   if (Object.values(await running($)).some(c => c.key === key && c.marks.includes(n))) return null
   let template = ''
   let p: Record<string, string>
@@ -896,7 +904,7 @@ export async function repairOf($: Engine, row: string, n: number, auto = false):
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
-  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto)}` }
+  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), ...(stale ? { again: true } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
@@ -925,11 +933,11 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
       ...rep, settledAt: null,
       items: rep.items.map(m => {
         if (m.n !== r.n) return m
-        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, ...base } = m
+        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, sources: _o, ...base } = m
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
       }),
     }))
-    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : { asked: true }), ...(r.thread ? { thread: r.thread } : {}), ...(r.wroteAt ? { wroteAt: r.wroteAt } : {}) }
+    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : { asked: true }), ...(r.thread ? { thread: r.thread } : {}), ...(r.wroteAt ? { wroteAt: r.wroteAt } : {}), ...(r.again ? { again: true } : {}) }
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
     await showRunning($, r.key, 1, [agentId])
     return ''
@@ -1047,7 +1055,7 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
     // the labels as they were when the marks' words were written (a check from before thimble kept that time reads them now)
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), ...await labelsAt($, c), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}) }),
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), ...await labelsAt($, c), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}), ...(c.again ? { fresh: true } : {}) }),
   })
   let out: { parsed: boolean; results: Any[]; outside?: unknown } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
@@ -1140,7 +1148,9 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)
       const { n: _n, ...rest } = res ?? {}
-      const x: MarkItem = res ? { ...m, ...rest, shown: String(res.shown ?? m.words) } : notRun(m, 'Its answer left this citation out.')
+      // what it rests on is what this check read, if anything
+      const { sources: _o, ...was } = m
+      const x: MarkItem = res ? { ...was, ...rest, shown: String(res.shown ?? m.words) } : notRun(m, 'Its answer left this citation out.')
       if (x.status !== 'failed' || x.failedBy === 'check') return x
       // a citation it could not judge while Claude Code refused its Python waits for the person's OK, not checked
       if (refused !== undefined) return waits(m)

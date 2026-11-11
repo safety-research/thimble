@@ -9,11 +9,12 @@
 //                                  in the reply, and each note, which the analyst does not see; '' when there is none
 //   repairTellText(parts, items, auto)   after a repair: how its mark ended, and who started it, the analyst or thimble
 //   repairRequest(parts, m, n, auto)     what follows the checker's text for a repair: which mark, what the first check
-//                                  found, and the task
+//                                  found (for a stale mark, which files changed after it), and the task
 //
 // The check's own words (its reason, its note) are quoted, since they may quote the records.
 import { fenced } from '../core/text.js'
 import { fill } from '../prompts/registry.mjs'
+import { staleFiles, staleOf } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 
 const PART = /^<!--\s*([a-z][a-z -]*?)\s*-->\s*$/m
@@ -96,8 +97,11 @@ export function repairTellText(p, items, auto = false) {
 
 /** What follows the checker's text for a repair of mark `m`, numbered `n` in it: who asked, the analyst or thimble
  *  (`auto`, right after the check failed it), what the first check found, and the task. A mark whose first check did
- *  not run is checked as any reply's is. */
+ *  not run is checked as any reply's is; a stale one (tray.mjs staleOf) against the files that changed after its check,
+ *  as they are now. */
 export function repairRequest(p, m, n, auto = false) {
+  const stale = staleOf(m)
+  if (stale.length) return [`${fill(p['request stale'], { N: String(n), FILES: staleFiles(stale) })} ${p['request where']}`, p['request task']].join('\n')
   if (m.status === 'unchecked' || m.failedBy === 'none') {
     return `${fill(p['request not run'], { N: String(n) })} ${p['request where']}`
   }

@@ -21,7 +21,7 @@
 //     a claim picked     k j the previous or next claim of its cluster (its evidence shown: citation) · e its
 //                        evidence shown or hidden (the line in the detail that says so) · h its History (a corrected
 //                        claim) · c the current citation's code and output whole · x repair the current citation
-//                        (the evidence hidden: its first failed one) when it failed (a check of it again in the background, marks/checker.ts
+//                        (the evidence hidden: its first failed one) when it failed or is stale (a check of it again in the background, marks/checker.ts
 //                        launchRepair, started in this feature's ui.press hook, seam.ts; while that check runs, x says so),
 //                        or x check the current citation when it was not checked yet (auto, manual: checkOpened)
 //   A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit each, and Claude Code types any other
@@ -169,7 +169,7 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
       return {
         ...s, n: m.n, status: m.status, failedBy: m.failedBy, shown: m.shown.replace(/\*\*|`/g, ''), ...placeOf(m),
         ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.rewrite ? { was: plainSentence(m.sentence), now: plainSentence(m.rewrite), rewritten: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: printableEvidence(m.evidence) } : {}),
-        ...(m.repair ? { repair: true } : {}), ...(m.unread ? { unread: m.unread } : {}),
+        ...(m.repair ? { repair: true } : {}), ...(m.unread ? { unread: m.unread } : {}), ...(m.sources ? { sources: m.sources } : {}),
       }
     }))
   }

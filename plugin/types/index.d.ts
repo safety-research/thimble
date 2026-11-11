@@ -8,16 +8,21 @@ declare module 'claude-code' {
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
        *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite?, unread?: [{ tool:
-       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }] }] } (marks/store.ts Reply), kept on disk too */
+       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }], sources?: [{ file, path, line?, size, mtime, sha256,
+       *  changed?, gone? }] }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
+      /** the keys of this conversation's replies whose citations rest on sources (marks/store.ts sourcedReplies), which
+       *  marks/stale.ts compares with their files */
+      marksSourced: string[]
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
        *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`); `asked`: a
-       *  check the person asked for (opening a citation, g, x); `note`: the words its prompt ends with */
-      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number; asked?: boolean; note?: string }>
+       *  check the person asked for (opening a citation, g, x); `note`: the words its prompt ends with; `again`: a repair of a
+       *  stale citation, whose computed evidence is a call of its own */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number; asked?: boolean; note?: string; again?: boolean }>
       /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
        *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
       checksRefused: string[]

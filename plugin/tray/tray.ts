@@ -26,7 +26,8 @@
 //               lines when it has one, else the lines themselves (a `place` frame)
 //   x repair    on a failed citation: a check of that one claim again in the background, which looks in
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
-//               for one whose check did not run, its check; the
+//               for one whose check did not run, its check; on a stale one (a file it rests on changed after its
+//               check, marks/stale.ts; its card says which), a check against the files as they are now; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card too (this module's ui.press hook, so the fork starts inside a hook). x gives the person's OK
 //               first (marks/checker.ts repairOk), so one press is enough: for thimble's checks this session, as g
@@ -96,7 +97,7 @@ import { tourHoldsCites } from '../tour/tour'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
-  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, unreadLine, wasLine,
+  staleLine, staleOf, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, unreadLine, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -585,10 +586,10 @@ async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Pro
 /** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
 const REPAIR_KEYS = new Set(['repair', 'bar-tray-x'])
 
-/** Whether x repairs this citation now (tray.mjs canRepair, marks/checker.ts repairOk), read for a failed one only,
- *  since a key's hook has a few milliseconds of its own time. */
+/** Whether x repairs this citation now (tray.mjs canRepair, marks/checker.ts repairOk), read for a failed or stale one
+ *  only, since a key's hook has a few milliseconds of its own time. */
 async function repairsNow($: Engine, m: MarkItem | null): Promise<boolean> {
-  return canRepair(m, m?.status === 'failed' && !!(await repairOk($, m)))
+  return canRepair(m, (m?.status === 'failed' || staleOf(m).length > 0) && !!(await repairOk($, m)))
 }
 
 /** A click on `x repair` on the citation the tray shows: the OK its check needs (marks/checker.ts repairOk), then a
@@ -808,12 +809,15 @@ function labelRow(els: Any, key: string, words: string): Unit {
 }
 
 /** `x repair`, a press that checks a failed citation again (this module's ui.press hook, as x does); for one whose
- *  check did not run, `x repair: start its check`. In its card. */
+ *  check did not run, `x repair: start its check`; for a stale one, against the files as they are now. In its card. */
 function repairRow(els: Any, m: MarkItem): Unit {
   const { Text } = els
   const unrun = m.status === 'failed' && m.failedBy === 'none'
-  return { h: 1, el: els.Button({ key: 'repair', plain: true, label: unrun ? 'check this citation' : 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
-    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: accent(), children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
+  const stale = staleOf(m)
+  const many = new Set(stale.map((s: { file: string }) => s.file)).size > 1
+  const does = stale.length ? `: check it again against the ${many ? 'files as they are' : 'file as it is'} now` : unrun ? ': start its check' : ': check it again and correct the cited words'
+  return { h: 1, el: els.Button({ key: 'repair', plain: true, label: unrun ? 'check this citation' : stale.length ? 'check this citation again' : 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
+    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: accent(), children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: does })] }),
   ] }) }
 }
 
@@ -846,6 +850,9 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
     short: { h: 1, el: Text({ key, dimColor: true, wrap: 'truncate-end', children: text }) },
   })
   const notFixed = m.repair ? 'not repaired: ' : ''
+  // a stale one: which files changed after its check (tray.mjs staleLine)
+  const stale = staleOf(m)
+  if (stale.length) dim('stale', printable(staleLine(stale)))
   // a rewrite's history is the sentence Claude wrote
   if (m.status === 'corrected' && m.was) dim('was', wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }))
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
@@ -1070,9 +1077,11 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   let words: { text: string } | null = null
   let status: ReturnType<typeof statusOf> | null = null
   let citeStatus: MarkStatus | null = null
+  let citeStale = false
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
     citeStatus = m?.status ?? null
+    citeStale = staleOf(m).length > 0
     await themeNow($)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
@@ -1110,7 +1119,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   // on its tint, a failed citation's in red; an explainer's or a heads-up's words on their full fill. A click on them
   // closes the tray, as a second click on the open mark in the reply does
   const fills = markColors(themeLast())
-  const cite = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`) : f.kind === 'place' ? wordsLook('unchecked', `tray:${f.row}:${f.id}`) : null
+  const cite = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`, citeStale) : f.kind === 'place' ? wordsLook('unchecked', `tray:${f.row}:${f.id}`) : null
   const look: Any = cite
     ? { ...(cite.color ? { color: cite.color } : {}), hover: cite.hover, bold: true, backgroundColor: cite.hover.backgroundColor }
     : { bold: true, backgroundColor: f.kind === 'heads' ? fills.headsBg : fills.glossBg }

@@ -25,10 +25,13 @@
 //                look whatever the cause
 //   deferred     as pending, with a dim ` ?` after it: a citation whose check waits until the person opens it (the
 //                setting Citations: auto, or words the person asked about with c), so it is not checked yet
+//   stale        verified or corrected, but a file it rests on changed after its check (stale.ts): the warning color
+//                (`warning`), underlined, with ` ↻` after it, a soft amber tint on hover; x in the tray checks it
+//                again
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
-// The sign after a mark (the turning glyph, ×, ?) takes two cells, and every other mark keeps those two cells when
+// The sign after a mark (the turning glyph, ×, ?, ↻) takes two cells, and every other mark keeps those two cells when
 // the lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph
 // shows or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
@@ -57,6 +60,7 @@ import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, type Theme } from '../core/theme'
+import { staleOf } from '../tray/tray.mjs'
 import { blocks, cardRef, inline, marksWithin, runsText, tableOf, withoutCardLinks, WORDS_CHANGED, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,8 +73,12 @@ type Mark = { start: number; end: number; words: string }
 
 export type MarkStatus = 'pending' | 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed' | 'unchecked'
 /** `quiet`: a citation Claude wrote while Citations is manual (marks/register.ts quietLooks): plain words at rest, its
- *  underline and tint under the pointer, and a click still opens it. */
-export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean; quiet?: true }
+ *  underline and tint under the pointer, and a click still opens it. `stale`: a verified or corrected citation whose
+ *  source changed after its check (tray/tray.mjs staleOf). */
+export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean; quiet?: true; stale?: true }
+
+/** A checked citation's `stale` look, when a file it rests on changed after its check (tray/tray.mjs staleOf). */
+export const staleLook = (it: { status: string; sources?: unknown }): { stale?: true } => (staleOf(it).length ? { stale: true } : {})
 
 export type MessageOpts = {
   text: string
@@ -124,9 +132,13 @@ export const CITE_TINT: Record<Theme, string> = { dark: '#423054', light: '#f3e6
  *  over #ffffff (the browser's --cite-tint-failed). The purple behind red words reads muddy. */
 export const FAILED_TINT: Record<Theme, string> = { dark: '#4b3430', light: '#faebea' }
 
-/** A citation's tint by its status, in the theme set the drawing hook read last (themeNow). */
-export function citeTint(status: MarkStatus = 'verified', theme: Theme = themeLast()): string {
-  return (status === 'failed' ? FAILED_TINT : CITE_TINT)[theme]
+/** A stale citation's tint, a soft amber, as FAILED_TINT is made: rgba(224,176,74,.2) over #1e1e1e, rgba(154,101,18,.10)
+ *  over #ffffff (the browser's --cite-tint-stale). */
+export const STALE_TINT: Record<Theme, string> = { dark: '#453b27', light: '#f5f0e7' }
+
+/** A citation's tint by its status (`stale`: a stale one's), in the theme set the drawing hook read last (themeNow). */
+export function citeTint(status: MarkStatus | 'stale' = 'verified', theme: Theme = themeLast()): string {
+  return (status === 'failed' ? FAILED_TINT : status === 'stale' ? STALE_TINT : CITE_TINT)[theme]
 }
 
 /** A hover group's name for a citation's id (`<reply key>:<n>`): short and stable, as Claude Code takes at most 64
@@ -138,7 +150,7 @@ export function citeScope(id: string): string {
 }
 
 /** The `hover` of a citation's words: its tint, while the pointer is over any member of its group. */
-export function citeHover(id: string, status: MarkStatus = 'verified', theme: Theme = themeLast()): { scope: string; backgroundColor: string } {
+export function citeHover(id: string, status: MarkStatus | 'stale' = 'verified', theme: Theme = themeLast()): { scope: string; backgroundColor: string } {
   return { scope: citeScope(id), backgroundColor: citeTint(status, theme) }
 }
 
@@ -156,10 +168,12 @@ export function citeLook(id: string, theme: Theme = themeLast()): { underline: t
   return { underline: true, hover: citeHover(id, 'verified', theme) }
 }
 
-/** A citation's words by its status, as the header comment says: failed red and underlined, its tint a soft red; every
- *  other status citeLook. */
-export function wordsLook(status: MarkStatus, id: string): { underline: true; color?: string; hover: { scope: string; backgroundColor: string } } {
+/** A citation's words by its status, as the header comment says: failed red and underlined, its tint a soft red; a
+ *  stale one (`stale`, verified or corrected) in the warning color, its tint a soft amber; every other status
+ *  citeLook. */
+export function wordsLook(status: MarkStatus, id: string, stale = false): { underline: true; color?: string; hover: { scope: string; backgroundColor: string } } {
   if (status === 'failed') return { underline: true, color: 'error', hover: citeHover(id, 'failed') }
+  if (stale && (status === 'verified' || status === 'corrected')) return { underline: true, color: 'warning', hover: citeHover(id, 'stale') }
   return citeLook(id)
 }
 
@@ -219,6 +233,7 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     const signed = !o.plain || o.focus === r.mark
     if (signed && look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (signed && look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    else if (signed && look?.stale) out.push({ s: ' ↻', mark: r.mark, tag: 'stale' })
     else if (signed && look?.status === 'deferred') out.push({ s: ' ?', mark: r.mark, tag: 'wait' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
@@ -285,11 +300,12 @@ function markEl(els: Any, o: RowOpts, r: Run, key: string) {
   // lights all its words, on every line it wraps to. A mark no check is for (n 0: new words in a squeezed version) is a
   // group of its own by its place, so the pointer over it lights it alone
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
-  const tint = citeHover(id, look.status)
+  const tint = citeHover(id, look.stale ? 'stale' : look.status)
   if (r.tag === 'spin') p.color = accent()
   else if (r.tag === 'wait') p.dimColor = true
+  else if (r.tag === 'stale') p.color = 'warning'
   else if (r.tag) p.color = 'error'
-  else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
+  else if (!look.quiet) Object.assign(p, wordsLook(look.status, id, !!look.stale))
   // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill under the citation's
   // underline, so both show (faint at rest; while the tray shows the span, bold on its full fill, as on plain words).
   // Its words are the span's press and hover group: an explainer or a heads-up opens first, and ] goes on to the
@@ -302,7 +318,7 @@ function markEl(els: Any, o: RowOpts, r: Run, key: string) {
   // red: citations underline and comments highlight. Its press is the span's, else the citation's, as at any time
   if (o.row && o.focus !== r.mark && !sp?.open) {
     const full = sp?.look.hoverBg ?? bg
-    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, ...(full ? { backgroundColor: full } : {}), ...(look.status === 'failed' ? { color: 'error' } : {}) } }
+    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, ...(full ? { backgroundColor: full } : {}), ...(look.status === 'failed' ? { color: 'error' } : look.stale ? { color: 'warning' } : {}) } }
     if (r.b) q.bold = true
     if (r.it) q.italic = true
     const span = sp?.onPress ? sp : null

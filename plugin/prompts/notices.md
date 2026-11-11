@@ -67,6 +67,9 @@ thimble asks you to repair citation {{N}}.
 <!-- request not run -->
 The analyst {{REPAIR_ASKED}} citation {{N}}, whose first check did not run.
 
+<!-- request stale -->
+The analyst {{REPAIR_ASKED}} citation {{N}}, since {{FILES}} changed after its first check. What this session read or printed before that change may be out of date.
+
 <!-- request where -->
 It may stand in an earlier reply than your last.
 

@@ -50,7 +50,7 @@ import { cut, printable, textWidth } from '../core/text.js'
 import { accent, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
-import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
+import { citeHeat, citeLook, messageEl, staleLook, type MarkLook } from '../marks/view'
 import { claudeCites } from '../settings/features.mjs'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
@@ -259,7 +259,7 @@ async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, 
     const it = reply?.items[j]
     if (!it) return { n: j + 1, status: waits ? 'pending' : 'failed' }
     if (it.status === 'corrected' && it.rewrite && !rewrote.placed.has(j)) return { n: it.n, status: 'failed' }
-    return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
+    return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}), ...staleLook(it) }
   })
   if (marks.length) await themeNow($)
   const body = messageEl(els, {
