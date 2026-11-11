@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -435,6 +437,59 @@ def test_the_kernel_names_the_browser_s_restart_for_the_plugin_files_this_server
                 and any(isinstance(t, ast.Name) and t.id == "BROWSER_RUNS" for t in n.targets)]
     assert sorted(theirs) == sorted(fixes.BROWSER_RUNS)
     assert all(p in fixes.BROWSER_RUNS for p in fixes.PAGE_SOURCES if p.startswith("plugin/"))
+    assert all(p in fixes.BROWSER_RUNS for p in fixes.SERVER_KEEPS)
+
+
+def test_the_page_s_sources_are_the_files_its_modules_import():
+    # every file outside browser/frontend that the page's modules import, and those import: a fix to one is in the page
+    # only after a build, so each is a page source, and the plugin's among them are in BROWSER_RUNS by that
+    top = config.REPO_ROOT.parent
+    src = config.REPO_ROOT / "frontend" / "src"
+    spec = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*|@import\s+(?:url\()?)['"](\.{1,2}/[^'"?]+)""")
+    ends = ("", ".ts", ".tsx", ".js", ".mjs", ".json", ".css", "/index.ts", "/index.tsx", "/index.js")
+    todo = [f for f in src.rglob("*") if f.suffix in (".ts", ".tsx", ".js", ".mjs", ".css") and ".test." not in f.name]
+    assert len(todo) > 50
+    seen, outside = set(todo), set()
+    while todo:
+        f = todo.pop()
+        for rel in spec.findall(f.read_text("utf-8")):
+            hit = next((t for e in ends if (t := Path(os.path.normpath(f"{f.parent / rel}{e}"))).is_file()), None)
+            if hit is None or hit in seen:
+                continue
+            seen.add(hit)
+            if not hit.is_relative_to(config.REPO_ROOT / "frontend"):
+                outside.add(hit.relative_to(top).as_posix())
+            if hit.suffix != ".json":
+                todo.append(hit)
+    assert sorted(outside) == sorted(fixes.PAGE_SOURCES[1:])
+
+
+def test_each_file_of_the_plugin_the_server_names_is_one_it_keeps_or_reads_at_each_use():
+    # the server's code names the terminal plugin's files by path. One it loads once (SERVER_KEEPS) is stale in a
+    # server that runs after a fix changes it; one it reads or starts at each use is as live has it at once. A path
+    # that is new here belongs in one of the two.
+    at_each_use = {
+        "engine/thimble.py",  # the kernel: a process for each call
+        "sandbox",  # setup.mjs: a process for each call
+        "prompts",  # the texts: read for each prompt
+        ".claude-plugin/plugin.json",  # read for each report
+    }
+    keeps = {p.removeprefix("plugin/") for p in fixes.SERVER_KEEPS}
+    chain = re.compile(r'''(?:plugin_dir\(\)|\bPLUGIN\b|(?<!REPO_ROOT / )"plugin")((?:\s*/\s*"[^"]+")+)''')
+    named = {"/".join(re.findall(r'"([^"]+)"', tail))
+             for f in (config.REPO_ROOT / "backend" / "app").glob("*.py") for tail in chain.findall(f.read_text("utf-8"))}
+    assert keeps <= named, "SERVER_KEEPS holds a file the server no longer names"
+    assert named - keeps - at_each_use == set()
+    # a module the server imports brings in no other file of the plugin: the validator is the standard library alone
+    import ast  # noqa: PLC0415
+
+    for mod in (config.REPO_ROOT.parent / p for p in fixes.SERVER_KEEPS if p.endswith(".py")):
+        for n in ast.walk(ast.parse(mod.read_text("utf-8"))):
+            names = [a.name for a in n.names] if isinstance(n, ast.Import) else []
+            if isinstance(n, ast.ImportFrom):
+                assert not n.level, f"{mod.name} imports a module beside it"
+                names = [n.module or ""]
+            assert not any((mod.parent / f"{x.split('.')[0]}.py").is_file() for x in names)
 
 
 def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():

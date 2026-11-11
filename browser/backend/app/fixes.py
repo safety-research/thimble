@@ -954,10 +954,16 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
 PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js",
                 "plugin/tray/printed.mjs", "plugin/tray/tray.mjs", "browser/backend/app/label_order.json",
                 "browser/backend/app/label_wheel.json")
-# the terminal plugin's files a server that runs keeps as they were at its start: those its page bundles, and the module
-# it imports once (marks.py evidence). The kernel names the restart for a fix that changes one by the same list
-# (BROWSER_RUNS in plugin/engine/kernel/fixes.py): change both.
-BROWSER_RUNS = (*(p for p in PAGE_SOURCES if p.startswith("plugin/")), "plugin/engine/kernel/evidence.py")
+# the terminal plugin's files the server itself holds from its start: the validator it imports once (marks.py evidence)
+# and the list it reads once (changeable). What it reads or starts anew at each use is as live has it at once, with no
+# restart, and is not here: the texts in plugin/prompts, the kernel, and the modules its node helpers import
+# (look_of.mjs, marks_of.mjs, notices_of.mjs, each a node process of its own for each call).
+SERVER_KEEPS = ("plugin/engine/kernel/evidence.py", "plugin/fix/changeable.mjs")
+# the terminal plugin's files a server that runs keeps as they were at its start: those its page bundles and those it
+# holds itself. The kernel names the restart for a fix that changes one by the same list (BROWSER_RUNS in
+# plugin/engine/kernel/fixes.py). Tests keep the lists whole (test_fixes_flow.py): the page's imports are followed
+# from its sources, and each file of the plugin the server names is one it keeps or one it reads at each use.
+BROWSER_RUNS = (*(p for p in PAGE_SOURCES if p.startswith("plugin/")), *SERVER_KEEPS)
 
 
 def page_built(fe: Path) -> bool:
