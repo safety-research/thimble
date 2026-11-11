@@ -1,8 +1,8 @@
 // A citation whose source changed after its check (marks/stale.ts): the pass stats each cited file once, from the index
 // of cited files (store.ts citedFiles), and sends the kernel only the citations that rest on a file whose stat changed;
 // a citation whose cited lines changed draws stale in the answer, and its card says which file changed and offers x,
-// which checks it again against the files as they are now. Cited lines that only moved take their new numbers. All
-// data is made up. `claude plugin test plugin`.
+// which checks it again against the files as they are now, and so each x after it until one of those checks passes.
+// Cited lines that only moved take their new numbers. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
@@ -216,6 +216,39 @@ test('x on a stale citation checks it again against the files as they are now; o
   const done = (await rowMarks($, 'row-1'))!.items[0]!
   expect(done).toMatchObject({ status: 'corrected', shown: 'port 9000', sources: [{ sha256: 'c3' }] })
   expect(staleOf(done)).toEqual([])
+  expect(done.fresh).toBeUndefined()
+})
+
+test('a stale citation whose check again failed stays on checks of the files as they are now, until one passes', async () => {
+  setOptions({ citations: 'auto + verify' })
+  const results = [
+    { n: 1, status: 'verified', shown: 'port 8000', reason: 'line 2 says so', sources: [CHECKED] },
+    { n: 1, status: 'failed', failedBy: 'check', shown: 'port 8000', reason: 'Line 2 now says port 9000.' },
+    { n: 1, status: 'corrected', shown: 'port 9000', was: 'port 8000', reason: 'line 2 says so', sources: [{ ...CHECKED, size: 41, mtime: 9, sha256: 'c3' }] },
+  ]
+  const { $, seen } = engine(req => (Array.isArray(req.cited)
+    ? { cited: req.cited.map((c: Any) => ({ sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }
+    : { parsed: true, results: [results.shift()] }))
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: `${FORK}0`, reason: 'answer', answer: '```json\n[]\n```' })
+  await examineSources($)
+  // x on the stale citation: its check fails, and the citation keeps the file that changed
+  await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })
+  await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
+  const failed = (await rowMarks($, 'row-1'))!.items[0]!
+  expect(failed).toMatchObject({ status: 'failed', fresh: ['README.md'] })
+  // x again: the file as it is now, the session's earlier output no evidence, as for the first x
+  const again = await repairOf($, 'row-1', 1)
+  expect(again).toMatchObject({ again: true })
+  expect((again as Any).prompt).toContain('The analyst pressed x on citation 1, since README.md changed after its first check.')
+  await launchRepair($, again as Any, { until: 0, cancelled: false })
+  await endCheck($, { agentId: `${FORK}2`, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(seen.stdin.filter(x => x.marks).map(x => !!x.fresh)).toEqual([false, true, true])
+  // that check passed: the citation is checked as any is from now on
+  const done = (await rowMarks($, 'row-1'))!.items[0]!
+  expect(done).toMatchObject({ status: 'corrected', shown: 'port 9000' })
+  expect(done.fresh).toBeUndefined()
 })
 
 test('a pass stats each cited file once and reads only the replies whose citations rest on a file that changed; moved lines take their new numbers', async () => {

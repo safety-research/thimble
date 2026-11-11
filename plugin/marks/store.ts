@@ -59,10 +59,13 @@ export type Evidence =
  *  `start` and `end` are the words' place in the row's text as Claude wrote it (message.js withAsked).
  *  `unread`: the files a failed mark's check could not read and needed, as Claude Code refused them (checker.ts
  *  readEnded, endCheck).
- *  `sources`: what a verified or corrected mark rests on, as its check read it (Source). */
+ *  `sources`: what a verified or corrected mark rests on, as its check read it (Source).
+ *  `fresh`: the files that changed after its check, once x checked it again for that: until a check of it passes, each
+ *  check of it takes computed evidence only from its own calls (checker.ts repairOf, the validator's `fresh`), since
+ *  what the session printed before the change shows the files as they were. */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]; fresh?: string[]
 }
 /** What a checked citation rests on (engine/kernel/evidence.py source): a file by the name a reason gives it, its real
  *  path, the cited lines when it rests on them alone (`head`: the hash of the first of several, which finds them where

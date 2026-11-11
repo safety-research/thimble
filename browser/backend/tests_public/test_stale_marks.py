@@ -1,8 +1,8 @@
 """marks.py: a citation whose source changed after its check. A verified mark keeps what its evidence rests on, and the
 index of cited files lists the marks that rest on each; when the page reads a chat, the server stats each cited file
 and compares only the marks that rest on a file whose stat changed (refresh_sources). Repair checks a stale mark again
-against the files as they are now, only its own calls counting as computed evidence. The fork is replaced here; the
-marks, the validator and the records are real."""
+against the files as they are now, only its own calls counting as computed evidence, and so each Repair of it until one
+of those checks passes. The fork is replaced here; the marks, the validator and the records are real."""
 from __future__ import annotations
 
 import asyncio
@@ -106,8 +106,41 @@ def test_a_mark_whose_cited_line_changed_is_stale_and_repair_checks_it_against_t
     assert "The analyst pressed Repair on citation 1, since notes.md changed after its first check." in prompts[-1]
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "corrected" and m["shown"] == "port 9000" and marks.stale_sources(m) == [], m
+    assert "fresh" not in m
     # the first check took any call as evidence; the repair of the stale mark only its own
     assert fresh == [False, True]
+
+
+def test_a_stale_mark_whose_repair_failed_is_repaired_against_the_file_now_until_a_check_passes(_fresh, monkeypatch):
+    folder = config.corpus_dir(CORPUS)
+    notes = folder / "notes.md"
+    notes.write_text("# app\nRun it on port 8000.\n")
+    _main(monkeypatch, folder)
+    fresh = _fresh_calls(monkeypatch)
+    prompts: list[str] = []
+    answers = [
+        {"mark": 1, "kind": "quote", "evidence": {"file": "notes.md", "line": 2, "substring": "port 8000"}, "status": "verified", "reason": "line 2"},
+        {"mark": 1, "kind": "quote", "evidence": {"file": "notes.md", "line": 2, "substring": "port 9000"}, "status": "wrong", "reason": "Line 2 now says port 9000."},
+        {"mark": 1, "kind": "quote", "evidence": {"file": "notes.md", "line": 2, "substring": "port 9000"}, "status": "corrected",
+         "correction": {"words": "port 9000"}, "reason": "line 2"},
+    ]
+
+    async def fork(c, main, cut, prompt):
+        prompts.append(prompt)
+        return {"answer": _answer([answers.pop(0)]), "calls": [], "error": None}
+
+    turn = _check(folder, "The app runs on [port 8000](#).", fork)
+    _edit(notes, "# app\nRun it on port 9000.\n")
+    asyncio.run(marks.refresh_sources(CORPUS))
+    _repair(turn, fork)
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "failed" and m["fresh"] == ["notes.md"], m
+    # a second Repair: the file as it is now again, the session's earlier output no evidence
+    _repair(turn, fork)
+    assert "since notes.md changed after its first check" in prompts[-1]
+    assert fresh == [False, True, True]
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "corrected" and m["shown"] == "port 9000" and "fresh" not in m, m
 
 
 def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed_and_moved_lines_take_their_numbers(_fresh, monkeypatch):

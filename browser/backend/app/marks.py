@@ -36,7 +36,8 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    since the last pass, the marks that rest on it, from the replies that hold them, to evidence.examine, which reads
    the file once for all of them. A mark whose source changed is stale, which the page draws (marks.ts lookOf); cited
    lines that only moved take their new numbers, with no other sign. Repair checks a stale mark again against the
-   files as they are now, its computed evidence only a call of that check's own (`fresh`).
+   files as they are now, its computed evidence only a call of that check's own (`fresh`), and so each Repair of it
+   until one of those checks passes (the mark's `fresh`: the files that changed).
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -758,8 +759,9 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                     return m
                 if res is None:
                     return {**m, "status": "unchecked", "reason": "the check gave no answer for this citation"}
-                # what it rests on is what this check read, if anything
-                was = {k: v for k, v in m.items() if k != "sources"}
+                # what it rests on is what this check read, if anything; a check that passed read the files as they are
+                passed = res.get("status") in ("verified", "corrected")
+                was = {k: v for k, v in m.items() if k != "sources" and not (k == "fresh" and passed)}
                 return {**was, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
 
             r["items"] = [judged(m) for m in r["items"]]
@@ -983,7 +985,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         return got
     main, cut = got
     share: dict[str, Any] | None = None
-    again = False  # a stale mark: checked against the files as they are now
+    again = False  # a stale mark, or one whose check since it went stale did not pass: checked against the files now
     if card:
         cell = notebook.get_cell(c, card)
         kept = (cell or {}).get("takeaway_marks") or {}
@@ -1005,11 +1007,15 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     else:
         reply = stored(c, turn or "")
         m = next((x for x in (reply or {}).get("items") or [] if x.get("n") == n), None)
-        again = bool(m and stale_sources(m))
-        if not m or (m.get("status") not in REPAIRABLE and not again):
+        stale = stale_sources(m) if m else []
+        if not m or (m.get("status") not in REPAIRABLE and not stale):
             return NOT_FAILED
+        again = bool(stale or m.get("fresh"))
         request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto)
         base = {key: v for key, v in m.items() if key not in CLEARED}
+        # a stale mark keeps the files that changed, so each check of it reads them fresh until one passes
+        if stale:
+            base["fresh"] = list(dict.fromkeys(str(src.get("file")) for src in stale))
         share = {**base, "status": "checking", "shown": m["words"]}
 
         def change_reply(r: dict[str, Any]) -> dict[str, Any]:
