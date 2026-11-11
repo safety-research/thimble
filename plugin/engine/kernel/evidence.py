@@ -102,8 +102,9 @@ changes the words around the citation too, such as a paraphrase no record shows 
 when it stays within the sentence (one line, no sentence added, every other citation of it as it was, or as its own
 result has it when the same check judges it, which then takes the same rewrite), the evidence
 shows its cited words, and each number, day or record name it puts outside the citation is one the evidence shows (a
-cited place's file and line count) and none the citation cited before. The check's evidence is the citation's
-evidence in every case, whatever call or place the reply pointed at. A mark the checker could
+cited place's file and line count) and none the citation cited before and cut out of it. A value the correction
+changed (`3 lines` to `0 lines`) is no value cut out: said again, it is one the evidence must show, as any other.
+The check's evidence is the citation's evidence in every case, whatever call or place the reply pointed at. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 Its method, how the code of computed evidence got the value, stays on that evidence, over the code the person reads:
@@ -3360,16 +3361,23 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     new words around the citation) and that states a value of the data: a number, a day or a record's name. It holds
     only when it is no value the marked words cited and the citation now leaves out (`left`), and the evidence shows
     each of its values (`unshown`: `shown` is what the evidence shows). Its other words are the reply's own wording (a
-    translation, an explanation), as a narrowing's are."""
+    translation, an explanation), as a narrowing's are. A citation that puts a value of a kind in place of each one of
+    that kind it leaves out changed them, as a correction does (`3 lines` to `0 lines`), and cut none out: words that
+    state such a value again (the 3 lines that read otherwise now) are judged as any words the check put in."""
+    w, c = wordnums(words, counts=True), wordnums(cited, counts=True)
+    cut_n = len([v for v, _ in marked_numbers(c) if not has_number(v, w)]) < len([v for v, _ in marked_numbers(w) if not has_number(v, c)])
+    cut_d = len([d for d in calendar_days(cited) if not days_shown(cited[d[0][0]:d[0][1]], words)]) < len(
+        [d for d in calendar_days(words) if not days_shown(words[d[0][0]:d[0][1]], cited)])
+    cut_x = len([x for x in NAME.findall(cited) if not has_name(x, words)]) < len([x for x in NAME.findall(words) if not has_name(x, cited)])
     for run in runs:
         nums = [v for v, _ in marked_numbers(wordnums(run, counts=True))]
         days = calendar_days(run)
         names = NAME.findall(run)
         if not (nums or days or names):
             continue
-        left = any(has_number(v, wordnums(words, counts=True)) and not has_number(v, wordnums(cited, counts=True)) for v in nums)
-        left = left or bool(days and calendar_days(words) and days_shown(run, words) and not days_shown(run, cited))
-        left = left or any(has_name(x, words) and not has_name(x, cited) for x in names)
+        left = cut_n and any(has_number(v, w) and not has_number(v, c) for v in nums)
+        left = left or (cut_d and bool(days and calendar_days(words) and days_shown(run, words) and not days_shown(run, cited)))
+        left = left or (cut_x and any(has_name(x, words) and not has_name(x, cited) for x in names))
         if left:
             return "left", run
         # its values, not its words: a quoted translation is the reply's own wording too

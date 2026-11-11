@@ -260,6 +260,29 @@ def test_one_check_of_two_citations_of_a_sentence_rewrites_it_once_for_both(tmp_
     assert second["status"] == "failed" and "rewrite" not in first
 
 
+def test_a_rewording_may_say_a_value_its_correction_changed_again_but_cuts_none_out_of_the_citation():
+    """A re-check after an edit: "3 lines" now reads "0 lines", and the rewording says what the 3 lines read now. The
+    3 is a value the correction changed, not one it left out of the citation, so the rewording stands when the evidence
+    shows it. A value it does not show, and a value cut out of the citation with none in its place, still fail."""
+    out = "0 lines mention port 8000\n3 lines mention port 9000\n"
+    code = ("lines = open('README.md').read().splitlines()\nfor port in (8000, 9000):\n"
+            "    print(f\"{sum(str(port) in l for l in lines)} lines mention port {port}\")")
+    was = {"n": 1, "words": "3 lines", "sentence": "[3 lines] of the README mention port 8000."}
+
+    def reworded(sentence: str, words: str = "0 lines", mark: dict = was, printed: str = out) -> dict:
+        item = {**computed(printed.split("\n")[0], "corrected", {"words": words, "sentence": sentence}), "reason": "none of them now"}
+        return check_mark(mark, item, [call(code, printed)], "/data", fresh=True)
+
+    ok = reworded("[0 lines] of the README mention port 8000 now, because the 3 lines that did now say 9000.")
+    assert (ok["status"], ok["shown"], ok["was"]) == ("corrected", "0 lines", "3 lines"), ok
+    unshown = reworded("[0 lines] of the README mention port 8000 now, because the 3 lines that did now say 9000.",
+                       printed="0 lines mention port 8000\n")
+    assert unshown["status"] == "failed" and unshown["reason"].startswith("The records do not show “now, because the 3 lines"), unshown
+    cut = reworded("Of the 40 runs, [12] failed.", "12", {"n": 1, "words": "15 of 40", "sentence": "Of the runs, [15 of 40] failed."},
+                   "12 failed\n")
+    assert cut["status"] == "failed" and cut["reason"] == "The check reworded the sentence, but it leaves “40” out of the citation, a value of the data.", cut
+
+
 # ------------------------------------------------------------------------------------------------ why a citation failed
 
 
