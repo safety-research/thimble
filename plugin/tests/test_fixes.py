@@ -169,6 +169,33 @@ def test_undo_takes_the_commit_out_and_keeps_it_for_on(world):
     assert FX.get(r["id"])["state"] == "on" and "read ${n}" in live_file("plugin/bar/bar.tsx")
 
 
+def test_y_and_u_on_a_fix_to_what_the_browser_runs_say_that_a_running_browser_is_stale(world):
+    # a fix to the terminal plugin alone says nothing of the browser
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    assert "browser" not in FX.apply(a["id"], press(a["id"]))
+    assert "browser" not in FX.undo(a["id"])
+    # a fix to the workbench, and one to a module of the plugin its page bundles: thimble-browser loads either when it
+    # starts again, so y and u both say so
+    for path in ("browser/README.md", "plugin/tray/tray.mjs"):
+        assert path.startswith("browser/") or path in FX.BROWSER_RUNS
+        r = FX.new("a note")
+        p = Path(r["work"]) / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("made up\n")
+        FX.done(r["id"], "A note", "")
+        assert FX.apply(r["id"], press(r["id"]))["browser"] == "stale"
+        assert FX.undo(r["id"])["browser"] == "stale"
+    # a fix changed in place: y on its new version, and u, which brings back the version before
+    FX.apply(r["id"], press(r["id"]))
+    x = FX.round_(r["id"], "more of it")
+    (Path(x["work"]) / path).write_text("made up, and more\n")
+    FX.done(r["id"], "A note", "")
+    assert FX.apply(r["id"], press(r["id"]))["browser"] == "stale"
+    back = FX.undo(r["id"])
+    assert back["back"] is True and back["browser"] == "stale"
+
+
 def on_with_a_round(world, path="plugin/bar/bar.tsx", text=None) -> int:
     """A fix that is on, and a round of it that waits for the person's y (on · change ready)."""
     if text is None:

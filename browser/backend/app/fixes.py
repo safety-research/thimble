@@ -59,6 +59,9 @@ restart; the newest row of a fix shows its state now, with the clicks it takes.
 A dev install's launcher (scripts/install.sh --local) starts the server from the clone, while Use it now starts it from
 live, where the fixes are: on a server that runs from the clone, Your fixes shows a fix that is on as off, and says why,
 and its Use it starts the server from live again (not_here).
+A fix that went on somewhere else while this server ran from live, by y in a Claude Code session or thimble fix apply in
+a shell, is not in the code this server runs either, when it changes what the server runs (BROWSER_RUNS): Your fixes
+shows it as off with a reason of its own, and its Use it builds the page and starts the server again (not_here).
 THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file nothing and answer
 with the reason, and Report a problem offers no fix (problem, which GET /fixes answers).
 """
@@ -406,9 +409,9 @@ def status(every: bool = False) -> dict[str, Any]:
         shown = bool(n) and not n.get("dismissed") and not phase
         conv = _fixers.get(fid)
         files = r.get("files") or []
-        away = every and not_here(r, kind)
+        away = not_here(r, kind) if every else ""
         rows.append({"id": fid, "title": r.get("title") or "", "state": "off" if away else r.get("state"),
-                     "why": NOT_HERE if away else None, "phase": phase,
+                     "why": away or None, "phase": phase,
                      # the turn the restart waits for, by its workspace and its chat's name (restart)
                      "waits": _waits.get(fid) if phase == "restarting" else None,
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
@@ -737,8 +740,8 @@ async def settle(fid: int, answer: str) -> None:
 async def apply(fid: int) -> None:
     """The person's click on a ready fix (Use it now, or Use it in Your fixes): the secret of this click to
     `fix apply`, then live's page is made ready, from the page the fix's checks built when live has the sources they
-    built it from (prepare), and the server starts again from live. A fix that is on but not in the clone this server
-    runs from (on_elsewhere) stays as it is: only the server starts again from live. Raises when the kernel refuses."""
+    built it from (prepare), and the server starts again from live. A fix that is on but not in the code this server
+    runs (on_elsewhere) stays as it is: only the server starts again from live. Raises when the kernel refuses."""
     _phase_set(fid, "applying")
     try:
         rec = await asyncio.to_thread(on_elsewhere, fid)
@@ -843,33 +846,64 @@ def target_root() -> Path:
     return live if (live / "backend" / "app" / "main.py").is_file() else config.REPO_ROOT
 
 
-# why Your fixes shows a fix that is on as off (not_here)
+# why Your fixes shows a fix that is on as off (not_here): a dev install's server that runs from the clone, and a server
+# that runs from live and started before the fix went on somewhere else
 NOT_HERE = "the workbench runs from your clone, which does not have it"
+NOT_YET = "the workbench started before it went on"
 
 
-def not_here(rec: dict[str, Any], kind: str) -> bool:
-    """Whether fix `rec` is on but not in the code this server runs. In a dev install (the kernel's list says kind
-    `clone`), Use it now starts the server from live, where the fixes are, and the launcher starts it from the clone
-    (scripts/install.sh --local): the fix is a commit of live's branch mine, which the clone's checkout does not hold
-    unless the person merged it there."""
-    if rec.get("state") != "on" or kind != "clone" or target_root().resolve() == config.REPO_ROOT.resolve():
-        return False
-    commit = str(rec.get("commit") or "")
-    if not re.fullmatch(r"[0-9a-f]{7,64}", commit):
-        return True
+def _git(cwd: Path, *args: str) -> int | None:
+    """The exit code of a git command that only reads the checkout at `cwd`; None when git did not run."""
     try:
-        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(config.REPO_ROOT),
-                            "merge-base", "--is-ancestor", commit, "HEAD"], capture_output=True, timeout=30,
-                           check=False)
+        return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "--literal-pathspecs",
+                               "-C", str(cwd), *args], capture_output=True, timeout=30, check=False).returncode
     except (OSError, subprocess.TimeoutExpired):
-        return True
-    return p.returncode != 0
+        return None
+
+
+def _holds(rev: str, commit: str) -> bool:
+    """Whether commit `rev` of this server's checkout holds the fix's commit `commit`."""
+    return (bool(re.fullmatch(r"[0-9a-f]{7,64}", commit))
+            and _git(config.REPO_ROOT, "merge-base", "--is-ancestor", commit, rev) == 0)
+
+
+def from_live() -> bool:
+    """Whether this server runs from live's browser/, a git checkout whose commit at the server's start is known
+    (config.BOOT_COMMIT)."""
+    return bool(config.BOOT_COMMIT) and live_root().resolve() == config.REPO_ROOT.resolve()
+
+
+def not_here(rec: dict[str, Any], kind: str) -> str:
+    """Why fix `rec` is on but not in the code this server runs (NOT_HERE, NOT_YET), '' when it is, or is not on.
+    In a dev install (the kernel's list says kind `clone`), Use it now starts the server from live, where the fixes are,
+    and the launcher starts it from the clone (scripts/install.sh --local): the fix is a commit of live's branch mine,
+    which the clone's checkout does not hold unless the person merged it there.
+    A server that runs from live (from_live) keeps the code it started with: a fix that went on after that, by y in a
+    Claude Code session or thimble fix apply in a shell, is not in it when it changes files this server runs
+    (BROWSER_RUNS), live has them otherwise now than at the server's start, and the commit the server started at does
+    not hold the fix's. So a fix whose commit was made anew with the same change (another fix went off) stays on, a fix
+    to the terminal plugin alone is never off here, and neither is any fix in a copy without git."""
+    if rec.get("state") != "on":
+        return ""
+    commit = str(rec.get("commit") or "")
+    if target_root().resolve() != config.REPO_ROOT.resolve():
+        if kind != "clone":
+            return ""
+        return "" if _holds("HEAD", commit) else NOT_HERE
+    paths = [x for f in rec.get("files") or [] if isinstance(f, dict)
+             for x in [str(f.get("path") or "")] if x.startswith("browser/") or x in BROWSER_RUNS]
+    if not paths or not from_live():
+        return ""
+    # live's top folder holds browser/ and plugin/, as the fix's paths name them
+    if _git(config.REPO_ROOT.parent, "diff", "--quiet", config.BOOT_COMMIT, "HEAD", "--", *paths) != 1:
+        return ""
+    return "" if _holds(config.BOOT_COMMIT, commit) else NOT_YET
 
 
 def on_elsewhere(fid: int) -> dict[str, Any] | None:
     """Fix `fid`'s record when it is on but not in the code this server runs (not_here), else None; no kernel call while
-    the server runs from live's browser/, or live has none."""
-    if target_root().resolve() == config.REPO_ROOT.resolve():
+    the server runs the code Use it starts, unless a fix can have gone on since its start (from_live)."""
+    if target_root().resolve() == config.REPO_ROOT.resolve() and not from_live():
         return None
     got = listing()
     rec = next((r for r in got.get("fixes") or [] if int(r.get("id") or 0) == int(fid)), None)
@@ -920,6 +954,10 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
 PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js",
                 "plugin/tray/printed.mjs", "plugin/tray/tray.mjs", "browser/backend/app/label_order.json",
                 "browser/backend/app/label_wheel.json")
+# the terminal plugin's files a server that runs keeps as they were at its start: those its page bundles, and the module
+# it imports once (marks.py evidence). The kernel names the restart for a fix that changes one by the same list
+# (BROWSER_RUNS in plugin/engine/kernel/fixes.py): change both.
+BROWSER_RUNS = (*(p for p in PAGE_SOURCES if p.startswith("plugin/")), "plugin/engine/kernel/evidence.py")
 
 
 def page_built(fe: Path) -> bool:
