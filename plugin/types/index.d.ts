@@ -8,12 +8,13 @@ declare module 'claude-code' {
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
        *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite?, unread?: [{ tool:
-       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }], sources?: [{ file, path, line?, size, mtime, sha256,
-       *  changed?, gone? }] }] } (marks/store.ts Reply), kept on disk too */
+       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }], sources?: [{ file, path, line?, head?, size, mtime,
+       *  sha256, changed?, gone? }], fresh?: string[] }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
-      /** the keys of this conversation's replies whose citations rest on sources (marks/store.ts sourcedReplies), which
-       *  marks/stale.ts compares with their files */
-      marksSourced: string[]
+      /** this conversation's cited files, by real path: what the last pass of marks/stale.ts saw of each ({ size,
+       *  mtime } or { gone: true }; null when due), and the citations that rest on it by their reply's key
+       *  (marks/store.ts Cited) */
+      marksCited: Record<string, { seen: { size: number; mtime: number } | { gone: true } | null; by: Record<string, number[]> }>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */

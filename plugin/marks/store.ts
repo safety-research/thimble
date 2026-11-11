@@ -11,7 +11,9 @@
 //   restoreMarks($)          the replies a resumed session's transcript holds, back in the state; a check that ran
 //                            when the session ended did not run (notRun)
 //   notRun(m, why)           a mark whose check did not run or gave no answer: failed, with why
-//   sourcedReplies($)        the keys of this conversation's replies whose citations rest on sources (stale.ts)
+//   citedFiles($)            the conversation's cited files, each with what the last pass saw of it and the citations
+//                            that rest on it (stale.ts), kept as each change of a reply's marks lands
+//   sawFiles($, saw)         what a pass saw of the files it compared
 import { update, type EngineInterface } from 'claude-code'
 
 import { keptDir } from '../core/env'
@@ -57,16 +59,26 @@ export type Evidence =
  *  `start` and `end` are the words' place in the row's text as Claude wrote it (message.js withAsked).
  *  `unread`: the files a failed mark's check could not read and needed, as Claude Code refused them (checker.ts
  *  readEnded, endCheck).
- *  `sources`: what a verified or corrected mark rests on, as its check read it (Source). */
+ *  `sources`: what a verified or corrected mark rests on, as its check read it (Source).
+ *  `fresh`: the files that changed after its check, once x checked it again for that: until a check of it passes, each
+ *  check of it takes computed evidence only from its own calls (checker.ts repairOf, the validator's `fresh`), since
+ *  what the session printed before the change shows the files as they were. */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]; fresh?: string[]
 }
 /** What a checked citation rests on (engine/kernel/evidence.py source): a file by the name a reason gives it, its real
- *  path, the cited lines when it rests on them alone, its size and mtime as last seen, and the sha256 of what the check
- *  read. `changed` once what it rests on no longer hashes so, `gone` once the file is not there (stale.ts): the
- *  citation is stale (tray/tray.mjs staleOf). */
-export type Source = { file: string; path: string; line?: string; size: number; mtime: number; sha256: string; changed?: true; gone?: true }
+ *  path, the cited lines when it rests on them alone (`head`: the hash of the first of several, which finds them where
+ *  they moved), the file's size and mtime and the sha256 of what the check read. `changed` once what it rests on no
+ *  longer reads so, `gone` once the file is not there (stale.ts): the citation is stale (tray/tray.mjs staleOf). Lines
+ *  that only moved take their new numbers. */
+export type Source = { file: string; path: string; line?: string; head?: string; size: number; mtime: number; sha256: string; changed?: true; gone?: true }
+/** A cited file as the last pass saw it (stale.ts): its size and mtime, or `gone`; null while no pass saw it since a
+ *  resumed session read citations of it that their checks read at other times. */
+export type Seen = { size: number; mtime: number } | { gone: true } | null
+/** The conversation's cited files, by real path: what the last pass saw of each, and the citations that rest on it, by
+ *  their reply's key. */
+export type Cited = Record<string, { seen: Seen; by: Record<string, number[]> }>
 /** A read of one file (checker.ts oneRead): a Read of it, or a Grep of it alone, by its absolute path. */
 export type OneRead = { tool: 'Read' | 'Grep'; file: string }
 /** A file a check could not read, by the tool that read it, and what lets it read the file (checker.ts readFix): `ok`,
@@ -85,20 +97,76 @@ export type Counts = { total: number; checking: number; verified: number; correc
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
-const SOURCED = { plugin: 'thimble', key: 'marksSourced' } as const
+const CITED = { plugin: 'thimble', key: 'marksCited' } as const
 
-/** Whether a reply has a citation that rests on sources. */
-const sourced = (r: Reply | null | undefined) => !!r?.items?.some(m => m.sources?.length)
-
-/** The keys of this conversation's replies whose citations rest on sources, which stale.ts compares with their files. */
-export async function sourcedReplies($: Engine): Promise<string[]> {
-  return ((await $.state.get(SOURCED)).value ?? []) as string[]
+/** The files a reply's citations rest on: by real path, the numbers of the citations that rest on each, and the stat
+ *  their checks read it at (null when they read it at different times). */
+function citedBy(r: Reply | null | undefined): Map<string, { ns: number[]; read: Seen }> {
+  const out = new Map<string, { ns: number[]; read: Seen }>()
+  for (const m of r?.items ?? []) {
+    for (const s of m.sources ?? []) {
+      const read: Seen = { size: s.size, mtime: s.mtime }
+      const x = out.get(s.path)
+      if (!x) out.set(s.path, { ns: [m.n], read })
+      else {
+        if (!x.ns.includes(m.n)) x.ns.push(m.n)
+        if (!sameSeen(x.read, read)) x.read = null
+      }
+    }
+  }
+  return out
 }
 
-/** A reply's key among the sourced ones, once one of its citations rests on sources. */
-async function noteSourced($: Engine, r: Reply | null): Promise<void> {
-  if (!r || !sourced(r)) return
-  await update($, SOURCED, cur => ((cur ?? []).includes(r.key) ? cur : [...(cur ?? []), r.key]) as never)
+/** Whether two sights of a file are the same: both gone, or the same size and mtime (to the millisecond, as the kernel
+ *  and the hooks each read it). Null is no sight: it matches nothing. */
+export function sameSeen(a: Seen | undefined, b: Seen | undefined): boolean {
+  if (!a || !b) return false
+  if ('gone' in a || 'gone' in b) return 'gone' in a && 'gone' in b
+  return a.size === b.size && Math.abs(a.mtime - b.mtime) < 1
+}
+
+/** The conversation's cited files (Cited), which stale.ts stats at each pass. */
+export async function citedFiles($: Engine): Promise<Cited> {
+  return ((await $.state.get(CITED)).value ?? {}) as Cited
+}
+
+/** What a pass saw of the files it compared, by path, kept for the next pass; a file no citation rests on any more is
+ *  left out. */
+export async function sawFiles($: Engine, saw: Record<string, Seen>): Promise<void> {
+  await update($, CITED, cur => {
+    const next: Cited = { ...((cur ?? {}) as Cited) }
+    for (const [p, seen] of Object.entries(saw)) if (next[p]) next[p] = { ...next[p], seen }
+    return next
+  })
+}
+
+/** The index of cited files after an edit of reply `key` from `was` to `now`: each citation of it that no longer rests
+ *  on a file is taken off that file, and each that rests on a file now is put on it, as changes, so two edits of one
+ *  reply that land at once both count. A file new to the index is as its checks read it; a file no citation rests on
+ *  goes. */
+async function noteCited($: Engine, key: string, was: Reply | null, now: Reply | null): Promise<void> {
+  const before = citedBy(was)
+  const after = citedBy(now)
+  const same = before.size === after.size && [...after].every(([p, x]) => {
+    const b = before.get(p)
+    return !!b && b.ns.length === x.ns.length && x.ns.every(n => b.ns.includes(n))
+  })
+  if (same) return
+  await update($, CITED, cur => {
+    const next: Cited = { ...((cur ?? {}) as Cited) }
+    for (const p of new Set([...before.keys(), ...after.keys()])) {
+      const gone = (before.get(p)?.ns ?? []).filter(n => !after.get(p)?.ns.includes(n))
+      const added = (after.get(p)?.ns ?? []).filter(n => !before.get(p)?.ns.includes(n))
+      if (!gone.length && !added.length) continue
+      const f = next[p]
+      const ns = [...new Set([...(f?.by[key] ?? []).filter(n => !gone.includes(n)), ...added])]
+      const { [key]: _old, ...others } = f?.by ?? {}
+      const by = ns.length ? { ...others, [key]: ns } : others
+      if (!Object.keys(by).length) delete next[p]
+      else next[p] = { seen: f ? f.seen : after.get(p)?.read ?? null, by }
+    }
+    return next
+  })
 }
 
 async function fileOf($: Engine, key: string): Promise<string> {
@@ -131,9 +199,13 @@ export async function newReply($: Engine, r: Reply): Promise<void> {
 
 /** A change of the reply's marks, applied to the reply as it stands now; answers the reply as changed. */
 export async function editReply($: Engine, key: string, edit: (r: Reply) => Reply): Promise<Reply | null> {
-  const out = await update($, { ...MARKS, id: key }, cur => (cur ? edit(cur as Reply) : cur) as unknown)
+  let was: Reply | null = null
+  const out = await update($, { ...MARKS, id: key }, cur => {
+    was = (cur ?? null) as Reply | null
+    return (cur ? edit(cur as Reply) : cur) as unknown
+  })
   await persist($, key)
-  await noteSourced($, (out ?? null) as Reply | null)
+  await noteCited($, key, was, (out ?? null) as Reply | null)
   return (out ?? null) as Reply | null
 }
 
@@ -184,24 +256,28 @@ export async function rowMarks($: Engine, row: string): Promise<RowMarks | null>
 
 /** The replies kept for this conversation that the state does not hold (a resumed session), back in it. Their marks
  *  that were still checked did not run: the check ended with the session that ran it. One that waits to be opened
- *  (`deferred`) still waits. */
+ *  (`deferred`) still waits. The index of cited files is made again from all of them. */
 export async function restoreMarks($: Engine): Promise<void> {
   const dir = `${await keptDir($)}/marks`
   let entries: { name: string; kind: string }[] = []
-  // the sourced replies are this conversation's own, so a /clear or a /resume leaves the earlier one's
-  const keys: string[] = []
+  // the cited files are this conversation's own, so a /clear or a /resume leaves the earlier one's
+  const cited: Cited = {}
   try { entries = (await $.fs.list(dir)) as { name: string; kind: string }[] } catch { entries = [] }
   for (const x of entries) {
     if (x.kind !== 'file' || !x.name.endsWith('.json')) continue
     let r: Reply
     try { r = JSON.parse(String(await $.fs.read(`${dir}/${x.name}`))) as Reply } catch { continue }
     if (!r?.key || !Array.isArray(r.items)) continue
-    if (sourced(r)) keys.push(r.key)
-    if (await replyOf($, r.key)) continue
+    const held = await replyOf($, r.key)
     const open = (m: MarkItem) => m.status === 'checking'
-    const ended = r.items.some(open)
-    await setReply($, ended ? { ...r, items: r.items.map(m => (open(m) ? notRun(m, 'The session ended before it did.') : m)) } : r)
+    const ended = !held && r.items.some(open)
+    const now = held ?? (ended ? { ...r, items: r.items.map(m => (open(m) ? notRun(m, 'The session ended before it did.') : m)) } : r)
+    // the files its citations rest on; what a pass saw of each is not kept, so a file its checks read at different
+    // times is due
+    for (const [p, x] of citedBy(now)) cited[p] = { seen: cited[p] && !sameSeen(cited[p].seen, x.read) ? null : x.read, by: { ...(cited[p]?.by ?? {}), [r.key]: x.ns } }
+    if (held) continue
+    await setReply($, now)
     if (ended) await persist($, r.key)
   }
-  await $.state.set(SOURCED, keys)
+  await $.state.set(CITED, cited)
 }

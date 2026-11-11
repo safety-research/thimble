@@ -12,7 +12,7 @@
 // While its check runs (`checking`) it has the plain look and a spinner. Before any check said anything of it
 // (`pending`: the reply still streams, or no check has begun on it) its underline is dotted: not checked, so it never
 // reads as a checked mark.
-import { marksIn, plainSentence, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
+import { marksIn, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
 import { staleLine, staleOf } from '../../../../plugin/tray/tray.mjs'
 
 /** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them
@@ -127,11 +127,12 @@ export function canRepair(item: MarkItem | undefined): boolean {
  * (plugin/tray/tray.mjs staleLine). Pure. */
 export const staleWhy = (item: MarkItem | undefined): string => staleLine(staleOf(item))
 
-/** What a corrected mark was, as the terminal says it under the words: `corrected; was 15 of 40`. Pure. */
+/** What a corrected mark was, as the terminal says it under the words: `corrected; was 15 of 40`; for a sentence the
+ * check rewrote, whose new words the text shows, `corrected` alone. Pure. */
 export function wasLine(item: MarkItem | undefined): string {
   if (item?.status !== 'corrected' || !item.was) return ''
-  const kind = item.rewrite ? 'sentence rewritten' : item.narrowed ? 'narrowed' : 'corrected'
-  return `${kind}; was ${(item.rewrite ? plainSentence(item.sentence) : item.was).replace(/\*\*|`/g, '')}`
+  if (item.rewrite) return 'corrected'
+  return `${item.narrowed ? 'narrowed' : 'corrected'}; was ${item.was.replace(/\*\*|`/g, '')}`
 }
 
 /** Why a failed mark failed, in one line: the check's reason, else what kind of failure it was. Pure. */

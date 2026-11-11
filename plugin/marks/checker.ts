@@ -52,7 +52,8 @@
 //   awaitsCheck($, row)       whether a row of main's is in the turn that runs or the one whose check starts now
 //   repairOf($, row, n, auto) x on a failed or stale citation (tray), or autoRepair (`auto`): what a check of that one
 //                             mark again needs; for a mark whose check did not run, the check itself; for a stale
-//                             one (stale.ts), a check against the files as they are now
+//                             one (stale.ts), a check against the files as they are now, and so for each check of it
+//                             until one passes (store.ts MarkItem `fresh`)
 //   launchRepair($, r, hold)  that check's fork, with a request to find the right value and correct the cited words;
 //                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
@@ -871,7 +872,7 @@ export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
 /** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
 export type RepairHold = { until: number; cancelled: boolean }
 /** What a check of one mark again needs: its reply, its mark, and the checker's text with the request; `again`: the
- *  mark is stale (Check `again`). */
+ *  mark is stale, or a check of it since it went stale has not passed yet (Check `again`). */
 export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean; wroteAt?: number; again?: boolean }
 
 let held: RepairHold | null = null
@@ -883,15 +884,16 @@ export function heldRepair(): RepairHold | null {
 }
 
 /** x on citation `n` of `row`, or autoRepair's repair of it (`auto`): what a check of it again needs (for one whose
- *  check did not run, the check; for a stale one, a check against the files as they are now), with the request that
- *  says who asked it (notices.mjs repairRequest); null when there is nothing to repair (it did not fail and is not
- *  stale, or a check of it runs), or why none can start. */
+ *  check did not run, the check; for a stale one, a check against the files as they are now, and so for a failed one
+ *  whose check after it went stale did not pass: store.ts MarkItem `fresh`), with the request that says who asked it
+ *  (notices.mjs repairRequest); null when there is nothing to repair (it did not fail and is not stale, or a check of
+ *  it runs), or why none can start. */
 export async function repairOf($: Engine, row: string, n: number, auto = false): Promise<Repair | string | null> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   const m = r?.items.find(x => x.n === n)
-  const stale = staleOf(m).length > 0
-  if (!key || !r || !m || (m.status !== 'failed' && !stale) || starting.has(`${key}:${n}`)) return null
+  const fresh = staleOf(m).length > 0 || !!m?.fresh?.length
+  if (!key || !r || !m || (m.status !== 'failed' && !staleOf(m).length) || starting.has(`${key}:${n}`)) return null
   if (Object.values(await running($)).some(c => c.key === key && c.marks.includes(n))) return null
   let template = ''
   let p: Record<string, string>
@@ -904,7 +906,7 @@ export async function repairOf($: Engine, row: string, n: number, auto = false):
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
-  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), ...(stale ? { again: true } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto)}` }
+  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), ...(fresh ? { again: true } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(p, m, m.n, auto)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
@@ -928,13 +930,15 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     await checkStarted($)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
-    // the mark is checked again: its earlier result goes, its place and words stay
+    // the mark is checked again: its earlier result goes, its place and words stay; a stale one keeps the files that
+    // changed, so each check of it reads them fresh until one passes
     await editReply($, r.key, rep => ({
       ...rep, settledAt: null,
       items: rep.items.map(m => {
         if (m.n !== r.n) return m
         const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, sources: _o, ...base } = m
-        return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
+        const fresh = staleOf(m).length ? [...new Set(staleOf(m).map((s: { file: string }) => s.file))] : m.fresh
+        return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const, ...(r.again && fresh?.length ? { fresh } : {}) }
       }),
     }))
     const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : { asked: true }), ...(r.thread ? { thread: r.thread } : {}), ...(r.wroteAt ? { wroteAt: r.wroteAt } : {}), ...(r.again ? { again: true } : {}) }
@@ -1148,9 +1152,10 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)
       const { n: _n, ...rest } = res ?? {}
-      // what it rests on is what this check read, if anything
+      // what it rests on is what this check read, if anything; a check that passed reads the files as they are now
       const { sources: _o, ...was } = m
       const x: MarkItem = res ? { ...was, ...rest, shown: String(res.shown ?? m.words) } : notRun(m, 'Its answer left this citation out.')
+      if (x.status === 'verified' || x.status === 'corrected') delete x.fresh
       if (x.status !== 'failed' || x.failedBy === 'check') return x
       // a citation it could not judge while Claude Code refused its Python waits for the person's OK, not checked
       if (refused !== undefined) return waits(m)

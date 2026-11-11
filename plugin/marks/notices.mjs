@@ -98,10 +98,11 @@ export function repairTellText(p, items, auto = false) {
 /** What follows the checker's text for a repair of mark `m`, numbered `n` in it: who asked, the analyst or thimble
  *  (`auto`, right after the check failed it), what the first check found, and the task. A mark whose first check did
  *  not run is checked as any reply's is; a stale one (tray.mjs staleOf) against the files that changed after its check,
- *  as they are now. */
+ *  as they are now, and so is one whose check since it went stale did not pass (marks/store.ts MarkItem `fresh`). */
 export function repairRequest(p, m, n, auto = false) {
   const stale = staleOf(m)
-  if (stale.length) return [`${fill(p['request stale'], { N: String(n), FILES: staleFiles(stale) })} ${p['request where']}`, p['request task']].join('\n')
+  const files = stale.length ? staleFiles(stale) : Array.isArray(m.fresh) && m.fresh.length ? staleFiles(m.fresh.map(file => ({ file }))) : ''
+  if (files) return [`${fill(p['request stale'], { N: String(n), FILES: files })} ${p['request where']}`, p['request task']].join('\n')
   if (m.status === 'unchecked' || m.failedBy === 'none') {
     return `${fill(p['request not run'], { N: String(n) })} ${p['request where']}`
   }
