@@ -4,7 +4,8 @@
 // check has said anything of yet is underlined dotted, and its label says it is not checked yet.
 // Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
-//   computed   the head names the code that ran; then the code in the file reader's colors for Python, then its real
+//   computed   the head names the code that ran; under it how that code got the value, in the check's words (its
+//              `method`), as the terminal shows it; then the code in the file reader's colors for Python, then its real
 //              output, the marked words highlighted, each under its label as the terminal labels it
 //              (plugin/tray/tray.mjs partLabel: `code · 7 lines`, `output · 62 lines`)
 //   quote      each cited place: its chip, named as the terminal names it (`changes.log · line 3`, plugin/tray/tray.mjs
@@ -339,6 +340,8 @@ async function quotedPlace(at: string, words: string): Promise<string> {
 function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
   const open = useContext(OpenPlace)
   if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} />
+  // how the code got the value, in the check's words, as the terminal shows it over the code
+  const method = ev.kind === 'computed' ? ev.method : undefined
   const printed = ev.kind === 'computed' ? printedTable(ev.table, value) : null
   if (printed)
     return (
@@ -349,6 +352,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           </Chip>
           <span className="refchip-pop-value">{value}</span>
         </div>
+        {method && <div className="mark-ev-method">{method}</div>}
         {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
         <div className="mark-ev-label mono">{TABLE_LABEL}</div>
         <TablePreview grid={printed.grid} at={printed.at} also={printed.also} />
@@ -363,6 +367,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           </Chip>
           <span className="refchip-pop-value">{value}</span>
         </div>
+        {method && <div className="mark-ev-method">{method}</div>}
         {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
         <div className="mark-ev-label mono">{partLabel('output', (ev.output ?? '').replace(/\n+$/, '').split('\n').length)}</div>
         <KeyBox className="refchip-lines mono mark-ev-out" label="output">

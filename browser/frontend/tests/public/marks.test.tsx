@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // A reply's marks drawn by what the citation check found (marks/Mark.tsx): verified, or failed with a red × after the
-// words, as the terminal draws it, and a click opens the evidence in the citation's label. The check's repairs show in
+// words, as the terminal draws it, and a click opens the evidence in the citation's label (for a value code computed,
+// how the code got it, over the code). The check's repairs show in
 // the reply: a corrected mark shows its new words, a rewritten sentence stands in place of its own, and a failed mark
 // can be repaired from its label, as x repairs it in the terminal.
 import { act } from 'react'
@@ -43,6 +44,20 @@ test('each mark draws as its check says, verified or failed, and a click opens i
   await open(again.querySelectorAll<HTMLElement>('.mark .mark-words')[2])
   await settle()
   expect(document.querySelector('.mark-pop .mark-pop-why')?.textContent).toBe('Not confirmed: no call printed it.')
+})
+
+test("a computed mark's label says how its code got the value, in the check's words, under the head and over the code", async () => {
+  const output = 'rows 40\nmerged 12'
+  const at = output.indexOf('12')
+  const how = 'Counted the lines of prs.jsonl whose merged field is true, one line per pull request.'
+  const code = 'import json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nprint(f"rows {len(prs)}")\nprint(f"merged {sum(p[\'merged\'] for p in prs)}")'
+  const el = await mount(<ChatMarkdown text="[12](#) merged." checks={[item(0, '12', { evidence: { kind: 'computed', code, output, highlight: [[at, at + 2]], by: 'checker', method: how } })]} />)
+  await open(el.querySelector<HTMLElement>('.mark-words')!)
+  await settle()
+  const method = document.querySelector('.mark-pop .mark-ev .mark-ev-method')
+  expect(method?.textContent).toBe(how)
+  expect(method?.previousElementSibling?.className).toBe('refchip-pop-head')
+  expect(method?.nextElementSibling?.textContent).toBe('code · 4 lines')
 })
 
 test("a card's value cited in the older form draws as verified only in a takeaway, whose link pass checked it", async () => {

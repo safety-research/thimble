@@ -1,10 +1,12 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the newest answer's first citation, which draws
-// in focus; its card shows the check and the evidence; a question typed with it open carries nothing of it and closes
+// in focus; its card shows the check and the evidence (for a value code computed, how the code got it, over the code,
+// as the side pane shows it too); a question typed with it open carries nothing of it and closes
 // the tray; a press on a citation opens it too; 0 closes it; a press on an older answer's citation marks no answer, and
 // ] from rest still starts at the newest answer; v closes it so the card shows, and a letter after v puts it back; ]
 // and [ reach a card where the reply draws it. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { drawEvidence } from '../marks/evidence'
 import { citeTint } from '../marks/view'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
@@ -137,6 +139,35 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('failed: 12')
   expect(band).not.toContain('a ask')
+})
+
+// the check counted the failed runs with code, and said how the code got the value
+const HOW = 'Counted the rows of runs.csv whose status column is failed, out of all its rows, one row per run, across the three nightly builds the file holds.'
+const COMPUTED = {
+  n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40', reason: 'counted',
+  evidence: { kind: 'computed', code: 'import csv\nrows = list(csv.DictReader(open("runs.csv")))\nfailed = [r for r in rows if r["status"] == "failed"]\nprint(f"{len(failed)} of {len(rows)}")', output: '12 of 40\n', highlight: [[0, 8]], by: 'checker', method: HOW },
+}
+const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any = {}) => ({ type, props }) })
+
+test("a computed citation's card says how its code got the value, over the code, whole when the card is cut, and so does its side pane", CITES, async ($, on) => {
+  await resumed($, on, COMPUTED)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  // the method in the check's words, the first thing under the head, then the code under its label
+  expect(textOf(await $.ui.render(above()))).toContain(`${HOW}code · 4 lines`)
+  // in the text's own color, not dim as the labels around it
+  const how = all(await $.ui.render(above())).find(n => n.type === 'Text' && textOf(n) === HOW)
+  expect(how?.props?.dimColor).toBeUndefined()
+  // a band too short for the whole card cuts the code and keeps the method whole, on its two rows
+  const cut = all(await $.ui.render(above(9)))
+  expect(textOf(cut)).toContain('⋯')
+  expect(cut.find(n => n.type === 'Text' && textOf(n) === HOW)?.props?.wrap).toBe('wrap')
+  // the side pane shows all of the card, from the reply's marks in the state: the method over the code there too
+  const kept = new Map<string, unknown>([
+    [JSON.stringify({ plugin: 'thimble', key: 'marksRow', id: 'row-t1' }), 'row-t1'],
+    [JSON.stringify({ plugin: 'thimble', key: 'marks', id: 'row-t1' }), { key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [COMPUTED] }],
+  ])
+  const pane$: Any = { state: { get: async (k: Any) => ({ value: kept.get(JSON.stringify(k)) }) }, clock: { now: async () => 1, after: () => ({ cancel() {} }) }, config: { list: async () => [] } }
+  expect(textOf(await drawEvidence(pane$, { props: { bodyColumns: 80 } }, { row: 'row-t1', n: 1 }, els))).toContain(`${HOW}code · 4 lines`)
 })
 
 // a second answer, newer than TEXT's, with a citation of its own
