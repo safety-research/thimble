@@ -14,8 +14,8 @@
 // no longer stale. So a pass costs a stat for each cited file, however many files the folder holds and however many
 // citations rest on each, and the replies it reads are only those whose citations rest on a file that changed.
 //
-// A stale citation draws as marks/view.ts says (its words in the warning color, ↻ after them); its card says stale and
-// which file changed (tray/tray.mjs staleLine), with x, which checks it again against the files as they are now
+// A stale citation draws as marks/view.ts says (its words in the warning color, ↻ after them); its card's status says
+// stale (tray/tray.mjs checkStatus), with x, which checks it again against the files as they are now
 // (checker.ts repairOf): the usual result, verified, corrected or failed, with sources of its own.
 //
 //   examineSources($)   one pass over the cited files; a pass asked for while one runs runs once after it

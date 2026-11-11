@@ -1,13 +1,16 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the newest answer's first citation, which draws
-// in focus; its card shows the check and the evidence (for a value code computed, how the code got it, over the code,
-// as the side pane shows it too); a question typed with it open carries nothing of it and closes
+// in focus; its header says the check's status and nothing else does, x repair among its keys on a failed citation,
+// and its card shows the evidence (for a value code computed, how the code got it, over the code, as the side pane
+// shows it too, with a failure's reason); a question typed with it open carries nothing of it and closes
 // the tray; a press on a citation opens it too; 0 closes it; a press on an older answer's citation marks no answer, and
 // ] from rest still starts at the newest answer; v closes it so the card shows, and a letter after v puts it back; ]
 // and [ reach a card where the reply draws it. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { REPAIR_DESCRIPTION } from '../marks/checker'
 import { drawEvidence } from '../marks/evidence'
 import { citeTint } from '../marks/view'
+import { trayBand } from '../tray/tray'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -37,11 +40,13 @@ const answer = (requestId: string, text: string) => ({ plugin: 'thimble', compon
 const above = (maxRows = 20) => ({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 100, scroll: { offset: 0, bodyRows: maxRows - 1 }, view: {} }, viewport: view }) as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-/** A resumed session with one answer, TEXT, whose citation the check left as `item`. */
-async function resumed($: Any, on: Any, item: Any, more: Record<string, string> = {}): Promise<{ submitted: Any[]; clock: Any }> {
+/** A resumed session with one answer, TEXT, whose citation the check left as `item`; `spawns`, the forks it asked
+ *  Claude Code for. */
+async function resumed($: Any, on: Any, item: Any, more: Record<string, string> = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
+  const spawns: Any[] = []
   on('session.id', () => ({ value: 's-tray' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
@@ -66,7 +71,7 @@ async function resumed($: Any, on: Any, item: Any, more: Record<string, string> 
   on('ui.panes', () => ({ value: [] }) as never)
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-repair-1' }) as never)
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: 'agent-repair-1' } as never })
   on('agent.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: Any) => { submitted.push(e); return { text: e.text } })
@@ -74,7 +79,7 @@ async function resumed($: Any, on: Any, item: Any, more: Record<string, string> 
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  return { submitted, clock }
+  return { submitted, clock, spawns }
 }
 
 // the check verified the citation, with a quote of the file it read: the reply's marks as a resumed session finds them
@@ -168,6 +173,75 @@ test("a computed citation's card says how its code got the value, over the code,
   ])
   const pane$: Any = { state: { get: async (k: Any) => ({ value: kept.get(JSON.stringify(k)) }) }, clock: { now: async () => 1, after: () => ({ cancel() {} }) }, config: { list: async () => [] } }
   expect(textOf(await drawEvidence(pane$, { props: { bodyColumns: 80 } }, { row: 'row-t1', n: 1 }, els))).toContain(`${HOW}code · 4 lines`)
+})
+
+/** The side pane of the reply that holds `item`, drawn from the reply's marks in the state. */
+async function sidePane(item: Any): Promise<Any> {
+  const kept = new Map<string, unknown>([
+    [JSON.stringify({ plugin: 'thimble', key: 'marksRow', id: 'row-t1' }), 'row-t1'],
+    [JSON.stringify({ plugin: 'thimble', key: 'marks', id: 'row-t1' }), { key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [item] }],
+  ])
+  const pane$: Any = { state: { get: async (k: Any) => ({ value: kept.get(JSON.stringify(k)) }) }, clock: { now: async () => 1, after: () => ({ cancel() {} }) }, config: { list: async () => [] } }
+  return drawEvidence(pane$, { props: { bodyColumns: 80 } }, { row: 'row-t1', n: 1 }, els)
+}
+
+// the check found the citation wrong and no right words: line 4 says another value
+const FIFTEEN = { ...QUOTED.evidence, lines: [{ n: 4, text: 'failed: 15', highlight: [8, 10] }] }
+const FAILED = { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 says 15 failed, not 12. It counts every run.', evidence: FIFTEEN }
+
+test("a failed citation's card says × failed in its header and no word of why, x repair first among its keys, a click on which starts the repair; the side pane keeps why", CITES, async ($, on) => {
+  const { spawns } = await resumed($, on, FAILED)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('× failed  x repair · a ask · 0 close')
+  expect(band).not.toContain('Line 4 says')
+  expect(band).not.toContain('repair:')
+  // the evidence the check gave, as it gave it
+  expect(band).toContain('runs/summary.txt · line 4│failed: 15')
+  // the side pane, which the person opens on purpose (a, +): the status at the right of the words, then why, whole
+  const pane = await sidePane(FAILED)
+  expect(textOf(pane.props.children[0])).toBe('12 of 40× failed')
+  expect(textOf(pane)).toContain('Line 4 says 15 failed, not 12. It counts every run.')
+  // a click on `x repair` in the header: the ui.press hook starts the repair's fork
+  const ui = await $.ui.mount(above())
+  await ui.press({ key: 'repair' })
+  await ui.unmount()
+  expect(spawns.map(s => s.description)).toEqual([REPAIR_DESCRIPTION])
+})
+
+test('while a check of a citation runs, its card is its header alone: the turning glyph and checking, no x, nothing under it', async () => {
+  // a plain engine (this kit's spawns name no agent, so no check of it runs there): the tray open on the citation
+  const kept = new Map<string, unknown>([
+    [JSON.stringify({ plugin: 'thimble', key: 'tray' }), { stack: [{ row: 'row-t1', kind: 'citation', n: 1 }] }],
+    [JSON.stringify({ plugin: 'thimble', key: 'marksRow', id: 'row-t1' }), 'row-t1'],
+    [JSON.stringify({ plugin: 'thimble', key: 'marks', id: 'row-t1' }), { key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: null, items: [{ ...FAILED, status: 'checking', repair: true, evidence: undefined, reason: undefined }] }],
+  ])
+  const $: Any = {
+    state: { get: async (k: Any) => ({ value: kept.get(JSON.stringify(k)), version: 0 }), set: async () => ({ isSet: true, version: 1 }) },
+    env: { get: async () => undefined }, config: { list: async () => [] }, clock: { now: async () => 1, after: () => ({ cancel() {} }) },
+  }
+  expect(textOf(await trayBand($, els, 100, { rows: 20 }))).toMatch(/^12 of 40\S checking {2}a ask · 0 close$/)
+})
+
+test("a citation x corrected says ✓ verified in its header, as any verified one, and its card nothing of what it was; the side pane says verified too", CITES, async ($, on) => {
+  const corrected = { ...QUOTED, status: 'corrected', shown: '15 of 40', was: '12 of 40', repair: true, reason: 'Line 4 says 15 failed.', evidence: FIFTEEN }
+  await resumed($, on, corrected)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('15 of 40')
+  expect(band).toContain('✓ verified  a ask · 0 close')
+  for (const said of ['repaired', 'corrected', 'was 12', 'Line 4 says']) expect(band).not.toContain(said)
+  expect(band).toContain('runs/summary.txt · line 4│failed: 15')
+  expect(textOf((await sidePane(corrected)).props.children[0])).toBe('15 of 40✓ verified')
+})
+
+test('a citation x checked again and verified as written says ✓ verified and no more', CITES, async ($, on) => {
+  await resumed($, on, { ...QUOTED, repair: true })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('✓ verified  a ask · 0 close')
+  expect(band).not.toContain('as written')
+  expect(band).not.toContain('Line 4 says')
 })
 
 // a second answer, newer than TEXT's, with a citation of its own

@@ -22,13 +22,14 @@
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it), or it is stale: x checks it again
 //   staleOf(item), staleLine(stale), staleFiles(stale)   the sources of a checked citation that changed after its
-//                                          check (marks/stale.ts), and what its card says of them, in both modes
-//   checkStatus(item), wasLine(item)       a citation's check as each place that shows its card says it (the tray's
-//                                          header, the evidence pane, the claims pane), and what it was before the
-//                                          check corrected it
+//                                          check (marks/stale.ts), what the workbench's label says of them, and their
+//                                          files in a list, for what main reads
+//   checkStatus(item)                      a citation's check as each place that shows its card says it, in both modes
+//                                          (the tray's header, the evidence pane, the claims pane, the workbench's
+//                                          label): its sign and its word, all a card says of its state
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
-//   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
+//   firstSentence(s)                       a text cut to its first sentence, for the failure line
 //   printableEvidence(ev)                  a citation's evidence as the terminal draws it: each text of the records in
 //                                          it printable (core/text.js)
 //   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
@@ -236,7 +237,7 @@ const listed = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} an
 /** The files of a stale citation's sources, each once, in a list (`README.md and runs.csv`). */
 export const staleFiles = stale => listed([...new Set((stale || []).map(s => String(s.file)))])
 
-/** What a stale citation's card says of its sources (staleOf), wherever it shows: `README.md changed after the check.`,
+/** What a stale citation's label says of its sources (staleOf) in the workbench: `README.md changed after the check.`,
  *  and `runs.csv is gone.` for a file that is not there now. */
 export function staleLine(stale) {
   const gone = [...new Set((stale || []).filter(s => s.gone).map(s => String(s.file)))]
@@ -247,10 +248,6 @@ export function staleLine(stale) {
   ].filter(Boolean).join(' ')
 }
 
-/** What a failed citation's card says of a file its check could not read (marks/store.ts MarkItem `unread`), in the tray
- *  and the Claims pane alike: the file that x repair's OK, or Claude Code's ask as the repair reads it, is about. */
-export const unreadLine = file => `The check could not read ${file}.`
-
 // a citation's check by its status: the sign the reply draws after the citation's words in that status (marks/view.ts
 // withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet, ↻ stale; a checked one has
 // none there, and ✓ here), its word, and its tone
@@ -258,25 +255,19 @@ const CHECKS = {
   checking: { sign: 'spin', word: 'checking', tone: 'dim' },
   deferred: { sign: '?', word: 'not checked', tone: 'dim' },
   verified: { sign: '✓', word: 'verified', tone: 'good' },
-  corrected: { sign: '✓', word: 'corrected', tone: 'good' },
-  repaired: { sign: '✓', word: 'repaired', tone: 'good' },
   stale: { sign: '↻', word: 'stale', tone: 'warn' },
   failed: { sign: '×', word: 'failed', tone: 'bad' },
 }
 
-/** A citation's check as every place that shows the citation's card says it: the tray's header, the evidence pane and
- *  the claims pane, so they never disagree. {key, sign, word, tone}: a citation the check corrected (its right words in
- *  place of the ones Claude wrote) says corrected, or repaired when x corrected it; one whose source changed after the
- *  check says stale (staleOf); a status no check gave (none ran) is failed (marks/store.ts notRun). */
+/** A citation's check as every place that shows the citation's card says it: the tray's header, the evidence pane, the
+ *  claims pane and the workbench's label, so they never disagree. {key, sign, word, tone}: a citation the check
+ *  corrected, by itself or after x, says verified, as its right words stand in place of the ones Claude wrote; one
+ *  whose source changed after the check says stale (staleOf); a status no check gave (none ran) is failed
+ *  (marks/store.ts notRun). The status is all a card says of the check: the evidence under it shows what it rests on. */
 export function checkStatus(m) {
-  const key = staleOf(m).length ? 'stale' : m?.status === 'corrected' && m.repair ? 'repaired' : CHECKS[m?.status] ? m.status : 'failed'
+  const key = staleOf(m).length ? 'stale' : m?.status === 'corrected' ? 'verified' : CHECKS[m?.status] ? m.status : 'failed'
   return { key, ...CHECKS[key] }
 }
-
-/** The line under a corrected citation's status: what it was (`was 15 of 40`), and for a citation it narrowed,
- *  `narrowed; ` before it. A sentence the check rewrote has none: it reads as it is now. */
-export const wasLine = ({ narrowed, was }) =>
-  `${narrowed ? 'narrowed; ' : ''}was ${String(was ?? '').replace(/\*\*|`/g, '')}`
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
  *  it mattered here. A heads-up: its title in bold, then two to four bullets. */
@@ -325,8 +316,8 @@ export function fileHref(abs, line) {
   return `file://${encodeURI(String(abs).toWellFormed()).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
 }
 
-/** A check's reason, its first sentence only: a citation's card says why in one sentence (a decimal point or an
- *  abbreviation inside it does not end it). */
+/** A text's first sentence only, as the failure line's short form says it (bar/notice.ts): a decimal point or an
+ *  abbreviation inside it does not end it. */
 export function firstSentence(s) {
   const t = String(s || '').replace(/\s+/g, ' ').trim()
   const m = /^.*?[.!?](?=\s+[A-Z0-9"“(']|$)/.exec(t)

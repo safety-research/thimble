@@ -2,7 +2,7 @@
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): underlined, a purple tint on hover, a turning glyph
 // after each mark until its own verdict arrives, corrected words in place with no sign (a click on them opens the tray,
-// whose status says corrected and what they were), Claude Code's error red with × when the check could not confirm it or
+// whose status says verified), Claude Code's error red with × when the check could not confirm it or
 // did not run (failed), a dim ? after one not checked yet (deferred). The bar's busy line says the check runs; nothing
 // under the reply counts the marks. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
