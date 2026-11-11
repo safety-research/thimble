@@ -78,9 +78,13 @@ export type Events = {
   /** show a chat in the panel; `send` is a first message to post once it is shown */
   openChat: { chatId: string; send?: string }
   /** A toast (shell/Toasts) only confirms or fails the analyst's own click, or reports news with a link to it: `ref`
-   * puts a chip of what it names on it, `thread` the chip of a thread (chat/Notes ThreadChip). A state that lasts, such
-   * as a refused start or a write that failed, shows once next to what it concerns and is never also a toast. */
-  toast: { text: string; kind?: 'info' | 'error'; ref?: string; thread?: { id: string; label: string } }
+   * puts a chip of what it names on it, `thread` the chip of a thread (chat/Notes ThreadChip), `link` a link to a page
+   * elsewhere. A state that lasts, such as a refused start or a write that failed, shows once next to what it concerns
+   * and is never also a toast. */
+  toast: { text: string; kind?: 'info' | 'error'; ref?: string; thread?: { id: string; label: string }; link?: { href: string; label: string } }
+  /** an export as a Claude artifact ended (the stream's `export` record, backend artifact_export.py): `published` with the
+   * artifact's link, or `failed`, which a notice explains (report/ExportMenu) */
+  export: { doc: string; format: string; status: string; link?: string }
   /** open Report a problem under the top bar's bug, with what failed written in and the chats it concerns */
   reportProblem: ProblemPrefill
   /** a ⌘-click inside a view's frame (files/ViewerFrame) or a custom card's (canvas/cardBridge): the pointer's box

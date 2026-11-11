@@ -492,6 +492,9 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'WebFetch':
     case 'WebSearch':
       return str(inp.url ?? inp.query)
+    case 'Artifact':
+      // the page main publishes for Export, Claude artifact: its file's name, not its path in thimble's workspace
+      return inp.file_path ? str(inp.file_path).split('/').pop() || '' : str(inp.url ?? inp.action ?? '')
     default: {
       // a tool the chat has no words for: the field of its input that names what the call is about, never the input
       // as JSON (live QA 2: `SendFeedback {"type":"bug",…`)
@@ -515,6 +518,7 @@ export const TOOL_WORDS: Record<string, string> = {
   Agent: 'Subagent',
   WebFetch: 'Fetch page',
   WebSearch: 'Web search',
+  Artifact: 'Claude artifact',
   add_card: 'Add card',
   edit_card: 'Edit card',
   delete_card: 'Delete card',
@@ -582,6 +586,7 @@ export const TOOL_GROUPS: Record<string, string> = {
   Task: 'Subtask',
   WebFetch: 'Web',
   WebSearch: 'Web',
+  Artifact: 'Claude artifact',
   file_dev_ticket: 'Dev ticket',
   fix_thimble: 'Fixes',
   screenshot: 'Screenshot',
