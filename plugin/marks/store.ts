@@ -60,12 +60,13 @@ export type Evidence =
  *  `unread`: the files a failed mark's check could not read and needed, as Claude Code refused them (checker.ts
  *  readEnded, endCheck).
  *  `sources`: what a verified or corrected mark rests on, as its check read it (Source).
+ *  `rerun`: for computed evidence whose code its check ran again, what runs it again (Rerun).
  *  `fresh`: the files that changed after its check, once x checked it again for that: until a check of it passes, each
  *  check of it takes computed evidence only from its own calls (checker.ts repairOf, the validator's `fresh`), since
  *  what the session printed before the change shows the files as they were. */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]; fresh?: string[]
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]; sources?: Source[]; rerun?: Rerun; fresh?: string[]
 }
 /** What a checked citation rests on (engine/kernel/evidence.py source): a file by the name a reason gives it, its real
  *  path, the cited lines when it rests on them alone (`head`: the hash of the first of several, which finds them where
@@ -73,6 +74,11 @@ export type MarkItem = {
  *  longer reads so, `gone` once the file is not there (stale.ts): the citation is stale (tray/tray.mjs staleOf). Lines
  *  that only moved take their new numbers. */
 export type Source = { file: string; path: string; line?: string; head?: string; size: number; mtime: number; sha256: string; changed?: true; gone?: true }
+/** What runs the code of computed evidence again (engine/kernel/evidence.py check_computed): the call's command, the
+ *  shell's folder and the session's, and the output the check gave. Its sources are the files that code read when the
+ *  check ran it; once one of them changed, a pass runs it again (stale.ts), and the citation stays as it was when it
+ *  prints that output again. */
+export type Rerun = { command: string; cwd: string; root?: string; given: unknown }
 /** A cited file as the last pass saw it (stale.ts): its size and mtime, or `gone`; null while no pass saw it since a
  *  resumed session read citations of it that their checks read at other times. */
 export type Seen = { size: number; mtime: number } | { gone: true } | null
@@ -239,7 +245,7 @@ export const NOT_RUN = 'The check did not run.'
 /** A mark whose check did not run or gave no answer (`why`, a sentence or none): failed, as the person sees it, and x
  *  starts its check (checker.ts repairOf). Its earlier result goes, its place and words stay. */
 export function notRun(m: MarkItem, why = ''): MarkItem {
-  const { was: _w, evidence: _e, note: _n, sources: _s, ...base } = m
+  const { was: _w, evidence: _e, note: _n, sources: _s, rerun: _r, ...base } = m
   return { ...base, status: 'failed', failedBy: 'none', shown: m.words, reason: why ? `${NOT_RUN} ${why}` : NOT_RUN }
 }
 

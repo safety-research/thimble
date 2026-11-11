@@ -1,8 +1,9 @@
 // checker.ts: the check of a reply's marks. After each of main's turns that answered with marks, a fork of the
 // session (core/forks.ts, kind `checker`; for a reply with many marks, up to MAX_FORKS forks at once, each with a share
 // of the marks) reads prompts/checker.md with its marks filled in and gives one answer per mark: verified, corrected,
-// wrong or unconfirmed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
-// without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
+// wrong or unconfirmed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model
+// (engine/kernel/evidence.py; the code of computed evidence runs again in thimble's sandbox only to see which files it
+// reads, which the citation then rests on: stale.ts): a quote must be in the file's line, and computed evidence names one
 // of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
 // show the words; card evidence names places of the session's cards (cards/store.ts), whose values must show them, or a
 // card's table and a condition, whose rows the validator counts from the card's rows.json. The conversation's labels
@@ -944,7 +945,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
       ...rep, settledAt: null,
       items: rep.items.map(m => {
         if (!marks.includes(m.n)) return m
-        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, sources: _o, ...base } = m
+        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, sources: _o, rerun: _a, ...base } = m
         const fresh = staleOf(m).length ? [...new Set(staleOf(m).map((s: { file: string }) => s.file))] : m.fresh
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const, ...(r.again && fresh?.length ? { fresh } : {}) }
       }),
@@ -1161,7 +1162,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       const res = byN.get(m.n)
       const { n: _n, ...rest } = res ?? {}
       // what it rests on is what this check read, if anything; a check that passed reads the files as they are now
-      const { sources: _o, ...was } = m
+      const { sources: _o, rerun: _a, ...was } = m
       const x: MarkItem = res ? { ...was, ...rest, shown: String(res.shown ?? m.words) } : notRun(m, 'Its answer left this citation out.')
       if (x.status === 'verified' || x.status === 'corrected') delete x.fresh
       if (x.status !== 'failed' || x.failedBy === 'check') return x

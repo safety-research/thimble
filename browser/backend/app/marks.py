@@ -29,13 +29,16 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    (_check_share, the terminal's autoRepair); a repair's own end starts none, so a mark that fails again waits for
    Repair.
 6. A mark the check verified or corrected keeps what its evidence rests on (`sources`, the validator's: the cited lines
-   of a quote or of code, the files its code names, as the check read them), and one index of the cited files lists
-   the marks that rest on each (`<workspace>/marks/cited.json`, kept as each reply is saved: _note_cited). Whenever the
-   page reads a chat (agents.py), refresh_soon makes one pass in the background, as the terminal does after Claude's
-   calls that can write (plugin/marks/stale.ts): a stat of each cited file, and only for a file whose stat changed
-   since the last pass, the marks that rest on it, from the replies that hold them, to evidence.examine, which reads
-   the file once for all of them. A mark whose source changed is stale, which the page draws (marks.ts lookOf); cited
-   lines that only moved take their new numbers, with no other sign. Repair checks a stale mark again against the
+   of a quote or of code, the files its code read when the validator ran it again in the terminal's sandbox and the
+   files its code names, as the check read them), and one index of the cited files lists the marks that rest on each
+   (`<workspace>/marks/cited.json`, kept as each reply is saved: _note_cited). Whenever the page reads a chat
+   (agents.py), refresh_soon makes one pass in the background, as the terminal does after Claude's calls that can write
+   (plugin/marks/stale.ts): a stat of each cited file, and only for a file whose stat changed since the last pass, the
+   marks that rest on it, from the replies that hold them, to evidence.examine, which reads the file once for all of
+   them. A mark whose source changed is stale, which the page draws (marks.ts lookOf); cited lines that only moved take
+   their new numbers, with no other sign. A mark whose computed evidence printed a value is stale only when the value
+   changed: its code runs again in the sandbox (`rerun`, evidence.examine, through validate.py), and with the same
+   value the mark rests on what that run read. Repair checks a stale mark again against the
    files as they are now, its computed evidence only a call of that check's own (`fresh`), and so each Repair of it
    until one of those checks passes (the mark's `fresh`: the files that changed). That check takes the other such
    marks of its sentence with it, so that one rewrite of the sentence corrects them all.
@@ -105,6 +108,8 @@ NOTICES_OF = HERE / "notices_of.mjs"
 PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose validator this module runs
 CHECKER = "plugin:checker"  # the terminal's checker.md (prompts.py reads a text of the plugin by this name)
 EVIDENCE = PLUGIN / "engine" / "kernel" / "evidence.py"
+VALIDATE = PLUGIN / "engine" / "validate.py"  # the terminal's validator as a command, whose sandbox runs a mark's code again
+RUN_S = 90  # seconds a run of a mark's code through the validator may take: its own limit, 60 s, and its start
 # A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks), which run at
 # once, so the reply settles when its slowest share does (the terminal's checker.ts).
 PER_FORK = 4
@@ -332,6 +337,41 @@ def evidence() -> ModuleType:
         sys.modules[name] = mod
         spec.loader.exec_module(mod)
     return mod
+
+
+def _srt_folder() -> str | None:
+    """The folder srt is installed in, for the validator's runs of a mark's code: the plugin's pin in the plugin's
+    home, where the install and each terminal session's start put it (plugin/sandbox/setup.mjs); None when it is not
+    there, and the validator looks in its own home (THIMBLE_HOME)."""
+    from . import fixes  # noqa: PLC0415
+
+    try:
+        pin = json.loads((PLUGIN / "sandbox" / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
+    except (OSError, ValueError, KeyError):
+        return None
+    at = fixes.plugin_home() / "srt" / pin
+    return str(at) if (at / "node_modules").is_dir() else None
+
+
+def runner(c: str, folders: tuple[str, str]) -> Callable[[str, str, str], dict[str, Any] | None]:
+    """The runner the validator takes (evidence.Runner): a mark's code run again in the terminal's sandbox, through the
+    validator as a command (validate.py "run"), which reads the check's folders (`folders`, check_folders) and the
+    workspace's temp folders, writes only a temp folder of its own and reaches no network. A run that cannot start
+    answers None, as one that ran out of time."""
+    shown = [f for f in (*folders, *_temp_dirs(c)) if f]
+    srt = _srt_folder()
+
+    def run(script: str, folder: str, python: str = "python3") -> dict[str, Any] | None:
+        req = {"run": {"script": script, "folder": folder, "python": python, "folders": shown}, "srt": srt}
+        try:
+            done = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True,
+                                  env=config.passed_environ(), timeout=RUN_S, cwd=folder)
+            got = json.loads(done.stdout).get("ran")
+        except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+            return None
+        return got if isinstance(got, dict) else None
+
+    return run
 
 
 # ---- a reply's marks: <workspace>/marks/<turn>.json {turn, items, times}, and for a side thread's answer `thread`
@@ -744,9 +784,10 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         mains = [k for k in bash_calls(_transcript_messages(wrote), "main")
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
+        # the code of computed evidence runs again in the sandbox, to see which files it reads
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
                                          answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)), at,
-                                         fresh)
+                                         fresh, runner(c, folders))
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
@@ -762,7 +803,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                     return {**m, "status": "unchecked", "reason": "the check gave no answer for this citation"}
                 # what it rests on is what this check read, if anything; a check that passed read the files as they are
                 passed = res.get("status") in ("verified", "corrected")
-                was = {k: v for k, v in m.items() if k != "sources" and not (k == "fresh" and passed)}
+                was = {k: v for k, v in m.items() if k not in ("sources", "rerun") and not (k == "fresh" and passed)}
                 return {**was, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
 
             r["items"] = [judged(m) for m in r["items"]]
@@ -950,7 +991,7 @@ REPAIRABLE = ("failed", "unchecked")
 # repair's answer for a mark that is not failed or stale now: checked as it stands, or under a check again
 NOT_FAILED = "this citation is not one that failed"
 # what a repair clears of a mark: its earlier result goes, its place and words stay
-CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed", "rewrite", "shown", "sources")
+CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed", "rewrite", "shown", "sources", "rerun")
 
 
 def stale_sources(m: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1174,33 +1215,41 @@ def _same_source(a: Any, b: dict[str, Any]) -> bool:
 async def refresh_sources(c: str) -> None:
     """One pass over the workspace's cited files (_cited): a stat of each, and only for the files whose stat changed
     since the last pass, the marks that rest on them, from the replies that hold them, to evidence.examine, which reads
-    each file once for all of them. A reply whose marks changed is written again, so the page draws them stale, no
-    longer stale, or at the lines they moved to."""
+    each file once for all of them and runs computed evidence's code again where a file of it changed, once for each
+    code. A reply whose marks changed is written again, so the page draws them stale, no longer stale, or at the lines
+    they moved to."""
     files = (await asyncio.to_thread(_cited, c))["files"]
     now = await asyncio.to_thread(lambda: {p: _seen_of(p) for p in files})
     due = {p: s for p, s in now.items() if not _same_seen(s, files[p].get("seen"))}
     if not due:
         return
-    # the marks that rest on those files, each with its sources there: (turn, n, places in its sources, sent, evidence)
-    asked: list[tuple[str, int, list[int], list[dict[str, Any]], Any]] = []
+    # the marks that rest on those files, each with its sources there: (turn, n, places in its sources, sent, evidence,
+    # what runs its code again while it is not stale)
+    asked: list[tuple[str, int, list[int], list[dict[str, Any]], Any, Any]] = []
     for turn in sorted({t for p in due for t in files[p].get("by") or {}}):
         for m in (stored(c, turn) or {}).get("items") or []:
             ks = [k for k, src in enumerate(m["sources"]) if isinstance(src, dict) and src.get("path") in due] if _confirmed(m) else []
             if ks:
-                asked.append((turn, m["n"], ks, [m["sources"][k] for k in ks], m.get("evidence")))
+                again = m.get("rerun") if isinstance(m.get("rerun"), dict) and not stale_sources(m) else None
+                asked.append((turn, m["n"], ks, [m["sources"][k] for k in ks], m.get("evidence"), again))
     if asked:
         ev = evidence()
-        got = await asyncio.to_thread(ev.examine, [{"sources": sent, **({"evidence": e} if e else {})} for *_, sent, e in asked])
-        changed = [(a, x) for a, x in zip(asked, got) if "evidence" in x or x["sources"] != a[3]]
+        items = [{"sources": sent, **({"evidence": e} if e else {}), **({"rerun": r} if r else {})} for *_, sent, e, r in asked]
+        got = await asyncio.to_thread(ev.examine, items, runner(c, check_folders(c, {})))
+        changed = [(a, x) for a, x in zip(asked, got) if "evidence" in x or "rests" in x or x["sources"] != a[3]]
         for turn in sorted({a[0] for a, _ in changed}):
             mine = [(a, x) for a, x in changed if a[0] == turn]
 
             def change(r: dict[str, Any], mine: list[tuple[Any, dict[str, Any]]] = mine) -> dict[str, Any]:
                 # a mark checked again meanwhile keeps the sources of its new check
                 for m in r["items"]:
-                    for (_, n, ks, sent, _), x in mine:
+                    for (_, n, ks, sent, _, _), x in mine:
                         if m.get("n") == n and _confirmed(m) and all(k < len(m["sources"]) and _same_source(m["sources"][k], s)
                                                                      for k, s in zip(ks, sent)):
+                            if "rests" in x:
+                                # its value is as its check read it: it rests on what that run read
+                                m["sources"] = x["rests"]
+                                continue
                             for k, s in zip(ks, x["sources"]):
                                 m["sources"][k] = s
                             if "evidence" in x:

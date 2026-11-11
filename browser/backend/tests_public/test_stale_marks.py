@@ -211,3 +211,78 @@ def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed_a
     _, log_path = agents.paths(CORPUS, agents.MAIN_ID)
     last = [r for r in agents.read_events(log_path) if r["type"] == "marks" and r["turn"] == a][-1]
     assert last["items"][0]["evidence"]["line"] == "3"
+
+
+def _validator():
+    """The terminal's validator as a module, for its prelude: the audit hook that notes what a script reads."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("thimble_validate_test", marks.VALIDATE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _plain_runner(runs: list):
+    """The runner with no sandbox, for the logic alone: the script run by this Python with the validator's prelude, as
+    validate.py runs it in the terminal's sandbox. Each run's script goes to `runs`."""
+    import subprocess
+    import sys
+
+    prelude = _validator().PRELUDE
+
+    def runner(c, folders):
+        def run(script, folder, python="python3"):
+            runs.append(script)
+            reads = os.path.join(os.path.dirname(folder), f"reads-{len(runs)}.txt")
+            p = subprocess.run([sys.executable, "-B", "-c", prelude], input=script, capture_output=True, text=True,
+                               cwd=folder, env={**os.environ, "THIMBLE_READS": reads})
+            got = open(reads).read().splitlines() if os.path.exists(reads) else []
+            return {"output": p.stdout + p.stderr, "reads": got, "ok": p.returncode == 0}
+        return run
+    return runner
+
+
+SEVERITIES = """import json, os
+from collections import Counter
+for build in sorted(os.listdir(".")):
+    path = os.path.join(build, "report", "review-results.json")
+    if os.path.isfile(path):
+        c = Counter(f["severity"] for f in json.load(open(path))["fixed"])
+        print(f"{build}: {c['major']} major, {c['minor']} minor of {sum(c.values())}")"""
+
+
+def test_a_computed_mark_rests_on_the_files_its_code_read_and_is_stale_only_when_its_value_changed(_fresh, monkeypatch):
+    folder = config.corpus_dir(CORPUS)
+    review = folder / "build-a" / "report" / "review-results.json"
+    review.parent.mkdir(parents=True)
+    review.write_text(json.dumps({"fixed": [{"title": "Streak resets", "severity": "major"}, {"title": "Toast hides undo", "severity": "minor"}]}, indent=1))
+    _main(monkeypatch, folder)
+    runs: list[str] = []
+    monkeypatch.setattr(marks, "runner", _plain_runner(runs))
+    run = marks.runner(CORPUS, (str(folder), str(folder)))
+    call = {"command": f"cd {folder} && python3 - <<'PY'\n{SEVERITIES}\nPY", "output": run(SEVERITIES, str(folder))["output"], "by": "checker"}
+    assert "build-a: 1 major, 1 minor of 2" in call["output"]
+
+    async def fork(c, main, cut, prompt):
+        out = [{"mark": 1, "kind": "computed", "evidence": {"output": "build-a: 1 major, 1 minor of 2"}, "status": "verified",
+                "reason": "counted", "method": "Counted the findings of each build's review results by severity."}]
+        return {"answer": _answer(out), "calls": [call], "error": None}
+
+    runs.clear()
+    turn = _check(folder, "Build-a's review has [1 major](#) finding.", fork)
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    # the file the code opened, through a path it built, is what the mark rests on; the check ran the code once
+    assert m["status"] == "verified" and [s["file"] for s in m["sources"]] == ["build-a/report/review-results.json"], m
+    assert m["rerun"]["given"] == "build-a: 1 major, 1 minor of 2" and len(runs) == 1
+    # an edit that leaves the count as it was: the code runs again, prints the same, and the mark rests on the file now
+    _edit(review, review.read_text().replace("Toast hides undo", "The toast hides undo"))
+    runs.clear()
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m2,) = marks.stored(CORPUS, turn)["items"]
+    assert len(runs) == 1 and marks.stale_sources(m2) == [] and m2["sources"][0]["sha256"] != m["sources"][0]["sha256"], m2
+    # an edit that changes it: the mark is stale
+    _edit(review, review.read_text().replace('"major"', '"minor"'))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m3,) = marks.stored(CORPUS, turn)["items"]
+    assert [s["file"] for s in marks.stale_sources(m3)] == ["build-a/report/review-results.json"], m3
