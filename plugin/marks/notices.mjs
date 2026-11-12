@@ -10,8 +10,8 @@
 //   repairTellText(parts, items, auto)   after a repair: how its marks ended, and who started it, the analyst or thimble
 //   repairRequest(parts, m, n, auto, also, ran)   what follows the checker's text for a repair: which mark, what the
 //                                  first check found (for a stale mark, which files changed after it, each card that
-//                                  ran again since, and each other stale mark of its sentence that the repair checks
-//                                  with it), and the task
+//                                  ran again since, each other stale mark of its sentence that the repair checks with
+//                                  it, and that a changed value is corrected in the sentence), and the task
 //
 // The check's own words (its reason, its note) are quoted, since they may quote the records.
 import { fenced } from '../core/text.js'
@@ -109,15 +109,17 @@ function changedFiles(m) {
  *  not run is checked as any reply's is; a stale one (tray.mjs staleOf) against the files that changed after its check,
  *  as they are now, and so is one whose check since it went stale did not pass (marks/store.ts MarkItem `fresh`), with
  *  the other such marks of its sentence (`also`, each with its number `n` in the checker's text), which one rewrite of
- *  the sentence corrects together. `ran`: the cards that ran again after the change, each as a citation names it
- *  (`card:<id>`), whose cells show the files as they are now (the workbench runs each card the stale marks rest on
- *  before their check: browser/backend/app/marks.py repair). */
+ *  the sentence corrects together: a value that changed is corrected in the sentence, and what it was goes in the
+ *  check's reason. `ran`: the cards that ran again after the change, each as a citation names it (`card:<id>`), whose
+ *  cells show the files as they are now (the workbench runs each card the stale marks rest on before their check:
+ *  browser/backend/app/marks.py repair). */
 export function repairRequest(p, m, n, auto = false, also = [], ran = []) {
   const files = changedFiles(m)
   if (files) {
     const cards = ran.map(card => fill(p['request card ran'], { CARD: card }))
     const more = also.map(x => fill(p['request stale also'], { N: String(x.n), FILES: changedFiles(x) }))
-    return [[fill(p['request stale'], { N: String(n), FILES: files }), ...cards, p['request where'], ...more].join(' '), p['request task']].join('\n')
+    const stale = [fill(p['request stale'], { N: String(n), FILES: files }), ...cards, p['request where'], ...more, p['request stale value']]
+    return [stale.join(' '), p['request task']].join('\n')
   }
   if (m.status === 'unchecked' || m.failedBy === 'none') {
     return `${fill(p['request not run'], { N: String(n) })} ${p['request where']}`

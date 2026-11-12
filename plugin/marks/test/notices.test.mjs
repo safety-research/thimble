@@ -13,7 +13,8 @@ import { partsOf, repairRequest } from '../notices.mjs'
 const PARTS = ['frame', 'check', 'check asked', 'seen', 'unseen', 'check end', 'repair', 'repair auto', 'repair end',
   'corrected', 'narrowed', 'rewritten', 'not confirmed', 'wrong', 'verified', 'still not confirmed', 'still wrong',
   'not checked', 'not checked again', 'why', 'request', 'request auto', 'request not run', 'request stale',
-  'request card ran', 'request stale also', 'request where', 'found not confirmed', 'found wrong', 'request task']
+  'request card ran', 'request stale also', 'request stale value', 'request where', 'found not confirmed', 'found wrong',
+  'request task']
 
 const parts = async mode => partsOf(await textOf('notices', mode))
 
@@ -36,5 +37,16 @@ test("a stale citation's repair request names each card that ran again after the
     assert.match(text, /since runs\.csv changed after its first check\. .* thimble ran card:k3f9a1 again after that change, so its cells now hold the current values\. It may stand in an earlier reply/)
     // with no card that ran, the request names none
     assert.doesNotMatch(repairRequest(p, stale, 2), /thimble ran/)
+  }
+})
+
+test("a stale citation's repair request asks for the sentence as the files are now, and only what was before in the reason", async () => {
+  const stale = n => ({ n, words: '3 lines', status: 'verified', sources: [{ file: 'README.md', path: '/made-up/README.md', changed: true }] })
+  for (const mode of ['terminal', 'browser']) {
+    const p = await parts(mode)
+    const [first, task] = repairRequest(p, stale(1), 1, false, [stale(2)]).split('\n')
+    // after every citation the check takes, for all of them
+    assert.match(first, /Check it again as well\. When a value the sentence states changed, correct the sentence to the value as it is now\. Say what it was before in `reason`, not in the sentence\.$/)
+    assert.match(task, /^Check it again from the start\./)
   }
 })

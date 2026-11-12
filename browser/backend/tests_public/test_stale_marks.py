@@ -105,8 +105,9 @@ def test_a_mark_whose_cited_line_changed_is_stale_and_repair_checks_it_against_t
 
     _repair(turn, fork)
     assert ("The analyst pressed Repair on citation 1, since notes.md changed after its first check. What this session read or "
-            "printed before that change may be out of date. A copy of a file from before the change is no evidence. Say what "
-            "changed in `reason`, not in the sentence.") in prompts[-1]
+            "printed before that change may be out of date. A copy of a file from before the change is no evidence. It may "
+            "stand in an earlier reply than your last. When a value the sentence states changed, correct the sentence to the "
+            "value as it is now. Say what it was before in `reason`, not in the sentence.") in prompts[-1]
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "corrected" and m["shown"] == "port 9000" and marks.stale_sources(m) == [], m
     assert "fresh" not in m
