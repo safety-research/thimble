@@ -7,8 +7,9 @@
 // (backend files_timeline.html). The reader feeds the page (ViewerFrame's `host`): every record with a time and its
 // values of the keys Color by offers in the Transcript and Table views (GET /source/events, colorKeys), Color by opening
 // on the key those views open on (defaultChoice) and Rows on the next key with few values; a record that opens in the
-// side panel is read whole (GET /ref). The labels that are on mark the records the table draws, and a citation of the
-// file opens the record it names.
+// side panel is read whole (GET /ref). The labels that are on mark the rows the table draws, a label colored by colors
+// every record, in the lanes and the strip too (backend viewer_colour.js markFor), and a citation of the file opens the
+// record it names.
 import { useMemo } from 'react'
 import { api } from '../../lib/api'
 import type { SourceEvents, SourceKey, SourceKind, TimeHint, TranscriptHint } from '../../lib/types'

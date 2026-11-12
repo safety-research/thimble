@@ -1294,11 +1294,22 @@
     this.body.className = 'thimble-lanes-body'
     this.mount.appendChild(this.body)
     if (foot) this.mount.appendChild(foot)
-    // the marks follow Color by as it changes, unless the lanes are given `color: false`
-    if (!this.bars.off)
+    // the marks follow Color by as it changes, unless the lanes are given `color: false`, and a label colored by as its
+    // values reach the records, which the lanes draw whether or not the page draws them anywhere else
+    if (!this.bars.off) {
       shared.onColour(function () {
         if (self.nodes.length && self.mount.isConnected) self.paint()
       })
+      var marksFrame = null
+      thimble.onMarks(function () {
+        var c = self.bars.colour()
+        if (!c || !c.label || marksFrame != null || !self.nodes.length || !self.mount.isConnected) return
+        marksFrame = requestAnimationFrame(function () {
+          marksFrame = null
+          self.paint()
+        })
+      })
+    }
     this.spanEl = document.createElement('div')
     this.spanEl.className = 'thimble-lanes-span'
     this.spanEl.setAttribute('aria-hidden', 'true')

@@ -40,10 +40,11 @@
 // green, gold, teal, brown, sky, then the rest (backend/app/label_order.json, which views.frame_document puts in the
 // frame as window.__thimbleLabelOrder), so the first five are five hues with no second blue; a place a value names or
 // keeps is the same hue whatever the order. --label-13 to --label-18, red, purple and pink, a value takes only when the
-// analyst picks it. A label colors by its values on each anchored record, in the label's own colours; a label the
-// analyst turns on anywhere in thimble takes the first place. Off colors nothing: no chips, no bars, no lanes, the tracks
-// a plain scrollbar. Colour marks the records alone, the anchored elements: a group's row takes none, and may show its
-// records' mix with thimble.mix.
+// analyst picks it. A label colors by its values on each anchored record, and on each record the kit draws no element
+// for, such as a table's rows out of view (markFor), in the label's own colours; a label the analyst turns on anywhere
+// in thimble takes the first place. Off colors nothing: no chips, no bars, no lanes, the tracks a plain scrollbar.
+// Colour marks the records alone, the anchored elements: a group's row takes none, and may show its records' mix with
+// thimble.mix.
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
 // top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a
 // value's color off or on, an Alt-click or a double click keeps that value's alone, and hovering a value shows what it
@@ -813,10 +814,20 @@
   // a label's value on a record (record.ref, or a ref given as a string), from the marks thimble draws; null for none
   function labelValue(id, record) {
     var ref = record != null && typeof record === 'object' ? record.ref : record
-    var m = ref != null ? thimble.markOf(String(ref)) : null
+    var m = markFor(ref)
     var vs = m && Array.isArray(m.values) ? m.values : []
     for (var i = 0; i < vs.length; i++) if (vs[i] && vs[i].id === id) return String(vs[i].value)
     return null
+  }
+  // A record's marks as thimble sent them, or null. thimble sends the marks of the records the page anchors; for a record
+  // no element anchors, such as a row a table leaves undrawn out of view or a mark of the lanes, reading its marks asks
+  // for them (the bridge's want), and they come with the next marks (thimble.onMarks), so that a label's value reaches
+  // every record the kit draws, not only the rows drawn first
+  function markFor(ref) {
+    if (ref == null || ref === '') return null
+    var m = thimble.markOf(String(ref))
+    if (!m) kit.want(ref)
+    return m
   }
 
   // ---------------------------------------------------------------- counts and values
@@ -2390,7 +2401,7 @@
           var tv = at ? tracksOf(at) : null
           return tv ? fieldIn(lane, tv[lane.at]) : null
         }
-        var mk = ref != null ? thimble.markOf(String(ref)) : null
+        var mk = markFor(ref)
         var vs = mk && Array.isArray(mk.values) ? mk.values : []
         for (var vi = 0; vi < vs.length; vi++) {
           if (!vs[vi] || String(vs[vi].id) !== lane.id) continue

@@ -29,7 +29,8 @@
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
 //   anchors {refs, seq, seen}
-//                          frame to page: the data-anchor values that appeared since the last report, `seq` how many
+//                          frame to page: the data-anchor values that appeared since the last report, with the refs of
+//                          records the view kit read a label's value of that no element anchors (want), `seq` how many
 //                          have been reported in all, and `seen` those of the anchored elements in the frame's viewport
 //                          not reported in view before, whose labels thimble reads first
 //   seen {refs}            frame to page: the same for the anchored elements a scroll, a resize or a redraw brought into
@@ -975,7 +976,9 @@
     post({ type: P + 'hidden', n: n, self: self })
   }
   function note(el) {
-    var ref = el.getAttribute('data-anchor')
+    noteRef(el.getAttribute('data-anchor'))
+  }
+  function noteRef(ref) {
     if (!ref || reported[ref]) return
     reported[ref] = true
     unsent.push(ref)
@@ -1906,12 +1909,19 @@
 
   // What the view kit's own controls (viewer_colour.js and viewer_range.js, loaded right after this bridge) need of it,
   // handed over once (the last of them takes it away): they hear the labels and marks without registering the page's
-  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, keep the choice and the time
-  // ranges with thimble, and say what the side panel shows (viewer_side.js), which a newer version opens on.
+  // onLabels, ask for the marks of records no element anchors, set the Color by choice the marks are drawn by, have the
+  // page drawn again, keep the choice and the time ranges with thimble, and say what the side panel shows
+  // (viewer_side.js), which a newer version opens on.
   window.__thimbleKit = {
     labels: function (fn) {
       kitFns.push(fn)
       if (labelState) fn(labelState, true, true)
+    },
+    // a record whose label's value the kit read with no element anchoring it, such as a row a table leaves undrawn out
+    // of view or a mark of the lanes: reported as an anchored element's ref is, once, so that its marks come too
+    want: function (ref) {
+      noteRef(ref == null ? '' : String(ref))
+      if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     },
     colour: function (hook) {
       colourHook = hook || null

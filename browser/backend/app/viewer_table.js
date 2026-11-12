@@ -278,13 +278,15 @@
     shared.onColour(function () {
       if (!self.dead && self.colourSig() !== self.colourKey) self.recolour(true)
     })
-    // a label colored by reaches the rows as they come into view: the strip's colours follow
+    // a label colored by reaches the rows as their marks arrive, the rows not drawn as well: the chips' counts and the
+    // strip's colours follow
     var marksFrame = null
     thimble.onMarks(function () {
       var c = self.bars.colour()
       if (self.dead || !c || !c.label || marksFrame != null) return
       marksFrame = requestAnimationFrame(function () {
         marksFrame = null
+        self.count()
         self.colourStrip()
       })
     })
@@ -762,27 +764,31 @@
       box: this.mount,
     })
   }
-  // What Color by draws, drawn again: the chips count the rows while a field is the colour (a label's values reach only
-  // the rows drawn), the strip shows every row's colour, and the rows near the view are drawn anew with their bars
+  // What Color by draws, drawn again: the chips count the rows, the strip shows every row's colour, and the rows near the
+  // view are drawn anew with their bars
   Table.prototype.recolour = function (rows) {
-    var c = this.bars.colour()
     this.colourKey = this.colourSig()
-    if (c && c.field) {
-      var counts = {}
-      for (var i = 0; i < this.shown.length; i++) {
-        var v = c.valueOf(this.shown[i])
-        var k = v == null ? '' : v
-        counts[k] = (counts[k] || 0) + 1
-      }
-      // the counts of the rows in its mount, which the chips count while the table shows (not in a tab out of view)
-      c.counts(counts, this.mount)
-    }
+    this.count()
     this.colourStrip()
     this.drawn.forEach(function (el) {
       el.remove()
     })
     this.drawn.clear()
     if (rows) this.window()
+  }
+  // The chips' counts of the rows: each row's value of the field or the label colored by, a row whose marks have not
+  // arrived yet counted as unmarked until they do. They are the counts of the rows in its mount, which the chips count
+  // while the table shows (not in a tab out of view).
+  Table.prototype.count = function () {
+    var c = this.bars.colour()
+    if (!c || (!c.field && !c.label) || typeof c.counts !== 'function') return
+    var counts = {}
+    for (var i = 0; i < this.shown.length; i++) {
+      var v = c.valueOf(this.shown[i])
+      var k = v == null ? '' : v
+      counts[k] = (counts[k] || 0) + 1
+    }
+    c.counts(counts, this.mount)
   }
   // the strip: every row's Color by value, ref and record, and what the loupe says of it: as metadata the first column
   // of times and the first column of text other than the main one, such as a sender, and as text the main column. The time
