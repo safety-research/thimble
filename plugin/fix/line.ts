@@ -17,7 +17,8 @@
 //               For the browser: restart thimble-browser    loads thimble with --plugin-dir, the restart that loads it)
 //               If thimble stops loading: sh …/off.sh
 //             (For the browser: only for a fix that changes what thimble-browser runs, which keeps the code it
-//             started with; an off line of such a fix has the row too)
+//             started with; while a thimble-browser runs from live, "click Use it now in the workbench", where its page
+//             asks to use the fix; an off line of such a fix has the restart's row too)
 //   off       ○ <title> is off · thimble reloaded           (until the next prompt)
 //             ↺ <title> is back to its version before · thimble reloaded   (u after y on a changed fix)
 //   failed    × <title> did not pass · <why>                y try again · d ask Claude · n dismiss   (until the
@@ -219,8 +220,10 @@ function failedKeys(els: Any, f: Fix | null, open: boolean, press: (k: string) =
 }
 
 /** What the line says under a fix that went on or off and changes what thimble-browser runs, in the words of the line
- *  after an update (fixes.ts carriedLine). */
+ *  after an update (fixes.ts carriedLine); for a fix that went on while a thimble-browser runs from live, the notice
+ *  its page shows, whose Use it now starts it again (the browser's fixes.elsewhere). */
 export const BROWSER_HINT = 'For the browser: restart thimble-browser'
+export const NOTICE_HINT = 'For the browser: click Use it now in the workbench'
 
 /** The line's rows, `width` cells wide, or none. */
 export async function fixLineRows($: Engine, els: Any, width: number): Promise<Any[]> {
@@ -248,9 +251,10 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   let why: Any[] = []
   let note: Any[] = []
   // a fix that changes what thimble-browser runs went on or off: a thimble-browser that runs now loads the change when
-  // it starts again, in a row of its own, as the first row has room for the title and its keys alone
+  // it starts again, by the Use it now its page shows or by a restart, in a row of its own, as the first row has room
+  // for the title and its keys alone
   const browser = (l.kind === 'applied' || l.kind === 'off') && l.browser
-    ? [Text({ key: 'b', wrap: 'wrap', children: `  ${BROWSER_HINT}` })] : []
+    ? [Text({ key: 'b', wrap: 'wrap', children: `  ${l.browser === 'notice' ? NOTICE_HINT : BROWSER_HINT}` })] : []
   if (l.kind === 'ready' && f) {
     // a round of a fix the person has: its new version, which y puts in place of the one they have; a fix that changes
     // the files the person is told of says which, in a row of its own, before they press y

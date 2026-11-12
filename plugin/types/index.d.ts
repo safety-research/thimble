@@ -154,7 +154,7 @@ declare module 'claude-code' {
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
        *  changed; a reload that waits for Claude's turn or a restart; for an update, whether the session loads what
        *  changed (fixes.ts FixLine) */
-      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean; browser?: boolean } | null
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean; browser?: 'restart' | 'notice' } | null
       /** whether this session looked for a newer release already (register.ts) */
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */

@@ -44,8 +44,9 @@ let now = 0
 
 /** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. `refuse`: the
  *  kernel's check does not use the fixer's first change, with this refusal. `path`: the file the fixer's change is in;
- *  as the kernel does, y and u on a fix to the browser workbench say that a thimble-browser that runs is stale. */
-function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx') {
+ *  as the kernel does, y and u on a fix to the browser workbench say that a thimble-browser that runs is stale, and y,
+ *  while one runs from live (`open`), that its page shows the fix's notice. */
+function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
@@ -69,6 +70,7 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx') {
   const all = () => (made && fix.state !== 'removed' ? [fix] : [])
   const list = () => ({ fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true, due: null })
   const stale = path.startsWith('browser/') ? { browser: 'stale' } : {}
+  const wentOn = path.startsWith('browser/') ? { browser: open ? 'notice' : 'stale' } : {}
   const kernel = (argv: string[], stdin?: string) => {
     const ok = (out: unknown) => ({ exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '' })
     const verb = argv[argv.indexOf('fix') + 1]
@@ -100,7 +102,7 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx') {
       // the kernel checks the press's secret against the sha256 the plugin wrote
       if (!JSON.parse(files.get(`${HOME}/fixes/asks/1.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix apply: only the person's key press in thimble does that" }
       Object.assign(fix, { state: 'on', work: null })
-      return ok({ id: 1, reload: true, version: '0.10.2+fix.c0ffee1', ...stale })
+      return ok({ id: 1, reload: true, version: '0.10.2+fix.c0ffee1', ...wentOn })
     }
     if (verb === 'undo') {
       Object.assign(fix, { state: 'off' })
@@ -381,6 +383,31 @@ test('y and u on a fix to the browser workbench: the line names the restart of t
   ])
   await (await fixKey(t.$, 'u'))!.later()
   expect((await fixLineRows(t.$, ELS, 110)).map(textOf)).toEqual(['  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again'])
+})
+
+test('y on a fix to the browser workbench while a thimble-browser runs: the row names the notice its page shows, which a reload that waited keeps; u names its restart', async () => {
+  const s = setup(null, 'browser/frontend/src/lib/theme.ts', true)
+  await requested(s)
+  const TURN = { plugin: 'thimble', key: 'mainTurn' }
+  await s.$.state.set(TURN, 't-main')
+  await (await fixKey(s.$, 'y'))!.later()
+  const rows = async () => (await fixLineRows(s.$, ELS, 110)).map(textOf)
+  expect(await rows()).toEqual([
+    '  ✓ Bar says read for coverage is on · reloads when Claude finishes · u undo',
+    '    For the browser: click Use it now in the workbench',
+    `    If thimble stops loading: sh ${HOME}/fixes/off.sh`,
+  ])
+  await s.$.state.set(TURN, null)
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect((await rows())[1]).toBe('    For the browser: click Use it now in the workbench')
+  await (await fixKey(s.$, 'u'))!.later()
+  expect(await rows()).toEqual([
+    '  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again',
+    '    For the browser: restart thimble-browser',
+  ])
 })
 
 test("a change whose tests failed: a new fixer gets another round in the same copy, told the end of the tests' output and the file that holds all of it; the person sees the fix only once it passes", async () => {
