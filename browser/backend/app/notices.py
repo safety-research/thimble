@@ -32,7 +32,8 @@ view builds and code tickets, checks.py for report checks), `proposals` for the 
 `safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py; the page shows it in that
 chat alone, since it tells of that chat's own replies), `thread:<chat>` and
 `helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
-(card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
+(card_check.py), `label:<id>` (concepts.py) and `export-artifact` for an export as a Claude artifact that published
+nothing (artifact_export.py). post and clear never raise: a failure to tell is logged.
 
 Kinds that tell of the setup rather than a failure:
 
@@ -245,7 +246,8 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
     """Tell the analyst in the foreground that something failed (module note): an open notice, replacing the one under
     the same `key`, a row in the agent's chat `chat` when it has one (not with `row` false: the chat shows the failure
     itself, as main's API error card does), and the `notice` event. `kind` names what failed ("agent", "safeguards",
-    "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). The
+    "view", "proposals", "card-check", "label", "export", API for main's own request, or a setup kind of the module
+    note). The
     notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed). `details` is the
     whole of a text the caller shortened (a failure's words cut by gist); a text longer than TEXT_CHARS keeps its own
     whole as `details`."""

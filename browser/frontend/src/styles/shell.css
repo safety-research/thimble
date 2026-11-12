@@ -692,6 +692,12 @@
 .shell-toast-text code {
   font: var(--type-mono-sm);
 }
+.shell-toast-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
 .theme-pop {

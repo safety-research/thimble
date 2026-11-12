@@ -1,6 +1,6 @@
 // A figure's art: the chart, table or drawing a report figure shows under its question, laid out at the figure's width.
 // The page draws it in each figure (FigureBlock.tsx), and the card harness draws the same for an export (render.tsx), so
-// a downloaded report and its slides show each figure as the page does.
+// a downloaded report shows each figure as the page does.
 import { useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import { CardBody } from '../canvas/bodies'
 import { useConceptDetail, useConcepts } from '../canvas/concepts'

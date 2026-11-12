@@ -19,7 +19,7 @@ import { kindOf } from './canvas/layout'
 import { apiPath } from './lib/browserKey'
 import { registerCells, registerConcepts } from './lib/cellName'
 import { inlineFaces, pageFaceRules, pageFaces } from './lib/frame'
-import { setAccent, setPaper, type Accent, type Paper } from './lib/theme'
+import { getAccent, getPaper, holdTheme, type Accent, type Paper } from './lib/theme'
 import type { Cell, Concept, ConceptDetail } from './lib/types'
 import { drawnView } from './lib/vegaDraw'
 import { FigureArt } from './report/FigureArt'
@@ -181,8 +181,8 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   // differently after an edit
   const ws = `render-${n}`
   history.replaceState(null, '', `?ws=${ws}`)
-  if (req.theme?.paper) setPaper(req.theme.paper)
-  if (req.theme?.accent) setAccent(req.theme.accent)
+  // the pool's pages share one storage, so each holds its request's theme to itself rather than store it (lib/theme)
+  if (req.theme?.paper || req.theme?.accent) holdTheme(req.theme.paper ?? getPaper(), req.theme.accent ?? getAccent())
   registerCells((req.names ?? []).map((c) => ({ id: c.id, title: c.title })))
   registerConcepts(req.labels ?? [])
   const cell: Cell = req.card

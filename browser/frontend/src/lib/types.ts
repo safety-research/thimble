@@ -136,6 +136,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
   | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
   | { type: 'checks'; id: string }
+  | { type: 'export'; doc: string; format: string; status: 'published' | 'failed' | string; link?: string }
   | { type: 'job'; status: string }
   | { type: 'server'; status: string }
   | { type: string; [k: string]: unknown }

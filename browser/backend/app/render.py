@@ -545,10 +545,11 @@ def theme(c: str) -> dict[str, str]:
     return {"paper": paper, "accent": accent}
 
 
-def export_theme(c: str) -> dict[str, str]:
+def export_theme(c: str, paper: str = "neutral") -> dict[str, str]:
     """The theme an export's figures are drawn in: the analyst's accent (theme) on Neutral, whose white is the page a
-    download is printed on and a slide is shown on."""
-    return {"paper": "neutral", "accent": theme(c)["accent"]}
+    download is printed on, or on `paper`, such as Dark for the dark theme of a Claude artifact's page
+    (exports.to_artifact)."""
+    return {"paper": paper if paper in PAPERS else "neutral", "accent": theme(c)["accent"]}
 
 
 def label_data(c: str, cell: dict[str, Any]) -> dict[str, Any] | None:
@@ -584,13 +585,14 @@ def card_libs_part(c: str, cell: dict[str, Any]) -> dict[str, Any]:
 
 
 def request_for(c: str, cell: dict[str, Any], *, width: int | None = None, figure: bool = False,
-                zoom: float = 1.0, whole: bool = False, files: tuple[str, ...] = ()) -> dict[str, Any]:
+                zoom: float = 1.0, whole: bool = False, files: tuple[str, ...] = (),
+                paper: str = "neutral") -> dict[str, Any]:
     """The render request for one card as it stands (module note, the page): the card as the canvas reads it, its refs
     resolved, the cards they name, the theme and the width, for a label card its label (label_data), and for a custom
     card the libraries it names (card_libs_part). `figure`: the page draws the card's art as a report figure shows it, in
-    the export's theme (export_theme), in place of the card face, `zoom` times as large as its layout; `whole` with the
-    card's question over it and its takeaway beside the rule under it; `files` the ones of FIGURE_FILES to make of the
-    drawing (render_figure)."""
+    the export's theme on `paper` (export_theme), in place of the card face, `zoom` times as large as its layout; `whole`
+    with the card's question over it and its takeaway beside the rule under it; `files` the ones of FIGURE_FILES to make
+    of the drawing (render_figure)."""
     refs = cited_refs(cell)
     label = label_data(c, cell)
     w = width or cell.get("width") or CARD_W
@@ -603,7 +605,7 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None, figur
         "citations": resolve_all(c, refs),
         "names": card_names(c, refs, cell),
         "labels": label_names(c, cell),
-        "theme": export_theme(c) if figure else theme(c),
+        "theme": export_theme(c, paper) if figure else theme(c),
         "width": int(w) if isinstance(w, (int, float)) and w > 0 else CARD_W,
         **({"label": label} if label else {}),
         **card_libs_part(c, cell),
@@ -624,9 +626,10 @@ async def render_card(c: str, cell: dict[str, Any], *, width: int | None = None,
 
 
 async def render_figure(c: str, cell: dict[str, Any], *, width: int, zoom: float = 1.0, whole: bool = False,
-                        files: tuple[str, ...] = (), timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
+                        files: tuple[str, ...] = (), paper: str = "neutral",
+                        timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
     """The art of one card of workspace `c` as a report figure draws it, laid out `width` px wide and drawn `zoom` times
-    as large, on the paper of the export's theme (request_for `figure`): the picture an export shows for a figure, with a
+    as large, on `paper` in the export's theme (request_for `figure`): the picture an export shows for a figure, with a
     table wider than `width` whole, its box in zoomed px. `whole`: the figure as one picture, `width` px wide, the card's
     question over its art and its takeaway beside the rule under it, as an export of the card alone shows it
     (card_export.py). `files`: the ones of FIGURE_FILES to make of the same drawing besides the PNG (Rendered.webp, pdf,
@@ -635,7 +638,8 @@ async def render_figure(c: str, cell: dict[str, Any], *, width: int, zoom: float
         raise ValueError(f"a figure's files are of {', '.join(FIGURE_FILES)}, not {', '.join(map(repr, unknown))}")
     if not enabled():
         raise Unavailable("THIMBLE_RENDER is off")
-    req = await asyncio.to_thread(request_for, c, cell, width=width, figure=True, zoom=zoom, whole=whole, files=files)
+    req = await asyncio.to_thread(request_for, c, cell, width=width, figure=True, zoom=zoom, whole=whole, files=files,
+                                  paper=paper)
     return await pool().render(req, timeout_s=timeout_s)
 
 

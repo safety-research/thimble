@@ -87,6 +87,10 @@ function fanOut(ev: WsEvent): void {
     case 'card-request':
       if (typeof rest.request === 'string' && typeof rest.card === 'string') bus.emit('cardRequest', { request: rest.request, card: rest.card })
       return
+    case 'export':
+      if (typeof rest.doc === 'string')
+        bus.emit('export', { doc: rest.doc, format: String(rest.format ?? ''), status: String(rest.status ?? ''), link: typeof rest.link === 'string' ? rest.link : undefined })
+      return
     case 'layout': {
       const presets = ['one', 'columns', 'rows', 'three', 'quadrants'] as const
       const name = presets.find((x) => x === rest.layout)
