@@ -178,9 +178,3 @@ export function takeawayChecks(cell: { id?: string; takeaway?: string; takeaway_
   for (const m of kept.items) if (typeof m?.k === 'number') out[m.k] = cell.id ? { ...m, card: cell.id } : m
   return out
 }
-
-/** The counts a reply's footer says once its check settled: how many marks failed. Pure. */
-export function footerCounts(items: readonly MarkItem[]): { look: MarkLook; n: number }[] {
-  const n = items.filter((m) => lookOf(m) === 'failed').length
-  return n ? [{ look: 'failed', n }] : []
-}

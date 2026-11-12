@@ -30,7 +30,6 @@ import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdo
 import { AnswerCommentPop } from './AnswerComment'
 import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
 import { asChecked } from '../marks/marks'
-import { MarksFooter } from '../marks/MarksFooter'
 import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, REWIND_CHIP, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
@@ -257,7 +256,6 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
                   <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} marks={own?.marks} />
                 </div>
                 {open && <AnswerCommentPop key={open.id} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
-                {r.turnMarks && <MarksFooter items={r.turnMarks} />}
               </div>
             )
           }

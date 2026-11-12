@@ -28,8 +28,6 @@ export interface TextRow {
   apiError?: string
   /** the check of this row's marks, by their order in its text (backend marks.py) */
   checks?: (MarkItem | undefined)[]
-  /** the turn's marks, on the turn's last text row (its reply), for the footer under it */
-  turnMarks?: MarkItem[]
   /** the id of main's turn this row answers, which its `done` record names: the checks' comments on the answer name it
    * (chat/answerComments.ts) */
   turn?: string
@@ -301,8 +299,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
 }
 
 /** Each turn's marks on its text rows: the marks are numbered in the order they stand in the turn's texts (backend
- * marks.py), so a row's checks are the next as many items as its text has marks. The turn's last text row, its reply,
- * gets the turn's marks for its footer. */
+ * marks.py), so a row's checks are the next as many items as its text has marks. */
 function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<string, MarkItem[]>): void {
   for (const [turn, items] of marks) {
     const texts = turns.get(turn)
@@ -314,7 +311,6 @@ function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<str
       if (n) row.checks = byN.slice(at, at + n)
       at += n
     }
-    texts[texts.length - 1].turnMarks = byN
   }
 }
 
