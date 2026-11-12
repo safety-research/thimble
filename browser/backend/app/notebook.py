@@ -3404,9 +3404,10 @@ TRIAL_EXPR_KEY = "thimble_trial"  # the user expression that ends a trial (trial
 
 async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
     """The card as it would be with `code`, run on the card's kernel and not stored: a fix the card check tries before
-    applying it. Returns {**card, code, outputs, status, exec_count, trial}, its outputs numbered against the card's.
-    The names the run bound are noted under `trial` so trial_settle can put them back when the fix is refused. KeyError
-    for a missing card, ValueError for one that runs no code."""
+    applying it, or the card's own code run again to see whether its values changed (marks.py). Returns {**card, code,
+    outputs, status, exec_count, trial, reads}, its outputs numbered against the card's, `reads` the files this run read
+    as the reads hook reports them. The names the run bound are noted under `trial` so trial_settle can put them back
+    when the fix is refused. KeyError for a missing card, ValueError for one that runs no code."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -3428,12 +3429,12 @@ async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
             # after it, so nothing else runs between them
             outputs, exec_count, status = await _run_card_code(k, f"{_trial_code('begin', tid)}\n{code}", cell.get("kind"),
                                                                timeout_s, {TRIAL_EXPR_KEY: _trial_code("end", tid)})
-            labels, revs = k.last_labels, k.last_label_revs
+            labels, revs, reads = k.last_labels, k.last_label_revs, k.last_reads
     except Exception as e:  # noqa: BLE001 — a kernel that failed to start is the trial's error, as for a run
-        outputs, exec_count, status, labels, revs = [_error_bundle(type(e).__name__, str(e))], None, "error", [], {}
+        outputs, exec_count, status, labels, revs, reads = [_error_bundle(type(e).__name__, str(e))], None, "error", [], {}, None
     number_outputs(_memo_of(cell), outputs)
     return {**copy.deepcopy(cell), "code": code, "outputs": outputs, "status": status, "exec_count": exec_count,
-            "labels": labels, "label_revs": revs, "trial": tid}
+            "labels": labels, "label_revs": revs, "trial": tid, **({"reads": reads["reads"]} if reads else {})}
 
 
 async def trial_settle(workspace: str, cell_id: str, tid: str, *, keep: bool) -> None:

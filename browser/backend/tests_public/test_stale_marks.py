@@ -105,7 +105,8 @@ def test_a_mark_whose_cited_line_changed_is_stale_and_repair_checks_it_against_t
 
     _repair(turn, fork)
     assert ("The analyst pressed Repair on citation 1, since notes.md changed after its first check. What this session read or "
-            "printed before that change may be out of date. A copy of a file from before the change is no evidence.") in prompts[-1]
+            "printed before that change may be out of date. A copy of a file from before the change is no evidence. Say what "
+            "changed in `reason`, not in the sentence.") in prompts[-1]
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "corrected" and m["shown"] == "port 9000" and marks.stale_sources(m) == [], m
     assert "fresh" not in m
@@ -211,3 +212,162 @@ def test_a_pass_reads_only_the_replies_whose_marks_rest_on_a_file_that_changed_a
     _, log_path = agents.paths(CORPUS, agents.MAIN_ID)
     last = [r for r in agents.read_events(log_path) if r["type"] == "marks" and r["turn"] == a][-1]
     assert last["items"][0]["evidence"]["line"] == "3"
+
+
+def _validator():
+    """The terminal's validator as a module, for its prelude: the audit hook that notes what a script reads."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("thimble_validate_test", marks.VALIDATE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _plain_runner(runs: list):
+    """The runner with no sandbox, for the logic alone: the script run by this Python with the validator's prelude, as
+    validate.py runs it in the terminal's sandbox. Each run's script goes to `runs`."""
+    import subprocess
+    import sys
+
+    prelude = _validator().PRELUDE
+
+    def runner(c, folders):
+        def run(script, folder, python="python3", flags=(), argv=("-",)):
+            runs.append(script)
+            p = subprocess.run([sys.executable, "-B", *flags, "-c", prelude, *argv[1:]], input=script, capture_output=True,
+                               text=True, cwd=folder, env={**os.environ, "THIMBLE_READS": "made-up-mark", "THIMBLE_ARGV0": argv[0]})
+            errors, _, read = p.stderr.rpartition("\nmade-up-mark\n")
+            return {"output": p.stdout + errors, "reads": read.splitlines(), "ok": p.returncode == 0}
+        return run
+    return runner
+
+
+SEVERITIES = """import json, os
+from collections import Counter
+for build in sorted(os.listdir(".")):
+    path = os.path.join(build, "report", "review-results.json")
+    if os.path.isfile(path):
+        c = Counter(f["severity"] for f in json.load(open(path))["fixed"])
+        print(f"{build}: {c['major']} major, {c['minor']} minor of {sum(c.values())}")"""
+
+
+def test_a_computed_mark_rests_on_the_files_its_code_read_and_is_stale_only_when_its_value_changed(_fresh, monkeypatch):
+    folder = config.corpus_dir(CORPUS)
+    review = folder / "build-a" / "report" / "review-results.json"
+    review.parent.mkdir(parents=True)
+    review.write_text(json.dumps({"fixed": [{"title": "Streak resets", "severity": "major"}, {"title": "Toast hides undo", "severity": "minor"}]}, indent=1))
+    _main(monkeypatch, folder)
+    runs: list[str] = []
+    monkeypatch.setattr(marks, "runner", _plain_runner(runs))
+    run = marks.runner(CORPUS, (str(folder), str(folder)))
+    call = {"command": f"cd {folder} && python3 - <<'PY'\n{SEVERITIES}\nPY", "output": run(SEVERITIES, str(folder))["output"], "by": "checker"}
+    assert "build-a: 1 major, 1 minor of 2" in call["output"]
+
+    async def fork(c, main, cut, prompt):
+        out = [{"mark": 1, "kind": "computed", "evidence": {"output": "build-a: 1 major, 1 minor of 2"}, "status": "verified",
+                "reason": "counted", "method": "Counted the findings of each build's review results by severity."}]
+        return {"answer": _answer(out), "calls": [call], "error": None}
+
+    runs.clear()
+    turn = _check(folder, "Build-a's review has [1 major](#) finding.", fork)
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    # the file the code opened, through a path it built, is what the mark rests on; the check ran the code once
+    assert m["status"] == "verified" and [s["file"] for s in m["sources"]] == ["build-a/report/review-results.json"], m
+    assert m["rerun"]["given"] == "build-a: 1 major, 1 minor of 2" and len(runs) == 1
+    # an edit that leaves the count as it was: the code runs again, prints the same, and the mark rests on the file now
+    _edit(review, review.read_text().replace("Toast hides undo", "The toast hides undo"))
+    runs.clear()
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m2,) = marks.stored(CORPUS, turn)["items"]
+    assert len(runs) == 1 and marks.stale_sources(m2) == [] and m2["sources"][0]["sha256"] != m["sources"][0]["sha256"], m2
+    # an edit that changes it: the mark is stale
+    _edit(review, review.read_text().replace('"major"', '"minor"'))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m3,) = marks.stored(CORPUS, turn)["items"]
+    assert [s["file"] for s in marks.stale_sources(m3)] == ["build-a/report/review-results.json"], m3
+
+
+def _seed_reading_card(monkeypatch, data, takeaway: str) -> tuple[str, list[int]]:
+    """A card whose code read `data` (its reads record), its table as that file makes it, and a takeaway; a run of its
+    code, kept (1) or not (0), is replaced by one that reads the file again: (its id, the runs of it)."""
+    from app import notebook
+
+    def table() -> dict:
+        rows = json.loads(data.read_text())
+        body = "".join(f"<tr><th>{a}</th><td>{n}</td></tr>" for a, n in rows.items())
+        return {"text/html": f"<table><tr><th>agent</th><th>test runs</th></tr>{body}</table>"}
+
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "Tests", role="exploration")
+    cell = notebook.new_cell("code", "run", "Test runs by agent", nb["id"], code="print()")
+    cell.update(status="ok", outputs=[table()], takeaway=takeaway, reads=[str(data.relative_to(config.corpus_dir(CORPUS)))])
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    ran: list[int] = []
+
+    async def trial_run(c, cid, code):
+        ran.append(0)
+        return {**notebook.get_cell(c, cid), "outputs": [table()], "status": "ok", "trial": "t1", "reads": cell["reads"]}
+
+    async def trial_settle(c, cid, tid, *, keep):
+        assert tid == "t1" and keep is False
+
+    async def run_cell(c, nb_id, cid):
+        ran.append(1)
+        with notebook.editing(ws):
+            hit = notebook._locate(ws, cid)
+            hit[1].update(outputs=[table()], status="ok")
+            notebook.write_notebook(ws, hit[0])
+
+    monkeypatch.setattr(notebook, "trial_run", trial_run)
+    monkeypatch.setattr(notebook, "trial_settle", trial_settle)
+    monkeypatch.setattr(notebook, "_run_cell", run_cell)
+    return cell["id"], ran
+
+
+def test_a_takeaway_mark_on_a_card_s_value_goes_stale_when_the_card_s_input_changes_that_value_and_repair_runs_the_card(_fresh, monkeypatch):
+    from app import notebook
+
+    folder = config.corpus_dir(CORPUS)
+    data = folder / "tests.json"
+    data.write_text(json.dumps({"agent-01": 71, "agent-02": 40}))
+    _main(monkeypatch, folder)
+    cid, ran = _seed_reading_card(monkeypatch, data, "agent-01 ran its tests [71](#) times.")
+
+    async def fork(c, main, cut, prompt):
+        value = json.loads(data.read_text())["agent-01"]
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": f"card:{cid}#test runs/agent-01"}, "reason": "the table says so",
+                **({"status": "verified"} if value == 71 else {"status": "corrected", "correction": {"words": str(value)}})}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    asyncio.run(marks.start_check(CORPUS, {"sid": SID, "cwd": str(folder), "transcript_path": None}, turn, [], "cut-1", fork=fork))
+    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    # the card's value rests on the file the card's code read
+    assert m["status"] == "verified" and [s["file"] for s in m["sources"]] == ["tests.json"], m
+    assert m["rerun"] == {"card": cid, "values": {f"card:{cid}#test%20runs/agent-01": "71"}}
+    index = json.loads((config.workspace_dir(CORPUS) / "marks" / "cited.json").read_text())
+    assert [f["by"] for f in index["files"].values()] == [{f"card:{cid}": [0]}]
+    # another agent's count changed: the card's code runs again, not kept, and the cited value is as it was
+    _edit(data, json.dumps({"agent-01": 71, "agent-02": 41}))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m2,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert ran == [0] and marks.stale_sources(m2) == [], m2
+    # the cited value changed: the takeaway's mark is stale, and the card shows its outputs as they were
+    _edit(data, json.dumps({"agent-01": 72, "agent-02": 41}))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    (m3,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert ran == [0, 0] and [s["file"] for s in marks.stale_sources(m3)] == ["tests.json"], m3
+    assert ">71<" in notebook.get_cell(CORPUS, cid)["outputs"][0]["text/html"]
+
+    # Repair: the card runs again, then the check reads its new value and corrects the takeaway's words
+    async def go():
+        assert await marks.repair(CORPUS, card=cid, k=0, fork=fork) == ""
+        await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+    asyncio.run(go())
+    assert ran == [0, 0, 1]
+    (m4,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert m4["status"] == "corrected" and m4["shown"] == "72" and marks.stale_sources(m4) == [], m4
+    assert m4["rerun"]["values"] == {f"card:{cid}#test%20runs/agent-01": "72"}

@@ -220,7 +220,7 @@ test('x on a stale citation checks it again against the files as they are now; o
   const r = await repairOf($, 'row-1', 1)
   expect(r).toMatchObject({ again: true })
   // a copy of the file kept from before the change is no evidence either
-  expect((r as Any).prompt).toContain('The analyst pressed x on citation 1, since README.md changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence. It may stand in an earlier reply than your last.\nCheck it again from the start.')
+  expect((r as Any).prompt).toContain('The analyst pressed x on citation 1, since README.md changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence. Say what changed in `reason`, not in the sentence. It may stand in an earlier reply than your last.\nCheck it again from the start.')
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   // while it runs it is checked again, its old sources gone
   const running = (await rowMarks($, 'row-1'))!.items[0]!
@@ -349,4 +349,45 @@ test('a pass stats each cited file once and reads only the replies whose citatio
   // a check of it again takes it off the index while it runs; a file no citation rests on leaves the index
   await editReply($, 'row-b', r => ({ ...r, items: r.items.map(m => { const { sources: _s, ...rest } = m; return { ...rest, status: 'checking' as const } }) }))
   expect(Object.keys(await citedFiles($))).toEqual([A.path])
+})
+
+test('a computed citation whose file changed has its code run again by the kernel: it stays verified while the code prints what its check gave, and goes stale when not', async () => {
+  setOptions({ citations: 'auto + verify' })
+  const READ = { file: 'build-a/report/review-results.json', path: '/made-up/data/build-a/report/review-results.json', size: 300, mtime: 1, sha256: 'r1' }
+  const RERUN = { command: "cd /made-up/data && python3 - <<'PY'\nprint('counts')\nPY", cwd: '/made-up/data', root: '/made-up/data', given: 'build-a: 1 major, 2 minor of 3' }
+  const evidence = { kind: 'computed', code: "print('counts')", output: 'build-a: 1 major, 2 minor of 3', highlight: [[9, 16]], by: 'checker' }
+  const files: Record<string, { size: number; mtimeMs: number }> = { [READ.path]: { size: 300, mtimeMs: 1 } }
+  // the kernel: the first run prints what the check gave, the second does not
+  let runs = 0
+  const { $, seen } = engine(req => ({ cited: req.cited.map((c: Any) => (c.rerun && ++runs === 1
+    ? { sources: c.sources, rests: [{ ...READ, size: 310, mtime: 2, sha256: 'r2' }] }
+    : { sources: c.sources.map((s: Any) => ({ ...s, changed: true })) })) }), files)
+  const item: MarkItem = { n: 1, row: 'row-1', words: '1 major', start: 0, end: 7, sentence: 's', status: 'verified', shown: '1 major', evidence: evidence as never, sources: [READ], rerun: RERUN }
+  await newReply($, { key: 'row-1', turnId: 't-1', rows: ['row-1'], startedAt: 0, settledAt: 1, items: [] })
+  await editReply($, 'row-1', r => ({ ...r, items: [item] }))
+
+  // an edit of the file that leaves the cited value as it was: the stat alone does not decide it; the kernel runs its
+  // code again, with the session's folders, and the citation rests on the file as that run read it
+  files[READ.path] = { size: 310, mtimeMs: 2 }
+  await examineSources($)
+  expect(seen.stdin.length).toBe(1)
+  expect(seen.stdin[0]).toMatchObject({ cwd: '/made-up/data', root: '/made-up/data' })
+  expect(seen.stdin[0].cited[0]).toMatchObject({ rerun: RERUN, sources: [READ] })
+  const held = (await replyOf($, 'row-1'))!.items[0]!
+  expect(staleOf(held)).toEqual([])
+  expect(held.sources).toEqual([{ ...READ, size: 310, mtime: 2, sha256: 'r2' }])
+  expect((await citedFiles($))[READ.path]!.seen).toEqual({ size: 310, mtime: 2 })
+
+  // an edit that changes the value: the run prints otherwise, and the citation is stale
+  files[READ.path] = { size: 320, mtimeMs: 3 }
+  await examineSources($)
+  expect(seen.stdin.length).toBe(2)
+  const stale = (await replyOf($, 'row-1'))!.items[0]!
+  expect(staleOf(stale).map((s: Any) => s.file)).toEqual(['build-a/report/review-results.json'])
+
+  // a stale citation runs no more: a later change of its file is decided as for any citation, here by the stat
+  files[READ.path] = { size: 330, mtimeMs: 4 }
+  await examineSources($)
+  expect(seen.stdin.length).toBe(2)
+  expect(staleOf((await replyOf($, 'row-1'))!.items[0]!).length).toBe(1)
 })
