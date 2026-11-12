@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 import { useTheme } from './lib/theme'
+import { reportTheme } from './lib/themeReport'
 import { syncInstance, workspaceFromUrl } from './lib/workspace'
 import { Shell } from './shell/Shell'
 import { StartPage } from './shell/StartPage'
@@ -20,9 +21,10 @@ export default function App() {
   // the instance check has settled (INSTANCE_WAIT caps it)
   const [checked, setChecked] = useState(false)
   const { paper, accent } = useTheme()
-  // the card harness draws a card offscreen in the theme this browser last showed (backend/app/render.py)
+  // the card harness draws a card offscreen in the theme this browser last showed (backend/app/render.py); one the
+  // server refuses shows a notice (lib/themeReport)
   useEffect(() => {
-    if (ws) api.reportTheme(ws, paper, accent).catch(() => undefined)
+    if (ws) void reportTheme(ws, paper, accent)
   }, [ws, paper, accent])
   useEffect(() => {
     if (!ws) return
