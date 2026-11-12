@@ -165,10 +165,10 @@ export async function trayHolds($: Engine): Promise<boolean> {
 }
 
 /** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
- *  each key shows once, where it acts: while it is open, its header's (+ while the card leaves lines out, a, 0), its
- *  body's (x) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
- *  as the card's. `ask`: the keys asked about, when not all (a key of a citation's body reads the citation). Read from
- *  the state, so a drawing that asks draws again when the tray opens or closes. */
+ *  each key shows once, where it acts: while it is open, its header's (x on a citation x repairs, + while the card leaves
+ *  lines out, a, 0) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which
+ *  the bar names as the card's. `ask`: the keys asked about, when not all (x reads the citation). Read from the state, so
+ *  a drawing that asks draws again when the tray opens or closes. */
 export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
