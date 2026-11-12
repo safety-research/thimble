@@ -319,6 +319,7 @@ def _seed_reading_card(monkeypatch, data, takeaway: str) -> tuple[str, list[int]
             hit = notebook._locate(ws, cid)
             hit[1].update(outputs=[table()], status="ok")
             notebook.write_notebook(ws, hit[0])
+            return dict(hit[1])
 
     monkeypatch.setattr(notebook, "trial_run", trial_run)
     monkeypatch.setattr(notebook, "trial_settle", trial_settle)
@@ -371,3 +372,46 @@ def test_a_takeaway_mark_on_a_card_s_value_goes_stale_when_the_card_s_input_chan
     (m4,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
     assert m4["status"] == "corrected" and m4["shown"] == "72" and marks.stale_sources(m4) == [], m4
     assert m4["rerun"]["values"] == {f"card:{cid}#test%20runs/agent-01": "72"}
+
+
+def test_repair_of_a_stale_takeaway_mark_tells_the_check_that_the_card_ran_again_each_time_until_a_check_passes(_fresh, monkeypatch):
+    from app import notebook
+
+    folder = config.corpus_dir(CORPUS)
+    data = folder / "tests.json"
+    data.write_text(json.dumps({"agent-01": 71, "agent-02": 40}))
+    _main(monkeypatch, folder)
+    cid, ran = _seed_reading_card(monkeypatch, data, "agent-01 ran its tests [71](#) times.")
+    cell = {"mark": 1, "kind": "card", "evidence": {"ref": f"card:{cid}#test runs/agent-01"}, "reason": "the table says so"}
+    answers = [{**cell, "status": "verified"},
+               # the first repair does not trust the card's cells, as a check not told that the card ran again
+               {**cell, "status": "unconfirmed", "reason": "the card may show the file as it was"},
+               {**cell, "status": "corrected", "correction": {"words": "72"}}]
+    prompts: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        prompts.append(prompt)
+        return {"answer": _answer([answers.pop(0)]), "calls": [], "error": None}
+
+    def repair() -> None:
+        async def go():
+            assert await marks.repair(CORPUS, card=cid, k=0, fork=fork) == ""
+            await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+        asyncio.run(go())
+
+    asyncio.run(marks.start_check(CORPUS, {"sid": SID, "cwd": str(folder), "transcript_path": None}, marks.new_turn(), [], "cut-1", fork=fork))
+    _edit(data, json.dumps({"agent-01": 72, "agent-02": 40}))
+    asyncio.run(marks.refresh_sources(CORPUS))
+    said = f"thimble ran card:{cid} again after that change, so its cells now hold the current values."
+    # Repair: the card runs again, then its check reads that it did, after the files that changed
+    repair()
+    assert ran == [0, 1] and said in prompts[-1]
+    assert prompts[-1].index("since tests.json changed after its first check") < prompts[-1].index(said)
+    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert m["status"] == "failed" and m["fresh"] == ["tests.json"], m
+    # Repair again: the card runs again too, and the check reads so again
+    repair()
+    assert ran == [0, 1, 1] and said in prompts[-1]
+    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert m["status"] == "corrected" and m["shown"] == "72" and "fresh" not in m, m

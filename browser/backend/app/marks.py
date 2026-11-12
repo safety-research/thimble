@@ -44,8 +44,8 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    files as they are now, its computed evidence only a call of that check's own (`fresh`), and so each Repair of it
    until one of those checks passes (the mark's `fresh`: the files that changed). That check takes the other such
    marks of its sentence (of its takeaway, for a takeaway's) with it, so that one rewrite of the sentence corrects them
-   all. A mark that rests on a card's value has that card run again first, so its check reads the card as the files
-   make it now.
+   all. A mark that rests on a card's value, and a stale mark of a card's takeaway, has that card run again first, so
+   its check reads the card as the files make it now, and its request says that the card ran again.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -993,12 +993,14 @@ def _transcript_messages(path: Any) -> list[dict[str, Any]]:
 # ---- repair: a failed mark checked again (the terminal's x, marks/checker.ts repairOf, launchRepair; the request and
 # what main hears after it, plugin/marks/notices.mjs repairRequest and repairTellText)
 
-def repair_request(m: dict[str, Any], n: int, auto: bool = False, also: list[dict[str, Any]] | None = None) -> str:
+def repair_request(m: dict[str, Any], n: int, auto: bool = False, also: list[dict[str, Any]] | None = None,
+                   ran: list[str] | None = None) -> str:
     """What follows the checker's text for a repair of mark `m`, numbered `n` in it (the terminal's repairRequest): who
     asked, the analyst with Repair or thimble (`auto`, as the check failed it), what the first check found (its reason
     quoted, since it may quote the records), and the task. A mark whose check did not run (unchecked, or failed by
-    none) is checked as any reply's is; a stale one with the other stale marks of its sentence (`also`)."""
-    return notices({"kind": "request", "mark": m, "n": n, "auto": auto, "also": also or []})["text"]
+    none) is checked as any reply's is; a stale one with the other stale marks of its sentence (`also`), and the cards
+    that ran again before its check (`ran`, each `card:<id>`), whose cells hold the values as the files are now."""
+    return notices({"kind": "request", "mark": m, "n": n, "auto": auto, "also": also or [], "ran": ran or []})["text"]
 
 
 def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
@@ -1039,9 +1041,10 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     """Repair a failed or stale mark: a reply's (`turn`, `n`) or a card's takeaway's (`card`, its order `k`). It is
     `checking` again while a fork of main checks it with the terminal's repair request, and the validator decides its
     end as for any check; a stale mark's check takes the other stale marks of its sentence (of its takeaway, for a
-    takeaway's) with it, and first runs again each card whose value one of them rests on, so the check reads the card as
-    the files make it now. '' when it started, else why not. The check runs in the background. `auto`: the check that
-    failed it started it, not the analyst (main hears so)."""
+    takeaway's) with it, and first runs again each card whose value one of them rests on, and a takeaway's own card, so
+    the check reads the card as the files make it now; its request names each card that ran. '' when it started, else
+    why not. The check runs in the background. `auto`: the check that failed it started it, not the analyst (main hears
+    so)."""
     from . import notebook  # noqa: PLC0415
 
     got = _main_now(c)
@@ -1074,7 +1077,8 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         bases = {x["k"]: cleared(x) for x in group}
         numbered = {kk: i for i, kk in enumerate(bases, 1)}
         also = [{**x, "n": numbered[x["k"]]} for x in group if x["k"] != k]
-        request = await asyncio.to_thread(repair_request, m, numbered[k], auto, also)
+        asked = (m, numbered[k], auto, also)
+        request = await asyncio.to_thread(repair_request, *asked)
         shares = [{**base, "n": numbered[kk], "status": "checking", "shown": base["words"], "card": card,
                    "title": str(cell.get("title") or ""), "takeaway": text} for kk, base in bases.items()]
 
@@ -1097,7 +1101,8 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         also = [x for x in items if again and x.get("n") != n and x.get("piece") == m.get("piece")
                 and x.get("sentence") == m.get("sentence") and x.get("status") != "checking"
                 and (stale_sources(x) or x.get("fresh"))]
-        request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto, also)
+        asked = (m, int(m["n"]), auto, also)
+        request = await asyncio.to_thread(repair_request, *asked)
         group = sorted([m, *also], key=lambda x: int(x["n"]))
         bases = {x["n"]: cleared(x) for x in group}
         shares = [{**base, "status": "checking", "shown": base["words"]} for base in bases.values()]
@@ -1108,21 +1113,32 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
             return r
 
         await _edit(c, str(turn), change_reply, tell=False)
-    # the cards whose values the stale marks rest on, which run again before the check reads them
-    runs = sorted({str(x["rerun"]["card"]) for x in group if again and isinstance(x.get("rerun"), dict) and x["rerun"].get("card")})
+    # the cards whose values the stale marks rest on, and a stale takeaway's own card, which run again before the check
+    # reads them
+    runs = sorted({str(x["rerun"]["card"]) for x in group if again and isinstance(x.get("rerun"), dict) and x["rerun"].get("card")}
+                  | ({card} if card and again else set()))
 
     # the time its words were written, which the first check kept: a label is read as it was then, never as a later
     # change made it (a mark checked before thimble kept the time is read as its labels are now)
     key = _time_key(card=card, text=str(shares[0].get("takeaway") or "")) if card else _time_key(turn=turn)
 
     async def run() -> None:
+        ran = []
         for cid in runs:
-            await _run_card(c, cid)
+            if await _run_card(c, cid):
+                ran.append(f"card:{cid}")
+        told = request
+        if ran:
+            # the check is told which cards ran again, whose cells it may then cite as the values now
+            try:
+                told = await asyncio.to_thread(repair_request, *asked, ran)
+            except Exception:  # noqa: BLE001 — the check runs with the request that names no card
+                log.exception("%s: the repair's request was not written again with the cards that ran", c)
         at = await asyncio.to_thread(_time_of, c, key)
         cards, index = await _cards_and_index(c, at)
         try:
             await _check_share(c, main, str(turn), cut, shares, check_folders(c, main), fork or run_fork, cards, index,
-                               request, auto, at, again)
+                               told, auto, at, again)
         finally:
             _drop_index(index)
 
@@ -1130,18 +1146,20 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     return ""
 
 
-async def _run_card(c: str, cid: str) -> None:
+async def _run_card(c: str, cid: str) -> bool:
     """Card `cid` run again, as a run the analyst asks for runs it (notebook._run_cell): its outputs as its files make
-    them now. A card that is gone, or runs no code, runs nothing; a run that fails shows on the card, as any does."""
+    them now. Whether it ran well. A card that is gone, or runs no code, runs nothing; a run that fails shows on the
+    card, as any does."""
     from . import notebook  # noqa: PLC0415
 
     hit = notebook.find_cell(config.workspace_dir(c), cid)
     if hit is None or not notebook.runnable(hit[1]):
-        return
+        return False
     try:
-        await notebook._run_cell(c, hit[0], cid)
+        return (await notebook._run_cell(c, hit[0], cid)).get("status") == "ok"
     except Exception:  # noqa: BLE001 — the check reads the card as it stands
         log.exception("%s: card %s did not run again for the repair of its takeaway", c, cid)
+        return False
 
 
 # ---- 6: a citation whose source changed after its check (the terminal's plugin/marks/stale.ts)
