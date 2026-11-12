@@ -12,6 +12,7 @@ import { setOptions } from '../settings/features.mjs'
 import { cardOf, correctionsOf } from '../claims/graph.js'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { readStore } from '../claims/store.js'
+import { newReply } from '../marks/store'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -318,6 +319,31 @@ test("a citation's card in the pane says its check by its status alone: verified
   expect(stale[0]).toContain('↻ stale')
   expect(stale.join('\n')).not.toContain('README.md')
   expect(correctionsOf({ id: 'c1', turn: 2, sources: [rewritten] }, new Map())).toMatchObject([{ old: 'The app runs on port 8000.', now: 'The app runs on port 9000.' }])
+})
+
+test("a claim picked says no state of its citations: a correction only by h, and while x repairs one its card says checking and the key row keeps x repair", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const text = 'Run 4 failed on the [p95 check](#).'
+  const s = setup([reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [text] })
+  const start = text.indexOf('[')
+  const mark = { n: 1, row: 't1-row-0', words: 'p95 check', start, end: start + '[p95 check](#)'.length, sentence: text }
+  const kept = (m: Any) => newReply(s.$, { key: 't1-row-0', turnId: 't1', rows: ['t1-row-0'], startedAt: 0, settledAt: 1, items: [{ ...mark, ...m }] })
+  const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
+  const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
+  // the check corrected its citation: no line under the claim says so; h opens the History, which shows the correction
+  await kept({ status: 'corrected', shown: 'p99 check', was: 'p95 check', reason: 'Line 4 says p99.' })
+  const fixed = await draw({ claim: 'c1' })
+  expect(textOf(fixed)).not.toContain('corrected')
+  expect(keysOf(fixed)).toContainEqual(['h', 'corrections'])
+  expect(textOf(await draw({ claim: 'c1', history: true }))).toContain('p99 check')
+  // x repairs a citation that failed: while its check runs, its card says checking, and x stays x repair, so a second
+  // press is a key of the pane, never a letter of the prompt
+  await kept({ status: 'checking', shown: 'p95 check', repair: true })
+  const running = await draw({ claim: 'c1', open: true })
+  expect(textOf(running)).toMatch(/│ p95 check .*checking/)
+  expect(keysOf(running)).toEqual([['e', 'hide evidence'], ['x', 'repair']])
 })
 
 test('a store of v 2 kept a long claim cut at 200 characters, in a word: read, it ends after its last whole word, then …', () => {

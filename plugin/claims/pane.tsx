@@ -22,8 +22,9 @@
 //                        evidence shown or hidden (the line in the detail that says so) · h its History (a corrected
 //                        claim) · c the current citation's code and output whole · x repair the current citation
 //                        (the evidence hidden: its first failed one) when it failed or is stale (a check of it again in the background, marks/checker.ts
-//                        launchRepair, started in this feature's ui.press hook, seam.ts; while that check runs, x says so),
-//                        or x check the current citation when it was not checked yet (auto, manual: checkOpened)
+//                        launchRepair, started in this feature's ui.press hook, seam.ts; while that check runs, x stays,
+//                        and the citation's status says checking), or x check the current citation when it was not
+//                        checked yet (auto, manual: checkOpened)
 //   A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit each, and Claude Code types any other
 //   letter into the prompt, the keyboard going with it; so a key shows while its press can still be expected (x after
 //   a repair began). f at rest finds the claims of the answers not read. The input under the pane asks about what is
@@ -395,12 +396,13 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (view.fixes) key('h', a.history ? 'hide corrections' : 'corrections', () => onClaim({ history: !a.history }))
     if (a.open && (view.cut || a.whole)) key('c', a.whole ? 'shorter' : 'all code and output', () => onClaim({ whole: !a.whole }))
     // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook; while the check runs again, x
-    // says so (a second x is not typed into the prompt). No repair where nothing the person does here lets its check
-    // run (marks/checker.ts repairOk): the failure line, or the citation's card, says why
+    // stays as it was, its press doing nothing more (a second x is not typed into the prompt), and the citation's status
+    // says checking. No repair where nothing the person does here lets its check run (marks/checker.ts repairOk): the
+    // failure line, or the citation's card, says why
     const failed = a.open ? shown : cites.find(repairable)
     if (a.open && checkable(shown)) key('x', 'check', () => undefined, CLAIMS_REPAIR)
     else if (repairable(failed) && (await repairOk($, failed))) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
-    else if (a.open && shown?.repair && shown.status === 'checking') key('x', 'checking again', () => undefined)
+    else if (a.open && shown?.repair && shown.status === 'checking') key('x', 'repair', () => undefined)
   } else if (view.chosen && cs.length) {
     // a cluster chosen: k j move the current claim of its list (the ends hold), e opens it; p n the other clusters
     key('k', 'previous claim', () => toCur(Math.max(0, i - 1)))

@@ -1079,9 +1079,9 @@ function citeRows(cites, W, { cur, compact, whole }) {
 /**
  * A claim picked, as rows W wide (the map gone, the pane's whole height): `fixed`, the rows that stay on top while the
  * rest scrolls: its cluster's name in its color and which of its claims it is (a press on the cluster), with `about`
- * its orienting line, and a blank row; then `rows`: the claim, bold; for a
- * corrected claim one line that says so; a blank row and its description, plain (reasonOf: the lens's `because`, else
- * the reply's sentences that said it, without their citation marks); with `st.history`, its History (historyRows);
+ * its orienting line, and a blank row; then `rows`: the claim, bold; a blank row and its description, plain (reasonOf:
+ * the lens's `because`, else the reply's sentences that said it, without their citation marks); with `st.history`, its
+ * History (historyRows), the one place that shows its corrections;
  * then a blank row and the line that shows its evidence (`evidence`: `show evidence (N citations)`, the pane's e),
  * and with `st.open` its citations under it (citeRows); or one dim line that says why it has none. curRow: the current
  * citation's first row in `rows`. {fixed, rows, cites, shown, cut, fixes, curRow}
@@ -1094,7 +1094,6 @@ function claimPanel({ claim, W, byId, st, ctx, compact, cluster, about }) {
   fixed.push([])
   const rows = wrap(sentenceOf(claim.text), W).map(l => [{ s: l, bold: true, part: `c:${claim.id}` }])
   const fixes = correctionsOf(claim, byId)
-  if (fixes.length) rows.push([{ s: claim.revised_by ? 'corrected later' : fixes.length > 1 ? `corrected ×${fixes.length}` : 'corrected', tone: 'cite' }])
   const why = reasonOf(claim, ctx.passage)
   if (why?.text) rows.push([], ...wrap(why.text, W).map(l => [{ s: l }]))
   if (st.history && fixes.length) rows.push([], ...historyRows(fixes, W, true))
