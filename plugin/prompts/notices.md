@@ -68,10 +68,16 @@ thimble asks you to repair citation {{N}}.
 The analyst {{REPAIR_ASKED}} citation {{N}}, whose first check did not run.
 
 <!-- request stale -->
-The analyst {{REPAIR_ASKED}} citation {{N}}, since {{FILES}} changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence. Say what changed in `reason`, not in the sentence.
+The analyst {{REPAIR_ASKED}} citation {{N}}, since {{FILES}} changed after its first check. What this session read or printed before that change may be out of date. A copy of a file from before the change is no evidence.
+
+<!-- request card ran -->
+thimble ran {{CARD}} again after that change, so its cells now hold the current values.
 
 <!-- request stale also -->
 Citation {{N}} stands in the same sentence, and {{FILES}} changed after its first check too. Check it again as well.
+
+<!-- request stale value -->
+When a value the sentence states changed, correct the sentence to the value as it is now. Say what it was before in `reason`, not in the sentence.
 
 <!-- request where -->
 It may stand in an earlier reply than your last.

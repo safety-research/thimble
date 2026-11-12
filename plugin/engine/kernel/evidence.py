@@ -3446,7 +3446,7 @@ def rest_of(s: str, groups: list[tuple[int, int]], k: int, hide: set[int] | None
     return norm_ws(out + s[at:])
 
 
-def sentence_rewrite(given: str, sentence: str, words: str, judged: dict[str, str] | None = None) -> dict[str, Any] | str:
+def sentence_rewrite(given: str, sentence: str, words: str, judged: dict[str, str] | None = None, same: int = 0) -> dict[str, Any] | str:
     """The check's new sentence for a citation (`correction.sentence`), in the form of the mark's own (each citation
     `[words]`): {sentence, cited, rest, was_rest, judged}, the new sentence, its cited words, the words outside the
     citation in the new sentence and in the old one, and the words each judged citation has in the new sentence; or why
@@ -3454,13 +3454,15 @@ def sentence_rewrite(given: str, sentence: str, words: str, judged: dict[str, st
     marker kept, and every other citation of the sentence with its words as they were (a sentence that writes them with
     no brackets has them bracketed where they stand). `judged`: the other citations of the sentence that the same check
     judges, each by its words, with the words its own answer gives it. Their words may change, and they are no words
-    outside the citation: check_all holds each to its own result."""
+    outside the citation: check_all holds each to its own result. `same`: how many citations of the sentence before
+    this one have its words ("[10] are major and [10] are minor"), so that each finds its own place."""
     if re.search(r"\n\s*\S", given.strip()):
         return "its sentence runs over more than one line"
     old = citations_of(sentence)
-    k = next((i for i, (a, b) in enumerate(old) if loose(sentence[a + 1:b - 1]) == loose(words)), None)
-    if k is None:
+    alike = [i for i, (a, b) in enumerate(old) if loose(sentence[a + 1:b - 1]) == loose(words)]
+    if not alike:
         return "thimble could not find the citation in the sentence"
+    k = alike[min(same, len(alike) - 1)]
     # a citation written as the reply writes one (`[words](#)`) is one too
     new = norm_ws(given).replace("](#)", "]")
     lead = LEAD.match(sentence)
@@ -3563,7 +3565,7 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False, judged_too: dict[str, str] | None = None, run: Runner | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False, judged_too: dict[str, str] | None = None, run: Runner | None = None, same: int = 0) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?, sources?, rerun?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls`
     the real Bash calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in
@@ -3571,7 +3573,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     source()), and for computed evidence whose code `run` ran again, what runs it again (`rerun`, check_computed).
     `fresh`: a check of a citation whose source changed after its first check, whose computed evidence is only a call
     this check ran, since output printed before the change shows the files as they were. `judged_too`: the other
-    citations of its sentence that the same check judges (sentence_rewrite `judged`), whose words a rewrite may change.
+    citations of its sentence that the same check judges (sentence_rewrite `judged`), whose words a rewrite may change;
+    `same`, how many of them before it have its words (sentence_rewrite).
 
     The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
     `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
@@ -3624,7 +3627,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     rewrite: dict[str, Any] | None = None
     given = str(corr.get("sentence") or "") if corr else ""
     if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
-        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words, judged_too)
+        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words, judged_too, same)
         if isinstance(got, str):
             # a rewording that cannot stand still leaves what the check found wrong, which the person reads in its
             # own reason (the records show it false); with no such reason, why the rewording could not stand
@@ -3770,8 +3773,11 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
     results = []
     for i, m in enumerate(marks):
         try:
-            judged = {str(marks[j].get("words", "")): answered(marks[j]) for j in of[norm_ws(m.get("sentence") or "")] if j != i}
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at, fresh, judged, run))
+            mine = of[norm_ws(m.get("sentence") or "")]
+            judged = {str(marks[j].get("words", "")): answered(marks[j]) for j in mine if j != i}
+            # two citations of the sentence with the same words: each the one at its own place, in order
+            same = sum(1 for j in mine if j < i and loose(str(marks[j].get("words", ""))) == loose(str(m.get("words", ""))))
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at, fresh, judged, run, same))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),

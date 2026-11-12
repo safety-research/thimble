@@ -6,12 +6,13 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
 1. At the end of main's turn (session._end_turn), the marks of the turn's texts (marks_of.mjs, with the terminal's
    plugin/marks/message.js) are kept, all `checking`, under the turn id that main's `done` record names; the page draws
    each with a spinner.
-2. The checker: forks of main's session at the turn's end (`claude -p --resume <main> --resume-session-at <cut>
-   --fork-session`, as the view proposer forks it), up to MAX_FORKS at once, each with a share of the marks, read the
-   terminal's checker.md as the workbench reads it (CHECKER, prompts.py: with the workbench's words in its slots of a
-   mode's own words) and give one JSON item per mark: verified, corrected, wrong or unconfirmed, with its evidence. A
-   fork reads with Read, Grep and Glob, and runs code only as Python (Bash `python3 …`), on Claude Code sign-in in
-   Claude Code's sandbox where it can run (run_fork).
+2. The checker: forks of main's session at the turn's end (on Claude Code sign-in, `claude --resume <main>
+   --resume-session-at <cut> --fork-session` through the Agent SDK), up to MAX_FORKS at once, each with a share of the
+   marks, read the terminal's checker.md as the workbench reads it (CHECKER, prompts.py: with the workbench's words in
+   its slots of a mode's own words) and give one JSON item per mark: verified, corrected, wrong or unconfirmed, with its
+   evidence. A fork reads with Read, Grep and Glob, and runs code only as Python (Bash `python3 …`), on Claude Code
+   sign-in in Claude Code's sandbox where it can run; its one Python script runs whatever Claude Code's own rule makes
+   of the code, as the terminal's check's does (run_fork, fork_options).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
@@ -44,8 +45,8 @@ after the reply, as the terminal plugin checks them (plugin/marks/checker.ts):
    files as they are now, its computed evidence only a call of that check's own (`fresh`), and so each Repair of it
    until one of those checks passes (the mark's `fresh`: the files that changed). That check takes the other such
    marks of its sentence (of its takeaway, for a takeaway's) with it, so that one rewrite of the sentence corrects them
-   all. A mark that rests on a card's value has that card run again first, so its check reads the card as the files
-   make it now.
+   all. A mark that rests on a card's value, and a stale mark of a card's takeaway, has that card run again first, so
+   its check reads the card as the files make it now, and its request says that the card ran again.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -89,7 +90,6 @@ import logging
 import os
 import re
 import secrets
-import signal
 import stat
 import subprocess
 import sys
@@ -139,7 +139,7 @@ _locks: dict[tuple[str, str], asyncio.Lock] = {}
 # (workspace, card, takeaway) of the takeaways a check has taken until their marks are on the card, so a check that
 # starts meanwhile (main's reply ending as the card's write lands) leaves them alone
 _claimed: set[tuple[str, str, str]] = set()
-_procs: set[asyncio.subprocess.Process] = set()
+_forks: set[asyncio.Future[dict[str, Any]]] = set()  # the forks that run (run_fork), which stop_all ends
 
 
 # ---- the terminal's texts and validator
@@ -993,12 +993,14 @@ def _transcript_messages(path: Any) -> list[dict[str, Any]]:
 # ---- repair: a failed mark checked again (the terminal's x, marks/checker.ts repairOf, launchRepair; the request and
 # what main hears after it, plugin/marks/notices.mjs repairRequest and repairTellText)
 
-def repair_request(m: dict[str, Any], n: int, auto: bool = False, also: list[dict[str, Any]] | None = None) -> str:
+def repair_request(m: dict[str, Any], n: int, auto: bool = False, also: list[dict[str, Any]] | None = None,
+                   ran: list[str] | None = None) -> str:
     """What follows the checker's text for a repair of mark `m`, numbered `n` in it (the terminal's repairRequest): who
     asked, the analyst with Repair or thimble (`auto`, as the check failed it), what the first check found (its reason
     quoted, since it may quote the records), and the task. A mark whose check did not run (unchecked, or failed by
-    none) is checked as any reply's is; a stale one with the other stale marks of its sentence (`also`)."""
-    return notices({"kind": "request", "mark": m, "n": n, "auto": auto, "also": also or []})["text"]
+    none) is checked as any reply's is; a stale one with the other stale marks of its sentence (`also`), and the cards
+    that ran again before its check (`ran`, each `card:<id>`), whose cells hold the values as the files are now."""
+    return notices({"kind": "request", "mark": m, "n": n, "auto": auto, "also": also or [], "ran": ran or []})["text"]
 
 
 def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
@@ -1039,9 +1041,10 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     """Repair a failed or stale mark: a reply's (`turn`, `n`) or a card's takeaway's (`card`, its order `k`). It is
     `checking` again while a fork of main checks it with the terminal's repair request, and the validator decides its
     end as for any check; a stale mark's check takes the other stale marks of its sentence (of its takeaway, for a
-    takeaway's) with it, and first runs again each card whose value one of them rests on, so the check reads the card as
-    the files make it now. '' when it started, else why not. The check runs in the background. `auto`: the check that
-    failed it started it, not the analyst (main hears so)."""
+    takeaway's) with it, and first runs again each card whose value one of them rests on, and a takeaway's own card, so
+    the check reads the card as the files make it now; its request names each card that ran. '' when it started, else
+    why not. The check runs in the background. `auto`: the check that failed it started it, not the analyst (main hears
+    so)."""
     from . import notebook  # noqa: PLC0415
 
     got = _main_now(c)
@@ -1074,7 +1077,8 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         bases = {x["k"]: cleared(x) for x in group}
         numbered = {kk: i for i, kk in enumerate(bases, 1)}
         also = [{**x, "n": numbered[x["k"]]} for x in group if x["k"] != k]
-        request = await asyncio.to_thread(repair_request, m, numbered[k], auto, also)
+        asked = (m, numbered[k], auto, also)
+        request = await asyncio.to_thread(repair_request, *asked)
         shares = [{**base, "n": numbered[kk], "status": "checking", "shown": base["words"], "card": card,
                    "title": str(cell.get("title") or ""), "takeaway": text} for kk, base in bases.items()]
 
@@ -1097,7 +1101,8 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         also = [x for x in items if again and x.get("n") != n and x.get("piece") == m.get("piece")
                 and x.get("sentence") == m.get("sentence") and x.get("status") != "checking"
                 and (stale_sources(x) or x.get("fresh"))]
-        request = await asyncio.to_thread(repair_request, m, int(m["n"]), auto, also)
+        asked = (m, int(m["n"]), auto, also)
+        request = await asyncio.to_thread(repair_request, *asked)
         group = sorted([m, *also], key=lambda x: int(x["n"]))
         bases = {x["n"]: cleared(x) for x in group}
         shares = [{**base, "status": "checking", "shown": base["words"]} for base in bases.values()]
@@ -1108,21 +1113,32 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
             return r
 
         await _edit(c, str(turn), change_reply, tell=False)
-    # the cards whose values the stale marks rest on, which run again before the check reads them
-    runs = sorted({str(x["rerun"]["card"]) for x in group if again and isinstance(x.get("rerun"), dict) and x["rerun"].get("card")})
+    # the cards whose values the stale marks rest on, and a stale takeaway's own card, which run again before the check
+    # reads them
+    runs = sorted({str(x["rerun"]["card"]) for x in group if again and isinstance(x.get("rerun"), dict) and x["rerun"].get("card")}
+                  | ({card} if card and again else set()))
 
     # the time its words were written, which the first check kept: a label is read as it was then, never as a later
     # change made it (a mark checked before thimble kept the time is read as its labels are now)
     key = _time_key(card=card, text=str(shares[0].get("takeaway") or "")) if card else _time_key(turn=turn)
 
     async def run() -> None:
+        ran = []
         for cid in runs:
-            await _run_card(c, cid)
+            if await _run_card(c, cid):
+                ran.append(f"card:{cid}")
+        told = request
+        if ran:
+            # the check is told which cards ran again, whose cells it may then cite as the values now
+            try:
+                told = await asyncio.to_thread(repair_request, *asked, ran)
+            except Exception:  # noqa: BLE001 — the check runs with the request that names no card
+                log.exception("%s: the repair's request was not written again with the cards that ran", c)
         at = await asyncio.to_thread(_time_of, c, key)
         cards, index = await _cards_and_index(c, at)
         try:
             await _check_share(c, main, str(turn), cut, shares, check_folders(c, main), fork or run_fork, cards, index,
-                               request, auto, at, again)
+                               told, auto, at, again)
         finally:
             _drop_index(index)
 
@@ -1130,18 +1146,20 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     return ""
 
 
-async def _run_card(c: str, cid: str) -> None:
+async def _run_card(c: str, cid: str) -> bool:
     """Card `cid` run again, as a run the analyst asks for runs it (notebook._run_cell): its outputs as its files make
-    them now. A card that is gone, or runs no code, runs nothing; a run that fails shows on the card, as any does."""
+    them now. Whether it ran well. A card that is gone, or runs no code, runs nothing; a run that fails shows on the
+    card, as any does."""
     from . import notebook  # noqa: PLC0415
 
     hit = notebook.find_cell(config.workspace_dir(c), cid)
     if hit is None or not notebook.runnable(hit[1]):
-        return
+        return False
     try:
-        await notebook._run_cell(c, hit[0], cid)
+        return (await notebook._run_cell(c, hit[0], cid)).get("status") == "ok"
     except Exception:  # noqa: BLE001 — the check reads the card as it stands
         log.exception("%s: card %s did not run again for the repair of its takeaway", c, cid)
+        return False
 
 
 # ---- 6: a citation whose source changed after its check (the terminal's plugin/marks/stale.ts)
@@ -1475,22 +1493,60 @@ def _model(c: str, main: dict[str, Any], prompt: str) -> tuple[str, str]:
     return m, str(main.get("effort") or conf["effort"])
 
 
-def fork_argv(main: dict[str, Any], cut: str | None, model_id: str, effort: str, sandbox: bool = False) -> list[str]:
-    """The fork's `claude -p`; with `sandbox` its python runs only in Claude Code's sandbox
-    (cc_settings.offline_sandbox, required), with no network and none of the ANTHROPIC_* variables Claude Code signs
-    in with."""
+# The one Python script the check runs its code as (plugin/prompts/checker.md): `python3 - <<'PY'`, the code, `PY`,
+# after a `cd` at most, and nothing else in the call, as the terminal's check runs it (plugin/marks/checker.ts oneScript,
+# runsPython)
+ONE_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;)\s*)?python3?\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
+
+
+def one_script(command: str) -> bool:
+    """Whether a Bash command only runs one Python script from a here-document, by python3 or python, after a `cd` at
+    most (with `&&`, `;` or a line of its own): the terminal's oneScript and runsPython (plugin/marks/checker.ts)."""
+    lines = re.sub(r"^\s*(cd\s+\S+)[ \t]*\n", r"\1; ", str(command).rstrip()).split("\n")
+    m = ONE_SCRIPT.fullmatch(lines[0])
+    if not m or len(lines) < 3:
+        return False
+    return lines[-1].strip() == m.group(2) and not any(line.strip() == m.group(2) for line in lines[1:-1])
+
+
+async def _one_script_runs(inp: Any, _tool_use_id: str | None, _ctx: Any) -> dict[str, Any]:
+    """The fork's PreToolUse hook: its Bash call of one Python script (one_script) runs, as the terminal lets its
+    check's run (plugin/marks/checker.ts allowsPython). Claude Code's rule for python3 does not match a script it cannot
+    read as a shell's words, such as a heredoc whose code holds `{'major': 0}`, which dontAsk mode would refuse, and a
+    check that may not run its code cannot compute. Any other call is left to Claude Code's rules."""
+    call = inp if isinstance(inp, dict) else {}
+    if call.get("tool_name") == "Bash" and one_script(str((call.get("tool_input") or {}).get("command") or "")):
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                       "permissionDecisionReason": "the check's one Python script"}}
+    return {}
+
+
+def fork_options(main: dict[str, Any], cut: str | None, model_id: str, effort: str, cwd: Path, env: dict[str, str],
+                 sandbox: bool = False, stderr: Callable[[str], None] | None = None) -> Any:
+    """The fork's Agent SDK options, the flags of a fork of main as Claude Code takes them (`--resume` main at `cut`,
+    `--fork-session`, no transcript kept, main's user settings with none of their customizations), its tools, its
+    rules (ALLOWED, in dontAsk mode) and the hook that lets its one Python script run (_one_script_runs). With
+    `sandbox` its commands run only in Claude Code's sandbox (cc_settings.offline_sandbox, required), with no network
+    and none of the ANTHROPIC_* variables Claude Code signs in with. `env` is the fork's whole environment: each
+    variable of this process's that it leaves out is "" (the SDK starts `claude` with this process's environment under
+    the options' own)."""
+    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher  # noqa: PLC0415
+
     from . import cc_settings  # noqa: PLC0415
 
     sent = effort if config.has_effort(model_id) else None
     settings = {**json.loads(sdk.cli_settings(model_id, sent, None)), "advisorModel": "off"}
     if sandbox:
         settings["sandbox"] = cc_settings.offline_sandbox(required=True)
-    at = ["--resume-session-at", cut] if cut else []
-    return [str(config.CLI_PATH or config.CLAUDE_BIN), "-p", "--resume", str(main["sid"]), *at,
-            "--fork-session", "--no-session-persistence", "--model", model_id, *(["--effort", sent] if sent else []),
-            "--tools", ",".join(CHECKER_TOOLS), "--allowedTools", ",".join(ALLOWED), "--strict-mcp-config",
-            "--disable-slash-commands", "--safe-mode", "--setting-sources", "user", "--permission-mode", "dontAsk",
-            "--settings", json.dumps(settings), "--output-format", "stream-json", "--verbose"]
+    return ClaudeAgentOptions(
+        cwd=str(cwd), tools=list(CHECKER_TOOLS), allowed_tools=list(ALLOWED), permission_mode="dontAsk",
+        model=model_id, effort=sent, settings=json.dumps(settings), cli_path=str(config.CLI_PATH or config.CLAUDE_BIN),
+        setting_sources=["user"], strict_mcp_config=True, max_buffer_size=sdk.MAX_BUFFER_SIZE,
+        env={**{k: "" for k in os.environ if k not in env}, **env}, stderr=stderr,
+        resume=str(main["sid"]), fork_session=True, resume_session_at=cut or None,
+        extra_args={"no-session-persistence": None, "disable-slash-commands": None, "safe-mode": None},
+        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[_one_script_runs])]},
+    )
 
 
 def _env(main: dict[str, Any]) -> dict[str, str]:
@@ -1571,37 +1627,61 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
     env = {**_env(main), **({"TMPDIR": str(tmp), "CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}
     if box:
         runtime_cc._enter(cwd)
+    said: list[str] = []  # what Claude Code wrote to stderr, for the error of a fork that failed
+    task: asyncio.Future[dict[str, Any]] | None = None
     try:
-        return await _claude_fork(fork_argv(main, cut, model_id, effort, sandbox=box), cwd, env, prompt)
+        task = asyncio.ensure_future(_sdk_fork(fork_options(main, cut, model_id, effort, cwd, env, box, said.append),
+                                               prompt, said))
+        _forks.add(task)
+        return await asyncio.wait_for(task, FORK_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        return {"answer": "", "error": "it took too long"}
+    except Exception as e:  # noqa: BLE001 — the check says it stopped, in words
+        return {"answer": "", "error": stderr_error(e, said)}
     finally:
+        if task is not None:
+            _forks.discard(task)
         if tmp is not None:
             nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the fork's python wrote it: no link followed
         if box:
             runtime_cc._tidy(cwd)
 
 
-async def _claude_fork(argv: list[str], cwd: Path, env: dict[str, str], prompt: str) -> dict[str, Any]:
-    """Run the fork `argv` in `cwd` with the prompt on stdin: {answer, calls, error}. A fork that started without the
-    prompt (sdk.stdin_missed) runs again, at most sdk.STDIN_TRIES times in all."""
-    for attempt in range(1, sdk.STDIN_TRIES + 1):
-        got, code, stderr = await _claude_fork_once(argv, cwd, env, prompt)
-        if got["answer"] or not sdk.stdin_missed(code, stderr) or attempt == sdk.STDIN_TRIES:
-            break
-        log.info("the check's fork started without its prompt (try %d of %d): it runs again", attempt, sdk.STDIN_TRIES)
-        await asyncio.sleep(sdk.STDIN_RETRY_WAIT_S)
-    if code not in (0, None) and not got["answer"] and (not got["error"] or sdk.stdin_missed(code, stderr)):
-        got["error"] = stderr_error(code, stderr)
-    return got
+async def _sdk_fork(options: Any, prompt: str, said: list[str]) -> dict[str, Any]:
+    """Run the fork (fork_options) on the prompt: {answer, calls, error}. The answer is its texts in order; `error`
+    names a result that was not a success, or why Claude Code stopped before it answered (`said`: what it wrote to
+    stderr)."""
+    from claude_agent_sdk import (AssistantMessage, ResultMessage, TextBlock, ToolResultBlock,  # noqa: PLC0415
+                                  ToolUseBlock, UserMessage, query)
+
+    os.environ.setdefault(sdk.SKIP_VERSION_CHECK_ENV, "1")
+    messages: list[dict[str, Any]] = []
+    texts: list[str] = []
+    error = None
+    try:
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, AssistantMessage):
+                texts += [b.text for b in msg.content if isinstance(b, TextBlock)]
+                messages.append({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input or {}}
+                    for b in msg.content if isinstance(b, ToolUseBlock)]}})
+            elif isinstance(msg, UserMessage) and isinstance(msg.content, list):
+                messages.append({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": b.tool_use_id, "content": "" if b.content is None else b.content}
+                    for b in msg.content if isinstance(b, ToolResultBlock)]}})
+            elif isinstance(msg, ResultMessage) and (msg.is_error or msg.subtype not in (None, "success")):
+                error = _clip(str(msg.result or msg.subtype or "error"))
+    except Exception as e:  # noqa: BLE001 — Claude Code stopped with an error: the answer it gave stands, else why
+        if not texts:
+            error = stderr_error(e, said)
+    return {"answer": "\n".join(texts), "calls": bash_calls(messages, "checker"), "error": error}
 
 
-def stderr_error(code: Any, stderr: str) -> str:
-    """A failed fork's error from what it wrote to stderr: its last STDERR_LINES lines but the stdin warning, after
-    sdk.STDIN_MISSED_TEXT when it started without its prompt, else its exit code."""
-    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip() and "no stdin data received" not in ln]
-    said = _clip(" ".join(lines[-STDERR_LINES:]))
-    if sdk.stdin_missed(code, stderr):
-        return f"{sdk.STDIN_MISSED_TEXT}. Claude Code said: {said}" if said else sdk.STDIN_MISSED_TEXT
-    return said or f"Claude Code exited with code {code}"
+def stderr_error(error: Any, stderr: list[str]) -> str:
+    """A failed fork's error: the last STDERR_LINES lines Claude Code wrote to stderr, whole, else the error's own
+    words."""
+    lines = [ln.strip() for ln in stderr if ln.strip()]
+    return _clip(" ".join(lines[-STDERR_LINES:]) or str(error).strip() or type(error).__name__)
 
 
 def _clip(text: str) -> str:
@@ -1609,36 +1689,7 @@ def _clip(text: str) -> str:
     return text if len(text) <= ERROR_CHARS else text[:ERROR_CHARS - 1].rstrip() + "…"
 
 
-async def _claude_fork_once(argv: list[str], cwd: Path, env: dict[str, str],
-                            prompt: str) -> tuple[dict[str, Any], int | None, str]:
-    """One run of the fork: ({answer, calls, error}, its exit code, its stderr)."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=str(cwd), env=env, stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
-    except OSError as e:
-        return {"answer": "", "error": f"Claude Code could not start: {e}"}, None, ""
-    _procs.add(proc)
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), FORK_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        _kill(proc)
-        return {"answer": "", "error": "it took too long"}, None, ""
-    except asyncio.CancelledError:
-        _kill(proc)
-        raise
-    finally:
-        _procs.discard(proc)
-    return parse_stream(stdout.decode("utf-8", "replace")), proc.returncode, stderr.decode("utf-8", "replace")
-
-
-def _kill(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is None:
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(proc.pid, signal.SIGKILL)
-
-
 def stop_all() -> None:
     """The server stops: the forks that run end with it."""
-    for proc in list(_procs):
-        _kill(proc)
+    for task in list(_forks):
+        task.cancel()

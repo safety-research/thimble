@@ -257,6 +257,19 @@ def test_one_check_of_two_citations_of_a_sentence_rewrites_it_once_for_both(tmp_
     assert second["status"] == "failed" and "rewrite" not in first
 
 
+def test_two_citations_of_a_sentence_with_the_same_words_each_take_the_words_at_their_own_place(tmp_path: Path):
+    """"[10] are major and [10] are minor": after one edit the counts read 11 and 9, and the check gives the new sentence
+    for both. Each citation is the one at its own place, so the second takes 9 from it, not the first one's 11."""
+    (tmp_path / "counts.txt").write_text("major: 11\nminor: 9\n")
+    was = "Of the [22] findings, [10] are major and [10] are minor."
+    now = "Of the [22] findings, [11] are major and [9] are minor."
+    marks = [{"n": 1, "words": "10", "sentence": was}, {"n": 2, "words": "10", "sentence": was}]
+    items = [{"mark": n, **quote("counts.txt", n, sub), "status": "corrected", "correction": {"words": words, "sentence": now}}
+             for n, sub, words in ((1, "major: 11", "11"), (2, "minor: 9", "9"))]
+    got = check_all(marks, "```json\n" + json.dumps(items) + "\n```", [], str(tmp_path))["results"]
+    assert [(r["status"], r["shown"], r.get("was")) for r in got] == [("corrected", "11", "10"), ("corrected", "9", "10")], got
+
+
 def test_a_rewording_may_say_a_value_its_correction_changed_again_but_cuts_none_out_of_the_citation():
     """A re-check after an edit: "3 lines" now reads "0 lines", and the rewording says what the 3 lines read now. The
     3 is a value the correction changed, not one it left out of the citation, so the rewording stands when the evidence

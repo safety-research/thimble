@@ -10,9 +10,8 @@ import re
 from pathlib import Path
 
 import pytest
-from conftest import NO_MARKER, STDIN_WARNING, late_stdin_claude
 
-from app import agents, config, marks, sdk, session
+from app import agents, config, marks, session
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-0000000000aa"
@@ -264,44 +263,104 @@ def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monke
         assert (m["status"], m["reason"]) == ("failed", OUTSIDE), m
 
 
-def test_a_fork_that_started_without_its_prompt_runs_again(tmp_path, monkeypatch):
-    """Claude Code waits 3 s for a prompt piped to it, then starts without it: the resumed fork stops with "No deferred
-    tool marker found" (sdk.stdin_missed). The fork runs again, and its second run reads the prompt and answers."""
-    monkeypatch.setattr(sdk, "STDIN_RETRY_WAIT_S", 0.0)
-    bin_, runs = late_stdin_claude(tmp_path, misses=1)
-    got = asyncio.run(marks._claude_fork([str(bin_)], tmp_path, {"PATH": "/usr/bin:/bin"}, "check the marks"))
-    assert got["error"] is None and got["answer"] == "Read: check the marks", got
-    assert len(runs.read_text().splitlines()) == 2
+def _cc(monkeypatch) -> None:
+    """Main reached through Claude Code sign-in, whose session the fork resumes, with no sandbox on this machine."""
+    from app import cc_settings, runtime, runtime_api
+
+    monkeypatch.setattr(runtime, "engine", lambda: "cc")
+    monkeypatch.setattr(runtime_api, "cc_main_session", lambda c: SID)
+    monkeypatch.setattr(runtime_api, "cc_main_cut", lambda c: "cut-7")
+    monkeypatch.setattr(cc_settings, "sandbox_ok", lambda *a, **k: False)
 
 
-def test_a_fork_that_never_gets_its_prompt_stops_and_the_notice_says_why_whole(_fresh, tmp_path, monkeypatch):
-    """A fork that starts without its prompt on every try (sdk.STDIN_TRIES) stops the check: its marks are unchecked
-    with the whole error, which says in plain words that the prompt came too late and keeps Claude Code's own words, and
-    the notice ends as a sentence does, with every word of the error in its text or its details (Show more)."""
-    monkeypatch.setattr(sdk, "STDIN_RETRY_WAIT_S", 0.0)
-    bin_, runs = late_stdin_claude(tmp_path, misses=99)
+def _sdk(monkeypatch, messages: list, stderr: tuple[str, ...] = (), raises: Exception | None = None) -> list:
+    """The Agent SDK's query replaced: it keeps each (prompt, options) it gets, writes `stderr` to the options' stderr
+    callback, gives `messages`, then raises `raises`, as Claude Code that stops with an error."""
+    import claude_agent_sdk
+
+    seen: list = []
+
+    async def query(*, prompt, options):
+        seen.append((prompt, options))
+        for line in stderr:
+            options.stderr(line)
+        for m in messages:
+            yield m
+        if raises is not None:
+            raise raises
+
+    monkeypatch.setattr(claude_agent_sdk, "query", query)
+    return seen
+
+
+def test_the_fork_runs_through_the_agent_sdk_and_its_one_python_script_runs_whatever_claude_codes_rule_makes_of_it(_fresh, monkeypatch):
+    """Claude Code's rule for python3 does not match a heredoc whose code holds `{'major': 11}`, a script it cannot read
+    as a shell's words, so in dontAsk mode the fork's Python was refused: the check said "Bash was not allowed" and
+    quoted the records, where the terminal's check ran its code (checker.ts allowsPython). The fork runs through the
+    Agent SDK with the flags of a fork of main, and its hook lets one Python script run; any other call is left to
+    Claude Code's rules. None of thimble's own variables reaches it."""
+    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+
+    _cc(monkeypatch)
+    monkeypatch.setenv("THIMBLE_MADE_UP", "1")
+    script = "python3 - <<'PY'\nprint({'major': 11}['major'])\nPY"
+    seen = _sdk(monkeypatch, [
+        AssistantMessage(content=[ToolUseBlock(id="t1", name="Bash", input={"command": script})], model="m"),
+        UserMessage(content=[ToolResultBlock(tool_use_id="t1", content="11")]),
+        AssistantMessage(content=[TextBlock(text="It prints 11.")], model="m"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=2, session_id="s"),
+    ])
+    got = asyncio.run(marks.run_fork(CORPUS, {"cwd": str(config.corpus_dir(CORPUS))}, "cut-1", "check the marks"))
+    assert got == {"answer": "It prints 11.", "calls": [{"command": script, "output": "11", "by": "checker"}], "error": None}
+    ((prompt, opts),) = seen
+    assert prompt == "check the marks"
+    assert (opts.resume, opts.fork_session, opts.resume_session_at, opts.permission_mode) == (SID, True, "cut-7", "dontAsk")
+    assert (opts.tools, opts.allowed_tools) == (list(marks.CHECKER_TOOLS), list(marks.ALLOWED))
+    assert {"no-session-persistence", "disable-slash-commands", "safe-mode"} <= set(opts.extra_args)
+    assert opts.env["THIMBLE_MADE_UP"] == ""
+    ((matcher,),) = [opts.hooks["PreToolUse"]]
+    (hook,) = matcher.hooks
+
+    def decided(command: str) -> dict:
+        return asyncio.run(hook({"tool_name": "Bash", "tool_input": {"command": command}}, "t1", None))
+
+    for one in (script, "cd /made-up/data && python3 - <<'PY'\nprint(1)\nPY", "cd /made-up/data\npython - <<PY\nprint(1)\nPY"):
+        assert decided(one)["hookSpecificOutput"]["permissionDecision"] == "allow", one
+    for other in ("grep -c major review.json", f"{script}\ngrep -c major review.json", "python3 -c 'print(1)'",
+                  "/usr/bin/python3 - <<'PY'\nprint(1)\nPY", "python3 - <<'PY'\nprint(1)\nPY\nrm x\nPY"):
+        assert decided(other) == {}, other
+
+
+def test_a_fork_that_stops_with_an_error_before_it_answers_says_claude_codes_last_words_and_the_notice_keeps_them_whole(_fresh, monkeypatch):
+    """Claude Code that stops with an error before the fork answered: the check stops, its marks are unchecked with
+    Claude Code's last words on stderr, and the notice ends as a sentence does, with every word of the error in its
+    text or its details (Show more). An answer it gave before the error stands."""
+    from claude_agent_sdk import AssistantMessage, TextBlock
+
+    _cc(monkeypatch)
     shown: list[tuple[str, str | None]] = []
     monkeypatch.setattr(marks, "_notice", lambda c, text, details=None: shown.append((text, details)))
-
-    async def fork(c, main, cut, prompt):
-        return await marks._claude_fork([str(bin_)], tmp_path, {"PATH": "/usr/bin:/bin"}, prompt)
-
+    words = ("Error: the session could not be resumed at the entry it names, which a later rewind of the conversation "
+             "removed, so the fork has no turn to start from. Start a new check from the conversation as it stands now, "
+             "or ask main again, and the check of its next reply resumes it at its last turn.")
+    _sdk(monkeypatch, [], stderr=("", "starting", words), raises=RuntimeError("Command failed with exit code 1"))
     turn = marks.new_turn()
     main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
 
     async def go():
-        await marks.start_check(CORPUS, main, turn, ["It says [ask for a review](#)."], "cut-1", fork=fork)
+        await marks.start_check(CORPUS, main, turn, ["It says [ask for a review](#)."], "cut-1")
         await _wait_all()
 
     asyncio.run(go())
-    assert len(runs.read_text().splitlines()) == sdk.STDIN_TRIES
-    error = f"{sdk.STDIN_MISSED_TEXT}. Claude Code said: {NO_MARKER}"
-    assert STDIN_WARNING not in error
     (m,) = marks.stored(CORPUS, turn)["items"]
-    assert (m["status"], m["reason"]) == ("unchecked", f"the check ended: {error}"), m
+    assert (m["status"], m["reason"]) == ("unchecked", f"the check ended: starting {words}"), m
     ((text, details),) = shown
-    assert text == marks.STOPPED_TEXT.format(why=sdk.STDIN_MISSED_TEXT), text
-    assert details == marks.STOPPED_TEXT.format(why=error.rstrip(".")), details
+    assert details == marks.STOPPED_TEXT.format(why=f"starting {words}".rstrip(".")), details
+    assert text != details and text.endswith("The next reply is checked again."), text
+    # an answer given before the error stands
+    _sdk(monkeypatch, [AssistantMessage(content=[TextBlock(text="Checked.")], model="m")], raises=RuntimeError("exit 1"))
+    got = asyncio.run(marks.run_fork(CORPUS, main, "cut-1", "check"))
+    assert (got["answer"], got["error"]) == ("Checked.", None), got
 
 
 def test_a_short_error_is_the_notice_s_whole_text(_fresh, monkeypatch):
@@ -314,8 +373,7 @@ def test_a_short_error_is_the_notice_s_whole_text(_fresh, monkeypatch):
 
 
 def test_a_failed_fork_s_error_keeps_its_last_stderr_lines():
-    """A fork that failed for another reason: its error is its stderr's last lines, whole, not only the last one."""
-    said = marks.stderr_error(1, "\nTypeError: x is undefined\n    at run (cli.js:1:2)\n  at main (cli.js:3:4)\n\n")
-    assert said == "TypeError: x is undefined at run (cli.js:1:2) at main (cli.js:3:4)"
-    assert marks.stderr_error(2, "") == "Claude Code exited with code 2"
-    assert marks.stderr_error(1, STDIN_WARNING) == sdk.STDIN_MISSED_TEXT
+    """A fork that failed: its error is its stderr's last lines, whole, not only the last one, else the error's words."""
+    lines = ["", "TypeError: x is undefined", "    at run (cli.js:1:2)", "  at main (cli.js:3:4)", ""]
+    assert marks.stderr_error(RuntimeError("exit 1"), lines) == "TypeError: x is undefined at run (cli.js:1:2) at main (cli.js:3:4)"
+    assert marks.stderr_error(RuntimeError("Claude Code exited with code 2"), []) == "Claude Code exited with code 2"
