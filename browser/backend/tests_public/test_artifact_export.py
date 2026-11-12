@@ -145,9 +145,9 @@ async def test_on_claude_code_sign_in_without_the_artifact_tool_the_notice_says_
     agents.ensure_main(CORPUS)
     await export_now()
     assert [n["text"] for n in told()] == [
-        "The report was not published as a Claude artifact: Claude Code offered no Artifact tool, which it has only when "
-        "it is signed in to claude.ai and artifacts are allowed there. Its page downloaded instead. In your terminal: "
-        "run `claude`, sign in to claude.ai with /login, then export again."]
+        "The report was not published as a Claude artifact: Claude Code had no Artifact tool, which needs a claude.ai "
+        "sign-in that allows artifacts. Its page downloaded instead. In your terminal: sign in to claude.ai with /login, "
+        "then export again."]
     # the record has the page download the artifact page, and nothing waits any more
     assert records == [{"type": "export", "format": "artifact", "doc": "report", "status": "failed"}]
     assert not artifact_export.waiting(CORPUS)

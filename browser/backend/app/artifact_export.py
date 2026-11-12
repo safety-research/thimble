@@ -51,9 +51,8 @@ API_WHY = "only a Claude Code sign-in can publish one, and thimble reaches Claud
 API_HOW = {"api-key": "an Anthropic API key", "wif": "Workload Identity Federation"}  # claude_access's choices
 NO_WAY = "thimble has no way to reach Claude yet"
 API_FIX = "To publish from thimble, choose your Claude Code sign-in in Settings, Claude access."
-NO_TOOL_WHY = ("Claude Code offered no Artifact tool, which it has only when it is signed in to claude.ai and artifacts "
-               "are allowed there")
-NO_TOOL_FIX = "In your terminal: run `claude`, sign in to claude.ai with /login, then export again."
+NO_TOOL_WHY = "Claude Code had no Artifact tool, which needs a claude.ai sign-in that allows artifacts"
+NO_TOOL_FIX = "In your terminal: sign in to claude.ai with /login, then export again."
 HELD_WHY = "main's session runs a command in the background, and that session has no Artifact tool"
 HELD_FIX = "Export again once the command ends."
 TOOL_WHY = "Claude Code's Artifact tool answered: {error}"
