@@ -59,6 +59,12 @@ restart; the newest row of a fix shows its state now, with the clicks it takes.
 A dev install's launcher (scripts/install.sh --local) starts the server from the clone, while Use it now starts it from
 live, where the fixes are: on a server that runs from the clone, Your fixes shows a fix that is on as off, and says why,
 and its Use it starts the server from live again (not_here).
+A fix that went on somewhere else while this server ran from live, by y in a Claude Code session or thimble fix apply in
+a shell, is not in the code this server runs either, when it changes what the server runs (BROWSER_RUNS): Your fixes
+shows it as off with a reason of its own, and its Use it builds the page and starts the server again (not_here). The
+server watches the kernel's list (watch), so such a fix gets the notice a fix made here gets, at once: a row of main's
+chat in each workspace it follows, Use it now, What changed and Later, which asks while the fix is not in the code this
+server runs, also after a reload of the page (elsewhere).
 THIMBLE_FIXES=off turns fixes off on this server: main's file_dev_ticket and POST /dev/tickets file nothing and answer
 with the reason, and Report a problem offers no fix (problem, which GET /fixes answers).
 """
@@ -88,7 +94,22 @@ from pydantic import BaseModel
 from . import config
 
 log = logging.getLogger("thimble.fixes")
-router = APIRouter()
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: Any):
+    """The router's lifespan, which FastAPI merges into the app's: the watch of the kernel's list runs while the server
+    does."""
+    task = asyncio.get_running_loop().create_task(watch(), name="fix-watch")
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+router = APIRouter(lifespan=_lifespan)
 
 COMMAND = "/thimble-fix"
 FIXER = "fixer"  # the role of the fixer's conversation (runtime.spec_of)
@@ -99,6 +120,7 @@ NO_SOURCE = "thimble's fixes need the terminal plugin's code beside the browser 
 EMPTY = "Ask for a change to thimble with /thimble-fix <what should work differently>."  # plugin/fix/fixes.ts FIX_ALONE
 RESTART_BY_HAND = "restart thimble-browser to load it"
 RESTART_AFTER_S = 0.3  # restart starts the server again this long after it returns, so the answer its caller gives goes out
+WATCH_S = 1.0  # how often the server looks whether the kernel's list of fixes changed (watch)
 BUSY_WAIT_S = 600.0  # how long a restart waits for main and the other agents to end their turns
 BUSY_POLL_S = 0.25  # how often it looks whether they have
 LINKS = (("backend", ".venv"), ("frontend", "node_modules"))  # what the install lends a copy and live's browser/
@@ -317,8 +339,12 @@ def _notes() -> dict[str, dict[str, Any]]:
 def note(fid: int, kind: str, said: str, **more: Any) -> None:
     """How fix `fid` ended or what came of the person's click (ready, fixed, failed, request, undone, problem): a row in
     main's chat and in the fix's thread, where it happened (a `fix` chip), and the words the newest row shows with its
-    clicks until the analyst dismisses them."""
+    clicks until the analyst dismisses them. The commit of a fix that went on somewhere else, which its notice asked
+    for (elsewhere), stays with each later row of the fix, so that the notice asks once for it."""
     notes = _notes()
+    had = notes.get(str(fid)) or {}
+    if had.get("elsewhere") and "elsewhere" not in more:
+        more["elsewhere"] = had["elsewhere"]
     notes[str(fid)] = {"kind": kind, "said": said, "at": time.time(), **more}
     p = notes_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -330,17 +356,18 @@ def note(fid: int, kind: str, said: str, **more: Any) -> None:
 
 
 def _row(fid: int, kind: str, said: str) -> None:
-    """The row of how fix `fid` ended, in main's chat and in the fix's thread (where), at this time."""
-    from . import agents  # noqa: PLC0415
+    """The row of how fix `fid` ended, in main's chat and in the fix's thread (where), at this time. A fix made
+    somewhere else has no thread here: its row is in main's chat of each workspace this server follows."""
+    from . import agents, session  # noqa: PLC0415
 
-    at = where(fid)
-    if at is None:
-        return
     rec = {"kind": "fix", "text": said, "ref": f"fix:{fid}", "status": kind}
-    with contextlib.suppress(Exception):
-        agents.chip(at[0], **rec)
-    with contextlib.suppress(Exception):
-        agents.Recorder(at[0], at[1]).record("chip", **rec)
+    at = where(fid)
+    for c in [at[0]] if at is not None else session.attached_workspaces():
+        with contextlib.suppress(Exception):
+            agents.chip(c, **rec)
+    if at is not None:
+        with contextlib.suppress(Exception):
+            agents.Recorder(at[0], at[1]).record("chip", **rec)
 
 
 def dismiss(fid: int) -> None:
@@ -386,9 +413,10 @@ def _checking(fid: int, on: bool) -> None:
 
 def status(every: bool = False) -> dict[str, Any]:
     """Each fix the page can show: the ones this server works on (their phase), and the ones whose end is not
-    dismissed yet. A ready notice shows only while the fix is still ready (the terminal can apply it too). `every`:
-    every fix but the removed ones, for Your fixes, where a fix that is on but not in the code this server runs is off,
-    with why (not_here). Newest first."""
+    dismissed yet. A ready notice shows only while the fix is still ready (the terminal can apply it too), or, for a fix
+    that went on somewhere else, while it is not in the code this server runs (elsewhere), which shows it as off, with
+    why. `every`: every fix but the removed ones, for Your fixes, where each fix that is on but not in the code this
+    server runs is off, with why (not_here). Newest first."""
     _recover_soon()
     why = problem()
     notes = _notes()
@@ -398,7 +426,8 @@ def status(every: bool = False) -> dict[str, Any]:
     for r in got.get("fixes") or []:
         fid = int(r["id"])
         n = notes.get(str(fid)) or {}
-        if n.get("kind") == "ready" and r.get("state") != "ready":
+        away = not_here(r, kind) if every or n.get("elsewhere") else ""
+        if n.get("kind") == "ready" and r.get("state") != "ready" and not (n.get("elsewhere") and away):
             n = {}
         phase = _phase.get(fid)
         if r.get("state") == "removed" or (not every and not phase and (not n or n.get("dismissed"))):
@@ -406,9 +435,8 @@ def status(every: bool = False) -> dict[str, Any]:
         shown = bool(n) and not n.get("dismissed") and not phase
         conv = _fixers.get(fid)
         files = r.get("files") or []
-        away = every and not_here(r, kind)
         rows.append({"id": fid, "title": r.get("title") or "", "state": "off" if away else r.get("state"),
-                     "why": NOT_HERE if away else None, "phase": phase,
+                     "why": away or None, "phase": phase,
                      # the turn the restart waits for, by its workspace and its chat's name (restart)
                      "waits": _waits.get(fid) if phase == "restarting" else None,
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
@@ -737,8 +765,8 @@ async def settle(fid: int, answer: str) -> None:
 async def apply(fid: int) -> None:
     """The person's click on a ready fix (Use it now, or Use it in Your fixes): the secret of this click to
     `fix apply`, then live's page is made ready, from the page the fix's checks built when live has the sources they
-    built it from (prepare), and the server starts again from live. A fix that is on but not in the clone this server
-    runs from (on_elsewhere) stays as it is: only the server starts again from live. Raises when the kernel refuses."""
+    built it from (prepare), and the server starts again from live. A fix that is on but not in the code this server
+    runs (on_elsewhere) stays as it is: only the server starts again from live. Raises when the kernel refuses."""
     _phase_set(fid, "applying")
     try:
         rec = await asyncio.to_thread(on_elsewhere, fid)
@@ -843,33 +871,135 @@ def target_root() -> Path:
     return live if (live / "backend" / "app" / "main.py").is_file() else config.REPO_ROOT
 
 
-# why Your fixes shows a fix that is on as off (not_here)
+# why Your fixes shows a fix that is on as off (not_here): a dev install's server that runs from the clone, and a server
+# that runs from live and started before the fix went on somewhere else
 NOT_HERE = "the workbench runs from your clone, which does not have it"
+NOT_YET = "the workbench started before it went on"
 
 
-def not_here(rec: dict[str, Any], kind: str) -> bool:
-    """Whether fix `rec` is on but not in the code this server runs. In a dev install (the kernel's list says kind
-    `clone`), Use it now starts the server from live, where the fixes are, and the launcher starts it from the clone
-    (scripts/install.sh --local): the fix is a commit of live's branch mine, which the clone's checkout does not hold
-    unless the person merged it there."""
-    if rec.get("state") != "on" or kind != "clone" or target_root().resolve() == config.REPO_ROOT.resolve():
-        return False
-    commit = str(rec.get("commit") or "")
-    if not re.fullmatch(r"[0-9a-f]{7,64}", commit):
-        return True
+def _git(cwd: Path, *args: str) -> int | None:
+    """The exit code of a git command that only reads the checkout at `cwd`; None when git did not run."""
     try:
-        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(config.REPO_ROOT),
-                            "merge-base", "--is-ancestor", commit, "HEAD"], capture_output=True, timeout=30,
-                           check=False)
+        return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "--literal-pathspecs",
+                               "-C", str(cwd), *args], capture_output=True, timeout=30, check=False).returncode
     except (OSError, subprocess.TimeoutExpired):
-        return True
-    return p.returncode != 0
+        return None
+
+
+def _holds(rev: str, commit: str) -> bool:
+    """Whether commit `rev` of this server's checkout holds the fix's commit `commit`."""
+    return (bool(re.fullmatch(r"[0-9a-f]{7,64}", commit))
+            and _git(config.REPO_ROOT, "merge-base", "--is-ancestor", commit, rev) == 0)
+
+
+def from_live() -> bool:
+    """Whether this server runs from live's browser/, a git checkout whose commit at the server's start is known
+    (config.BOOT_COMMIT)."""
+    return bool(config.BOOT_COMMIT) and live_root().resolve() == config.REPO_ROOT.resolve()
+
+
+def not_here(rec: dict[str, Any], kind: str) -> str:
+    """Why fix `rec` is on but not in the code this server runs (NOT_HERE, NOT_YET), '' when it is, or is not on.
+    In a dev install (the kernel's list says kind `clone`), Use it now starts the server from live, where the fixes are,
+    and the launcher starts it from the clone (scripts/install.sh --local): the fix is a commit of live's branch mine,
+    which the clone's checkout does not hold unless the person merged it there.
+    A server that runs from live (from_live) keeps the code it started with: a fix that went on after that, by y in a
+    Claude Code session or thimble fix apply in a shell, is not in it when it changes files this server runs
+    (BROWSER_RUNS), live has them otherwise now than at the server's start, and the commit the server started at does
+    not hold the fix's. So a fix whose commit was made anew with the same change (another fix went off) stays on, a fix
+    to the terminal plugin alone is never off here, and neither is any fix in a copy without git."""
+    if rec.get("state") != "on":
+        return ""
+    commit = str(rec.get("commit") or "")
+    if target_root().resolve() != config.REPO_ROOT.resolve():
+        if kind != "clone":
+            return ""
+        return "" if _holds("HEAD", commit) else NOT_HERE
+    paths = [x for f in rec.get("files") or [] if isinstance(f, dict)
+             for x in [str(f.get("path") or "")] if x.startswith("browser/") or x in BROWSER_RUNS]
+    if not paths or not from_live():
+        return ""
+    # live's top folder holds browser/ and plugin/, as the fix's paths name them
+    if _git(config.REPO_ROOT.parent, "diff", "--quiet", config.BOOT_COMMIT, "HEAD", "--", *paths) != 1:
+        return ""
+    return "" if _holds(config.BOOT_COMMIT, commit) else NOT_YET
+
+
+async def elsewhere() -> bool:
+    """A fix that went on somewhere else after this server started (not_here's NOT_YET: y in a Claude Code session, or
+    thimble fix apply in a shell) gets the notice a fix made here gets when its checks pass: a row of main's chat in each
+    workspace this server follows (_row), with Use it now, What changed and Later, which asks while the fix is not in the
+    code this server runs (status). Once for each commit of the fix, so that Later holds, and a fix that went on again,
+    or in a new version, asks again. False when the kernel's list could not be read."""
+    got = await asyncio.to_thread(_went_on_elsewhere)
+    for fid, said, more in got or []:
+        note(fid, "ready", said, **more)
+    return got is not None
+
+
+def _went_on_elsewhere() -> list[tuple[int, str, dict[str, Any]]] | None:
+    """The notices elsewhere writes, each fix's id, words and what its note keeps beside them; None when the kernel's
+    list could not be read. Blocking: the kernel's list and git."""
+    if problem() or not from_live():
+        return []
+    got = listing()
+    if "fixes" not in got:
+        return None
+    kind = str(got.get("kind") or "")
+    notes = _notes()
+    out = []
+    for r in got.get("fixes") or []:
+        fid, commit = int(r["id"]), str(r.get("commit") or "")
+        had = notes.get(str(fid)) or {}
+        # a fix this server puts on or takes off itself (Use it now, Undo) is told where its click was
+        if fid in _phase or had.get("elsewhere") == commit or not_here(r, kind) != NOT_YET:
+            continue
+        tests = " · tests pass" if r.get("tests") == "passed" else ""
+        # the page the checks of a fix made here built stays its page: prepare takes it only when live has the very
+        # sources it was built from (checks_build)
+        out.append((fid, f"thimble fixed: {fix_name(r)}{tests}",
+                    {"elsewhere": commit, **({"page": had["page"]} if had.get("page") else {})}))
+    return out
+
+
+def _listed() -> tuple[int, int, int] | None:
+    """The kernel's list of fixes as it stands on disk: the inode, the size and the time of the last change of
+    fixes.jsonl, which each change of a record appends to; None while there is none."""
+    try:
+        st = (fixes_home() / "fixes.jsonl").stat()
+    except OSError:
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
+async def watch() -> None:
+    """The kernel's list of fixes, as a Claude Code session, a shell or this server changes it: a fix that went on
+    somewhere else gets its notice (elsewhere), and each change goes to the pages as a `fix` event, so that what they
+    show of each fix is what the list says now. It looks every WATCH_S; its first look counts as a change, for a fix
+    that went on while the server started, and a change whose list could not be read counts again at the next look."""
+    seen: Any = ()
+    failing = False
+    while True:
+        now = await asyncio.to_thread(_listed)
+        if now != seen:
+            try:
+                read = await elsewhere()
+            except Exception:  # noqa: BLE001 — the watch goes on, and so does the server
+                read = False
+                if not failing:
+                    log.warning("the notices of fixes that went on somewhere else were not written", exc_info=True)
+            if read:
+                if seen != ():
+                    _event(0, "listed")
+                seen = now
+            failing = not read
+        await asyncio.sleep(WATCH_S)
 
 
 def on_elsewhere(fid: int) -> dict[str, Any] | None:
     """Fix `fid`'s record when it is on but not in the code this server runs (not_here), else None; no kernel call while
-    the server runs from live's browser/, or live has none."""
-    if target_root().resolve() == config.REPO_ROOT.resolve():
+    the server runs the code Use it starts, unless a fix can have gone on since its start (from_live)."""
+    if target_root().resolve() == config.REPO_ROOT.resolve() and not from_live():
         return None
     got = listing()
     rec = next((r for r in got.get("fixes") or [] if int(r.get("id") or 0) == int(fid)), None)
@@ -920,6 +1050,16 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
 PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js",
                 "plugin/tray/printed.mjs", "plugin/tray/tray.mjs", "browser/backend/app/label_order.json",
                 "browser/backend/app/label_wheel.json")
+# the terminal plugin's files the server itself holds from its start: the validator it imports once (marks.py evidence)
+# and the list it reads once (changeable). What it reads or starts anew at each use is as live has it at once, with no
+# restart, and is not here: the texts in plugin/prompts, the kernel, and the modules its node helpers import
+# (look_of.mjs, marks_of.mjs, notices_of.mjs, each a node process of its own for each call).
+SERVER_KEEPS = ("plugin/engine/kernel/evidence.py", "plugin/fix/changeable.mjs")
+# the terminal plugin's files a server that runs keeps as they were at its start: those its page bundles and those it
+# holds itself. The kernel names the restart for a fix that changes one by the same list (BROWSER_RUNS in
+# plugin/engine/kernel/fixes.py). Tests keep the lists whole (test_fixes_flow.py): the page's imports are followed
+# from its sources, and each file of the plugin the server names is one it keeps or one it reads at each use.
+BROWSER_RUNS = (*(p for p in PAGE_SOURCES if p.startswith("plugin/")), *SERVER_KEEPS)
 
 
 def page_built(fe: Path) -> bool:

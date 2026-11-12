@@ -12,13 +12,13 @@
     "minimal": {
       "type": "boolean",
       "title": "Minimal mode",
-      "description": "Plain answers; cards only when you ask; the rest off.",
+      "description": "Sets the rows below in one step, for plainer answers with fewer extras. Turn it off to put back the modes they had.",
       "default": false
     },
     "cards": {
       "type": "string",
       "title": "Cards",
-      "description": "auto: Claude draws charts and tables of your data. on demand: Claude draws a card only when you ask for one. Press v for the last answer. off: no cards.",
+      "description": "A card is a chart or a table of the data behind an answer. Choose on demand when you would rather read answers as plain text. auto: Claude draws charts and tables of your data. on demand: Claude draws a card only when you ask for one. Press v for the last answer. off: no cards.",
       "options": [
         "auto",
         "on demand",
@@ -29,19 +29,19 @@
     "squeezeAnswers": {
       "type": "boolean",
       "title": "Simplify",
-      "description": "A shorter, plainer version of the last answer.",
+      "description": "Press s when an answer is too long or too technical, and a shorter, plainer version shows under it. Turn it off to take s off the bar.",
       "default": true
     },
     "catchUp": {
       "type": "boolean",
       "title": "Catch-up",
-      "description": "One note on the replies that came in while you were away.",
+      "description": "When several replies came in since your last message, press b to read them as one note. Turn it off if you read each reply as it comes.",
       "default": true
     },
     "citations": {
       "type": "string",
       "title": "Citations",
-      "description": "auto + verify: Claude cites what each answer rests on. The verifier checks every citation after each answer. auto: Claude cites what each answer rests on. The verifier checks a citation when you open it. manual: select words and press c. The verifier checks them against your files. off: no citations.",
+      "description": "A citation links words of an answer to the lines of your files they rest on. Choose an auto mode to have Claude cite every answer. auto + verify: Claude cites what each answer rests on. The verifier checks every citation after each answer. auto: Claude cites what each answer rests on. The verifier checks a citation when you open it. manual: select words and press c. The verifier checks them against your files. off: no citations.",
       "options": [
         "auto + verify",
         "auto",
@@ -53,7 +53,7 @@
     "checkerModel": {
       "type": "string",
       "title": "Verifier model",
-      "description": "The model of the verifier, which checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.2: that model, which reads the conversation without the cache of the conversation's model.",
+      "description": "The model of the verifier, a second Claude that checks each citation against your files. Pick a stronger model for harder checks, or a smaller one for faster checks. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.2: that model, which reads the conversation without the cache of the conversation's model.",
       "options": [
         "same as Claude",
         "Haiku 5.5",
@@ -66,7 +66,7 @@
     "checkerEffort": {
       "type": "string",
       "title": "Verifier effort",
-      "description": "How hard the verifier thinks. same as Claude: the effort of the conversation. low, medium, high, xhigh or max: that effort, of the levels Claude Code offers for the verifier's model.",
+      "description": "How long the verifier thinks before it rules on a citation. Raise it for harder checks, or lower it for faster ones. same as Claude: the effort of the conversation. low, medium, high, xhigh or max: that effort, of the levels Claude Code offers for the verifier's model.",
       "options": [
         "same as Claude",
         "low",
@@ -80,7 +80,7 @@
     "explain": {
       "type": "string",
       "title": "Explainers",
-      "description": "auto: short notes on terms you may not know. on demand: select words and press e for a short note. off: no explainers.",
+      "description": "An explainer is a short note on what a term in an answer means. Choose on demand to get one only for the words you select. auto: short notes on terms you may not know. on demand: select words and press e for a short note. off: no explainers.",
       "options": [
         "auto",
         "on demand",
@@ -91,7 +91,7 @@
     "details": {
       "type": "string",
       "title": "Heads-ups",
-      "description": "auto: notes on details that may mislead. off: no heads-ups.",
+      "description": "A heads-up flags a detail you should know before you rely on an answer. Turn it off to read answers without these notes. auto: notes on details that may mislead. off: no heads-ups.",
       "options": [
         "auto",
         "off"
@@ -101,13 +101,13 @@
     "labels": {
       "type": "boolean",
       "title": "Labels",
-      "description": "The labels Claude made, with their values and records. off: no Labels pane, and Claude makes no labels.",
+      "description": "A label gives each record a value by a rule or a question, such as how each run ended. Turn it off if you do not want Claude to make labels.",
       "default": true
     },
     "claimsMode": {
       "type": "string",
       "title": "Claims",
-      "description": "auto: everything the session concluded. on demand: everything the session concluded, when you press f in the pane. off: no Claims pane.",
+      "description": "The Claims pane lists what the session has concluded, grouped by topic. Turn it on to review a long analysis claim by claim. auto: everything the session concluded. on demand: everything the session concluded, when you press f in the pane. off: no Claims pane.",
       "options": [
         "auto",
         "on demand",
@@ -118,7 +118,7 @@
     "coverage": {
       "type": "boolean",
       "title": "Coverage",
-      "description": "Which files Claude has read.",
+      "description": "The Coverage pane shows how much of each file Claude has read. Turn it on to see what an answer may have missed.",
       "default": false
     }
   }

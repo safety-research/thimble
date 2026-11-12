@@ -28,8 +28,6 @@ export interface TextRow {
   apiError?: string
   /** the check of this row's marks, by their order in its text (backend marks.py) */
   checks?: (MarkItem | undefined)[]
-  /** the turn's marks, on the turn's last text row (its reply), for the footer under it */
-  turnMarks?: MarkItem[]
   /** the id of main's turn this row answers, which its `done` record names: the checks' comments on the answer name it
    * (chat/answerComments.ts) */
   turn?: string
@@ -301,8 +299,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
 }
 
 /** Each turn's marks on its text rows: the marks are numbered in the order they stand in the turn's texts (backend
- * marks.py), so a row's checks are the next as many items as its text has marks. The turn's last text row, its reply,
- * gets the turn's marks for its footer. */
+ * marks.py), so a row's checks are the next as many items as its text has marks. */
 function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<string, MarkItem[]>): void {
   for (const [turn, items] of marks) {
     const texts = turns.get(turn)
@@ -314,7 +311,6 @@ function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<str
       if (n) row.checks = byN.slice(at, at + n)
       at += n
     }
-    texts[texts.length - 1].turnMarks = byN
   }
 }
 
@@ -423,6 +419,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
         str(inp.card ?? inp.cell ?? '')
       )
     case 'delete_card':
+    case 'export_card':
       return str(inp.card ?? inp.cell ?? '')
     case 'apply_label':
       return [str(inp.name), inp.scope ? `on ${str(inp.scope)}` : ''].filter(Boolean).join(' ')
@@ -491,6 +488,9 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'WebFetch':
     case 'WebSearch':
       return str(inp.url ?? inp.query)
+    case 'Artifact':
+      // the page main publishes for Export, Claude artifact: its file's name, not its path in thimble's workspace
+      return inp.file_path ? str(inp.file_path).split('/').pop() || '' : str(inp.url ?? inp.action ?? '')
     default: {
       // a tool the chat has no words for: the field of its input that names what the call is about, never the input
       // as JSON (live QA 2: `SendFeedback {"type":"bug",…`)
@@ -514,9 +514,11 @@ export const TOOL_WORDS: Record<string, string> = {
   Agent: 'Subagent',
   WebFetch: 'Fetch page',
   WebSearch: 'Web search',
+  Artifact: 'Claude artifact',
   add_card: 'Add card',
   edit_card: 'Edit card',
   delete_card: 'Delete card',
+  export_card: 'Export card',
   read_ref: 'Look up',
   list_cards: 'List cards',
   apply_label: 'Apply label',
@@ -554,6 +556,7 @@ export const TOOL_GROUPS: Record<string, string> = {
   add_card: 'Cards',
   edit_card: 'Cards',
   delete_card: 'Cards',
+  export_card: 'Cards',
   list_cards: 'Cards',
   apply_label: 'Label',
   show_label: 'Label',
@@ -579,6 +582,7 @@ export const TOOL_GROUPS: Record<string, string> = {
   Task: 'Subtask',
   WebFetch: 'Web',
   WebSearch: 'Web',
+  Artifact: 'Claude artifact',
   file_dev_ticket: 'Dev ticket',
   fix_thimble: 'Fixes',
   screenshot: 'Screenshot',
@@ -793,6 +797,8 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return with_('Edited card', oneLine(str(inp.question ?? inp.title)) || cellQ(inp.card ?? inp.cell) || takeawayLine(inp.takeaway))
     case 'delete_card':
       return with_('Deleted card', cellQ(inp.card ?? inp.cell))
+    case 'export_card':
+      return with_('Exported card', cellQ(inp.card ?? inp.cell))
     case 'list_cards': {
       const g = str(inp.group).trim()
       return g && g.toLowerCase() !== 'all' ? `Listed cards in ${g}` : 'Listed cards'

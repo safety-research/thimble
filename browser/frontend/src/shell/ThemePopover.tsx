@@ -1,5 +1,5 @@
 // The theme popover under the top bar's palette button: the paper (Warm, Neutral, Dark) as a segmented choice in a
-// track, then the seven accents as swatches; the chosen swatch is ringed in ink. Both are kept by lib/theme.
+// track, then the accents as swatches; the chosen swatch is ringed in ink. Both are kept by lib/theme.
 import { Segmented } from '../components/Button'
 import { Popover } from '../components/Menu'
 import { ACCENTS, PAPERS, useTheme } from '../lib/theme'

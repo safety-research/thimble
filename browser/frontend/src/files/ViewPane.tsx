@@ -11,7 +11,7 @@
 // reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked or the record the side panel shows (none once they closed it), the scroll positions, the fields
 // and the label filter. Undo in the review's mark loads at once.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { api } from '../lib/api'
@@ -21,11 +21,11 @@ import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ViewReview } from '../lib/types'
-import { openLabelEditor } from './LabelEditor'
+import { useViewLabelActions } from './labelCalls'
 import { ViewFailed } from './Reader'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
-import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
+import { ViewerFrame, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import type { BuiltView } from './ViewsBar'
 
@@ -52,23 +52,8 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
   const pin = usePinnedView(ws, view.slug, view.version)
-  const { byId, toggle, setFocus, setColour } = labels
-  // what a new label made in the editor applies to: the files the view claims
-  const claims = view.claims
-  const firstFile = view.first_file
-  const labelActions = useMemo<ViewLabelActions>(
-    () => ({
-      setOn: (id, on) => {
-        const k = byId.get(id)
-        if (!k || !!k.shown === on) return
-        if (on) setFocus(id)
-        toggle(id)
-      },
-      setColour,
-      edit: (id, at) => at && openLabelEditor({ id, ...at, appliesTo: claims ?? (firstFile ? [firstFile] : []) }),
-    }),
-    [byId, toggle, setFocus, setColour, claims, firstFile],
-  )
+  // the page's label controls; a new label made in the editor applies to the files the view claims
+  const labelActions = useViewLabelActions(labels, view.claims ?? (view.first_file ? [view.first_file] : []))
   // how many records the label filter hides in the view, null while there is no filter or no exact count yet
   const [hidden, setHidden] = useState<number | null>(null)
   useEffect(() => setFailure(null), [view.slug, targetRef])

@@ -141,9 +141,10 @@ items}`:
   left-aligned on one edge.
 
 `groupOf(record)` is a record's group, `query()` the choice for the reader (`{field}`, `{label, name}`, or null), and
-`thimble.color_value(rows, ref, record)` a record's group there. A label's value reaches the page only on the records
-it anchors (the marks of `thimble.markOf`); a record the reader gave its group as `group` keeps it, for a view that does
-not anchor every record.
+`thimble.color_value(rows, ref, record)` a record's group there. A label's value reaches the page on the records it
+anchors, and on each record a part of the kit reads it of, such as a row the table has not drawn, once thimble has sent
+that record's marks (`thimble.onMarks`); a record the reader gave its group as `group` has it at once, for a view that
+does not hand the kit every record.
 
 ## The timeline
 

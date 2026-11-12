@@ -1,6 +1,7 @@
 // Claims (claims/): the observer's claims lens places each answer's claims by their words; a look that fails leaves a
-// gap the pane names; w opens the pane, where a cluster chosen lists its claims and a claim picked takes the pane. All
-// data is made up. `claude plugin test plugin`.
+// gap the pane names; w opens the pane, where a cluster chosen lists its claims and a claim picked takes the pane. A
+// citation's card there says what its check found as the reply's card does. All data is made up.
+// `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { registerAnswers, resetAnswers } from '../core/answers'
@@ -8,8 +9,10 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
+import { cardOf, correctionsOf } from '../claims/graph.js'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { readStore } from '../claims/store.js'
+import { newReply } from '../marks/store'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -227,11 +230,11 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   await buttons(picked).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
   // its citation as the tray's card in a frame; its reply has no check in the store: it did not run, so the citation
-  // is failed; the card is one press that opens it as a press on it in the reply does
+  // is failed, which its status alone says; the card is one press that opens it as a press on it in the reply does
   const shown = await draw({ claim: 'c1', open: true })
   const st = textOf(shown)
   expect(st).toMatch(/│ p95 check +× failed │/)
-  expect(st).toContain('The check did not run.')
+  expect(st).not.toContain('The check did not run.')
   expect(buttons(shown).some(b => /^p\d+:ev:0$/.test(b.key) && textOf(b.children).includes('p95 check'))).toBe(true)
   // one citation: k j still the claims; e hides it, back to the claim
   expect(keysOf(shown)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'hide evidence']])
@@ -296,6 +299,61 @@ test('a long claim is kept whole: its cluster lists it whole when current, a pre
   expect(other).not.toContain('past the contract.')
   // e opens it: the claim picked shows it whole
   expect(flat(await draw({ claim: 'c1' }))).toContain(LONG)
+})
+
+test("a citation's card in the pane says its check by its status alone: verified once the check corrected or rewrote it, failed with no reason, stale with no file; History still shows the sentence before and after", () => {
+  const lines = (s: Any) => cardOf(s, 90).rows.map((r: Any[]) => r.map((x: Any) => x.s).join(''))
+  const rewritten = { status: 'corrected', repair: true, shown: 'port 9000', was: 'The app runs on port 8000.', now: 'The app runs on port 9000.', rewritten: true, reason: 'the README says 9000' }
+  const card = lines(rewritten)
+  expect(card[0]).toContain('✓ verified')
+  expect(card.join('\n')).not.toMatch(/repaired|corrected|rewritten|port 8000/)
+  // words alone the check corrected: verified, and nothing of what they were
+  const fixed = lines({ status: 'corrected', shown: '12 of 40', was: '15 of 40' })
+  expect(fixed[0]).toContain('✓ verified')
+  expect(fixed.join('\n')).not.toContain('15 of 40')
+  // a failed one: no reason and no file its check could not read; a stale one: no file that changed
+  const failed = lines({ status: 'failed', shown: '12 of 40', reason: 'Line 4 says 15.', unread: [{ tool: 'Read', file: 'runs.csv', fix: 'ok' }] })
+  expect(failed[0]).toContain('× failed')
+  expect(failed.join('\n')).not.toMatch(/Line 4|runs\.csv/)
+  const stale = lines({ status: 'verified', shown: 'port 8000', sources: [{ file: 'README.md', path: '/made-up/data/README.md', size: 1, mtime: 1, sha256: 'a1', changed: true }] })
+  expect(stale[0]).toContain('↻ stale')
+  expect(stale.join('\n')).not.toContain('README.md')
+  expect(correctionsOf({ id: 'c1', turn: 2, sources: [rewritten] }, new Map())).toMatchObject([{ old: 'The app runs on port 8000.', now: 'The app runs on port 9000.' }])
+})
+
+test("a computed citation's card in the pane shows the line of code that printed its value right under the head, and no words of the check's on how the code got it", () => {
+  const code = 'import csv\nrows = list(csv.DictReader(open("runs.csv")))\nprint(f"{sum(r[\'status\'] == \'failed\' for r in rows)} of {len(rows)}")'
+  // evidence a check kept with its words on how the code got the value, as an earlier build stored it
+  const evidence = { kind: 'computed', code, output: '12 of 40\n', highlight: [[0, 8]], by: 'checker', method: 'Counted the rows of runs.csv whose status is failed.' }
+  const card = cardOf({ status: 'verified', shown: '12 of 40', evidence }, 90).rows.map((r: Any[]) => r.map((x: Any) => x.s).join(''))
+  expect(card[0]).toContain('✓ verified')
+  expect(card[1]).toContain('print(f"{sum(')
+  expect(card.join('\n')).not.toContain('Counted the rows')
+})
+
+test("a claim picked says no state of its citations: a correction only by h, and while x repairs one its card says checking and the key row keeps x repair", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const text = 'Run 4 failed on the [p95 check](#).'
+  const s = setup([reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [text] })
+  const start = text.indexOf('[')
+  const mark = { n: 1, row: 't1-row-0', words: 'p95 check', start, end: start + '[p95 check](#)'.length, sentence: text }
+  const kept = (m: Any) => newReply(s.$, { key: 't1-row-0', turnId: 't1', rows: ['t1-row-0'], startedAt: 0, settledAt: 1, items: [{ ...mark, ...m }] })
+  const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
+  const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
+  // the check corrected its citation: no line under the claim says so; h opens the History, which shows the correction
+  await kept({ status: 'corrected', shown: 'p99 check', was: 'p95 check', reason: 'Line 4 says p99.' })
+  const fixed = await draw({ claim: 'c1' })
+  expect(textOf(fixed)).not.toContain('corrected')
+  expect(keysOf(fixed)).toContainEqual(['h', 'corrections'])
+  expect(textOf(await draw({ claim: 'c1', history: true }))).toContain('p99 check')
+  // x repairs a citation that failed: while its check runs, its card says checking, and x stays x repair, so a second
+  // press is a key of the pane, never a letter of the prompt
+  await kept({ status: 'checking', shown: 'p95 check', repair: true })
+  const running = await draw({ claim: 'c1', open: true })
+  expect(textOf(running)).toMatch(/│ p95 check .*checking/)
+  expect(keysOf(running)).toEqual([['e', 'hide evidence'], ['x', 'repair']])
 })
 
 test('a store of v 2 kept a long claim cut at 200 characters, in a word: read, it ends after its last whole word, then …', () => {

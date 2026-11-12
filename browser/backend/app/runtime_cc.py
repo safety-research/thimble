@@ -7,7 +7,7 @@ thimble's prompt as the whole system prompt; the role's model and effort. thimbl
 named so that the tools read as 0.8's plugin named them (tools.thimble_tool); Claude Code's built-in tools are the
 same set the Messages API runtime gives (Spec.builtins), Bash in Claude Code's sandbox (no Bash where it cannot run),
 Edit and Write allowed only in the agent's write folders (the corpus among them for main and its thread forks while
-Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits).
+Settings' Read only is off, runtime.Spec.corpus_edits).
 
 Permissions. The session runs in Claude Code's default mode with a permission callback (options' `ask`), so a command's
 request to a host the analyst's Claude Code settings do not allow asks the analyst in the chat, as Claude Code asks in
@@ -18,7 +18,12 @@ shows the session's Bash call that runs (a session runs one at a time), which th
 
 A PreToolUse hook callback (in this process, not a plugin hook) hears each call of thimble's tools with Claude Code's
 id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8, and each
-Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. The
+Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. Main has Claude
+Code's Artifact tool in the turns an export waits for (artifact_export.py), in a session that starts with the variable
+a headless session needs for that tool (artifact_export.ENV) and without the tools Claude Code adds with it
+(artifact_export.COMPANIONS). The hook refuses every call of the Artifact tool but the publish of that export's page and
+the read of the artifact it updates, which the permission callback allows when Claude Code asks, and each result of
+such a call goes to artifact_export.result, which reads the artifact's link. The
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
 session as a fork of it (fork_session). After a rewind of main (runtime.rewind_main) the state also names the entry of
 the session that main's next turn, and a fork until then, resumes it up to (resume_at), as a fork of it.
@@ -384,7 +389,7 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None, speed))
     out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path(), **kernel_wrap.NO_SIDE_WRITES}
     no_write = list(getattr(spec, "no_write", []) or [])
-    corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
+    corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings' Read only is off
     out["permissions"] = {
         "allow": [f"Edit(/{w}/**)" for w in spec.write_roots],
         "deny": [*([] if corpus else [f"Edit(/{spec.cwd}/**)"]),
@@ -414,10 +419,13 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
     from claude_agent_sdk import (ClaudeAgentOptions, HookMatcher, PermissionResultAllow,  # noqa: PLC0415
                                   PermissionResultDeny, SdkMcpTool, create_sdk_mcp_server)
 
-    from . import cc_settings, config, host_asks, runtime, sdk, tools  # noqa: PLC0415
+    from . import artifact_export, cc_settings, config, host_asks, runtime, sdk, tools  # noqa: PLC0415
 
     bash = "Bash" in spec.builtins and cc_settings.sandbox_ok()
     builtins = [b for b in spec.builtins if b != "Bash" or bash]
+    # a turn an export waits for (runtime.spec_of) has the Artifact tool in its spec, so it never goes on in a session
+    # started without it (turn): its session starts with the variable that gives it the tool, without its companions
+    artifact = artifact_export.TOOL in builtins
     secs = tools.tool_sections(spec.thimble, getattr(spec, "labels", True))
 
     def handler(name: str) -> Any:
@@ -439,6 +447,9 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
             pending.setdefault(_key(name, (inp or {}).get("tool_input")), []).append(tool_use_id)
         elif tool_use_id and name == "Bash":
             shell[tool_use_id] = {"tool": name, "input": (inp or {}).get("tool_input") or {}}
+        elif name == artifact_export.TOOL and not artifact_export.may_publish(conv.c, (inp or {}).get("tool_input")):
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": tools.hint("artifact-refused")}}
         return {}
 
     async def ended(_inp: Any, tool_use_id: str | None, _ctx: Any) -> dict[str, Any]:
@@ -446,6 +457,8 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         return {}
 
     async def ask(name: str, inp: dict[str, Any], _ctx: Any) -> Any:
+        if name == artifact_export.TOOL and artifact_export.may_publish(conv.c, inp):
+            return PermissionResultAllow()  # the analyst's Export asked for this publish, or the read before it
         if name != host_asks.TOOL:
             return PermissionResultDeny(message=REFUSED.format(tool=name))
         # the request is the running Bash call's (module note, permissions): the one started last, should two run
@@ -457,7 +470,8 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
             return PermissionResultAllow()
         return PermissionResultDeny()
 
-    allowed = [b for b in builtins if b not in ("Edit", "Write")]
+    # Edit and Write only in the write folders; the Artifact tool asks the callback (ask), which allows the one publish
+    allowed = [b for b in builtins if b not in ("Edit", "Write", artifact_export.TOOL)]
     allowed += [f"Edit(/{w}/**)" for w in spec.write_roots]
     allowed += [tools.thimble_tool(n) for n in spec.thimble]
     state = _load(conv.state_path("cc"))
@@ -475,6 +489,7 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         cwd=str(spec.cwd),
         tools=builtins,
         allowed_tools=allowed,
+        disallowed_tools=list(artifact_export.COMPANIONS) if artifact else [],
         permission_mode="default",
         can_use_tool=ask,
         mcp_servers={SERVER: server},
@@ -488,7 +503,8 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         strict_mcp_config=True,
         add_dirs=[str(w) for w in spec.write_roots],
         # Claude Code keeps its own temp folder in the short TMPDIR too, whatever CLAUDE_CODE_TMPDIR the server has
-        env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}),
+        env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {}),
+                          **({artifact_export.ENV: "1"} if artifact else {})}),
         # the session echoes each message it reads, so a message handed to main mid-turn is known read (_hand), and a
         # turn's prompt too, before which a result is one of a turn Claude Code ran of its own (_session)
         extra_args={"safe-mode": None, "replay-user-messages": None},
@@ -632,11 +648,12 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
     open since its last turn (Held)."""
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, UserMessage  # noqa: PLC0415
 
-    from . import runtime  # noqa: PLC0415
+    from . import artifact_export, runtime  # noqa: PLC0415
 
     path = conv.state_path("cc")
     reply, failed, box, ran = "", "", "", False
     bash_ids: set[str] = set()
+    publishing: dict[str, Any] = {}  # the Artifact calls that run, by id: each one's input (artifact_export.result)
     handed: dict[str, str] = {}  # by uuid, the messages handed to the session (_hand) that it has not read yet
     closing = asyncio.Event()
     # the uuid the session echoes this turn's prompt with once it reads it: before that, a result ends a turn Claude Code
@@ -647,6 +664,10 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
     def results(rs: list[dict[str, Any]]) -> None:
         nonlocal box, ran
         conv.emit_results(rs)
+        for r in rs:
+            if r.get("tool_use_id") in publishing:
+                artifact_export.result(conv.c, publishing.pop(str(r["tool_use_id"])), r.get("content"),
+                                       bool(r.get("is_error")))
         mine = [r for r in rs if r.get("tool_use_id") in bash_ids]
         box = box or _box_failure(mine)
         ran = ran or any(not _box_failure([r]) for r in mine)
@@ -670,6 +691,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
                         sid = (msg.data or {}).get("session_id")
                         if sid:
                             _save(path, {"session_id": sid})
+                        conv.tools = [str(t) for t in (msg.data or {}).get("tools") or []]
                     elif isinstance(msg, SystemMessage) and msg.subtype == "background_tasks_changed":
                         held.tasks = list((msg.data or {}).get("tasks") or [])
                     elif isinstance(msg, SystemMessage) and msg.subtype == "task_notification":
@@ -681,6 +703,8 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
                         if held.bash:  # a session without Bash answers a call of it with an error that ran nothing
                             bash_ids.update(str(b["id"]) for b in blocks
                                             if b.get("type") == "tool_use" and b.get("name") == "Bash")
+                        publishing.update({str(b["id"]): b.get("input") for b in blocks
+                                           if b.get("type") == "tool_use" and b.get("name") == artifact_export.TOOL})
                         conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                         said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()

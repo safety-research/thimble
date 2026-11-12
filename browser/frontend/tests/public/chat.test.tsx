@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // The chat as the analyst uses it (src/chat/ChatPanel.tsx, useChat.ts, Rows.tsx), over a stand-in server that answers
 // the routes the panel calls as the server does: a question goes to main, and the answer shows with the card it made
-// and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a model
+// and its citation as the check found it, a failed citation saying so only in itself; while main works, a message
+// waits for main and Stop ends the turn; a model
 // picked under the composer shows there at once; a view's thread shows the fast mode of its build's row in Settings,
 // which is main's until the row's own is set; a rewind takes a message back; a side thread says it is starting, then
 // that it works, and ends on its answer; a fix shows in main as a side thread does.
@@ -138,6 +139,32 @@ test('a question goes to main, and the answer shows with the card it made and it
   expect(el.querySelector('.refchip[data-ref="card:abcd1234"]')).not.toBeNull()
   const mark = el.querySelector('.chat-text .mark')
   expect([mark?.getAttribute('data-mark-look'), mark?.textContent]).toEqual(['verified', '12 of the 40'])
+})
+
+test('an answer whose citations failed says so in each citation alone, with no line under the answer', async () => {
+  chats.main.events.push(
+    ...([
+      { type: 'user', ts: T, text: 'How many runs failed?', by: 'browser' },
+      { type: 'text', delta: '[12 of the 40](#) runs failed, [3](#) of them twice.' },
+      { type: 'done', turn: 'aaaa1111' },
+      {
+        type: 'marks',
+        turn: 'aaaa1111',
+        items: [
+          { n: 1, piece: 0, k: 0, words: '12 of the 40', sentence: '', status: 'failed', failedBy: 'evidence', shown: '12 of the 40', reason: 'No line shows 12.' },
+          { n: 2, piece: 0, k: 1, words: '3', sentence: '', status: 'failed', failedBy: 'check', shown: '3', reason: 'Two runs failed twice.' },
+        ],
+      },
+    ] as unknown as ChatRecord[]),
+  )
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  expect([...el.querySelectorAll('.chat-text .mark')].map((m) => [m.getAttribute('data-mark-look'), m.textContent])).toEqual([
+    ['failed', '12 of the 40×'],
+    ['failed', '3×'],
+  ])
+  const answer = el.querySelector('.chat-text')!.closest('.chat-assistant')!
+  expect(answer.textContent).toBe('12 of the 40× runs failed, 3× of them twice.')
 })
 
 test('while main works, a message sent waits until main reads it, and Stop main ends the turn', async () => {

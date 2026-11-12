@@ -406,7 +406,8 @@ body[data-cmd] .board-stage * {
   visibility: visible;
   pointer-events: auto;
 }
-.bcell.is-locked .bcell-acts > .btn:not(.bcell-lock) {
+.bcell.is-locked .bcell-acts > .btn:not(.bcell-lock),
+.bcell.is-locked .bcell-acts > .bcell-export {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -415,7 +416,9 @@ body[data-cmd] .board-stage * {
     visibility 0s linear calc(0.3s + var(--dur-fast));
 }
 .bcell.is-locked:hover .bcell-acts > .btn,
-.bcell.is-locked.is-selected .bcell-acts > .btn {
+.bcell.is-locked:hover .bcell-acts > .bcell-export,
+.bcell.is-locked.is-selected .bcell-acts > .btn,
+.bcell.is-locked.is-selected .bcell-acts > .bcell-export {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;

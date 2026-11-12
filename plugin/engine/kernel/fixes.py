@@ -139,6 +139,12 @@ PROTECTED_KINDS = {
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
 }
 PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
+# the plugin's files a thimble-browser that runs keeps as they were at its start: the modules its page bundles
+# (PAGE_SOURCES in the browser's fixes.py) and the files its server loads once (SERVER_KEEPS there). The browser tells a
+# fix that changes what it runs by the same list (BROWSER_RUNS there), and its tests fail when the two differ or when
+# the browser loads a file that is in neither.
+BROWSER_RUNS = ("plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js", "plugin/tray/printed.mjs",
+                "plugin/tray/tray.mjs", "plugin/engine/kernel/evidence.py", "plugin/fix/changeable.mjs")
 # the files a fix may change that the person is told of before they use it, by what each one is: the rest of what keeps
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
@@ -2282,12 +2288,41 @@ def _aside_why(rec: dict[str, Any]) -> str:
             "it fits")
 
 
+def _browser_stale(*recs: dict[str, Any], went_on: bool = False) -> dict[str, str]:
+    """{browser: "stale"} when a fix among `recs` changes what thimble-browser runs, a file under browser/ or one of the
+    plugin's it loads (BROWSER_RUNS): a thimble-browser that runs now keeps the code it started with until it starts
+    again, which also builds its page. For a fix that `went_on`, {browser: "notice"} while a thimble-browser runs from
+    live (browser_open): its page shows the fix's notice, whose Use it now starts it again. {} otherwise."""
+    paths = [str(f.get("path") or "") for r in recs for f in r.get("files") or [] if isinstance(f, dict)]
+    if not any(x.startswith("browser/") or x in BROWSER_RUNS for x in paths):
+        return {}
+    return {"browser": "notice" if went_on and browser_open() else "stale"}
+
+
+def browser_open() -> bool:
+    """Whether a thimble-browser runs now from live's browser/: the server that its home's server.json names is a process
+    that lives, and it started from there. Such a server tells a fix that goes on after its start as a notice on its
+    page (the browser's fixes.elsewhere)."""
+    st = read_json(browser_home() / "server.json")
+    pid = st.get("pid") if isinstance(st, dict) else None
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except OSError:
+        return False
+    repo = str(st.get("repo") or "")
+    return bool(repo) and Path(repo).resolve() == (live_dir() / "browser").resolve()
+
+
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     """y: the fix goes on. thimble points the marketplace at live the first time (before anything else, so that a y
     whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
     Claude Code copy live; the plugin then runs /reload-plugins. A y that fails after live moved, such as one whose fix
     does not fit the others, leaves live and state.json as they were (_or_put_back), so a y while every fix is off turns
-    none of them on."""
+    none of them on. `browser`: notice or stale, when the fix changes what thimble-browser runs (_browser_stale)."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -2330,7 +2365,8 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
         r.update(state="on", on_at=time.time(), commit=new_commit, error=None)
         _drop_work(r)
         put(r)
-        return {"id": r["id"], "title": r["title"], "commit": new_commit, **synced}
+        return {"id": r["id"], "title": r["title"], "commit": new_commit, **synced,
+                **_browser_stale(r, went_on=True)}
 
     return _move(change, copied=True)
 
@@ -2381,7 +2417,9 @@ def _swap(fid: int) -> dict[str, Any]:
              note=None, prev={**p, "commit": old})
     _drop_work(r)
     put(r)
-    return {"id": fid, "title": r["title"], "commit": new_commit, "changed": True, "redo": failed, **synced}
+    # the version before counts too: a file only it changed goes back to the release's
+    return {"id": fid, "title": r["title"], "commit": new_commit, "changed": True, "redo": failed, **synced,
+            **_browser_stale(r, p, went_on=True)}
 
 
 def merge(ids: list[int | str], secret: str | None) -> dict[str, Any]:
@@ -2703,7 +2741,8 @@ def undo(fid: int | str, back: bool = True) -> dict[str, Any]:
             r["prev"] = {**r["prev"], "state": "off"}
         put(r)
         out = _take_out(rec["id"], f"it did not fit once fix {rec['id']} was undone")
-        return {"id": rec["id"], "title": rec["title"], **out}
+        # the version that was on is the one before, while a round of the fix waits
+        return {"id": rec["id"], "title": rec["title"], **out, **_browser_stale(rec, rec.get("prev") or {})}
 
     return _move(change)
 
@@ -2712,6 +2751,7 @@ def _back(fid: int) -> dict[str, Any]:
     """u after y on a fix changed in place: the version before comes back, on or off as it was."""
     live = live_dir()
     r = get(fid)
+    stale = _browser_stale(r, r.get("prev") or {})
     p = r.pop("prev") or {}
     old = git("rev-parse", "-q", "--verify", f"refs/thimble/prev/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
     git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
@@ -2733,7 +2773,7 @@ def _back(fid: int) -> dict[str, Any]:
     r = get(fid)
     r["commit"] = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     put(r)
-    return {"id": fid, "title": r["title"], "back": True, "state": r["state"], "redo": failed}
+    return {"id": fid, "title": r["title"], "back": True, "state": r["state"], "redo": failed, **stale}
 
 
 def remove(fid: int | str) -> dict[str, Any]:
@@ -3585,10 +3625,9 @@ def _carry(sync: bool = True, say=None) -> dict[str, Any] | None:
     recs = records()
     out = {"to": version, "back": [f for f, _ in back], "had": had, "aside": aside, "why": why, "off": off,
            "titles": {i: recs[i]["title"] for i in [*(f for f, _ in back), *had, *aside]}, "reload": False}
-    if any(str(f.get("path") or "").startswith("browser/") for fid, _ in back for f in recs[fid].get("files") or []):
-        # the browser workbench's page is built again from it: at once by thimble update and thimble reapply (carry), else
-        # when thimble-browser starts next
-        out["browser"] = "stale"
+    # the browser workbench's page is built again from it: at once by thimble update and thimble reapply (carry), else
+    # when thimble-browser starts next
+    out.update(_browser_stale(*(recs[fid] for fid, _ in back)))
     if sync and (back or unchecked) and not off:
         # Claude Code copies live: the fixes put back, or the fixes an older thimble put back taken off. Owed until it
         # did, so that a copy that fails, or a call stopped before it, is made later

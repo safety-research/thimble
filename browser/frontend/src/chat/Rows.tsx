@@ -30,7 +30,6 @@ import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdo
 import { AnswerCommentPop } from './AnswerComment'
 import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
 import { asChecked } from '../marks/marks'
-import { MarksFooter } from '../marks/MarksFooter'
 import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, REWIND_CHIP, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
@@ -257,7 +256,6 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
                   <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} marks={own?.marks} />
                 </div>
                 {open && <AnswerCommentPop key={open.id} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
-                {r.turnMarks && <MarksFooter items={r.turnMarks} />}
               </div>
             )
           }
@@ -576,7 +574,7 @@ function CallRun({ tools, ws, pending }: { tools: readonly ToolRowT[]; ws: strin
 
 /** The thimble tools whose target is one or more refs (a card, a passage of the report): their chip line names the
  * tool alone and each ref follows it as its chip, which names a card by its name, never its id. */
-const REF_TARGET_TOOLS = new Set(['read_ref', 'screenshot', 'edit_card', 'delete_card', 'edit_document', 'add_comment'])
+const REF_TARGET_TOOLS = new Set(['read_ref', 'screenshot', 'edit_card', 'delete_card', 'export_card', 'edit_document', 'add_comment'])
 
 /** The refs a call's target names, when it is a thimble call whose target is refs alone; null otherwise. Pure. */
 export function targetRefs(name: string, summary: string): string[] | null {

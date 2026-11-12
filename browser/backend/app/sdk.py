@@ -76,7 +76,7 @@ SKIP_VERSION_CHECK_ENV = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
 SCRUBBED_ENV = ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
                 "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                 "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL")
-# A fork's `claude -p` (marks._claude_fork, proposer._fork) takes its prompt on stdin, which Claude Code waits 3 s for
+# A fork's `claude -p` (proposer._fork) takes its prompt on stdin, which Claude Code waits 3 s for
 # before it starts without one ("no stdin data received in 3s"); a resumed session with no prompt then stops with "No
 # deferred tool marker found", which names no cause. A busy machine can keep Claude Code from reading a prompt written
 # at once, so a fork that missed it runs again, at most STDIN_TRIES times in all, STDIN_RETRY_WAIT_S apart.

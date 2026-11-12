@@ -1,24 +1,22 @@
-// The figure block: a canvas card embedded in the report, filling the page's column, with its question, its output at
-// the card's width (or its body, for cards with no run), and a caption edited in place. In the editor the block's
-// actions (chat, delete, lock) stand inside the card, at the right of its question line (Editor.tsx BlockActions).
+// The figure block: a canvas card embedded in the report, filling the page's column, with its question, its art at the
+// card's width (FigureArt.tsx: its output, or its body for cards with no run), and a caption edited in place. In the
+// editor the block's actions (chat, delete, lock) stand inside the card, at the right of its question line (Editor.tsx
+// BlockActions).
 // Before a card is picked the block is the picker. A figure follows its card: when the card changes (the stream's `cell`
 // record) it is read again and drawn in place, and a caption that still says the card's takeaway word for word takes
 // the new takeaway, also after a change made while the figure was not on the page (captionSource), unless the analyst
 // locked the figure.
 // In the editor the question line is a handle that moves the figure, as the block's actions in the gutter do.
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { ChatMarkdown } from '../chat/markdown'
 import { CITATION, takeawayChecks } from '../marks/marks'
-import { CardBody, exampleRefs } from '../canvas/bodies'
-import { useConceptDetail, useConcepts } from '../canvas/concepts'
-import { CanvasContext } from '../canvas/context'
+import { exampleRefs } from '../canvas/bodies'
 import { RefEditor } from '../canvas/RefEditor'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { Chip } from '../components/Chip'
-import { chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
-import { GlyphCites } from '../components/RefChip'
+import { figureKind } from '../components/Outputs'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -27,16 +25,12 @@ import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import type { CardVersion, Cell, WriteupFigure } from '../lib/types'
 import { useReportCtx } from './context'
+import { FigureArt } from './FigureArt'
 import { anchorFor, figureCandidates, readableText } from './model'
 
-const FIGURE_TABLE_ROWS = 20
 /** How long a figure waits after its card's last change before it reads the card again, ms: the stream replays a
  * workspace's history when it opens, and a run changes a card several times. */
 const FIGURE_REFETCH_MS = 300
-/** The narrowest a figure's chart is laid out, px. In a narrower column (a narrow window, with the margin beside the
- * text) the chart keeps this width and scrolls in its box, as a wide table does: fitted narrower, its views get too
- * small to read. */
-const FIGURE_CHART_MIN = 320
 
 export interface FigureBlockProps {
   block: { id: string; props: { cell: string; caption: string } }
@@ -222,7 +216,6 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
   const [cell, setCell] = useState<Cell | null | undefined>(undefined)
   // the caption edited in place, and where the click that opened it landed
   const [editing, setEditing] = useState<{ at: { x: number; y: number } | null } | null>(null)
-  const concepts = useConcepts(ws)
   // the card is its citations' home, so a citation of its own table marks the cell in place, as on the canvas
   const citeHome = cellRef ? cellIdOf(cellRef) : undefined
   // the card as the caption last followed it, the latest caption and its setter, read by the card's updates
@@ -297,9 +290,6 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
     return () => ro.disconnect()
   }, [box])
 
-  const art = cell ? primaryArtifact(cell.outputs) : null
-  const shown = art && art.kind !== 'error' ? art.bundle : null
-  const wide = shown && width < FIGURE_CHART_MIN && isVegaLite(pickMime(shown) ?? '') ? FIGURE_CHART_MIN : undefined
   const body = pending ? (
     <div className="wu-fig-making">
       <Spinner label="working" /> <span>{stored?.make}</span>
@@ -308,12 +298,8 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
     <div className="wu-fig-loading">
       <Spinner label="working" />
     </div>
-  ) : shown && width > 0 ? (
-    <FigureOutput table={art?.kind === 'table'} wide={wide} out={outIndex(cell?.outputs, shown)}>
-      <Output bundle={shown} fitWidth={wide ?? width} maxLines={30} maxRows={FIGURE_TABLE_ROWS} labels={chartLabels(cell?.labels, concepts)} />
-    </FigureOutput>
-  ) : cell && !art && width > 0 ? (
-    <CardFigure ws={ws} cell={cell} width={width} />
+  ) : cell && width > 0 ? (
+    <FigureArt ws={ws} cell={cell} width={width} />
   ) : null
   // the caption under the rule: the writer's or the analyst's; a locked figure without one shows the card's takeaway.
   // While it says the card's takeaway word for word it is shown as the takeaway, with its citations, as on the canvas
@@ -372,58 +358,6 @@ function Figure({ ws, id, cellRef, caption, stored, onCaption, onFollow, drag }:
  * listener on the caption stops the press there; the caption's own handlers listen to the click. */
 function keepFromEditor(el: HTMLElement | null) {
   el?.addEventListener('mousedown', (e) => e.stopPropagation())
-}
-
-/** A card without a run to show, drawn by the canvas's own body for its kind (canvas/bodies CardBody), so a note, an
- * example, a label, a timeline or a custom card reads in the report as it does on the board. */
-function CardFigure({ ws, cell, width }: { ws: string; cell: Cell; width: number }) {
-  const board = useContext(CanvasContext)
-  const ctx = useMemo(() => ({ ...board, ws }), [board, ws])
-  const payload = (cell.payload ?? {}) as Record<string, unknown>
-  const label = useConceptDetail(ws, cell.kind === 'label' && typeof payload.concept === 'string' ? payload.concept : null)
-  return (
-    <CanvasContext.Provider value={ctx}>
-      <GlyphCites.Provider value={true}>
-        {/* the wrapper keeps the body from reading as :empty (report.css hides an empty body) while it has nothing yet,
-            such as a label whose definition is still loading */}
-        <div className="wu-fig-card">
-          <CardBody cell={cell} width={width} label={label} />
-        </div>
-      </GlyphCites.Provider>
-    </CanvasContext.Provider>
-  )
-}
-
-/**
- * The chart, table or drawing of a figure. A table wider than the column, or a chart laid out `wide` (px) in a narrower one,
- * scrolls inside its box, and the box carries `wu-fig-overflow` while it does, so the stylesheet draws a fade at the
- * right edge where it continues.
- */
-function FigureOutput({ table, wide, out, children }: { table?: boolean; wide?: number; out: number; children: ReactNode }) {
-  const [el, setEl] = useState<HTMLDivElement | null>(null)
-  const [overflow, setOverflow] = useState(false)
-  useLayoutEffect(() => {
-    if (!el) return
-    const check = () => setOverflow(el.scrollWidth > el.clientWidth + 1)
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(el)
-    for (const kid of Array.from(el.children)) ro.observe(kid)
-    return () => ro.disconnect()
-  }, [el, children])
-  if (!table && !wide)
-    return (
-      <div className="wu-fig-chart" data-out={out}>
-        {children}
-      </div>
-    )
-  return (
-    <div className={`wu-fig-scroll${overflow ? ' wu-fig-overflow' : ''}`} data-out={out}>
-      <div className={`wu-fig-chart ${table ? 'wu-fig-table' : 'wu-fig-wide'}`} ref={setEl}>
-        {table ? children : <div style={{ width: wide }}>{children}</div>}
-      </div>
-    </div>
-  )
 }
 
 /** The cards a figure can show, from the canvas: the cards that draw a figure (figureKind), one Card row per card with what it draws and its time (who made it is not shown: the thread is the author). */

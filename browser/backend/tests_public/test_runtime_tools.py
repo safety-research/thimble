@@ -1,13 +1,34 @@
 """The built-in tools of an agent the server runs on the Messages API (runtime_tools.py): main's Read, Write and Edit
-touch only the folders they may, and a link a card's code left in the workspace leads them nowhere outside it."""
+touch only the folders they may, a link a card's code left in the workspace leads them nowhere outside it, and while
+Settings' Read only is on, what they and main's prompt say of the corpus folder names that switch."""
 from __future__ import annotations
 
 import os
+import re
 import stat
 
 import pytest
 
-from app import config, runtime_tools
+from app import config, events, runtime_tools
+
+
+def test_while_read_only_is_on_main_is_told_so_and_that_the_analyst_can_turn_it_off(workspaces_tmp):
+    """Settings' Read only keeps main and its thread forks from writing the corpus folder (corpus_edits false). While it
+    is on, a write there is refused, and the refusal, the Bash, Write and Edit descriptions and main's prompt say that
+    Read only is on, and how the analyst turns it off. While it is off, main's prompt says that turning it on stops the
+    writes."""
+    ws, corpus = config.workspace_dir("mini"), config.corpus_dir("mini")
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs"],
+                            corpus_edits=False)
+    with pytest.raises(ValueError) as refused:
+        box.path("notes.md", write=True)
+    bash, write, edit = (runtime_tools.describe(n, False) for n in ("Bash", "Write", "Edit"))
+    prompt = {"on": events.CORPUS_WRITES[False], "off": events.CORPUS_WRITES[True]}  # main's, by Read only
+    for text in (str(refused.value), bash, write, edit, prompt["on"]):
+        assert re.search(r'"Read only" is on|turned on "Read only"', text), text
+    for text in (str(refused.value), write, edit, prompt["on"]):
+        assert re.search(r'turn (it |"Read only" )?off', text), text
+    assert 'turn on "Read only"' in prompt["off"]
 
 
 def test_a_link_a_card_left_in_the_workspace_leads_neither_thimble_nor_main_s_tools_outside_it(workspaces_tmp,

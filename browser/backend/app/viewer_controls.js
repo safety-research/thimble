@@ -631,17 +631,14 @@
     }
     this.fit()
   }
-  // the toggles that do not fit the mount go behind "N more", the last first
+  // the toggles that do not fit the mount go behind "N more", the last first (Color by's chipsOver)
   Filter.prototype.fit = function () {
     if (!this.root) return
     var box = this.root.querySelector('.thimble-filter-chips')
     var more = this.root.querySelector('.thimble-filter-more')
     if (!box || !more) return
     var over = function () {
-      var left = box.getBoundingClientRect().left
-      var right = left
-      for (var k = 0; k < box.children.length; k++) if (!box.children[k].hidden) right = Math.max(right, box.children[k].getBoundingClientRect().right)
-      return right - left > box.clientWidth + 1
+      return shared.chipsOver(box)
     }
     var chips = box.querySelectorAll('.thimble-filter-chip')
     for (var i = 0; i < chips.length; i++) chips[i].hidden = false
@@ -1218,6 +1215,12 @@
   var PAD = 6 // px left either side of the records' span on an axis of the timeline's own, so no mark sits on its edge
   var NAMES = 200 // px, the names' column by default, and the most a column fitted to its names takes
   var KEY_PAD = 8 // px, the key's inset where it stands in the names' column (viewer_parts.css .thimble-lanes-key)
+  // What the lanes draw of Color by: its choices and each value's colour and whether it is on, not how many records take
+  // it; null for a Color by the page made, whose colours only it knows
+  function drawnSig(c) {
+    if (!c || !Array.isArray(c.values)) return null
+    return JSON.stringify([c.picks || null, !!c.off, c.values.map(function (v) { return [v.value, v.colour || v.color || null, v.on] })])
+  }
   function Lanes(opts) {
     var self = this
     this.opts = opts
@@ -1297,11 +1300,31 @@
     this.body.className = 'thimble-lanes-body'
     this.mount.appendChild(this.body)
     if (foot) this.mount.appendChild(foot)
-    // the marks follow Color by as it changes, unless the lanes are given `color: false`
-    if (!this.bars.off)
+    // the marks follow Color by as what they draw of it changes (not its counts), unless the lanes are given `color:
+    // false`, and a label colored by as its values reach the records, which the lanes draw whether or not the page draws
+    // them anywhere else: each mark recolored where it stands (recolour). A change of Color by is drawn after the page's
+    // own onChange of it, which comes in the same turn, so that a page that draws the lanes again draws them once
+    if (!this.bars.off) {
+      var colourTimer = null
       shared.onColour(function () {
-        if (self.nodes.length && self.mount.isConnected) self.paint()
+        if (colourTimer != null) return
+        colourTimer = setTimeout(function () {
+          colourTimer = null
+          if (!self.nodes.length || !self.mount.isConnected) return
+          var sig = drawnSig(self.bars.colour())
+          if (sig == null || sig !== self.colourKey) self.paint()
+        }, 0)
       })
+      var marksFrame = null
+      thimble.onMarks(function () {
+        var c = self.bars.colour()
+        if (!c || !c.label || marksFrame != null || !self.nodes.length || !self.mount.isConnected) return
+        marksFrame = requestAnimationFrame(function () {
+          marksFrame = null
+          self.recolour()
+        })
+      })
+    }
     this.spanEl = document.createElement('div')
     this.spanEl.className = 'thimble-lanes-span'
     this.spanEl.setAttribute('aria-hidden', 'true')
@@ -1435,6 +1458,29 @@
     this.layout()
     this.paint()
   }
+  // The marks' colours again, each mark where it stands, as a label's values reach the records: only a mark whose colour
+  // changed is written, and nothing is laid out again. The density bars, whose heights the values set, are drawn anew.
+  Lanes.prototype.recolour = function () {
+    var colour = this.bars.colour()
+    var plain = !colour || colour.off === true || (colour.field === null && colour.label === null)
+    if (this.dens || !this.fills || plain) return this.paint()
+    var rows = this.body.children
+    for (var li = 0; li < this.nodes.length; li++) {
+      var fill = this.fills[li]
+      var its = this.nodes[li].items || []
+      var rects = fill && rows[li] ? rows[li].getElementsByClassName('thimble-lane-mark') : []
+      for (var k = 0; k < rects.length; k++) {
+        var r = rects[k]
+        var i = Number(r.getAttribute('data-i'))
+        if (!(i in fill)) continue
+        var c = colour.colourOf(colour.valueOf(its[i])) || ''
+        if (c === fill[i]) continue
+        fill[i] = c
+        if (c) r.style.fill = c
+        else r.style.removeProperty('fill')
+      }
+    }
+  }
   Lanes.prototype.on = function (series) {
     return this.key ? this.key.isOn(series) : true
   }
@@ -1527,10 +1573,15 @@
     var H = dense ? DENSE_H : LANE_H
     this.mount.classList.toggle('is-density', dense)
     this.dens = dense ? this.binned(sc, colour) : null
+    this.colourKey = drawnSig(colour)
+    // each lane's marks' colours by their record's place in its items, which recolour compares the marks' new ones to
+    var fills = []
+    this.fills = fills
     var own = !!this.drawLane
     var html = this.nodes
       .map(function (n, ni) {
         var svg = ''
+        var fill = (fills[ni] = [])
         // a band where the lane ran, in Events only: Density draws its bars alone, with nothing behind them
         if (self.band && !n.heading && !dense) {
           var spans = safe(function () { return self.band(n) }, []) || []
@@ -1596,6 +1647,7 @@
           // a record the page draws itself (`marks`) takes no mark of the kit's, and still answers the tip and a click
           if (!self.marks || safe(function () { return !!self.marks(mk.it) }, true)) {
             var c = plain ? one : colour.colourOf(colour.valueOf(mk.it))
+            fill[mk.i] = c || ''
             svg += '<rect class="thimble-lane-mark" data-i="' + mk.i + '" x="' + mk.x.toFixed(1) + '" y="3" width="' + mk.w.toFixed(1) + '" height="' + (LANE_H - 6) + '"' + (c ? ' style="fill:' + esc(c) + '"' : '') + '/>'
           }
           if (self.problem && safe(function () { return self.problem(mk.it) }, false)) bad += badX(mk.x + mk.w / 2, LANE_H - 3)

@@ -36,7 +36,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, inverse, part}.
 import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
-import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, unreadLine, wasLine } from '../tray/tray.mjs'
+import { checkStatus, evidenceLine, hiddenOutput, lineWindow, moreLines, printedBy, staleOf } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -487,17 +487,19 @@ function layOf(claims, groups, edges, W, h, cols) {
 }
 
 // a citation's check as the citation's card says it beside `cite`, in the tray's words (tray/tray.mjs checkStatus, as the
-// tray's header and the evidence pane say it): the sign and word, its tone. Two outcomes: verified (`✓ verified`; one
-// the check corrected `✓ corrected`, or `✓ repaired` after x, with what it was under it), and failed (the check could
-// not confirm it, or did not run); and the states before an outcome: checking, and `? not checked` for one that waits
-// until the person opens it (the setting Citations, auto or manual), which x checks. A drawing here has no turning
-// glyph, so checking stands alone. A citation no longer in the session says so
+// tray's header and the evidence pane say it): the sign and word, its tone, all the card says of the check. Two
+// outcomes: verified (`✓ verified`, one the check corrected too, by itself or after x), and failed (the check could not
+// confirm it, or did not run); `↻ stale` for a checked one whose file changed after its check; and the states before an
+// outcome: checking, and `? not checked` for one that waits until the person opens it (the setting Citations, auto or
+// manual), which x checks. A drawing here has no turning glyph, so checking stands alone. A citation no longer in the
+// session says so
 const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
 const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)
 
-/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair); the pane
- *  offers x only where something the person does here lets its check run too (marks/checker.ts repairOk). */
-export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
+/** Whether x can repair a citation: the check could not confirm it, or did not run, or a file it rests on changed after
+ *  its check (tray/tray.mjs canRepair); the pane offers x only where something the person does here lets its check run
+ *  too (marks/checker.ts repairOk). */
+export const repairable = s => !!s && (s.status === 'failed' || staleOf(s).length > 0) && !!s.row && !!s.n
 
 /** Whether x checks a citation for the first time: it waits to be opened (`deferred`). */
 export const checkable = s => !!s && s.status === 'deferred' && !!s.row && !!s.n
@@ -607,11 +609,12 @@ const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title 
 
 /**
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
- * (underlined, tinted on hover; a failed one's red) and
- * its check beside them (`✓ verified · citation`, as the tray's header says it); what it was, when the check corrected
- * it (`✓ corrected · citation` over `was 15 of 40`), or why it failed and each file its check could not read, dim; then
- * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
- * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
+ * (underlined, tinted on hover; a failed one's red, a stale one's in the warning color) and its check beside them
+ * (`✓ verified · citation`, as the tray's header says it), all the card says of the check: no line of why it failed,
+ * what it was before the check corrected it or which file changed (History, h, keeps the corrections and their
+ * reasons); then its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line
+ * after a dim │, the cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the
+ * output has more.
  * `whole`: the code and output whole (c). {rows, cut}: cut when the code or the line was cut.
  */
 export function cardOf(s, W, { whole = false } = {}) {
@@ -622,12 +625,8 @@ export function cardOf(s, W, { whole = false } = {}) {
   const kind = ' · citation'
   const right = [{ s: '   ' }, { s: word, tone }, { s: kind, tone: 'dim' }]
   const words = one(s.shown || s.label)
-  const look = key === 'failed' ? { tone: 'bad', underline: true } : { tint: true }
+  const look = key === 'failed' ? { tone: 'bad', underline: true } : key === 'stale' ? { tone: 'warn', underline: true } : { tint: true }
   const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - len(kind))), ...look, bold: true }, ...right]]
-  const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
-  if (s.status === 'corrected' && s.was) dim(wasLine({ rewritten: s.rewritten, narrowed: s.narrowed, was: one(s.was) }))
-  else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
-  if (s.status === 'failed') for (const file of new Set((s.unread || []).map(u => u.file))) dim(unreadLine(file))
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
   if (whole) return { rows: [...rows, ...wholeRows(s.evidence, W)], cut: true }
   const sn = snippetOf(s.evidence, W - 2)
@@ -1031,7 +1030,7 @@ function citeLine(s, inner) {
 }
 
 /** A citation's card as the tray draws it, the rows inside its frame: its words and check (citeTitle), then what
- *  cardOf draws under them (what it was or why it failed, the code line or the file's place, the cited line after │),
+ *  cardOf draws under them (how the code got the value, the code line or the file's place, the cited line after │),
  *  without the count of output lines left out; `whole`: the code and output whole. {rows, cut} */
 function citeBody(s, inner, whole) {
   const card = cardOf(s, inner, { whole })
@@ -1078,9 +1077,9 @@ function citeRows(cites, W, { cur, compact, whole }) {
 /**
  * A claim picked, as rows W wide (the map gone, the pane's whole height): `fixed`, the rows that stay on top while the
  * rest scrolls: its cluster's name in its color and which of its claims it is (a press on the cluster), with `about`
- * its orienting line, and a blank row; then `rows`: the claim, bold; for a
- * corrected claim one line that says so; a blank row and its description, plain (reasonOf: the lens's `because`, else
- * the reply's sentences that said it, without their citation marks); with `st.history`, its History (historyRows);
+ * its orienting line, and a blank row; then `rows`: the claim, bold; a blank row and its description, plain (reasonOf:
+ * the lens's `because`, else the reply's sentences that said it, without their citation marks); with `st.history`, its
+ * History (historyRows), the one place that shows its corrections;
  * then a blank row and the line that shows its evidence (`evidence`: `show evidence (N citations)`, the pane's e),
  * and with `st.open` its citations under it (citeRows); or one dim line that says why it has none. curRow: the current
  * citation's first row in `rows`. {fixed, rows, cites, shown, cut, fixes, curRow}
@@ -1093,7 +1092,6 @@ function claimPanel({ claim, W, byId, st, ctx, compact, cluster, about }) {
   fixed.push([])
   const rows = wrap(sentenceOf(claim.text), W).map(l => [{ s: l, bold: true, part: `c:${claim.id}` }])
   const fixes = correctionsOf(claim, byId)
-  if (fixes.length) rows.push([{ s: claim.revised_by ? 'corrected later' : fixes.length > 1 ? `corrected ×${fixes.length}` : 'corrected', tone: 'cite' }])
   const why = reasonOf(claim, ctx.passage)
   if (why?.text) rows.push([], ...wrap(why.text, W).map(l => [{ s: l }]))
   if (st.history && fixes.length) rows.push([], ...historyRows(fixes, W, true))

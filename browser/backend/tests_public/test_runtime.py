@@ -144,7 +144,7 @@ async def test_a_message_runs_a_turn_of_main_on_the_messages_api(on, monkeypatch
     assert got[-1][0] == "done"
     body = client.bodies[0]
     assert "<thimble-event" in json.dumps(body["messages"][-1])
-    assert {"Read", "Grep", "Glob", "list_cards"} <= {t["name"] for t in body["tools"] if "name" in t}
+    assert {"Read", "Grep", "Glob", "list_cards", "export_card"} <= {t["name"] for t in body["tools"] if "name" in t}
     from app import subagent_files as sf
 
     line = sf.find_caller(config.workspace_dir(CORPUS), "toolu_1")
@@ -216,6 +216,8 @@ async def test_claude_code_sign_in_runs_a_headless_session_with_the_same_records
     assert "Agent" not in opts.tools and "Read" in opts.tools
     assert seen["server"][0] == runtime_cc.SERVER
     assert "mcp__plugin_thimble_thimble__list_cards" in opts.allowed_tools
+    assert "mcp__plugin_thimble_thimble__export_card" in opts.allowed_tools
+    assert "export_card" in {t.name for t in seen["server"][1]}
     assert "<thimble-event" in seen["prompt"]
     assert json.loads(runtime._spaces[CORPUS].main.state_path("cc").read_text())["session_id"] == "sess-1"
 
@@ -392,20 +394,21 @@ async def test_a_command_main_s_bash_runs_in_the_background_outlives_the_turn_un
     assert made[0].stopped == ["b1"], "the session stops the command first: claude would wait for it as it exits"
 
 
-@pytest.mark.parametrize("change", ["edits off", "labels off", "edits back on"])
+@pytest.mark.parametrize("change", ["read only on", "labels off", "read only off"])
 async def test_a_settings_change_that_lets_main_do_less_closes_its_kept_session_at_once(on, monkeypatch, analyst,
                                                                                        change):
-    """Taking a permission back leaves no command running with it: a Settings change that lets main do less ("Claude can
-    edit files in this folder" or labels off) closes main's session kept open for a background command at once, not at
-    main's next turn, and the command with it. A change that only widens leaves the command running."""
+    """Taking a permission back leaves no command running with it: a Settings change that lets main do less (Read only
+    on or labels off) closes main's session kept open for a background command at once, not at main's next turn, and the
+    command with it. A change that only widens leaves the command running."""
     made = background_cli(monkeypatch)
-    if change == "edits back on":
+    if change == "read only off":
         ledger.put_settings_route(CORPUS, analyst, {"corpus_edits": False})
     await main_turn("Start the long job.")
     job = made[0].jobs[0]
-    ledger.put_settings_route(CORPUS, analyst, {"edits off": {"corpus_edits": False}, "labels off": {"labels": False},
-                                                "edits back on": {"corpus_edits": None}}[change])
-    if change == "edits back on":
+    ledger.put_settings_route(CORPUS, analyst, {"read only on": {"corpus_edits": False},
+                                                "labels off": {"labels": False},
+                                                "read only off": {"corpus_edits": None}}[change])
+    if change == "read only off":
         await asyncio.sleep(0.2)
         assert not made[0].closed and job.poll() is None, "a change that only widens leaves the command running"
         await runtime_cc.close(runtime._spaces[CORPUS].main)

@@ -1,5 +1,6 @@
-"""The deterministic check of a checker's answer: no model call, no code run. Standard library only, so the browser can
-import it too.
+"""The deterministic check of a checker's answer: no model call, and no code run but through the caller's sandbox, which
+runs the code of computed evidence again to see what it reads (what a citation rests on, below). Standard library only,
+so the browser can import it too.
 
 A reply marks its claims as `[words](#)`. After the reply, the checker (a fork of the session, prompts/checker.md) gives
 one answer per mark: a status (`verified`, `corrected`, `narrowed`, `wrong`, `unconfirmed`), the evidence, and for a correction
@@ -21,7 +22,8 @@ shows the words, so a mark is never verified on evidence the checker made up:
             no such reading: each run of words it puts in place of the marked ones stands in those lines as words, or
             by its parts that compare (a changed count), so a free description of what the output means ("looking
             only at the file summary") is not confirmed. The check reads
-            the output the call really printed, never the output the checker wrote down, and it runs nothing.
+            the output the call really printed, never the output the checker wrote down, nor what a run of its own
+            prints.
             The call's code does not type in a number of the words as the printed value: given to print as is,
             assigned alone to a name, or returned; a number inside a text the code prints counts as typed only when
             the output shows it nowhere else. A number the code computes with may also stand in the printed words
@@ -99,16 +101,27 @@ cites only a part of the marked words, which the evidence shows, and leaves the 
 translation, a gloss): it holds only when its words are a part of the marked ones, the evidence shows them, and the
 words it leaves out state no number or day, which would be a claim of the data. A rewrite (`correction.sentence`)
 changes the words around the citation too, such as a paraphrase no record shows or a wrong line number: it holds only
-when it stays within the sentence (one line, no sentence added, every other citation of it as it was), the evidence
+when it stays within the sentence (one line, no sentence added, every other citation of it as it was, or as its own
+result has it when the same check judges it, which then takes the same rewrite), the evidence
 shows its cited words, and each number, day or record name it puts outside the citation is one the evidence shows (a
-cited place's file and line count) and none the citation cited before. The check's evidence is the citation's
-evidence in every case, whatever call or place the reply pointed at. A mark the checker could
+cited place's file and line count) and none the citation cited before and cut out of it. A value the correction
+changed (`3 lines` to `0 lines`) is no value cut out: said again, it is one the evidence must show, as any other.
+The check's evidence is the citation's evidence in every case, whatever call or place the reply pointed at. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 
-  check_all(marks, answer, calls, cwd, root, tmp, cards, rules, at)  -> {parsed, results}: every mark of a reply
+  check_all(marks, answer, calls, cwd, root, tmp, cards, rules, at, fresh, run)
+                                                                 -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp, cards, rules, at)    -> {n, status, shown, reason, failedBy?,
-                                                                         evidence?, note?, was?, narrowed?, rewrite?}
+                                                                         evidence?, note?, was?, narrowed?, rewrite?,
+                                                                         sources?, rerun?}
+  examine(items, run)                                            -> checked marks' sources as they stand now, one read
+                                                                     of each file: `changed` or `gone` when what a mark
+                                                                     rests on differs from what the check read, cited
+                                                                     lines that moved at their new numbers, and
+                                                                     computed evidence whose files changed run again
+  shown_refs(evidence), card_values(refs, cards)                 -> the places card evidence cites, and what each
+                                                                     shows in `cards`
   card_index(cards, at)                                          -> the cards' tables, places and values, one per
                                                                      line, for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
@@ -124,6 +137,8 @@ from __future__ import annotations
 
 import ast
 import difflib
+import glob
+import hashlib
 import io
 import json
 import keyword
@@ -133,9 +148,11 @@ import os
 import re
 import shlex
 import tokenize
-from collections import Counter
+from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from stat import S_ISREG
+from typing import Any, Callable
 from urllib.parse import unquote
 
 MONTHS = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
@@ -967,6 +984,9 @@ def without_texts(out: str, texts: list[str]) -> str:
 
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.S)
 RUNS_SCRIPT = re.compile(r"(?:cd\s+\S+\s*(?:&&|;|\n)\s*)?\S*python[\d.]*\s+(?:-\S+\s+)*-\s*<<-?[ \t]*(['\"]?)(\w+)\1[ \t]*")
+HEREDOC_OP = re.compile(r"<<-?[ \t]*(['\"]?)\w+\1")
+PYTHON_WORD = re.compile(r"\S*python[\d.]*")
+PY_FLAG = re.compile(r"-[A-Za-z]+")  # Python's options before its script (-I, -u), but -c and -m, which take one
 
 
 def scripts(command: str) -> list[str]:
@@ -980,6 +1000,39 @@ def scripts(command: str) -> list[str]:
             words = []
         out += [words[i + 1] for i, w in enumerate(words[:-1]) if w == "-c"]
     return out or [command]
+
+
+def script_of(command: str) -> dict[str, Any] | None:
+    """A call that runs one Python script and nothing else, after a `cd` at most: {python: the Python it names, script,
+    flags: its options before the script (-I, -u), argv: the script's sys.argv}. The script is a here-document
+    (`python3 - <<'PY'`, the script, `PY`, its errors joined to its output or not) or a `-c` argument; the words after it
+    are its arguments, such as a file it reads by sys.argv[1]. None for any other call (a pipe, a second command, a
+    module run with -m): a run of its script alone would not run all of its code."""
+    m = HEREDOC.search(command)
+    if m and command[m.end():].strip():
+        return None
+    head = re.sub(r"\s2>&1(?=\s|$)", " ", HEREDOC_OP.sub(" ", command[:m.start()] + m.group(0).split("\n", 1)[0])) if m else command
+    try:
+        lex = shlex.shlex(head, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        words = list(lex)
+    except ValueError:
+        return None
+    if len(words) > 3 and words[0] == "cd" and words[2] in ("&&", ";"):
+        words = words[3:]
+    if not words or not PYTHON_WORD.fullmatch(words[0]) or any(w and set(w) <= set("();<>|&") for w in words):
+        return None
+    i, flags = 1, []
+    while i < len(words) and words[i] not in ("-", "-c"):
+        n = 2 if words[i] in ("-X", "-W") else 1
+        if not PY_FLAG.fullmatch(words[i]) or words[i] == "-m" or i + n > len(words):
+            return None
+        flags, i = flags + words[i:i + n], i + n
+    if m and i < len(words) and words[i] == "-":
+        return {"python": words[0], "script": m.group(3), "flags": flags, "argv": ["-", *words[i + 1:]]}
+    if not m and i + 1 < len(words) and words[i] == "-c":
+        return {"python": words[0], "script": words[i + 1], "flags": flags, "argv": ["-c", *words[i + 2:]]}
+    return None
 
 
 ABS_PATH = re.compile(r"(?<![\w./~$-])/[^\s'\"`;&|()<>,]*")
@@ -1062,12 +1115,15 @@ def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list
     return lead + text[a:b] + ("…" if b < len(text) else ""), [[x - a + len(lead), y - a + len(lead)] for x, y in spans if x >= a and y <= b]
 
 
-def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "", folder: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "", folder: str | None = None, cwd: str | None = None, run: Runner | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of computed evidence, and the evidence to show. The check names a call by the output it printed;
     the calls of the session whose real output holds that text are the candidates, and the first whose output shows
     the words, and whose code types none of them in, is the evidence: its code and its whole output, the words
     highlighted from the cited place on. When no call printed that output, the check's own last call is shown. For a
-    correction, `was` is the marked words: the output also shows each run of words the correction puts in."""
+    correction, `was` is the marked words: the output also shows each run of words the correction puts in. Evidence
+    that holds keeps what it rests on: the files its code names (code_files), and the files its code read when `run`
+    ran it again and it printed the output the check gave (read_again), with what runs it again (RERUN); `cwd` is the
+    shell's folder, `folder` the one the session started in."""
     if not output_parts(given):
         return ["the check showed no printed result for it"], None
     runs = [(c, at) for c in calls for at in [printed(given, str(c.get("output") or ""))] if at is not None]
@@ -1110,7 +1166,10 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
                 continue
             # the words in the cited lines, else the cited lines themselves
             spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out)] or [at]
-            return [], shown(c, spans)
+            again = {"command": str(c.get("command") or ""), "cwd": cwd or folder or ".", "root": folder or cwd, "given": given}
+            read = read_again(again, run)
+            files = [*code_files(again["command"], again["cwd"], folder), *(read or [])]
+            return [], {**shown(c, spans), SOURCES: sources_of(files, [f for f in (folder, cwd) if f]), **({RERUN: again} if read is not None else {})}
         else:
             problem = problem or instead("the result", target, [out], approx)
     return [problem], shown(runs[0][0], [runs[0][1]])
@@ -1650,7 +1709,8 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None, 
     rel = path if not inside(path, [top, cwd]) else os.path.relpath(path, top)
     if rel.startswith("../"):
         rel = os.path.relpath(_real(path) or path, _real(top) or top)
-    return problems, {"file": rel, "line": line, "lines": rows}, hay
+    # the path read, which check_quote keeps as the place's source and takes out of the place it shows
+    return problems, {"file": rel, "line": line, "lines": rows, READ_PATH: path}, hay
 
 
 def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
@@ -1692,7 +1752,423 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
         missing = unshown_change(was, target, "\n".join(hay))
         if missing:
             problems.append(f"{where} does not show “{short(' … '.join(missing), 60)}”")
-    return problems, {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
+    read = [s.pop(READ_PATH, None) for s in shown]
+    out = {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
+    if not problems:
+        # each cited place, as the check read it: what the citation rests on
+        out[SOURCES] = [x for p, s in zip(read, shown) if p for x in [source(p, s["file"], s["line"])] if x]
+    return problems, out
+
+
+# ------------------------------------------------------------------------------------------------ what a citation rests on
+#
+# A citation the check confirmed rests on files: the lines that quote and code evidence cite, and for computed evidence
+# the files its code read and the files its code names. What the code read comes from a run of its own: the check runs
+# the call's script again in the caller's sandbox (`run`, validate.py sandboxed; this module starts nothing itself),
+# which notes each file the code opens to read, and keeps those files when that run printed the output the check gave.
+# A file the code only lists or stats is none of them. A call that runs no single Python script, or whose run failed or
+# printed otherwise, rests on the files its code names alone. For each, check_mark keeps what identifies the version the
+# check read (`sources`): the file's size and mtime then, and the sha256 of the cited lines (with that of their first
+# line, `head`, which finds them where they moved), or of the whole file for code that reads it. examine() says how each
+# reads now. The plugin and the workbench keep one index of the cited files, stat each file once at the moments they
+# show citations, and call examine() only for a file whose stat changed since they last looked (the plugin's
+# marks/stale.ts, the workbench's marks.refresh_sources), so a citation whose source changed after its check shows that
+# it is stale.
+#
+# examine() reads each file once at most, for all the sources that rest on it:
+#   cited lines   the lines at their numbers, reached by counting line breaks in blocks: as the check read them, the
+#                 source stands. Else the file once more, for the nearest lines that hash the same (an edit above them
+#                 moved them): the citation takes their numbers, and nothing else changes. None, and the source
+#                 changed. A source already found changed is read at its numbers only (an edit undone), never searched.
+#   a whole file  its size first: another size than the check read is another file, changed with no read; the same
+#                 size, its hash.
+# So a log that grows at each pass costs a stat, and for a citation of its lines a read up to those lines: never a hash
+# of the whole log.
+#
+# Computed evidence that rests on what its code read keeps what runs it again (`rerun`: the call's command, its folders
+# and the output the check gave). When one of its files changed, examine() runs that code again, once for each code
+# however many citations rest on it: a run that prints the output the check gave leaves the citation as it was, resting
+# on what that run read (`rests`); a run that prints otherwise, fails, or cannot start leaves it stale. So an edit that
+# leaves the cited value as it was keeps the citation, and a file added to a folder the code lists changes no source.
+
+SOURCES = "sources"  # the key a place's or a call's evidence carries its sources under, until check_mark takes them
+RERUN = "rerun"  # the key computed evidence carries what runs its code again under, until check_mark takes it
+READ_PATH = "_path"  # the key a place carries the path read under, until check_quote takes it
+WILDCARD = re.compile(r"[*?[]")
+# the caller's run of a call's script (validate.py sandboxed): run(script, folder, python, flags, argv), the call's own
+# (run_key), answers what it printed, the files it opened to read and whether it ended well, {output, reads, ok}, or None
+# when it could not run
+Runner = Callable[[str, str, str, tuple, tuple], "dict[str, Any] | None"]
+
+
+def run_folder(again: dict[str, Any]) -> str:
+    """The folder a call's script ran in: the shell's, or the one its leading `cd` moved to."""
+    shell = str(again.get("cwd") or ".")
+    m = LEADING_CD.match(str(again.get("command") or ""))
+    d = m.group(1).strip("'\"") if m else ""
+    return os.path.normpath(os.path.join(shell, d)) if d else shell
+
+
+def run_key(again: Any) -> tuple[str, str, str, tuple, tuple] | None:
+    """One run of a call's code: (its script, the folder it ran in, the Python it names, its options, its sys.argv);
+    None for a call that runs no single Python script (script_of)."""
+    got = script_of(str(again.get("command") or "")) if isinstance(again, dict) else None
+    return (got["script"], run_folder(again), got["python"], tuple(got["flags"]), tuple(got["argv"])) if got else None
+
+
+def ran_reads(again: dict[str, Any], ran: Any) -> list[str] | None:
+    """The files a run of a call's code opened to read (`ran`, the runner's answer), when it ended well and printed the
+    output the check gave; None otherwise."""
+    if not isinstance(ran, dict) or not ran.get("ok") or printed(again.get("given"), str(ran.get("output") or "")) is None:
+        return None
+    return [str(p) for p in ran.get("reads") or [] if isinstance(p, str)]
+
+
+def once_each(run: Runner) -> Runner:
+    """`run`, each code run once: a second run of one script in one folder, with the same arguments, answers what the
+    first one did."""
+    ran: dict[tuple, Any] = {}
+
+    def once(*key: Any) -> Any:
+        if key not in ran:
+            ran[key] = run(*key)
+        return ran[key]
+
+    return once
+
+
+def read_again(again: dict[str, Any], run: Runner | None) -> list[str] | None:
+    """The files a call's code read when `run` ran it again (ran_reads); None for a call that runs no single Python
+    script, or with no runner."""
+    key = run_key(again) if run else None
+    return ran_reads(again, run(*key)) if key and run else None
+
+
+def sources_of(paths: list[str], folders: list[str], read: dict[tuple[str, str], Any] | None = None) -> list[dict[str, Any]]:
+    """The sources of computed evidence: each regular file of `paths` once, by its real path, its whole read, named from
+    the folder it lies in. `read` keeps the sources already made, so the citations of one code read each file once."""
+    seen: dict[str, str] = {}
+    for p in paths:
+        real = _real(p)
+        if real and real not in seen:
+            seen[real] = p
+    read = {} if read is None else read
+    for real, p in seen.items():
+        name = file_named(p, folders) or os.path.basename(p)
+        if (real, name) not in read:
+            read[(real, name)] = source(p, name)
+    return [s for real, p in seen.items() for s in [read[(real, file_named(p, folders) or os.path.basename(p))]] if s]
+
+
+def _mtime_ms(st: os.stat_result) -> float:
+    """A stat's mtime in milliseconds, as the plugin's hooks read a file's (`mtimeMs`)."""
+    return st.st_mtime_ns / 1e6
+
+
+def _open_file(path: str) -> Any:
+    """The regular file at `path`, open to read as bytes, or None: not there, not readable, or no regular file (a pipe
+    would never end)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    except (OSError, ValueError):
+        return None
+    f = os.fdopen(fd, "rb")
+    try:
+        if S_ISREG(os.fstat(f.fileno()).st_mode):
+            return f
+    except OSError:
+        pass
+    f.close()
+    return None
+
+
+def _hashed(raw: bytes) -> bytes:
+    """A line as the hash of cited lines takes it: without its line break, then one line break."""
+    return raw.rstrip(b"\r\n") + b"\n"
+
+
+def _file_hash(f: Any) -> str:
+    """The sha256 of the whole of open file f."""
+    f.seek(0)
+    h = hashlib.sha256()
+    for block in iter(lambda: f.read(BLOCK), b""):
+        h.update(block)
+    return h.hexdigest()
+
+
+def _skip_to(f: Any, line: int, a: int) -> int:
+    """From the start of line `line` of open file f to the start of line `a`, the line breaks counted in blocks as
+    read_lines counts them; answers the line it reached, short of `a` when the file ends first."""
+    while line < a:
+        block = f.read(BLOCK)
+        if not block:
+            return line
+        n = block.count(b"\n")
+        if line + n < a:
+            line += n
+            continue
+        at = -1
+        for _ in range(a - line):
+            at = block.index(b"\n", at + 1)
+        f.seek(f.tell() - (len(block) - at - 1))
+        line = a
+    return line
+
+
+def _lines_hash(f: Any, k: int, starts: dict[int, int] | None = None, first: int = 0) -> tuple[str, str] | None:
+    """The sha256 of the next k lines of open file f, and that of the first of them alone; None when it has fewer.
+    `starts` takes where each line read starts, the first numbered `first`."""
+    h = hashlib.sha256()
+    head = ""
+    for i in range(k):
+        if starts is not None:
+            starts[first + i] = f.tell()
+        raw = f.readline()
+        if not raw:
+            return None
+        line = _hashed(raw)
+        h.update(line)
+        if not i:
+            head = hashlib.sha256(line).hexdigest()
+    return h.hexdigest(), head
+
+
+def source(path: str, file: str, line: Any = None) -> dict[str, Any] | None:
+    """A source as the check read it: the file by the name a reason gives it (`file`), its real path, the cited lines
+    (`line`) when it rests on them alone, its size and mtime, and the sha256 of what it rests on, for several cited
+    lines with that of the first of them (`head`); None when it cannot be read or has no such lines."""
+    span = line_span(line) if line else None
+    if line and not span:
+        return None
+    f = _open_file(path)
+    if f is None:
+        return None
+    with f:
+        try:
+            st = os.fstat(f.fileno())
+            if not span:
+                got: tuple[str, str] | None = (_file_hash(f), "")
+            else:
+                got = _lines_hash(f, span[1] - span[0] + 1) if _skip_to(f, 1, span[0]) == span[0] else None
+        except OSError:
+            return None
+    if got is None:
+        return None
+    out = {"file": file, "path": _real(path) or path, **({"line": str(line)} if line else {}), "size": st.st_size,
+           "mtime": _mtime_ms(st), "sha256": got[0]}
+    # a run of lines is found again by its first line; one line, by its own hash
+    return {**out, "head": got[1]} if span and span[1] > span[0] else out
+
+
+def code_files(command: str, cwd: str, root: str | None = None) -> list[str]:
+    """The files that the code of a call names, which computed evidence rests on: each string of its code (scripts())
+    that names a regular file inside the session's folders, read from the folder the call ran in (its leading `cd`,
+    else the shell's folder or the one the session started in), and each file that a string with a wildcard matches
+    there (`*/runs.jsonl`, `**` too) when the string names a folder or a kind of file, with a `/` or a `.` (a `"*"`
+    the code prints names none). A path the code builds from parts names none."""
+    m = LEADING_CD.match(command)
+    d = m.group(1).strip("'\"") if m else ""
+    bases = [f for f in (cwd, root) if f]
+    if d:
+        bases = [d] if os.path.isabs(d) else [os.path.join(b, d) for b in bases]
+    folders = [f for f in (root, cwd) if f]
+    out: dict[str, None] = {}
+    for code in scripts(command):
+        try:
+            toks = tokens(code)
+        except (tokenize.TokenError, SyntaxError, IndentationError):
+            continue
+        for t in toks:
+            s = string_value(t.string) if t.type == tokenize.STRING else ""
+            if not s.strip() or "\n" in s or "\0" in s:
+                continue
+            for b in bases:
+                full = os.path.normpath(os.path.join(b, s))
+                wild = WILDCARD.search(s)
+                if wild and not re.search(r"[/.]", s):
+                    continue
+                for p in sorted(glob.glob(full, recursive=True)) if wild else [full]:
+                    if os.path.isfile(p) and inside(p, folders):
+                        out.setdefault(_real(p) or p)
+    return list(out)
+
+
+def _spans_read(f: Any, spans: list[tuple[int, int]]) -> dict[tuple[int, int], str | None]:
+    """The sha256 of each span of lines of open file f (as _lines_hash), in one pass from its start: the lines before a
+    span counted in blocks, a line read again only where two spans share it; None for a span the file is too short
+    for."""
+    out: dict[tuple[int, int], str | None] = {}
+    starts: dict[int, int] = {}
+    f.seek(0)
+    line = 1
+    for a, b in sorted(set(spans)):
+        if a in starts:
+            f.seek(starts[a])
+            line = a
+        else:
+            line = _skip_to(f, line, a)
+        got = _lines_hash(f, b - a + 1, starts, a) if line == a else None
+        out[(a, b)] = got[0] if got else None
+        line = b + 1
+    return out
+
+
+def _find_lines(f: Any, srcs: list[dict[str, Any]]) -> dict[int, int]:
+    """Where cited lines that are not at their numbers stand now: for each source, by its place in `srcs`, the first
+    line of the run of lines nearest its numbers that hashes as its cited lines did (the run's first line found by
+    `head`), the upper one of two as near. Reads open file f from its start, and stops once no later run can be
+    nearer."""
+    want = []
+    for i, s in enumerate(srcs):
+        span = line_span(s.get("line"))
+        if span:
+            want.append((i, span[0], span[1] - span[0] + 1, str(s.get("head") or ""), str(s.get("sha256") or "")))
+    best: dict[int, int] = {}
+    if not want:
+        return best
+    size = max(k for _, _, k, _, _ in want)
+    lines: deque[bytes] = deque(maxlen=size)
+    heads: deque[str] = deque(maxlen=size)
+    f.seek(0)
+    for n, raw in enumerate(f, 1):
+        line = _hashed(raw)
+        lines.append(line)
+        heads.append(hashlib.sha256(line).hexdigest())
+        for i, a, k, head, sha in want:
+            start = n - k + 1
+            if start < 1 or (i in best and abs(start - a) >= abs(best[i] - a)):
+                continue
+            first = heads[-k]
+            if (head and first != head) or (k == 1 and first != sha):
+                continue
+            if k == 1 or hashlib.sha256(b"".join(list(lines)[-k:])).hexdigest() == sha:
+                best[i] = start
+        if len(best) == len(want) and all(n - k + 2 - a >= abs(best[i] - a) for i, a, k, _, _ in want):
+            break
+    return best
+
+
+def examine_file(path: str, srcs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The sources of one file as it stands now, in order (examine), from one read of it, and one more for cited lines
+    that are not at their numbers: `gone` when the file is not there or is no regular file, `changed` when what a source
+    rests on no longer reads as the check read it, and cited lines that moved with their numbers now (`line`). A source
+    that reads as the check read it has neither."""
+    clear = [{k: v for k, v in s.items() if k not in ("changed", "gone")} for s in srcs]
+    f = _open_file(path)
+    if f is None:
+        return [{**c, "gone": True} for c in clear]
+    out: list[dict[str, Any] | None] = [None] * len(srcs)
+    with f:
+        try:
+            size = os.fstat(f.fileno()).st_size
+            whole = ""
+            spans = _spans_read(f, [sp for s in srcs if s.get("line") for sp in [line_span(s["line"])] if sp])
+            for i, s in enumerate(srcs):
+                if not s.get("line"):
+                    # another size is another file; the same size, its hash
+                    if size == s.get("size"):
+                        whole = whole or _file_hash(f)
+                    out[i] = clear[i] if size == s.get("size") and whole == s.get("sha256") else {**clear[i], "changed": True}
+                elif spans.get(line_span(s["line"]) or (0, 0)) == s.get("sha256"):
+                    out[i] = clear[i]
+            # cited lines not at their numbers, but those found changed before: a log that keeps changing would be
+            # searched whole at each pass
+            lost = [i for i, x in enumerate(out) if x is None and not srcs[i].get("changed") and line_span(srcs[i].get("line"))]
+            found = _find_lines(f, [srcs[i] for i in lost]) if lost else {}
+        except OSError:
+            return [{**c, "changed": True} for c in clear]
+    for j, i in enumerate(lost):
+        span = line_span(srcs[i]["line"])
+        if j in found and span:
+            start = found[j]
+            out[i] = {**clear[i], "line": str(start) if span[0] == span[1] else f"{start}-{start + span[1] - span[0]}"}
+    return [x if x is not None else {**clear[i], "changed": True} for i, x in enumerate(out)]
+
+
+def moved_place(evidence: Any, was: dict[str, Any], now: dict[str, Any]) -> Any:
+    """The evidence with the place that source `was` rests on (its file and cited lines) at the lines source `now`
+    names: the cited lines numbered anew, and each line around them kept where the file still reads the same there, so
+    no words come into it that the check did not show."""
+    span, to = line_span(was.get("line")), line_span(now.get("line"))
+    if not span or not to:
+        return evidence
+    d = to[0] - span[0]
+
+    def place(p: Any) -> Any:
+        if not isinstance(p, dict) or p.get("file") != was.get("file") or str(p.get("line")) != str(was.get("line")):
+            return p
+        near = read_lines(str(now.get("path") or ""), max(1, to[0] - 1), to[1] + 1, partial=True)
+        reads = {near[0] + k: window(t, [], CONTEXT_MAX)[0] for k, t in enumerate(near[1])} if near else {}
+        rows = [{**r, "n": r["n"] + d} for r in p.get("lines") or [] if isinstance(r, dict) and isinstance(r.get("n"), int)
+                and (span[0] <= r["n"] <= span[1] or reads.get(r["n"] + d) == r.get("text"))]
+        return {**p, "line": now["line"], "lines": rows}
+
+    if isinstance(evidence, list):
+        return [moved_place(e, was, now) for e in evidence]
+    if not isinstance(evidence, dict):
+        return evidence
+    out = place(evidence)
+    return {**out, "more": [place(p) for p in out["more"]]} if isinstance(out.get("more"), list) else out
+
+
+def examine(items: list[Any], run: Runner | None = None) -> list[Any]:
+    """Checked marks' sources as they stand now: for each item {sources, evidence?, rerun?}, in order, {sources} as
+    examine_file answers each, with `evidence` too when cited lines moved (moved_place). The sources of every item that
+    rest on one file are read together, once. An item with `rerun` whose file changed or is gone has its code run again
+    by `run` (ran_again): when it prints the output its check gave, its sources are no longer changed, and `rests` holds
+    what it rests on now, every file that run read. A value that is no such item comes back as it is."""
+    marks = [(i, it["sources"]) for i, it in enumerate(items) if isinstance(it, dict) and isinstance(it.get("sources"), list)]
+    by_path: dict[str, list[tuple[int, int]]] = {}
+    for i, srcs in marks:
+        for k, s in enumerate(srcs):
+            if isinstance(s, dict):
+                by_path.setdefault(str(s.get("path") or ""), []).append((i, k))
+    now: dict[tuple[int, int], dict[str, Any]] = {}
+    for path, places in by_path.items():
+        now.update(zip(places, examine_file(path, [items[i]["sources"][k] for i, k in places])))
+    out = list(items)
+    for i, srcs in marks:
+        ev, moved, kept = items[i].get("evidence"), False, []
+        for k, s in enumerate(srcs):
+            x = now.get((i, k), s)
+            if isinstance(s, dict) and s.get("line") and x.get("line") != s.get("line"):
+                ev, moved = moved_place(ev, s, x), True
+            kept.append(x)
+        out[i] = {"sources": kept, **({"evidence": ev} if moved else {})}
+    if run:
+        ran_again(items, out, run)
+    return out
+
+
+def ran_again(items: list[Any], out: list[Any], run: Runner) -> None:
+    """examine()'s runs: each item with `rerun` whose sources examine found changed or gone has its code run again by
+    `run`, one run for each code (run_key) however many items rest on it, the runs at once. An item whose run printed
+    the output its check gave holds: its sources as they stand, no longer changed, and `rests`, the files that run read
+    and the files its code names (sources_of). Any other item stays as examine found it."""
+    due = [i for i, it in enumerate(items) if isinstance(it, dict) and run_key(it.get("rerun")) and isinstance(out[i], dict)
+           and any(isinstance(s, dict) and (s.get("changed") or s.get("gone")) for s in out[i]["sources"])]
+    keys = list(dict.fromkeys(run_key(items[i]["rerun"]) for i in due))
+    if not keys:
+        return
+
+    def one(key: tuple) -> Any:
+        try:
+            return run(*key)
+        except Exception:  # noqa: BLE001 — a run that breaks is one that could not run: the citation stays stale
+            return None
+
+    with ThreadPoolExecutor(max_workers=min(len(keys), os.cpu_count() or 1)) as pool:
+        ran = dict(zip(keys, pool.map(one, keys)))
+    read: dict[tuple[str, str], Any] = {}
+    for i in due:
+        again = items[i]["rerun"]
+        reads = ran_reads(again, ran[run_key(again)])
+        if reads is None:
+            continue
+        root, cwd = again.get("root") or None, str(again.get("cwd") or ".")
+        files = [*code_files(str(again.get("command") or ""), cwd, root), *reads]
+        clear = [{k: v for k, v in s.items() if k not in ("changed", "gone")} for s in out[i]["sources"]]
+        out[i] = {**out[i], "sources": clear, "rests": sources_of(files, [f for f in (root, cwd) if f], read)}
 
 
 # ------------------------------------------------------------------------------------------------ tables and cards
@@ -2155,6 +2631,36 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None, at: float | None =
     line = lines[i][1]
     return "", {"cid": cid, "title": title, "ref": f"{head}@out{out_i}#L{n}", "value": line, "text": line,
                 "where": f"line {n} of the card's output", "out": ("lines", out_i), "n": n, "lines": lines, "i": i, **kept}
+
+
+CARD_WHOLE = re.compile(r"^card:([A-Za-z0-9_-]+)$")
+
+
+def shown_refs(evidence: Any) -> list[str]:
+    """The places that card evidence as the person sees it (check_card) cites: its place or places, and those of its
+    other outputs (`more`); for a count, the whole card it counts (`card:<id>`, card_values)."""
+    out: list[str] = []
+    for e in [evidence, *(evidence.get("more") or [] if isinstance(evidence, dict) else [])]:
+        if not isinstance(e, dict) or e.get("kind", "card") != "card" or not e.get("card"):
+            continue
+        refs = [f"card:{e['card']}"] if e.get("count") else e.get("refs") if isinstance(e.get("refs"), list) else [e.get("ref")]
+        out += [str(r) for r in refs if r and str(r) not in out]
+    return out
+
+
+def card_values(refs: list[str], cards: list[dict[str, Any]] | None) -> dict[str, str | None]:
+    """What each place shows in `cards`, by place: a cell's value or a line's text (_card_place); for a whole card,
+    `card:<id>`, its outputs as text; None for a place the cards do not have."""
+    out: dict[str, str | None] = {}
+    for ref in refs:
+        whole = CARD_WHOLE.match(ref)
+        if whole:
+            card = next((c for c in cards or [] if str(c.get("id")) == whole.group(1)), None)
+            out[ref] = json.dumps(card.get("outputs"), sort_keys=True, ensure_ascii=False) if card else None
+            continue
+        _, p = _card_place(ref, cards)
+        out[ref] = str(p["value"]) if p else None
+    return out
 
 
 def _apart(places: list[dict[str, Any]]) -> str:
@@ -2797,14 +3303,14 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, sentence: str = "") -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, sentence: str = "", run: Runner | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
     new words and `was` the marked words; `at` is when the words were written (check_card); `sentence` is the mark's
-    sentence, which a count's condition stands in."""
+    sentence, which a count's condition stands in; `run` runs computed evidence's code again (check_computed)."""
     if kind == "card":
         return check_card(target, ev, cards, approx, was, sentence, at)
     if kind == "computed":
-        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd)
+        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd, cwd, run)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
         return check_quote(target, kind, evs, cwd, root, tmp, calls, was, rules) if evs else (["the check named no place in a file"], None)
@@ -2895,7 +3401,9 @@ def narrowed_part(new: str, words: str) -> tuple[str, str, str] | None:
 LEAD = re.compile(r"^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d{1,9}[.)]\s+|\|\s*)+")
 SENTENCE_END = re.compile(r"[.!?][\"'”’)*_]*\s+(?=\S)")
 QUOTED = re.compile(r"\"[^\"]*\"|“[^”]*”")
+CODE_SPAN = re.compile(r"(`+)(?:[^`\n]|[^`\n].*?[^`\n])\1(?!`)")  # inline code, as marks/message.js codeRanges reads it
 CITED = "⟨cited⟩"
+JUDGED = "⟨judged⟩"  # another citation of the sentence, which the same check judges on its own (sentence_rewrite)
 
 
 def citations_of(s: str) -> list[tuple[int, int]]:
@@ -2928,63 +3436,83 @@ def loose(s: str) -> str:
     return " ".join(k for x in unmark(s).split() for k in [one_quote(x).strip(' "().,;:!?').lower()] if k)
 
 
-def rest_of(s: str, groups: list[tuple[int, int]], k: int) -> str:
-    """A sentence's words outside its citation k (CITED in its place), the other citations' words as plain words."""
+def rest_of(s: str, groups: list[tuple[int, int]], k: int, hide: set[int] | None = None) -> str:
+    """A sentence's words outside its citation k (CITED in its place), the other citations' words as plain words, but
+    those of `hide`, citations the check judges on their own (JUDGED in their place)."""
     out, at = "", 0
     for i, (a, b) in enumerate(groups):
-        out += s[at:a] + (f" {CITED} " if i == k else s[a + 1:b - 1])
+        out += s[at:a] + (f" {CITED} " if i == k else f" {JUDGED} " if hide and i in hide else s[a + 1:b - 1])
         at = b
     return norm_ws(out + s[at:])
 
 
-def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | str:
+def sentence_rewrite(given: str, sentence: str, words: str, judged: dict[str, str] | None = None, same: int = 0) -> dict[str, Any] | str:
     """The check's new sentence for a citation (`correction.sentence`), in the form of the mark's own (each citation
-    `[words]`): {sentence, cited, rest, was_rest}, the new sentence, its cited words, and the words outside the citation
-    in the new sentence and in the old one; or why it cannot stand in place of the old one. It stays within the old
-    sentence: one line, no sentence added, the block's marker kept, and every other citation of the sentence with its
-    words as they were (a sentence that writes them with no brackets has them bracketed where they stand)."""
+    `[words]`): {sentence, cited, rest, was_rest, judged}, the new sentence, its cited words, the words outside the
+    citation in the new sentence and in the old one, and the words each judged citation has in the new sentence; or why
+    it cannot stand in place of the old one. It stays within the old sentence: one line, no sentence added, the block's
+    marker kept, and every other citation of the sentence with its words as they were (a sentence that writes them with
+    no brackets has them bracketed where they stand). `judged`: the other citations of the sentence that the same check
+    judges, each by its words, with the words its own answer gives it. Their words may change, and they are no words
+    outside the citation: check_all holds each to its own result. `same`: how many citations of the sentence before
+    this one have its words ("[10] are major and [10] are minor"), so that each finds its own place."""
     if re.search(r"\n\s*\S", given.strip()):
         return "its sentence runs over more than one line"
     old = citations_of(sentence)
-    k = next((i for i, (a, b) in enumerate(old) if loose(sentence[a + 1:b - 1]) == loose(words)), None)
-    if k is None:
+    alike = [i for i, (a, b) in enumerate(old) if loose(sentence[a + 1:b - 1]) == loose(words)]
+    if not alike:
         return "thimble could not find the citation in the sentence"
+    k = alike[min(same, len(alike) - 1)]
     # a citation written as the reply writes one (`[words](#)`) is one too
     new = norm_ws(given).replace("](#)", "]")
     lead = LEAD.match(sentence)
     if lead and not new.startswith(lead.group(0).strip()):
         new = lead.group(0) + new
     others = [sentence[a + 1:b - 1] for i, (a, b) in enumerate(old) if i != k]
+    answered = {loose(w): str(x) for w, x in (judged or {}).items()}
+    free = [loose(w) in answered for w in others]
     groups = citations_of(new)
     if len(groups) == 1 and others:
-        # the other citations written as plain words: bracketed where they stand, in order
+        # the other citations written as plain words: bracketed where they stand, in order; a judged one as its words
+        # stand or as its own answer gives them
         a0, b0 = groups[0]
         spans, at = [], 0
-        for w in others:
-            j = new.find(w, at)
-            if j >= 0 and a0 <= j < b0:
-                j = new.find(w, b0)
+        for w, f in zip(others, free):
+            j, x = -1, w
+            for x in [y for y in dict.fromkeys([w, answered[loose(w)]] if f else [w]) if y]:
+                j = new.find(x, at)
+                if j >= 0 and a0 <= j < b0:
+                    j = new.find(x, b0)
+                if j >= 0:
+                    break
             if j < 0:
                 return "it leaves out another citation of the sentence"
-            spans.append((j, j + len(w)))
-            at = j + len(w)
+            spans.append((j, j + len(x)))
+            at = j + len(x)
         for a, b in sorted(spans, reverse=True):
             new = f"{new[:a]}[{new[a:b]}]{new[b:]}"
         groups = citations_of(new)
     if len(groups) != len(old):
         return "it changes the other citations of the sentence"
     inner = [new[a + 1:b - 1] for a, b in groups]
-    fits = [j for j in range(len(groups)) if [loose(w) for i, w in enumerate(inner) if i != j] == [loose(w) for w in others]]
+    # the other citations in order, each with its words as they were, but a judged one
+    fits = [j for j in range(len(groups))
+            if all(f or loose(x) == loose(w) for x, w, f in zip([x for i, x in enumerate(inner) if i != j], others, free))]
     if not fits:
         return "it changes the other citations of the sentence"
     j = k if k in fits else fits[0]
-    # the sentences a quote holds are the quote's
-    ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", x)))  # noqa: E731
-    if ends(rest_of(new, groups, j)) > ends(rest_of(sentence, old, k)):
+    now_at, was_at = [i for i in range(len(groups)) if i != j], [i for i in range(len(old)) if i != k]
+    hide_now, hide_was = {now_at[p] for p, f in enumerate(free) if f}, {was_at[p] for p, f in enumerate(free) if f}
+    # the sentences a quote holds are the quote's, and a `.` in code ends none, as in the reply's sentence
+    # (marks/message.js sentenceSpan)
+    ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", CODE_SPAN.sub("c", x))))  # noqa: E731
+    if ends(rest_of(new, groups, j, hide_now)) > ends(rest_of(sentence, old, k, hide_was)):
         return "it adds a sentence"
     if not inner[j].strip():
         return "it cites no words"
-    return {"sentence": new, "cited": norm_ws(inner[j]), "rest": rest_of(new, groups, j), "was_rest": rest_of(sentence, old, k)}
+    return {"sentence": new, "cited": norm_ws(inner[j]), "rest": rest_of(new, groups, j, hide_now),
+            "was_rest": rest_of(sentence, old, k, hide_was),
+            "judged": {others[p]: norm_ws(inner[now_at[p]]) for p, f in enumerate(free) if f}}
 
 
 def evidence_text(evidence: dict[str, Any] | None) -> str:
@@ -3011,16 +3539,23 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     new words around the citation) and that states a value of the data: a number, a day or a record's name. It holds
     only when it is no value the marked words cited and the citation now leaves out (`left`), and the evidence shows
     each of its values (`unshown`: `shown` is what the evidence shows). Its other words are the reply's own wording (a
-    translation, an explanation), as a narrowing's are."""
+    translation, an explanation), as a narrowing's are. A citation that puts a value of a kind in place of each one of
+    that kind it leaves out changed them, as a correction does (`3 lines` to `0 lines`), and cut none out: words that
+    state such a value again (the 3 lines that read otherwise now) are judged as any words the check put in."""
+    w, c = wordnums(words, counts=True), wordnums(cited, counts=True)
+    cut_n = len([v for v, _ in marked_numbers(c) if not has_number(v, w)]) < len([v for v, _ in marked_numbers(w) if not has_number(v, c)])
+    cut_d = len([d for d in calendar_days(cited) if not days_shown(cited[d[0][0]:d[0][1]], words)]) < len(
+        [d for d in calendar_days(words) if not days_shown(words[d[0][0]:d[0][1]], cited)])
+    cut_x = len([x for x in NAME.findall(cited) if not has_name(x, words)]) < len([x for x in NAME.findall(words) if not has_name(x, cited)])
     for run in runs:
         nums = [v for v, _ in marked_numbers(wordnums(run, counts=True))]
         days = calendar_days(run)
         names = NAME.findall(run)
         if not (nums or days or names):
             continue
-        left = any(has_number(v, wordnums(words, counts=True)) and not has_number(v, wordnums(cited, counts=True)) for v in nums)
-        left = left or bool(days and calendar_days(words) and days_shown(run, words) and not days_shown(run, cited))
-        left = left or any(has_name(x, words) and not has_name(x, cited) for x in names)
+        left = cut_n and any(has_number(v, w) and not has_number(v, c) for v in nums)
+        left = left or (cut_d and bool(days and calendar_days(words) and days_shown(run, words) and not days_shown(run, cited)))
+        left = left or (cut_x and any(has_name(x, words) and not has_name(x, cited) for x in names))
         if left:
             return "left", run
         # its values, not its words: a quoted translation is the reply's own wording too
@@ -3030,11 +3565,16 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False, judged_too: dict[str, str] | None = None, run: Runner | None = None, same: int = 0) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
-    rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
-    calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
-    session's (check_quote).
+    rewrite?, sources?, rerun?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls`
+    the real Bash calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in
+    besides the session's (check_quote). A mark verified or corrected keeps what its evidence rests on (`sources`, each a
+    source()), and for computed evidence whose code `run` ran again, what runs it again (`rerun`, check_computed).
+    `fresh`: a check of a citation whose source changed after its first check, whose computed evidence is only a call
+    this check ran, since output printed before the change shows the files as they were. `judged_too`: the other
+    citations of its sentence that the same check judges (sentence_rewrite `judged`), whose words a rewrite may change;
+    `same`, how many of them before it have its words (sentence_rewrite).
 
     The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
     `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
@@ -3060,6 +3600,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return out
     status, kind = item.get("status"), item.get("kind")
     ev = item.get("evidence") if isinstance(item.get("evidence"), (dict, list)) else {}
+    if fresh and kind == "computed":
+        calls = [c for c in calls if c.get("by") == "checker"]
     # the check's own reason says why when the check found the claim wrong or could not confirm it; when its evidence
     # does not hold, the reason is this module's (its reason then says why the claim held, which it did not)
     reason = check_reason(item.get("reason") or "", words)
@@ -3075,6 +3617,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         if ev:
             _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards,
                                          rules=rules, at=at, sentence=str(mark.get("sentence") or ""))
+            if evidence:
+                evidence.pop(SOURCES, None)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 res["evidence"] = evidence
         return res
@@ -3083,7 +3627,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     rewrite: dict[str, Any] | None = None
     given = str(corr.get("sentence") or "") if corr else ""
     if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
-        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words)
+        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words, judged_too, same)
         if isinstance(got, str):
             # a rewording that cannot stand still leaves what the check found wrong, which the person reads in its
             # own reason (the records show it false); with no such reason, why the rewording could not stand
@@ -3142,7 +3686,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         target = f'"{target}"'
     sentence_now = str(rewrite["sentence"] if rewrite else mark.get("sentence") or "")
     problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules,
-                                        at, sentence_now)
+                                        at, sentence_now, run)
+    rests = evidence.pop(SOURCES, None) if evidence else None
+    again = evidence.pop(RERUN, None) if evidence else None
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
@@ -3171,6 +3717,10 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
             res["narrowed"] = True
         if rewrite:
             res["rewrite"] = rewrite["sentence"]
+    if rests:
+        res["sources"] = rests
+    if again:
+        res["rerun"] = again
     return res
 
 
@@ -3189,12 +3739,16 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None, fresh: bool = False, run: Runner | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
     folders (one, or a list); `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps
     its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions); `at` when the
-    marks' words were written (seconds since the epoch), the time a card that keeps its versions is read at (None: now).
-    A mark the validator fails on fails as a check that did not run, with why; the other marks are judged."""
+    marks' words were written (seconds since the epoch), the time a card that keeps its versions is read at (None: now);
+    `fresh`, a check of citations whose source changed after their first check (check_mark); `run`, the caller's
+    runner, which runs the code of computed evidence again to see what it reads (check_computed), once for each code.
+    A mark the validator fails on fails as a check that did not run, with why; the other marks are judged. The marks of
+    one sentence are judged together: a rewrite of it may change the words of each, as its own result has them."""
+    run = once_each(run) if run else None
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -3203,31 +3757,79 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
             by_n.setdefault(int(it.get("mark")), it)
         except (TypeError, ValueError):
             continue
-    results = []
-    for m in marks:
+    of: dict[str, list[int]] = {}
+    for i, m in enumerate(marks):
+        of.setdefault(norm_ws(m.get("sentence") or ""), []).append(i)
+
+    def answered(m: dict[str, Any]) -> str:
+        """The words a mark's own answer gives it: its correction's words, else its words as written."""
         try:
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at))
+            it = by_n.get(int(m.get("n"))) or {}
+        except (TypeError, ValueError):
+            it = {}
+        corr = it.get("correction") if isinstance(it.get("correction"), dict) else {}
+        return norm_ws(corr.get("words") or "") or str(m.get("words", ""))
+
+    results = []
+    for i, m in enumerate(marks):
+        try:
+            mine = of[norm_ws(m.get("sentence") or "")]
+            judged = {str(marks[j].get("words", "")): answered(marks[j]) for j in mine if j != i}
+            # two citations of the sentence with the same words: each the one at its own place, in order
+            same = sum(1 for j in mine if j < i and loose(str(marks[j].get("words", ""))) == loose(str(m.get("words", ""))))
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at, fresh, judged, run, same))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
                             "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {said[:120]})."})
-    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's. The same new
-    # sentence for a second citation undoes nothing: a rewrite keeps the other citations' words, so the second
-    # citation's words stand in it as written, and the first rewrite places them
-    rewritten: dict[str, str] = {}
-    for m, r in zip(marks, results):
-        if not r.get("rewrite"):
-            continue
-        key = norm_ws(m.get("sentence") or "")
-        if key in rewritten:
-            words = str(m.get("words", ""))
-            same = norm_ws(str(r["rewrite"])) == rewritten[key]
-            if same:
-                r.update(status="verified", shown=words)
-            else:
-                r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
-            for k in ("rewrite", "was", "narrowed"):
-                r.pop(k, None)
-            continue
-        rewritten[key] = norm_ws(str(r["rewrite"]))
+    for key, idx in of.items():
+        one_rewrite(key, [marks[i] for i in idx], [results[i] for i in idx])
     return {"parsed": items is not None, "results": results}
+
+
+def ended_words(m: dict[str, Any], r: dict[str, Any]) -> str:
+    """A mark's words as its check ends them: a correction's words, else its words as written (a narrowing keeps them
+    in the sentence)."""
+    return str(r.get("shown") or "") if r.get("status") == "corrected" and not r.get("narrowed") else str(m.get("words", ""))
+
+
+def one_rewrite(sentence: str, marks: list[dict[str, Any]], results: list[dict[str, Any]]) -> None:
+    """The results of the marks of one sentence (`sentence`, as each mark has it), held to one rewrite of it: a second
+    rewrite would undo the first one's. The first rewrite stands when each other citation of the sentence reads in it
+    as written or as its own result has it; one that gives a citation other words cannot stand. A citation whose words
+    it changes is corrected with it, the same rewrite on each (marks/message.js rewritesIn draws it once). The same new
+    sentence for a later citation undoes nothing: the citation's words stand in it as written, and the first rewrite
+    places them. Another new sentence is left out."""
+    stands: dict[str, Any] | None = None
+    held: set[int] = set()
+    for i, (m, r) in enumerate(zip(marks, results)):
+        if not r.get("rewrite") or i in held:
+            continue
+        words = str(m.get("words", ""))
+        if stands is None:
+            got = sentence_rewrite(str(r["rewrite"]), sentence, md_unescaped(words),
+                                   {str(x.get("words", "")): "" for j, x in enumerate(marks) if j != i})
+            gives = {loose(w): x for w, x in got["judged"].items()} if isinstance(got, dict) else {}
+            now = {j: gives.get(loose(str(x.get("words", ""))), str(x.get("words", ""))) for j, x in enumerate(marks) if j != i}
+            if any(loose(w) not in (loose(str(marks[j].get("words", ""))), loose(ended_words(marks[j], results[j]))) for j, w in now.items()):
+                r.update(status="failed", failedBy="evidence", shown=words,
+                         reason="The check reworded the sentence, but it changes the other citations of the sentence.")
+                for k in ("rewrite", "was", "narrowed", "sources", "rerun"):
+                    r.pop(k, None)
+                continue
+            stands = r
+            for j, w in now.items():
+                if loose(w) != loose(str(marks[j].get("words", ""))):
+                    # its words changed with the rewrite, as its own check corrected them
+                    results[j].update(status="corrected", rewrite=r["rewrite"], was=str(marks[j].get("words", "")))
+                    results[j].pop("narrowed", None)
+                    held.add(j)
+            continue
+        if norm_ws(str(r["rewrite"])) == norm_ws(str(stands["rewrite"])):
+            r.update(status="verified", shown=words)
+        else:
+            r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
+            r.pop("sources", None)
+            r.pop("rerun", None)
+        for k in ("rewrite", "was", "narrowed"):
+            r.pop(k, None)

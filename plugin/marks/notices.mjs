@@ -7,13 +7,16 @@
 //                                  next
 //   tellText(parts, items)         after a reply's check: each mark it corrected or flagged, as the analyst reads it
 //                                  in the reply, and each note, which the analyst does not see; '' when there is none
-//   repairTellText(parts, items, auto)   after a repair: how its mark ended, and who started it, the analyst or thimble
-//   repairRequest(parts, m, n, auto)     what follows the checker's text for a repair: which mark, what the first check
-//                                  found, and the task
+//   repairTellText(parts, items, auto)   after a repair: how its marks ended, and who started it, the analyst or thimble
+//   repairRequest(parts, m, n, auto, also, ran)   what follows the checker's text for a repair: which mark, what the
+//                                  first check found (for a stale mark, which files changed after it, each card that
+//                                  ran again since, each other stale mark of its sentence that the repair checks with
+//                                  it, and that a changed value is corrected in the sentence), and the task
 //
 // The check's own words (its reason, its note) are quoted, since they may quote the records.
 import { fenced } from '../core/text.js'
 import { fill } from '../prompts/registry.mjs'
+import { staleFiles, staleOf } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 
 const PART = /^<!--\s*([a-z][a-z -]*?)\s*-->\s*$/m
@@ -94,10 +97,30 @@ export function repairTellText(p, items, auto = false) {
   return parts.join('\n')
 }
 
+/** The files a stale mark rests on that changed after its check (tray.mjs staleOf), or, for one whose check since it
+ *  went stale did not pass, those it keeps (marks/store.ts MarkItem `fresh`), in a list; '' for any other mark. */
+function changedFiles(m) {
+  const stale = staleOf(m)
+  return stale.length ? staleFiles(stale) : Array.isArray(m?.fresh) && m.fresh.length ? staleFiles(m.fresh.map(file => ({ file }))) : ''
+}
+
 /** What follows the checker's text for a repair of mark `m`, numbered `n` in it: who asked, the analyst or thimble
  *  (`auto`, right after the check failed it), what the first check found, and the task. A mark whose first check did
- *  not run is checked as any reply's is. */
-export function repairRequest(p, m, n, auto = false) {
+ *  not run is checked as any reply's is; a stale one (tray.mjs staleOf) against the files that changed after its check,
+ *  as they are now, and so is one whose check since it went stale did not pass (marks/store.ts MarkItem `fresh`), with
+ *  the other such marks of its sentence (`also`, each with its number `n` in the checker's text), which one rewrite of
+ *  the sentence corrects together: a value that changed is corrected in the sentence, and what it was goes in the
+ *  check's reason. `ran`: the cards that ran again after the change, each as a citation names it (`card:<id>`), whose
+ *  cells show the files as they are now (the workbench runs each card the stale marks rest on before their check:
+ *  browser/backend/app/marks.py repair). */
+export function repairRequest(p, m, n, auto = false, also = [], ran = []) {
+  const files = changedFiles(m)
+  if (files) {
+    const cards = ran.map(card => fill(p['request card ran'], { CARD: card }))
+    const more = also.map(x => fill(p['request stale also'], { N: String(x.n), FILES: changedFiles(x) }))
+    const stale = [fill(p['request stale'], { N: String(n), FILES: files }), ...cards, p['request where'], ...more, p['request stale value']]
+    return [stale.join(' '), p['request task']].join('\n')
+  }
   if (m.status === 'unchecked' || m.failedBy === 'none') {
     return `${fill(p['request not run'], { N: String(n) })} ${p['request where']}`
   }

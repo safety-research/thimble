@@ -9,7 +9,7 @@ import { failLineNow } from '../bar/notice'
 import { checkSpans } from '../core/answerview'
 import { autoRepair, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, repairOf, startCheck } from '../marks/checker'
 import { setOptions } from '../settings/features.mjs'
-import { marksIn } from '../marks/message.js'
+import { marksIn, withRewrites } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { NOTICES, tempRun } from './stubs'
@@ -144,6 +144,16 @@ test("the checker reads files, and runs code only as one Python script; a mark's
   for (const c of ['rm -rf data', "python3 - <<'PY'\nprint(1)\nPY\nrm -rf data", "python3 - <<'PY'\nprint(1)\nPY\nrm x\nPY", 'curl https://example.invalid']) expect(call('Bash', c)).toContain('one Python script')
   const item = { n: 1, row: 'r', words: '$5', start: 0, end: 0, sentence: "It cost [$5] and $' more, $$ and $&.", status: 'checking' as const, shown: '$5' }
   expect(checkerPrompt('A\n{{MARKS}}\nB {{CWD}} {{ROOT}}', [item], '/made-up/data/sub', '/made-up/data')).toBe("A\n1. [$5] in: It cost [$5] and $' more, $$ and $&.\nB /made-up/data/sub /made-up/data")
+})
+
+test("a `.` in code or in a link's words ends no sentence: the check reads a mark's whole sentence, and its rewrite takes the place of that whole sentence", async () => {
+  const reply = 'The app runs on [port 8000](#): you start it with `uvicorn ... --port 8000` and open http://localhost:8000. See [Fig. 2](fig2.png) for the [3 runs](#).'
+  const { $, seen } = engine(VALIDATED)
+  await noteRow($, 'row-1', reply)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  expect(seen.spawned[0].prompt).toBe('CHECK\n1. [port 8000] in: The app runs on [port 8000]: you start it with `uvicorn ... --port 8000` and open http://localhost:8000.\n2. [3 runs] in: See [Fig. 2](fig2.png) for the [3 runs].\nIN /made-up/data')
+  const rewrite = 'The app runs on [port 9000]: you start it with `uvicorn ... --port 9000` and open http://localhost:9000.'
+  expect(withRewrites(reply, [{ status: 'corrected', rewrite }, { status: 'verified' }])).toBe('The app runs on [port 9000](#): you start it with `uvicorn ... --port 9000` and open http://localhost:9000. See [Fig. 2](fig2.png) for the [3 runs](#).')
 })
 
 test('x on a wrong citation checks it again in a fork of its own; its answer corrects it in place and main reads how it ended', async () => {

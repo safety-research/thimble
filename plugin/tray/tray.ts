@@ -17,6 +17,16 @@
 // where it acts (the bar keeps its own, less the keys the tray takes, and a card's header names no a:
 // core/answerview.ts heldKeys):
 //
+//   x repair    named first, on a failed citation or a stale one (a file it rests on changed after its check,
+//               marks/stale.ts): a check of that one claim again in the background (marks/checker.ts launchRepair),
+//               which on a failed one looks in the records for the right value and corrects the cited words, or for
+//               one whose check did not run starts its check, and on a stale one checks it against the files as they
+//               are now; the citation spins while it runs, and its status shows the result when it ends; a click on
+//               `x repair` too (this module's ui.press hook, so the fork starts inside a hook). x gives the person's
+//               OK first (marks/checker.ts repairOk), so one press is enough: for thimble's checks this session, as g
+//               does (their spawn, and their Python where nobody is asked), and for a file its check could not read,
+//               where Claude Code asked nobody; where nothing the person does here lets the check run, x is not
+//               offered (the failure line, or the reason in the side pane, says why)
 //   a ask       a side thread about the mark (threads/seam.ts openThread), its input taking the keys; 1 too,
 //               unnamed. With a thread about it already, a opens that thread
 //   + show all  named before a while the card leaves lines out: all of the mark in the side pane, the same pane a
@@ -24,26 +34,19 @@
 //   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
 //               links to a file's lines are citations too, drawn as the answer's: the answer's own citation of those
 //               lines when it has one, else the lines themselves (a `place` frame)
-//   x repair    on a failed citation: a check of that one claim again in the background, which looks in
-//               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
-//               for one whose check did not run, its check; the
-//               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
-//               card too (this module's ui.press hook, so the fork starts inside a hook). x gives the person's OK
-//               first (marks/checker.ts repairOk), so one press is enough: for thimble's checks this session, as g
-//               does (their spawn, and their Python where nobody is asked), and for a file its check could not read,
-//               where Claude Code asked nobody; where nothing the person does here lets the check run, x is not
-//               offered, and the failure line or the card says why
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
 //
-// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, and each marker of a cut
-// card is +; a click on the citation's words, in the tray's title as in the reply, closes it, as a second click on the
-// open mark in the reply does.
+// Each key's words in the tray are a click too: the header's keys, and each marker of a cut card is +; a click on the
+// citation's words, in the tray's title as in the reply, closes it, as a second click on the open mark in the reply
+// does.
 //
 // The tray stands in the band above the prompt, over the bar (bar/register.ts), so the bar with ] and [ stays in view
 // under it. It is a summary of the mark: as much of it as fits in the rows the band has over the bar, whole when it
-// fits, a blank row between its head and the card. A citation's evidence shows in parts, each under its label, dim: the
+// fits, a blank row between its head and the card. A citation's status in its header is all it says of its check: its
+// card shows no line of what the check found (why it failed, what it was before a correction, which file changed),
+// which the side pane gives in full. A citation's evidence shows in parts, each under its label, dim: the
 // code (`code · 7 lines`, its whole size), a blank row, then its printed output (`output · 62 lines`); a file's lines
 // under their place (`changes.log · line 3`); a card's value under the card. A taller card is cut to those rows: a
 // citation keeps the line of code that printed its value and the output line that holds it in view, with what fits
@@ -85,7 +88,7 @@ import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, errorWordsOf, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
-import { blocks, cardRef, marksIn, plainSentence, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
+import { blocks, cardRef, marksIn, withAsked, withoutLinks, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
@@ -94,9 +97,9 @@ import { squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import { tourHoldsCites } from '../tour/tour'
 import {
-  aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
+  aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
-  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, unreadLine, wasLine,
+  staleOf, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -161,10 +164,10 @@ export async function trayHolds($: Engine): Promise<boolean> {
 }
 
 /** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
- *  each key shows once, where it acts: while it is open, its header's (+ while the card leaves lines out, a, 0), its
- *  body's (x) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
- *  as the card's. `ask`: the keys asked about, when not all (a key of a citation's body reads the citation). Read from
- *  the state, so a drawing that asks draws again when the tray opens or closes. */
+ *  each key shows once, where it acts: while it is open, its header's (x on a citation x repairs, + while the card leaves
+ *  lines out, a, 0) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which
+ *  the bar names as the card's. `ask`: the keys asked about, when not all (x reads the citation). Read from the state, so
+ *  a drawing that asks draws again when the tray opens or closes. */
 export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
@@ -582,13 +585,14 @@ async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Pro
   await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card }, byKey ? { key: ASK_WORDS } : {})
 }
 
-/** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
+/** The Button keys of `x repair`: in the tray's header (trayKeys), and in the bar (bar.tsx draws an item as
+ *  `bar-<id>`). */
 const REPAIR_KEYS = new Set(['repair', 'bar-tray-x'])
 
-/** Whether x repairs this citation now (tray.mjs canRepair, marks/checker.ts repairOk), read for a failed one only,
- *  since a key's hook has a few milliseconds of its own time. */
+/** Whether x repairs this citation now (tray.mjs canRepair, marks/checker.ts repairOk), read for a failed or stale one
+ *  only, since a key's hook has a few milliseconds of its own time. */
 async function repairsNow($: Engine, m: MarkItem | null): Promise<boolean> {
-  return canRepair(m, m?.status === 'failed' && !!(await repairOk($, m)))
+  return canRepair(m, (m?.status === 'failed' || staleOf(m).length > 0) && !!(await repairOk($, m)))
 }
 
 /** A click on `x repair` on the citation the tray shows: the OK its check needs (marks/checker.ts repairOk), then a
@@ -708,12 +712,14 @@ async function restItem($: Engine): Promise<BarItem[]> {
   return [{ id: 'tray-next', key: ']', words: w.words, shorter: w.shorter, ...markedAs(w.what, w.kind), ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
-/** An open tray's keys, in its header at the right, each a click that does what its key does: + show all (showAll),
- *  which the header names only while the card leaves lines out (trayBand), a ask, 0 back or close (] and [ are on the
- *  bar, trayBar). x repair is in the citation's card, where it acts, and 2–9 are its links in an explainer's words. */
-async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
+/** An open tray's keys, in its header at the right, each a click that does what its key does: x repair first, on a
+ *  citation x repairs now (`repairs`, repairsNow; the click is this module's ui.press hook's, so the repair starts
+ *  inside a hook), then + show all (showAll), which the header names only while the card leaves lines out (trayBand),
+ *  a ask, 0 back or close (] and [ are on the bar, trayBar). 2–9 are the links in an explainer's words. */
+async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame, repairs = false): Promise<BarItem[]> {
   await themeNow($)
   return [
+    ...(repairs ? [{ id: 'repair', key: 'x', words: 'repair', press: () => undefined }] : []),
     { id: 'tray-+', key: SHOW_ALL.key, words: SHOW_ALL.words, press: () => showAll($, f) },
     { id: 'tray-a', key: 'a', words: 'ask', press: () => askAbout($, f) },
     { id: 'tray-0', key: '0', words: tray.stack.length > 1 ? 'back' : 'close', press: () => goBack($) },
@@ -760,19 +766,18 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
   return drawsHyperlinks(env)
 }
 
-/** A citation's status as its header says it, in the words the evidence pane and the claims pane say it in (tray.mjs
- *  checkStatus): the sign the reply draws after the citation's words in that status, so the tray says what it means
- *  (the turning glyph while it is checked, × failed, ? not checked yet; ✓ for a checked one, which has none there), and
- *  its word: verified, or corrected (the right words in place of the ones Claude wrote, which the line under it gives),
- *  repaired when x corrected it. Failed for one with no check (marks/store.ts notRun; one the store no longer holds,
- *  whose reply the reply draws failed too, says so under it). */
+/** A citation's status as its header says it, in the words the evidence pane, the claims pane and the workbench's
+ *  label say it in (tray.mjs checkStatus): the sign the reply draws after the citation's words in that status, so the
+ *  tray says what it means (the turning glyph while it is checked, × failed, ↻ stale, ? not checked yet; ✓ for a
+ *  checked one, which has none there), and its word: verified, for one the check corrected too (its right words stand
+ *  in place of the ones Claude wrote), by itself or after x. Failed for one with no check (marks/store.ts notRun; one
+ *  the store no longer holds, whose reply the reply draws failed too, says so under it). */
 const statusOf = (m: MarkItem | null) => checkStatus(m)
 
-/** A part of the tray's body and the rows it takes; `short`, the same on one row, which a cut card shows (fitCitation);
- *  `code`, in place of `el`, a line of code, which unitEls draws with the lines of code beside it; `cut`, in place of
- *  `el`, a marker where the card leaves lines out: how many, and whether they stand above or below the lines it shows
- *  (cutRow draws it). */
-type Unit = { h: number; el?: Any; code?: string; short?: Unit; cut?: { n: number; where: 'above' | 'below' } }
+/** A part of the tray's body and the rows it takes; `code`, in place of `el`, a line of code, which unitEls draws with
+ *  the lines of code beside it; `cut`, in place of `el`, a marker where the card leaves lines out: how many, and whether
+ *  they stand above or below the lines it shows (cutRow draws it). */
+type Unit = { h: number; el?: Any; code?: string; cut?: { n: number; where: 'above' | 'below' } }
 
 /** A card's units as elements: lines of code next to each other as one Code, which Claude Code draws in its own colors
  *  for Python, as the side pane draws the code (marks/evidence.tsx), each line on one row. */
@@ -807,16 +812,6 @@ function labelRow(els: Any, key: string, words: string): Unit {
   return { h: 1, el: els.Text({ key, dimColor: true, wrap: 'truncate-end', children: words }) }
 }
 
-/** `x repair`, a press that checks a failed citation again (this module's ui.press hook, as x does); for one whose
- *  check did not run, `x repair: start its check`. In its card. */
-function repairRow(els: Any, m: MarkItem): Unit {
-  const { Text } = els
-  const unrun = m.status === 'failed' && m.failedBy === 'none'
-  return { h: 1, el: els.Button({ key: 'repair', plain: true, label: unrun ? 'check this citation' : 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
-    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: accent(), children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
-  ] }) }
-}
-
 /** A part of a citation's evidence: its lines, one row each, of which a cut card shows a window around the line it
  *  keeps in view (`key`): the code around the line that printed the value, the printed output around the line that
  *  holds it, a file's lines around the cited one, a table's header over its cited row. `draw(i)`: line i, the lines
@@ -824,43 +819,22 @@ function repairRow(els: Any, m: MarkItem): Unit {
  *  part, between it and the part above it (the output's, under the code). */
 type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; gap?: Unit }
 
-/** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
- *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a rewritten
- *  sentence or a narrowed citation says which, as the header says only corrected or repaired); a failed one why in one
- *  sentence, and each file its check could not read (tray.mjs unreadLine); after a repair (x) that verified it as
- *  written, why; all dim, and under it `x repair` (repairRow) while something the person does here lets its check run
- *  (`runs`, marks/checker.ts repairOk). For a value code computed: the code under `code · 7 lines`,
- *  in Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs printedAt; from its
- *  start when the code does not show which line printed it), a blank row, then under `output · 62 lines` the printed
- *  output around the line that holds it in the ruled block; printed output that is a table shows as its header over
- *  the cited row, under `output · table`. For a file: its place (`place`, a click opens the side pane), then its lines
- *  around the cited one in the ruled block. For a card's value: the card, then the header over the cited row, or its
- *  printed lines around the cited one. The cited words stand on the citations' purple tint. */
-function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null, runs: boolean): { top: Unit[]; blocks: Block[] } {
+/** A citation's card under its header, whose status is all it says of the check (statusOf): its evidence in parts
+ *  (Block), each under its label, nothing of what the check found about it. For a value code computed: the code under
+ *  `code · 7 lines`, in Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs
+ *  printedAt; from its start when the code does not show which line printed it), a blank row, then under `output · 62
+ *  lines` the printed output around the line that holds it in the ruled block; printed output that is a table shows as
+ *  its header over the cited row, under `output · table`. For a file: its place (`place`, a click opens the side
+ *  pane), then its lines around the cited one in the ruled block. For a card's value: the card, then the header over
+ *  the cited row, or its printed lines around the cited one. The cited words stand on the citations' purple tint.
+ *  While its check runs, and for a check that gave no evidence, the card is empty; for a citation no longer in the
+ *  session it says so (`top`). */
+function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null): { top: Unit[]; blocks: Block[] } {
   const { Text } = els
   if (!m) return { top: [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }], blocks: [] }
   const ev = printableEvidence(m.evidence)
   const top: Unit[] = []
-  const dim = (key: string, text: string) => top.push({
-    h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }),
-    short: { h: 1, el: Text({ key, dimColor: true, wrap: 'truncate-end', children: text }) },
-  })
-  const notFixed = m.repair ? 'not repaired: ' : ''
-  // a rewrite's history is the sentence Claude wrote
-  if (m.status === 'corrected' && m.was) dim('was', wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }))
-  else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
-  else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
-  else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
-  // each file its check could not read, once, whatever tools Claude Code refused on it: what x asks for, or why no x
-  if (m.status === 'failed') for (const [k, file] of [...new Set((m.unread ?? []).map(u => u.file))].entries()) dim(`unread-${k}`, unreadLine(file))
-  // a check that did not run: x starts it
-  const unrun = m.status === 'failed' && m.failedBy === 'none'
-  if (canRepair(m, runs)) top.push(repairRow(els, m))
-  if (!ev) {
-    if (m.status !== 'checking' && !unrun) dim('none', 'The check gave no evidence for it.')
-    return { top, blocks: [] }
-  }
-  if (m.status === 'checking') return { top, blocks: [] }
+  if (!ev || m.status === 'checking') return { top, blocks: [] }
   const table = ev.kind === 'card' || ev.kind === 'computed' ? ev.table : undefined
   const tl = table ? tableLines(table, w - 2) : null
   // a table: its header over the cited rows, the first cited row kept in view
@@ -951,7 +925,7 @@ function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): Uni
   const blocks = parts.blocks
   const all = [...parts.top, ...blocks.flatMap(b => [...(b.gap ? [b.gap] : []), ...(b.lead ? [b.lead] : []), ...Array.from({ length: b.n }, (_, i) => b.draw(i))])]
   if (sum(all) <= rows) return all
-  const top = parts.top.map(u => u.short ?? u)
+  const top = [...parts.top]
   // a row at least for the evidence: its marker, when no line of it fits
   while (top.length && rows - sum(top) < 1) top.pop()
   const room = rows - sum(top)
@@ -1047,7 +1021,8 @@ export const trayShape = (): { gap: boolean } => ({ gap: gapRow })
 
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, bold on the tint the
  *  reply gives the open mark, and a click that closes it, as in the reply) on top, a citation's status and its keys at
- *  its right (trayKeys), a blank row, then the mark's card, its rows starting where the title starts. It shows as much
+ *  its right (trayKeys), a blank row, then the mark's card, its rows starting where the title starts (a citation's card
+ *  with nothing in it, while its check runs, leaves the head alone). It shows as much
  *  of the card as fits in the rows the band has over the bar (`room`; null: no limit), so the bar with ] and [ stays in
  *  view under it; the band's blank row over the bar stays while the whole card fits with it, and the one under the head
  *  while a row of the card fits under it. A taller card is cut to those rows: a citation keeps the line that printed
@@ -1070,13 +1045,17 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   let words: { text: string } | null = null
   let status: ReturnType<typeof statusOf> | null = null
   let citeStatus: MarkStatus | null = null
+  let citeStale = false
+  let repairs = false
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
     citeStatus = m?.status ?? null
+    citeStale = staleOf(m).length > 0
     await themeNow($)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m), await repairsNow($, m))
+    repairs = await repairsNow($, m)
+    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m))
   } else if (f.kind === 'place') {
     title = f.id
     units = await placeBody($, els, f, inner)
@@ -1110,7 +1089,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   // on its tint, a failed citation's in red; an explainer's or a heads-up's words on their full fill. A click on them
   // closes the tray, as a second click on the open mark in the reply does
   const fills = markColors(themeLast())
-  const cite = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`) : f.kind === 'place' ? wordsLook('unchecked', `tray:${f.row}:${f.id}`) : null
+  const cite = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`, citeStale) : f.kind === 'place' ? wordsLook('unchecked', `tray:${f.row}:${f.id}`) : null
   const look: Any = cite
     ? { ...(cite.color ? { color: cite.color } : {}), hover: cite.hover, bold: true, backgroundColor: cite.hover.backgroundColor }
     : { bold: true, backgroundColor: f.kind === 'heads' ? fills.headsBg : fills.glossBg }
@@ -1147,9 +1126,11 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   }
   // the rows the band has under `head`, less the frame's two borders (Infinity: no limit); a blank row stands first, so
   // the title stands apart from the card, while a row is left for the card under it too. An explainer's or a heads-up's
-  // words start with one of their own, as the reply draws them (marks/view.ts messageEl)
+  // words start with one of their own, as the reply draws them (marks/view.ts messageEl), and a citation's card with
+  // nothing in it (its check runs, or gave no evidence) leaves the head alone
   const leftOf = (head: Any) => (room ? room.rows - 2 - treeRows(head, inner) : Infinity)
-  const gapUnder = (head: Any) => !words && leftOf(head) >= 2
+  const bare = !!parts && !parts.top.length && !parts.blocks.length
+  const gapUnder = (head: Any) => !words && !bare && leftOf(head) >= 2
   // the card in units, in the rows left for it under `head`, one at least: a citation's fit to its rows (fitCitation);
   // other words taller than the rows, from their start, a window of the rows left over the marker under it, which says
   // how many it leaves out (null: other words that fit, whole)
@@ -1169,7 +1150,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   // +; when it leaves lines out the head names + too, and when that head takes a row more, the card is laid out again in
   // the rows left, where it leaves lines out still, so the frame keeps to the band's rows. A band too short for that head
   // and a row of the card keeps the head without +
-  const keys = await trayKeys($, tray, f)
+  const keys = await trayKeys($, tray, f, repairs)
   let named = keys.filter(k => k.key !== SHOW_ALL.key)
   let head = headOf(named)
   let laid = layOut(head)
@@ -1196,7 +1177,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [
     head,
     ...under,
-    Box({ key: 'tray-body', flexDirection: 'column', children: shown }),
+    ...(shown.length ? [Box({ key: 'tray-body', flexDirection: 'column', children: shown })] : []),
   ] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }

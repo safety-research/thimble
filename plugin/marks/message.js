@@ -163,7 +163,8 @@ export function withoutMarks(text) {
 /**
  * The sentence that holds a mark, as the checker reads it and its evidence shows it: from the end of the sentence
  * before the mark to the end of the one it is in (a `.`, `!` or `?`, after any closing quote, bracket or emphasis,
- * then a space, outside any mark's words), never across a line break; on one line, with no bold, each mark in it written `[words]`.
+ * then a space, outside any mark's words, code or link), never across a line break; on one line, with no bold, each
+ * mark in it written `[words]`.
  */
 export function sentenceOf(text, mark) {
   const s = String(text || '')
@@ -184,10 +185,11 @@ export function sentenceSpan(text, mark) {
   if (b < 0) b = s.length
   const end = /[.!?]["'\u201d\u2019)*_]*\s/g
   end.lastIndex = a
-  // a mark's words are one claim: a `.` inside them (a quote of two sentences) ends no sentence
-  const marks = marksIn(s)
+  // a mark's words are one claim, and code and a link are read whole: a `.` inside them (a quote of two sentences,
+  // `uvicorn ... --port 8000`, `[Fig. 3](fig3.png)`) ends no sentence
+  const whole = [...marksIn(s), ...linksIn(s)].map(m => [m.start, m.end]).concat(codeRanges(s))
   for (let e; (e = end.exec(s)) && e.index < b;) {
-    if (marks.some(m => e.index > m.start && e.index < m.end)) continue
+    if (whole.some(([x, y]) => e.index > x && e.index < y)) continue
     const after = e.index + e[0].length
     if (after <= mark.start) a = after
     else if (e.index >= mark.end - 1) { b = after; break }
@@ -199,8 +201,10 @@ export function sentenceSpan(text, mark) {
  * The text with the sentences its checks rewrote: `items` are the text's marks' checks by their place (marks/store.ts
  * MarkItem), and a corrected one's `rewrite` is the sentence that stands in place of its own, written as sentenceOf
  * writes one (each citation `[words]`, engine/kernel/evidence.py sentence_rewrite). The white space around the sentence
- * stays; a second rewrite of one sentence is left out. Each rewrite stands or not on its own: one that would not hold
- * the marks of the sentence it replaces leaves that sentence as it was. `placed`: the marks whose rewrite stands.
+ * stays; a second rewrite of one sentence is left out, but the same new sentence, which a check that corrected several
+ * citations of the sentence gives each of them (evidence.py one_rewrite), stands for each. Each rewrite stands or not on
+ * its own: one that would not hold the marks of the sentence it replaces leaves that sentence as it was. `placed`: the
+ * marks whose rewrite stands.
  */
 export function rewritesIn(text, items) {
   const s = String(text || '')
@@ -208,9 +212,13 @@ export function rewritesIn(text, items) {
     .sort((x, y) => y.span[0] - x.span[0])
   let out = s
   let floor = Infinity
+  let last = null
   const placed = new Set()
   for (const { k, span: [a, b], sentence } of spans) {
-    if (b > floor) continue
+    if (b > floor) {
+      if (last && a === last.a && sentence === last.sentence) placed.add(k)
+      continue
+    }
     const raw = s.slice(a, b)
     const lead = raw.match(/^\s*/)[0]
     const trail = raw.slice(lead.length).match(/\s*$/)[0]
@@ -218,6 +226,7 @@ export function rewritesIn(text, items) {
     if (body == null) continue
     out = out.slice(0, a) + lead + body + trail + out.slice(b)
     floor = a
+    last = { a, sentence }
     placed.add(k)
   }
   return { text: out, placed }

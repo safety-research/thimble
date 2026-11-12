@@ -29,12 +29,13 @@
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
 //   anchors {refs, seq, seen}
-//                          frame to page: the data-anchor values that appeared since the last report, `seq` how many
+//                          frame to page: the data-anchor values that appeared since the last report, with the refs of
+//                          records the view kit read a label's value of that no element anchors (want), `seq` how many
 //                          have been reported in all, and `seen` those of the anchored elements in the frame's viewport
 //                          not reported in view before, whose labels thimble reads first
 //   seen {refs}            frame to page: the same for the anchored elements a scroll, a resize or a redraw brought into
 //                          view
-//   labels {marks, on, filter, all, palette, answered}
+//   labels {marks, merge?, on, filter, all, palette, answered}
 //                          page to frame: marks {ref: {bar, names, values: [{id, label, value, colour}], spans: [{text,
 //                          colour}], keep?}}, the marks of the labels that are on for the records and units among those
 //                          refs, drawn over every element with that data-anchor, `values` each label that highlights the
@@ -44,7 +45,9 @@
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
 //                          here, colour, values: [{name, colour, highlight}], count}], every label over files, those
 //                          that mark records in the view's files first with `here` true; palette, the
-//                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
+//                          colours a label's value can take. Each replaces the last, but for the marks of a message with
+//                          `merge`, which change only the refs they name (null takes a ref's mark away);
+//                          window.thimble.onLabels hears all
 //                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. A colour
 //                          that is a CSS variable, var(--label-3), is resolved here to the colour it stands for, so a
 //                          canvas can draw every colour the page is given
@@ -322,18 +325,27 @@
   // A labels message's marks taken in by ref: a ref whose mark is the same as in the last message keeps its resolved
   // mark, so a message costs a comparison per ref rather than the whole map copied and serialized. Whether any changed.
   var given = {} // ref -> the mark as the page last sent it
-  function takeMarks(raw) {
+  // the marks of a `labels` message: all of them, or with `merge` those of the refs it names alone
+  function takeMarks(raw, merge) {
     if (!raw || typeof raw !== 'object') raw = {}
     var changed = false
-    for (var ref in given) {
-      if (Object.prototype.hasOwnProperty.call(raw, ref) && raw[ref] && typeof raw[ref] === 'object') continue
-      delete given[ref]
-      delete marks[ref]
-      changed = true
-    }
+    if (!merge)
+      for (var ref in given) {
+        if (Object.prototype.hasOwnProperty.call(raw, ref) && raw[ref] && typeof raw[ref] === 'object') continue
+        delete given[ref]
+        delete marks[ref]
+        changed = true
+      }
     for (var r in raw) {
       var m = raw[r]
-      if (!m || typeof m !== 'object') continue
+      if (!m || typeof m !== 'object') {
+        if (merge && Object.prototype.hasOwnProperty.call(given, r)) {
+          delete given[r]
+          delete marks[r]
+          changed = true
+        }
+        continue
+      }
       if (Object.prototype.hasOwnProperty.call(given, r) && same(given[r], m)) continue
       given[r] = m
       marks[r] = realMark(m)
@@ -586,7 +598,7 @@
         }
       } else showWait()
     } else if (d.type === P + 'labels') {
-      var marksChanged = takeMarks(d.marks)
+      var marksChanged = takeMarks(d.marks, d.merge === true)
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
       if (filter && 'colour' in filter) filter = realLabelList([filter])[0]
       answered = typeof d.answered === 'number' ? d.answered : -1
@@ -975,7 +987,9 @@
     post({ type: P + 'hidden', n: n, self: self })
   }
   function note(el) {
-    var ref = el.getAttribute('data-anchor')
+    noteRef(el.getAttribute('data-anchor'))
+  }
+  function noteRef(ref) {
     if (!ref || reported[ref]) return
     reported[ref] = true
     unsent.push(ref)
@@ -1906,12 +1920,19 @@
 
   // What the view kit's own controls (viewer_colour.js and viewer_range.js, loaded right after this bridge) need of it,
   // handed over once (the last of them takes it away): they hear the labels and marks without registering the page's
-  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, keep the choice and the time
-  // ranges with thimble, and say what the side panel shows (viewer_side.js), which a newer version opens on.
+  // onLabels, ask for the marks of records no element anchors, set the Color by choice the marks are drawn by, have the
+  // page drawn again, keep the choice and the time ranges with thimble, and say what the side panel shows
+  // (viewer_side.js), which a newer version opens on.
   window.__thimbleKit = {
     labels: function (fn) {
       kitFns.push(fn)
       if (labelState) fn(labelState, true, true)
+    },
+    // a record whose label's value the kit read with no element anchoring it, such as a row a table leaves undrawn out
+    // of view or a mark of the lanes: reported as an anchored element's ref is, once, so that its marks come too
+    want: function (ref) {
+      noteRef(ref == null ? '' : String(ref))
+      if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     },
     colour: function (hook) {
       colourHook = hook || null

@@ -13,7 +13,9 @@
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
 //             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on,
 //             the Files label filter, every label over files and the palette, which the page hears through
-//             thimble.onLabels; the rows of the records in view (`seen`, and later `seen` messages) are read first
+//             thimble.onLabels; the rows of the records in view (`seen`, and later `seen` messages) are read first.
+//             While the labels and the filter stay as they are, a `labels` carries only the marks that changed
+//             (`merge`), null for a mark gone
 //   key       sent once the page is ready: the key the bridge puts on each labelCall
 //   labelCall the page's label controls (labelCalls.ts), answered by labelDone: done here as the Labels pane does them
 //             (`labelActions`), a mark stored as the analyst's verdict and the label filter set, each only during the
@@ -38,7 +40,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
 import { getAskKey, onAskKey } from '../lib/platform'
-import { recordOf } from '../lib/refs'
+import { recordKey, recordOf } from '../lib/refs'
 import { notePress } from '../lib/surfaces'
 import { teleport } from '../lib/teleport'
 import { useTheme } from '../lib/theme'
@@ -48,7 +50,7 @@ import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen } from '../lib/types'
 import { callKey, inGesture, NO_GESTURE, runLabelCall, type ViewLabelActions } from './labelCalls'
 import { pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
-import { labelsArrived, wantRecordLabels, watchPathLabels } from './marks'
+import { labelsArrived, wantRecordLabels, wantRecordsLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
 const STATE_WAIT_MS = 400 // how long a page has to say what the analyst is looking at
@@ -202,10 +204,12 @@ const NO_CONCEPTS: ReadonlyMap<string, Concept> = new Map()
 const UNIT_BATCH = 500 // unit refs one marks request asks about
 
 /** The labels over the page's records and units: keeps the refs the page reports (`anchors`) and sends `labels`
- * whenever its marks, the labels that are on or the filter change; each message replaces the last. A record's marks
- * come from the label rows read here, a unit's from the view's marks route, asked again when the labels, their runs or
- * the filter change. With a filter on, `answered` is the last anchors' seq once every ref reported has its rows or its
- * unit's marks, else -1. `reset` forgets the refs. */
+ * whenever its marks, the labels that are on or the filter change. A record's marks come from the label rows read here,
+ * a unit's from the view's marks route, asked again when the labels, their runs or the filter change. A message
+ * carries every mark when the labels that are on, their values or the filter changed, or for a new page; otherwise only
+ * the marks of the refs whose rows or unit marks changed, which the page merges into those it holds (`merge`), so that
+ * the rows of thousands of records arriving in batches cost each batch its own records. With a filter on, `answered`
+ * is the last anchors' seq once every ref reported has its rows or its unit's marks, else -1. `reset` forgets the refs. */
 function useViewLabels(
   ws: string,
   slug: string,
@@ -233,7 +237,14 @@ function useViewLabels(
   const asked = useRef(new Set<string>())
   const rows = useRef(new Map<string, Map<string, Map<string, LabelRow>>>())
   const watching = useRef(new Map<string, () => void>())
-  const sent = useRef('{}')
+  /** each record ref's file and its key among the rows (lib/refs), read once */
+  const placeOf = useRef(new Map<string, { path: string; key: string }>())
+  /** what the page holds: each ref's mark as last sent; per record ref, the rows of the labels that mark was made from;
+   * what the marks were made for (the labels that are on, their values, the filter); the rest of the last message */
+  const held = useRef(new Map<string, ViewMark | Keep>())
+  const heldFrom = useRef(new Map<string, (LabelRow | undefined)[]>())
+  const heldFor = useRef<string | null>(null)
+  const heldRest = useRef<string | null>(null)
   const [tick, setTick] = useState(0)
   const send = useRef(post)
   send.current = post
@@ -292,8 +303,11 @@ function useViewLabels(
           }
           continue
         }
-        if (refs.current.has(ref) || !recordOf(ref)) continue
+        if (refs.current.has(ref)) continue
+        const at = recordOf(ref)
+        if (!at) continue
         refs.current.add(ref)
+        placeOf.current.set(ref, { path: at.path, key: recordKey(ref) })
         fresh = true
       }
       if (fresh) setTick((t) => t + 1)
@@ -316,16 +330,21 @@ function useViewLabels(
   )
   const reset = useCallback(() => {
     refs.current.clear()
+    placeOf.current.clear()
     inView.current.clear()
     units.current.clear()
     unitMarks.current = {}
     unitsAnswered.current.clear()
     seqNow.current = 0
-    sent.current = '{}'
+    held.current.clear()
+    heldFrom.current.clear()
+    heldFor.current = null
+    heldRest.current = null
   }, [])
-  // a page that says ready hears the labels at once, even one that anchors nothing
+  // a page that says ready hears the labels at once, every mark, even one that anchors nothing
   const ready = useCallback(() => {
-    sent.current = ''
+    heldFor.current = null
+    heldRest.current = null
     setTick((t) => t + 1)
   }, [])
   // the units are marked afresh when the labels that are on, their values or the filter change, and when a label's
@@ -354,29 +373,76 @@ function useViewLabels(
   const filterLabel = filter ? byId.get(filter.concept) : undefined
   useEffect(() => {
     if (on.length || filter) {
+      // the rows of the refs not asked for yet, one call per file, those in view first
+      const wanted = new Map<string, [string[], string[]]>()
       for (const ref of refs.current) {
         if (asked.current.has(ref)) continue
         asked.current.add(ref)
-        const at = recordOf(ref)!
-        if (!watching.current.has(at.path))
+        const { path } = placeOf.current.get(ref)!
+        if (!watching.current.has(path))
           watching.current.set(
-            at.path,
-            watchPathLabels(ws, at.path, (got) => {
-              rows.current.set(at.path, got)
+            path,
+            watchPathLabels(ws, path, (got) => {
+              rows.current.set(path, got)
               setTick((t) => t + 1)
             }),
           )
-        wantRecordLabels(ws, at.path, ref, inView.current.has(ref))
+        let w = wanted.get(path)
+        if (!w) wanted.set(path, (w = [[], []]))
+        w[inView.current.has(ref) ? 0 : 1].push(ref)
+      }
+      for (const [path, [soon, later]] of wanted) {
+        if (soon.length) wantRecordsLabels(ws, path, soon, true)
+        if (later.length) wantRecordsLabels(ws, path, later)
       }
     }
     const rowsOf = { get: (ref: string) => rows.current.get(recordOf(ref)?.path ?? '')?.get(ref) }
-    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current, token), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
+    // the marks made again for the refs whose rows changed since the last message; for every ref when what they are
+    // made for changed, or for a new page
+    const ids = [...on.map((k) => k.id), ...(filter ? [filter.concept] : [])]
+    const madeFor = JSON.stringify([on.map((k) => [k.id, (k.classes ?? []).map((c) => [c.name, c.color, c.highlight])]), filter, filter ? (filterFiles ?? null) : null])
+    const whole = madeFor !== heldFor.current
+    heldFor.current = madeFor
+    const changed: string[] = []
+    for (const ref of refs.current) {
+      const at = placeOf.current.get(ref)!
+      const mine = rows.current.get(at.path)?.get(at.key)
+      const was = heldFrom.current.get(ref)
+      let same = !whole && !!was
+      for (let i = 0; same && i < ids.length; i++) same = was![i] === mine?.get(ids[i])
+      if (same) continue
+      heldFrom.current.set(
+        ref,
+        ids.map((id) => mine?.get(id)),
+      )
+      // a record with no rows yet and no mark has nothing to send, but under a filter, which keeps the records of a file
+      // its label never ran over
+      if (mine || filter || held.current.has(ref)) changed.push(ref)
+    }
+    const made = withKeeps(viewMarks(on, rowsOf, changed, token), filter, rowsOf, changed, filterFiles)
+    const delta: Record<string, ViewMark | Keep | null> = {}
+    let moved = false
+    const hold = (ref: string, m: ViewMark | Keep | undefined) => {
+      if (m) {
+        if (held.current.get(ref) === m) return
+        held.current.set(ref, m)
+        delta[ref] = m
+        moved = true
+      } else if (held.current.delete(ref)) {
+        delta[ref] = null
+        moved = true
+      }
+    }
+    for (const ref of changed) hold(ref, made[ref])
+    // a unit's mark as the view's marks route last answered it
+    for (const u of units.current) hold(u, labelled ? unitMarks.current[u] : undefined)
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
     const answered = !filter || (everyOne(refs.current, (ref) => keepKnown(ws, ref, filterFiles)) && everyOne(units.current, (u) => unitsAnswered.current.has(u))) ? seqNow.current : -1
-    const text = JSON.stringify([marks, state, all, palette, answered])
-    if (text === sent.current) return
-    sent.current = text
-    send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter, all, palette, answered })
+    const rest = JSON.stringify([state, all, palette, answered])
+    if (!whole && !moved && rest === heldRest.current) return
+    heldRest.current = rest
+    const marks = whole ? Object.fromEntries(held.current) : delta
+    send.current({ type: P + 'labels', marks, ...(whole ? {} : { merge: true }), on: state.on, filter: state.filter, all, palette, answered })
   }, [ws, on, filter, filterFiles, filterLabel, byId, all, palette, labelled, tick])
   return useMemo(() => ({ add, see, reset, ready }), [add, see, reset, ready])
 }

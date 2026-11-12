@@ -375,6 +375,21 @@ Get a picture of what the analyst sees in the browser. It is slow. Use it only w
 }
 ```
 
+## export_card
+
+Write a card's figure as files into a folder of the corpus, as the card's Export menu saves them. The figure shows the card's question, its chart or table, and its takeaway. Use it when the analyst asks for a card as a figure or as files.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "card": {"type": "string", "description": "card:<id>"},
+    "folder": {"type": "string", "description": "The folder for the files, relative to the corpus folder. Default figures."}
+  },
+  "required": ["card"]
+}
+```
+
 ## start_writing
 
 Start a writer as a subagent of this session. The writer writes or revises one document from this conversation, the cards and the documents. Call it when the analyst asks for a document or for a change to one. To change one passage of a written document, use `edit_document` yourself.
@@ -700,6 +715,10 @@ thimble shows {surfaces} {layout}.
 ## open_view-view
 
 Opened the {view} view in Files.
+
+## export_card-written
+
+Wrote the figure of {card}: {paths}.
 
 ## clear_filter-cleared
 
@@ -1215,6 +1234,18 @@ This agent ran in an earlier version of thimble and cannot be continued.
 ## stop-subagent
 
 The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Stop it with TaskStop.
+
+## export-artifact
+
+The analyst chose Export, Claude artifact, on the {doc} “{title}”. thimble wrote the {doc} as one page: {page}. Publish that file as it is, with your Artifact tool. The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
+
+## export-artifact-update
+
+The analyst chose Export, Claude artifact, on the {doc} “{title}”. It was published before as {link}. thimble wrote the {doc} again as one page: {page}. Publish that file as it is, with your Artifact tool, and give {link} as its `url`. The new page replaces the old one. If the tool refuses because this session has not read that artifact, read it with the tool, then publish the file again. The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
+
+## artifact-refused
+
+In thimble, the Artifact tool publishes only the page of a document the analyst exported as a Claude artifact.
 
 ## main-stopped-note
 

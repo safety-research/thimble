@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -353,6 +355,223 @@ async def test_a_dev_install_run_from_its_clone_shows_a_fix_that_is_on_as_off_an
     fixing.recs[1]["commit"] = "f" * 40
     fixing.kind = "release"
     assert fixes.status(every=True)["fixes"][0]["state"] == "on"
+
+
+def _live_git(*args: str) -> str:
+    """git in the made-up live checkout, as thimble makes its commits there."""
+    return subprocess.run(["git", "-C", str(fixes.live_root().parent), "-c", "user.name=thimble",
+                           "-c", "user.email=thimble@example.invalid", "-c", "commit.gpgsign=false", *args],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture()
+def from_live(fixing, monkeypatch):
+    """This server runs from live, a git checkout of made-up files, and started at live's first commit. The fixture
+    gives `on(fid, title, path)`: a fix that changes `path` went on after that, somewhere else (y in a Claude Code
+    session), as a commit of live and a record of the kernel's."""
+    top = fixes.live_root().parent
+    for path in ("browser/backend/app/main.py", "browser/frontend/src/App.tsx", "plugin/engine/thimble.py",
+                 "plugin/bar/bar.tsx", "plugin/tray/tray.mjs"):
+        (top / path).parent.mkdir(parents=True, exist_ok=True)
+        (top / path).write_text("made up\n")
+    _live_git("init", "-q", "-b", "mine")
+    _live_git("add", "-A")
+    _live_git("commit", "-q", "-m", "thimble")
+    monkeypatch.setattr(config, "REPO_ROOT", fixes.live_root())
+    monkeypatch.setattr(config, "BOOT_COMMIT", _live_git("rev-parse", "HEAD"))
+
+    def on(fid: int, title: str, path: str) -> None:
+        (top / path).write_text(f"made up, with fix {fid}\n")
+        _live_git("commit", "-q", "-am", title)
+        fixing.recs[fid] = {"id": fid, "title": title, "words": [title], "state": "on", "files": [{"path": path}],
+                            "commit": _live_git("rev-parse", "HEAD"), "updated": float(fid)}
+
+    return on
+
+
+def _shown() -> dict[int, tuple[str, str | None]]:
+    """Each fix of Your fixes: its state there, and why it is off."""
+    return {r["id"]: (r["state"], r["why"]) for r in fixes.status(every=True)["fixes"]}
+
+
+async def test_a_fix_that_went_on_in_the_terminal_after_this_server_started_is_off_here_until_use_it_starts_it_again(
+        fixing, from_live, analyst, monkeypatch):
+    from_live(1, "Bigger minimap button", "browser/frontend/src/App.tsx")
+    from_live(2, "Bar says read", "plugin/bar/bar.tsx")
+    from_live(3, "Tray keeps its order", "plugin/tray/tray.mjs")
+    # the fix to the page and the fix to a module of the plugin the page bundles are not in the code this server runs;
+    # the fix to the terminal plugin alone is on, as the server runs none of it
+    assert _shown() == {1: ("off", fixes.NOT_YET), 2: ("on", None), 3: ("off", fixes.NOT_YET)}
+    # Use it leaves the fix as it is, which the kernel would not apply again, and starts the server again from live
+    await fixes.apply_route(1, analyst)
+    await _went_on()
+    await _restarted(fixing, "Use it")
+    assert "apply" not in [c[0] for c in fixing.calls] and fixing.recs[1]["state"] == "on"
+    assert fixing.restarts == [("fix 1: Bigger minimap button", fixes.live_root() / "backend")]
+    fixes._phase.clear()
+    # the server that started again is at live's commit now: every fix is on
+    booted = config.BOOT_COMMIT
+    monkeypatch.setattr(config, "BOOT_COMMIT", _live_git("rev-parse", "HEAD"))
+    assert _shown() == {1: ("on", None), 2: ("on", None), 3: ("on", None)}
+    # and stays on when its commit was made anew with the same change (another fix went off), which the commit the
+    # server started at does not hold
+    fixing.recs[1]["commit"] = "f" * 40
+    assert _shown()[1] == ("on", None)
+    # a fix that went on before the server started and one after it, in the same file: only the later one is off
+    from_live(4, "Minimap button has a label", "browser/frontend/src/App.tsx")
+    fixing.recs[1]["commit"] = config.BOOT_COMMIT
+    assert (_shown()[1], _shown()[4]) == (("on", None), ("off", fixes.NOT_YET))
+    # a copy without git knows no commit of its start: each fix is on, as before, and Use it asks the kernel
+    monkeypatch.setattr(config, "BOOT_COMMIT", "")
+    assert set(_shown().values()) == {("on", None)} and fixes.on_elsewhere(4) is None
+    monkeypatch.setattr(config, "BOOT_COMMIT", booted)
+    assert fixes.on_elsewhere(4)["id"] == 4 and fixes.on_elsewhere(2) is None
+
+
+def _asks() -> list[tuple[str, str]]:
+    """The rows of fixes in main's chat: what each says, and how its fix ended then."""
+    return [(r["text"], r["status"]) for r in _log(CORPUS) if r.get("type") == "chip" and r.get("kind") == "fix"]
+
+
+async def test_a_fix_that_went_on_in_the_terminal_asks_in_the_open_workbench_until_use_it_now_or_later(
+        fixing, from_live, analyst, monkeypatch):
+    # the workspace whose main this server follows, where the person works
+    monkeypatch.setattr(session, "attached_workspaces", lambda: [CORPUS])
+    from_live(1, "More accent colors", "browser/frontend/src/App.tsx")
+    fixing.recs[1].update(tests="passed", made_in="terminal")
+    await fixes.elsewhere()
+    # the notice a fix made here gets when its checks pass, in main's chat, which asks while the fix is off here
+    assert _asks() == [("thimble fixed: More accent colors · tests pass", "ready")]
+    [row] = fixes.status()["fixes"]
+    assert (row["kind"], row["state"], row["why"], row["words"]) == ("ready", "off", fixes.NOT_YET, "More accent colors")
+    # each change of the kernel's list reads it again, and so does each reload of the page: the one notice asks on
+    await fixes.elsewhere()
+    assert len(_asks()) == 1 and fixes.status()["fixes"][0]["kind"] == "ready"
+    # Later: it asks no more, also once the list changes, and Your fixes keeps the fix, off, with its Use it
+    await fixes.dismiss_route(1, analyst)
+    await fixes.elsewhere()
+    assert fixes.status()["fixes"] == [] and len(_asks()) == 1
+    assert _shown() == {1: ("off", fixes.NOT_YET)}
+    # a fix to the terminal plugin alone asks nothing here; a fix to the server asks, and Use it now leaves it as it is
+    # and starts the server again with it, whose row says so
+    from_live(2, "Bar says read", "plugin/bar/bar.tsx")
+    from_live(3, "Bigger minimap button", "browser/backend/app/main.py")
+    await fixes.elsewhere()
+    assert _asks()[1:] == [("thimble fixed: Bigger minimap button", "ready")]
+    await fixes.apply_route(3, analyst)
+    await _went_on(3)
+    await _restarted(fixing, "Use it now")
+    assert "apply" not in [c[0] for c in fixing.calls]
+    assert fixing.restarts == [("fix 3: Bigger minimap button", fixes.live_root() / "backend")]
+    assert _asks()[-1] == ("“Bigger minimap button” is on", "fixed")
+    # the server that started again runs every fix: nothing asks, and nothing asks again
+    fixes._phase.clear()
+    monkeypatch.setattr(config, "BOOT_COMMIT", _live_git("rev-parse", "HEAD"))
+    await fixes.elsewhere()
+    assert fixes.status()["fixes"] == [] and len(_asks()) == 3
+    assert set(_shown().values()) == {("on", None)}
+
+
+async def test_the_server_watches_the_kernel_s_list_and_a_fix_that_went_on_elsewhere_asks_at_once(
+        fixing, from_live, monkeypatch):
+    monkeypatch.setattr(session, "attached_workspaces", lambda: [CORPUS])
+    monkeypatch.setattr(fixes, "WATCH_S", 0.01)
+    told: list[dict[str, Any]] = []
+    monkeypatch.setattr(dev, "_emit_all", lambda event, only=None: told.append(event))
+    unread = {"list": False}
+
+    def kernel(args: list[str], **kw: Any) -> fixes.Ran:
+        if args[0] == "list" and unread["list"]:
+            return fixes.Ran(False, "", "thimble fix list took longer than 30 s")
+        return fixing(args, **kw)
+
+    monkeypatch.setattr(fixes, "kernel", kernel)
+    listed = fixes.fixes_home() / "fixes.jsonl"
+    listed.parent.mkdir(parents=True, exist_ok=True)
+    listed.write_text("")
+    task = asyncio.ensure_future(fixes.watch())
+    try:
+        await asyncio.sleep(0.1)
+        assert told == [] and _asks() == []
+        # y in a Claude Code session: the kernel puts the fix on and appends its record, while its list cannot be read
+        unread["list"] = True
+        from_live(1, "More accent colors", "browser/frontend/src/App.tsx")
+        with listed.open("a") as f:
+            f.write(json.dumps(fixing.recs[1]) + "\n")
+        await asyncio.sleep(0.1)
+        assert told == [] and _asks() == []
+        # the list reads again: the change counts at the next look, with no other change of the file
+        unread["list"] = False
+        await _until(lambda: {"type": "fix", "id": 0, "state": "listed"} in told, "the pages never heard of the change")
+        assert _asks() == [("thimble fixed: More accent colors", "ready")]
+    finally:
+        task.cancel()
+
+
+def test_the_kernel_names_the_browser_s_restart_for_the_plugin_files_this_server_runs():
+    # two lists, one in each program: a fix to one of these files is stale in a thimble-browser that runs
+    import ast  # noqa: PLC0415
+
+    tree = ast.parse((config.REPO_ROOT.parent / "plugin" / "engine" / "kernel" / "fixes.py").read_text())
+    [theirs] = [ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "BROWSER_RUNS" for t in n.targets)]
+    assert sorted(theirs) == sorted(fixes.BROWSER_RUNS)
+    assert all(p in fixes.BROWSER_RUNS for p in fixes.PAGE_SOURCES if p.startswith("plugin/"))
+    assert all(p in fixes.BROWSER_RUNS for p in fixes.SERVER_KEEPS)
+
+
+def test_the_page_s_sources_are_the_files_its_modules_import():
+    # every file outside browser/frontend that the page's modules import, and those import: a fix to one is in the page
+    # only after a build, so each is a page source, and the plugin's among them are in BROWSER_RUNS by that
+    top = config.REPO_ROOT.parent
+    src = config.REPO_ROOT / "frontend" / "src"
+    spec = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*|@import\s+(?:url\()?)['"](\.{1,2}/[^'"?]+)""")
+    ends = ("", ".ts", ".tsx", ".js", ".mjs", ".json", ".css", "/index.ts", "/index.tsx", "/index.js")
+    todo = [f for f in src.rglob("*") if f.suffix in (".ts", ".tsx", ".js", ".mjs", ".css") and ".test." not in f.name]
+    assert len(todo) > 50
+    seen, outside = set(todo), set()
+    while todo:
+        f = todo.pop()
+        for rel in spec.findall(f.read_text("utf-8")):
+            hit = next((t for e in ends if (t := Path(os.path.normpath(f"{f.parent / rel}{e}"))).is_file()), None)
+            if hit is None or hit in seen:
+                continue
+            seen.add(hit)
+            if not hit.is_relative_to(config.REPO_ROOT / "frontend"):
+                outside.add(hit.relative_to(top).as_posix())
+            if hit.suffix != ".json":
+                todo.append(hit)
+    assert sorted(outside) == sorted(fixes.PAGE_SOURCES[1:])
+
+
+def test_each_file_of_the_plugin_the_server_names_is_one_it_keeps_or_reads_at_each_use():
+    # the server's code names the terminal plugin's files by path. One it loads once (SERVER_KEEPS) is stale in a
+    # server that runs after a fix changes it; one it reads or starts at each use is as live has it at once. A path
+    # that is new here belongs in one of the two.
+    at_each_use = {
+        "engine/thimble.py",  # the kernel: a process for each call
+        "engine/validate.py",  # the validator as a command: a process for each run of a citation's code
+        "sandbox",  # setup.mjs: a process for each call
+        "sandbox/package.json",  # the sandbox runtime's pin: read for each run of a citation's code
+        "prompts",  # the texts: read for each prompt
+        ".claude-plugin/plugin.json",  # read for each report
+    }
+    keeps = {p.removeprefix("plugin/") for p in fixes.SERVER_KEEPS}
+    chain = re.compile(r'''(?:plugin_dir\(\)|\bPLUGIN\b|(?<!REPO_ROOT / )"plugin")((?:\s*/\s*"[^"]+")+)''')
+    named = {"/".join(re.findall(r'"([^"]+)"', tail))
+             for f in (config.REPO_ROOT / "backend" / "app").glob("*.py") for tail in chain.findall(f.read_text("utf-8"))}
+    assert keeps <= named, "SERVER_KEEPS holds a file the server no longer names"
+    assert named - keeps - at_each_use == set()
+    # a module the server imports brings in no other file of the plugin: the validator is the standard library alone
+    import ast  # noqa: PLC0415
+
+    for mod in (config.REPO_ROOT.parent / p for p in fixes.SERVER_KEEPS if p.endswith(".py")):
+        for n in ast.walk(ast.parse(mod.read_text("utf-8"))):
+            names = [a.name for a in n.names] if isinstance(n, ast.Import) else []
+            if isinstance(n, ast.ImportFrom):
+                assert not n.level, f"{mod.name} imports a module beside it"
+                names = [n.module or ""]
+            assert not any((mod.parent / f"{x.split('.')[0]}.py").is_file() for x in names)
 
 
 def test_a_fixers_end_in_a_code_fence_leaves_the_fence_out():

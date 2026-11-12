@@ -393,8 +393,8 @@
 }
 
 /* -------- settings popover (shell/SettingsPopover, inside a Popover): one flat list on hairlines, each line a name in
-   the body face at its left and its control at its right; the Models line folds the agents' rows, each its name, its
-   model menu, its effort menu and fast mode's bolt in four columns -------- */
+   the body face at its left, with its ? after it, and its control at its right; the Models line folds the agents' rows,
+   each its name and ?, its model menu, its effort menu and fast mode's bolt in four columns -------- */
 .settings-pop {
   max-width: calc(100vw - 16px);
 }
@@ -414,6 +414,13 @@
   color: var(--text-primary);
   font: var(--type-body);
   line-height: 1.3;
+}
+/* a setting's name and its ? (components/Tooltip HelpTip), close after it */
+.settings-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 .settings-line {
   display: flex;
@@ -464,27 +471,49 @@
   font: var(--type-body-sm);
   overflow-wrap: anywhere;
 }
-/* the Models line: its name in a heading's caps, while folded the models and the efforts in use, and its chevron */
+/* the Models line: its name in a heading's caps and its ?, while folded the models and the efforts in use, and its
+   chevron. The name is the fold's button, which reaches over the whole line, so a click anywhere on it folds; the ?
+   stands over it */
 .settings-fold {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   min-height: 40px;
   padding: 0 10px;
-  border: 0;
   border-radius: var(--radius-ui);
-  background: transparent;
   color: var(--text-tertiary);
-  text-align: left;
   cursor: pointer;
   transition: var(--transition-color);
 }
 .settings-fold:hover {
   background: var(--surface-hover);
 }
-.settings-fold:focus-visible {
+.settings-fold:has(.settings-fold-button:focus-visible) {
   box-shadow: 0 0 0 1.5px var(--accent);
+}
+.settings-fold-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-fold-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.settings-fold-button:focus-visible {
+  outline: none;
+}
+.settings-fold .help-tip {
+  position: relative;
+  z-index: 1;
 }
 .settings-gist {
   flex: 1;
@@ -662,6 +691,12 @@
 }
 .shell-toast-text code {
   font: var(--type-mono-sm);
+}
+.shell-toast-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */

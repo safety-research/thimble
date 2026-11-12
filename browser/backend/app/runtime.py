@@ -14,12 +14,12 @@ fork's or an agent's is <workspace>/runtime/<sid>/subagents/agent-<id>.jsonl wit
 finds a subagent's. So the page cannot tell the two ways apart.
 
 Writes (spec_of). Main and its thread forks write the corpus folder, as Claude Code does in its own folder, unless the
-analyst turns Settings' "Claude can edit files in this folder" off for the workspace (ledger.corpus_edits); their
-prompt and their Bash, Write and Edit descriptions say which, and name that switch when it is off. thimble's other
-agents (writers, view builds and reviews, checks) and the checker's and proposer's forks never write it. No agent
-writes thimble's private files (PRIVATE_FILES) or the workspace's protected files (protected), with one carve-out: a
-view's builder and its reviewer write that view's folder in the protected extension/, and their own folder, alone
-(agent_writes), by the slug of the start the server recorded for them, so no other agent writes a view's files.
+analyst turns on Settings' Read only for the workspace (ledger.corpus_edits false); their prompt and their Bash, Write
+and Edit descriptions say which, and name that switch when it is on. thimble's other agents (writers, view builds and
+reviews, checks) and the checker's and proposer's forks never write it. No agent writes thimble's private files
+(PRIVATE_FILES) or the workspace's protected files (protected), with one carve-out: a view's builder and its reviewer
+write that view's folder in the protected extension/, and their own folder, alone (agent_writes), by the slug of the
+start the server recorded for them, so no other agent writes a view's files.
 
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
 - a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end; a message the
@@ -189,8 +189,8 @@ class Spec:
     # (runtime_cc.workspace_tmp). None for thimble's other agents, whose commands have a TMPDIR of their own
     temp: Path | None = None
     fast: bool = False
-    # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
-    # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
+    # whether the corpus is among write_roots (False while Settings' Read only is on): True or False for main and its
+    # thread forks, which the switch reaches, None for thimble's other agents, which never write it
     corpus_edits: bool | None = None
     no_write: list[Path] = field(default_factory=list)  # the workspace's protected files, never written (protected)
     # the workspace's Label tool switch (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
@@ -237,6 +237,7 @@ class Conv:
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
     switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
     cc: Any = None  # its Claude Code session, open past its turn while a background command runs (runtime_cc.Held)
+    tools: list[str] | None = None  # the tools its last Claude Code session listed as it started (runtime_cc)
 
     @property
     def c(self) -> str:
@@ -461,7 +462,8 @@ class Space:
         if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
             self.attach()
             return False
-        self.drop_waiting()
+        for text in self.drop_waiting():
+            _turn_ended(self.c, text, None)  # an export's request that went unread ends unpublished
         self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
@@ -554,12 +556,14 @@ class Space:
         if words is not None:
             agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
 
-    def drop_waiting(self) -> None:
+    def drop_waiting(self) -> list[str]:
         """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
-        analyst's messages among it still get their lines in main's chat, as they sent them."""
-        for text in self.main.queue:
+        analyst's messages among it still get their lines in main's chat, as they sent them. What went, oldest first."""
+        gone = list(self.main.queue)
+        for text in gone:
             self.said_line(text, read=False)
         self.main.queue.clear()
+        return gone
 
     def take_back(self, logged: dict[str, str], rewound: str) -> list[tuple[str, str]]:
         """What a rewind to the analyst's message `rewound` takes back of what waits for main (rewind_main): each
@@ -602,8 +606,8 @@ class Space:
         return [home / n for n in PRIVATE_FILES]
 
     def spec_of(self, conv: Conv) -> Spec:
-        from . import (cc_settings, config, events, labels_off, ledger, runtime_tools, subagents,  # noqa: PLC0415
-                       tools, userconf)
+        from . import (artifact_export, cc_settings, config, events, labels_off, ledger, runtime_tools,  # noqa: PLC0415
+                       subagents, tools, userconf)
 
         tmp = self.dir / "tmp" / conv.id
         nofollow.makedirs(tmp)
@@ -614,13 +618,19 @@ class Space:
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
         if conv.kind in ("main", "fork"):
             # main and its thread forks write the corpus, as Claude Code does in its folder, unless the analyst turned
-            # "Claude can edit files in this folder" off in Settings (ledger.corpus_edits)
+            # on Read only in Settings (ledger.corpus_edits)
             edits: bool | None = ledger.corpus_edits(self.c)
             system = events.session_prompt(str(self.corpus), edits=edits)
             names = [s.name for s in tools.REGISTRY.values()
                      if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)
                      and (labels or s.name not in labels_off.TOOLS)]
             builtins = list(MAIN_BUILTINS)
+            if conv.kind == "main" and engine() == "cc" and conv.cc is None and artifact_export.waiting(self.c):
+                # an export waits for main to publish it: the turns it waits for have Claude Code's Artifact tool
+                # (artifact_export.py), each in a new session, which starts with the variable that gives a headless
+                # session the tool (runtime_cc.options), and a session kept open for a command in the background goes
+                # on without it
+                builtins.append(artifact_export.TOOL)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
             # the composer's effort, else the one Claude Code in a terminal runs the model at by the analyst's
@@ -854,12 +864,13 @@ async def forget(c: str) -> None:
     (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
     place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
     brought back)."""
-    from . import runtime_cc  # noqa: PLC0415
+    from . import artifact_export, runtime_cc  # noqa: PLC0415
 
     sp = _spaces.pop(c, None)
     if sp is None:
         return
     sp.drop_waiting()
+    artifact_export.forget(c)  # its exports end with no word, which the folder that takes its place would keep
     for conv in [sp.main, *sp.convs.values()]:
         if conv.running:
             conv.queue.clear()
@@ -1035,14 +1046,31 @@ async def _main_loop(sp: Space) -> None:
         t0 = time.monotonic()
         main.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "task-notification"}})
         sp.said_line(text)
+        end: TurnEnd | None = None
         try:
             # each label as main can read it in this turn is a version, which a citation of it is checked against
             await asyncio.to_thread(_keep_label_versions, sp.c)
-            await _run(main, text)
+            end = await _run(main, text)
         except asyncio.CancelledError:
             sp.read()
             raise
+        finally:
+            _turn_ended(sp.c, text, end)
         main.emit({"type": "system", "subtype": "turn_duration", "durationMs": int((time.monotonic() - t0) * 1000)})
+
+
+def _turn_ended(c: str, text: str, end: TurnEnd | None) -> None:
+    """Main's turn on `text` ended (`end`; None when it stopped or never ran): an export whose request it was ends with
+    it (artifact_export.turn_ended). Never raises."""
+    from . import artifact_export  # noqa: PLC0415
+
+    m = EVENT_ID_RE.match(text)
+    if m is None:
+        return
+    try:
+        artifact_export.turn_ended(c, m.group(1), end)
+    except Exception:  # noqa: BLE001 — main's turn is over either way
+        log.exception("%s: the end of main's turn did not reach its export", c)
 
 
 def _keep_label_versions(c: str) -> None:
@@ -1504,10 +1532,10 @@ async def access_changed() -> None:
 
 def settings_changed(c: str) -> None:
     """Settings changed for workspace `c`: when main may do less now than in its session kept open for a background
-    command (narrows, such as "Claude can edit files in this folder" turned off), that session closes at once, and the
-    command with it, so no command keeps a permission taken back; a turn that runs keeps its session only while main
-    may do as much as in it (runtime_cc._session). A change that only widens leaves it to main's next turn
-    (runtime_cc.turn). From any thread: the check runs on the server's loop."""
+    command (narrows, such as Read only turned on), that session closes at once, and the command with it, so no command
+    keeps a permission taken back; a turn that runs keeps its session only while main may do as much as in it
+    (runtime_cc._session). A change that only widens leaves it to main's next turn (runtime_cc.turn). From any thread:
+    the check runs on the server's loop."""
     from . import runtime_cc  # noqa: PLC0415
 
     sp = _spaces.get(c)
@@ -1563,12 +1591,13 @@ async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
     (_agent_loop, _ended), and what waited for main goes (Space.drop_waiting). It waits up to `wait_s` for them, then
     the mirror keeps where each stands (session.keep_places), so the next server neither shows them running nor takes
     them up again. The ids stopped."""
-    from . import session  # noqa: PLC0415
+    from . import artifact_export, session  # noqa: PLC0415
 
     stopping: list[tuple[str, Any]] = []
     mains = [sp.c for sp in _spaces.values() if sp.main.running]
     for sp in list(_spaces.values()):
         sp.drop_waiting()
+        artifact_export.forget(sp.c)  # an export that waits ends with the server, with no word for a page that is gone
         for conv in [sp.main, *sp.convs.values()]:
             if conv.running:
                 conv.queue.clear()

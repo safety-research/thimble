@@ -16,7 +16,9 @@
 // over it then. One that names first-party model ids or their effort (`firstParty`: Verifier model, Verifier effort)
 // shows only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts firstPartyApi).
 // Verifier effort offers the levels Claude Code offers for the model Verifier model names (settings/features.mjs
-// choicesIn).
+// choicesIn). Under the list, past a thin line and kept at the pane's bottom however far the rows scroll (core/pane.ts
+// keepsAtFoot), the row picked says what it does and when you would change it: its name, then, gray, its `help`, the
+// words /config starts its description with.
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. tab and shift+tab move the ring along the row's choices (Claude Code's keys for a pane's ring: a pane
@@ -27,7 +29,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { barRows, keyLooks } from '../bar/bar'
-import { arrowsOwn, keepsInView, PANE_ID } from '../core/pane'
+import { arrowsOwn, keepsAtFoot, keepsInView, PANE_ID } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { choicesIn, SWITCHES, switchesFrom } from '../settings/features.mjs'
@@ -36,7 +38,7 @@ import { firstPartyApi, heldValues, settingsAction, shownValues } from '../setti
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; letter?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; letter?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string>; help: string }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -181,6 +183,15 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   // the row picked and the line under it stay in view in a pane of any height (core/pane.ts keepsInView)
   const mine = body.findIndex((r: Any) => r?.props?.key === `sw-${picked}`)
   keepsInView(mine < 0 ? null : { key: `${picked}:${shownOf(shown[at]!, values[picked])}`, top: treeRows([preview, ...body.slice(0, mine)], width), rows: treeRows(body[mine], width) })
+  // what the row picked does, at the pane's bottom under a thin line: its name as its row has it, then its help
+  const row = shown[at]
+  keepsAtFoot(row ? [
+    Box({ key: 'help-rule', children: [Text({ dimColor: true, children: '─'.repeat(width) })] }),
+    Box({ key: `help-${row.key}`, width, children: [Text({ wrap: 'wrap', children: [
+      Text({ key: 'n', bold: true, children: row.title }),
+      Text({ key: 'w', dimColor: true, children: `${GAP}${row.help}` }),
+    ] })] }),
+  ] : null)
   return Box({ flexDirection: 'column', width, children: [
     preview,
     ...body,

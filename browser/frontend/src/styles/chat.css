@@ -27,7 +27,10 @@
   color: var(--text-tertiary);
 }
 /* -------- the list: the transcript, with the composer's height kept clear at its foot; it reaches 2px past the
-   column on either side so a row's flash ring is not cut -------- */
+   column on either side so a row's flash ring is not cut. The rows fade out just above the composer, whole until 24px
+   above it and gone at 8px, so nothing reads through its glass or past its edges; the window's paper shows there. The
+   bottom padding reaches the fade's start, so the last row scrolls whole above it and a chat shorter than the column
+   has nothing in the fade -------- */
 .chat-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -36,6 +39,7 @@
   overflow-x: hidden;
   padding: 14px 2px calc(var(--composer-h, 88px) + 24px);
   scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--composer-h, 88px) - 24px), transparent calc(100% - var(--composer-h, 88px) - 8px));
 }
 .chat-flow {
   display: flex;
@@ -2049,8 +2053,14 @@ button.chat-strip-head:hover {
 .chat-flow > .chat-fix {
   margin: 4px 0;
 }
+/* a fix's quiet row keeps its mark at the start of its first line, and words too long for the line go on beside it */
+.chat-fix-said {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
 .chat-fix-said .chat-fix-ico {
   flex: none;
+  margin-top: 3px;
   color: var(--text-tertiary);
 }
 .chat-fix-said[data-kind='ready'] .chat-fix-ico,

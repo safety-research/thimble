@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
-from kernel.evidence import check_mark  # noqa: E402
+from kernel.evidence import check_all, check_mark  # noqa: E402
 
 CODE = 'import json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nprint(f"{sum(p[\'merged\'] for p in prs)} of {len(prs)}")'
 
@@ -38,6 +38,16 @@ def test_computed_evidence_is_the_real_call_that_printed_the_output_the_check_ga
     # left-out text is "…", and white space is read loosely
     long = "rows: 40\nmerged:   12 of 40\n"
     assert check_mark(mark("12 of 40"), computed("rows: 40 … merged: 12 of 40"), [call(CODE, long)], "/data")["status"] == "verified"
+
+
+def test_computed_evidence_is_the_code_and_its_output_whatever_else_the_check_says_of_them():
+    # a check that also says how its code got the value adds nothing to the evidence: the person reads the code itself
+    how = "Counted the lines of prs.jsonl whose merged field is true, out of all its lines, one line per pull request."
+    ok = check_mark(mark("12 of 40"), {**computed("12 of 40"), "method": how}, [call(CODE, "12 of 40\n")], "/data")
+    assert ok["status"] == "verified" and ok["evidence"]["code"] == CODE and "method" not in ok["evidence"]
+    # a claim the check found wrong keeps its real evidence, and no more
+    wrong = check_mark(mark("15 of 40"), {**computed("12 of 40", status="wrong"), "method": how}, [call(CODE, "12 of 40\n")], "/data")
+    assert wrong["status"] == "failed" and wrong["evidence"]["output"].startswith("12 of 40") and "method" not in wrong["evidence"]
 
 
 def test_a_typed_in_value_is_no_evidence_but_a_bound_is_a_condition():
@@ -196,6 +206,91 @@ def test_a_card_s_cell_is_evidence_and_shows_as_its_table_with_the_cell_cited():
 
 
 # ------------------------------------------------------------------------------------------------ one path to a correct citation
+
+def test_a_period_in_code_ends_no_sentence_of_a_rewrite_but_a_sentence_put_in_is_one_too_many(tmp_path: Path):
+    (tmp_path / "README.md").write_text("cd backend && uv run uvicorn app.main:app --port 9000\n")
+    was = {"n": 1, "words": "port 8000", "sentence": "The app runs on [port 8000]: start it with `uvicorn app.main:app --port 8000`."}
+
+    def reworded(sentence: str) -> dict:
+        item = {**quote("README.md", 1, "--port 9000"), "status": "corrected", "reason": "",
+                "correction": {"words": "port 9000", "sentence": sentence}}
+        return check_mark(was, item, [], str(tmp_path))
+
+    ok = reworded("The app runs on [port 9000]: start it with `uvicorn ... --port 9000`.")
+    assert (ok["status"], ok["rewrite"]) == ("corrected", "The app runs on [port 9000]: start it with `uvicorn ... --port 9000`.")
+    more = reworded("The app runs on [port 9000]. Start it with `uvicorn ... --port 9000`.")
+    assert more["status"] == "failed" and more["reason"] == "The check reworded the sentence, but it adds a sentence."
+
+
+def test_one_check_of_two_citations_of_a_sentence_rewrites_it_once_for_both(tmp_path: Path):
+    """Both citations of the sentence went out of date with one edit. A check of one alone could not rewrite the
+    sentence: the rewrite changed the other citation's words. One check of both rewrites it once, each citation held
+    to its own evidence, and a rewrite that gives a citation other words than its own result cannot stand."""
+    (tmp_path / "README.md").write_text("cd backend && uv run uvicorn app.main:app --port 9000\nOpen http://localhost:9000.\n")
+    was = "The app runs on [port 8000]: start it with `uvicorn ... --port 8000`, then open [http://localhost:8000]."
+    now = "The app runs on [port 9000]: start it with `uvicorn ... --port 9000`, then open [http://localhost:9000]."
+    marks = [{"n": 1, "words": "port 8000", "sentence": was}, {"n": 2, "words": "http://localhost:8000", "sentence": was}]
+
+    def item(n: int, line: int, words: str, sentence: str | None = now, status: str = "corrected") -> dict:
+        return {"mark": n, **quote("README.md", line, words), "status": status, "reason": "the README says 9000 now",
+                "correction": {"words": words, **({"sentence": sentence} if sentence else {})} if status == "corrected" else None}
+
+    def check(*items: dict, of: list[dict] = marks) -> list[dict]:
+        return check_all(of, "```json\n" + json.dumps(list(items)) + "\n```", [], str(tmp_path))["results"]
+
+    # the same new sentence for both, or the sentence for one and the words for the other, or each bracketing only
+    # its own words: both corrected, the one rewrite on each
+    one = now.replace("[http://localhost:9000]", "http://localhost:9000")
+    two = now.replace("[port 9000]", "port 9000")
+    for answers in ((item(1, 1, "port 9000"), item(2, 2, "http://localhost:9000")),
+                    (item(1, 1, "port 9000"), item(2, 2, "http://localhost:9000", None)),
+                    (item(1, 1, "port 9000", one), item(2, 2, "http://localhost:9000", two))):
+        got = check(*answers)
+        assert [(r["status"], r["shown"], r.get("was"), r.get("rewrite")) for r in got] == [
+            ("corrected", "port 9000", "port 8000", now), ("corrected", "http://localhost:9000", "http://localhost:8000", now)], got
+    # a check of one alone cannot change the other's words
+    (alone,) = check(item(1, 1, "port 9000"), of=marks[:1])
+    assert alone["status"] == "failed" and "rewrite" not in alone
+    # a rewrite that gives the other citation words its own check does not confirm cannot stand
+    first, second = check(item(1, 1, "port 9000"), item(2, 2, "http://localhost:8000", status="verified"))
+    assert (first["status"], first["reason"]) == ("failed", "The check reworded the sentence, but it changes the other citations of the sentence.")
+    assert second["status"] == "failed" and "rewrite" not in first
+
+
+def test_two_citations_of_a_sentence_with_the_same_words_each_take_the_words_at_their_own_place(tmp_path: Path):
+    """"[10] are major and [10] are minor": after one edit the counts read 11 and 9, and the check gives the new sentence
+    for both. Each citation is the one at its own place, so the second takes 9 from it, not the first one's 11."""
+    (tmp_path / "counts.txt").write_text("major: 11\nminor: 9\n")
+    was = "Of the [22] findings, [10] are major and [10] are minor."
+    now = "Of the [22] findings, [11] are major and [9] are minor."
+    marks = [{"n": 1, "words": "10", "sentence": was}, {"n": 2, "words": "10", "sentence": was}]
+    items = [{"mark": n, **quote("counts.txt", n, sub), "status": "corrected", "correction": {"words": words, "sentence": now}}
+             for n, sub, words in ((1, "major: 11", "11"), (2, "minor: 9", "9"))]
+    got = check_all(marks, "```json\n" + json.dumps(items) + "\n```", [], str(tmp_path))["results"]
+    assert [(r["status"], r["shown"], r.get("was")) for r in got] == [("corrected", "11", "10"), ("corrected", "9", "10")], got
+
+
+def test_a_rewording_may_say_a_value_its_correction_changed_again_but_cuts_none_out_of_the_citation():
+    """A re-check after an edit: "3 lines" now reads "0 lines", and the rewording says what the 3 lines read now. The
+    3 is a value the correction changed, not one it left out of the citation, so the rewording stands when the evidence
+    shows it. A value it does not show, and a value cut out of the citation with none in its place, still fail."""
+    out = "0 lines mention port 8000\n3 lines mention port 9000\n"
+    code = ("lines = open('README.md').read().splitlines()\nfor port in (8000, 9000):\n"
+            "    print(f\"{sum(str(port) in l for l in lines)} lines mention port {port}\")")
+    was = {"n": 1, "words": "3 lines", "sentence": "[3 lines] of the README mention port 8000."}
+
+    def reworded(sentence: str, words: str = "0 lines", mark: dict = was, printed: str = out) -> dict:
+        item = {**computed(printed.split("\n")[0], "corrected", {"words": words, "sentence": sentence}), "reason": "none of them now"}
+        return check_mark(mark, item, [call(code, printed)], "/data", fresh=True)
+
+    ok = reworded("[0 lines] of the README mention port 8000 now, because the 3 lines that did now say 9000.")
+    assert (ok["status"], ok["shown"], ok["was"]) == ("corrected", "0 lines", "3 lines"), ok
+    unshown = reworded("[0 lines] of the README mention port 8000 now, because the 3 lines that did now say 9000.",
+                       printed="0 lines mention port 8000\n")
+    assert unshown["status"] == "failed" and unshown["reason"].startswith("The records do not show “now, because the 3 lines"), unshown
+    cut = reworded("Of the 40 runs, [12] failed.", "12", {"n": 1, "words": "15 of 40", "sentence": "Of the runs, [15 of 40] failed."},
+                   "12 failed\n")
+    assert cut["status"] == "failed" and cut["reason"] == "The check reworded the sentence, but it leaves “40” out of the citation, a value of the data.", cut
 
 
 # ------------------------------------------------------------------------------------------------ why a citation failed

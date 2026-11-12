@@ -152,6 +152,35 @@ export function pageFaces(rules: readonly string[]): { decls: string; url: strin
   return out
 }
 
+/** The @font-face rules of the page's own stylesheets, as the browser writes them back. */
+export function pageFaceRules(): string[] {
+  const texts: string[] = []
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList
+    try {
+      rules = sheet.cssRules
+    } catch {
+      continue // a sheet from another origin cannot be read
+    }
+    for (const r of Array.from(rules)) if (r.cssText.startsWith('@font-face')) texts.push(r.cssText)
+  }
+  return texts
+}
+
+/** @font-face rules for `faces` (pageFaces), each one's file fetched and inlined as a data URL. Throws when a file
+ * cannot be fetched. */
+export async function inlineFaces(faces: readonly { decls: string; url: string }[]): Promise<string> {
+  const rules = await Promise.all(
+    faces.map(async ({ decls, url }) => {
+      const buf = new Uint8Array(await (await fetch(new URL(url, document.baseURI))).arrayBuffer())
+      let bin = ''
+      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
+      return `@font-face{${decls}${decls.endsWith(';') ? '' : ';'}src:url(data:font/woff2;base64,${btoa(bin)}) format('woff2');}`
+    }),
+  )
+  return rules.join('')
+}
+
 let facesOnce: Promise<string> | null = null
 /** the rules once fetched, for a frame built after that to have them at once */
 let facesDone: string | null = null
@@ -164,25 +193,7 @@ export function frameFonts(): Promise<string> {
   if (facesOnce) return facesOnce
   facesOnce = (async () => {
     try {
-      const texts: string[] = []
-      for (const sheet of Array.from(document.styleSheets)) {
-        let rules: CSSRuleList
-        try {
-          rules = sheet.cssRules
-        } catch {
-          continue // a sheet from another origin cannot be read
-        }
-        for (const r of Array.from(rules)) if (r.cssText.startsWith('@font-face')) texts.push(r.cssText)
-      }
-      const rules = await Promise.all(
-        pageFaces(texts).map(async ({ decls, url }) => {
-          const buf = new Uint8Array(await (await fetch(new URL(url, document.baseURI))).arrayBuffer())
-          let bin = ''
-          for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
-          return `@font-face{${decls}${decls.endsWith(';') ? '' : ';'}src:url(data:font/woff2;base64,${btoa(bin)}) format('woff2');}`
-        }),
-      )
-      return rules.join('')
+      return await inlineFaces(pageFaces(pageFaceRules()))
     } catch {
       return ''
     }
