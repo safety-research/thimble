@@ -214,8 +214,8 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
 }
 
 /** The line under a label's name: the run's progress, its outcome with how many records it could not label, how many
- * the analyst marked by hand (in a view, the Files reader or the label's card) and how many whole files it read only in
- * part (ReadCutLine), each on a line of its own, or its failure with Retry. */
+ * the analyst marked by hand (on the label's card or with a view's own label controls) and how many whole files it read
+ * only in part (ReadCutLine), each on a line of its own, or its failure with Retry. */
 function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
