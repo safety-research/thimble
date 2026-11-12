@@ -235,11 +235,10 @@ def _plain_runner(runs: list):
     def runner(c, folders):
         def run(script, folder, python="python3", flags=(), argv=("-",)):
             runs.append(script)
-            reads = os.path.join(os.path.dirname(folder), f"reads-{len(runs)}.txt")
             p = subprocess.run([sys.executable, "-B", *flags, "-c", prelude, *argv[1:]], input=script, capture_output=True,
-                               text=True, cwd=folder, env={**os.environ, "THIMBLE_READS": reads, "THIMBLE_ARGV0": argv[0]})
-            got = open(reads).read().splitlines() if os.path.exists(reads) else []
-            return {"output": p.stdout + p.stderr, "reads": got, "ok": p.returncode == 0}
+                               text=True, cwd=folder, env={**os.environ, "THIMBLE_READS": "made-up-mark", "THIMBLE_ARGV0": argv[0]})
+            errors, _, read = p.stderr.rpartition("\nmade-up-mark\n")
+            return {"output": p.stdout + errors, "reads": read.splitlines(), "ok": p.returncode == 0}
         return run
     return runner
 

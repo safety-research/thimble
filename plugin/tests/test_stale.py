@@ -23,11 +23,10 @@ def plain_runner(runs: list | None = None):
     def run(script: str, folder: str, python: str = "python3", flags=(), argv=("-",)) -> dict:
         if runs is not None:
             runs.append(script)
-        reads = Path(folder).parent / f"reads-{len(runs or [])}.txt"
         p = subprocess.run([sys.executable, "-B", *flags, "-c", validate.PRELUDE, *argv[1:]], input=script, capture_output=True,
-                           text=True, cwd=folder, env={**os.environ, "THIMBLE_READS": str(reads), "THIMBLE_ARGV0": argv[0]})
-        got = reads.read_text().splitlines() if reads.exists() else []
-        return {"output": p.stdout + p.stderr, "reads": got, "ok": p.returncode == 0}
+                           text=True, cwd=folder, env={**os.environ, "THIMBLE_READS": "made-up-mark", "THIMBLE_ARGV0": argv[0]})
+        errors, _, read = p.stderr.rpartition("\nmade-up-mark\n")
+        return {"output": p.stdout + errors, "reads": read.splitlines(), "ok": p.returncode == 0}
     return run
 
 
@@ -293,15 +292,19 @@ def test_the_validator_runs_the_code_again_in_thimbles_sandbox_at_the_check_and_
     call = severity_call(data, plain_runner())
     answer = "```json\n" + json.dumps([{"mark": 1, "kind": "computed", "status": "verified", "evidence": {"output": "build-a: 1 major, 2 minor of 3"},
                                         "reason": "counted"}]) + "\n```"
-    req = {"cwd": str(data), "root": str(data), "marks": [{"n": 1, "words": "1 major", "sentence": "It has [1 major](#) finding."}],
-           "answer": answer, "calls": [call]}
-    done = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
+    # the hooks' TMPDIR is the session's temp folder, which the sandbox shows read only
+    temp = tmp_path / "session-tmp"
+    temp.mkdir()
+    env = {**os.environ, "TMPDIR": str(temp)}
+    req = {"cwd": str(data), "root": str(data), "tmp": [str(temp)], "answer": answer, "calls": [call],
+           "marks": [{"n": 1, "words": "1 major", "sentence": "It has [1 major](#) finding."}]}
+    done = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True, env=env)
     [r] = json.loads(done.stdout)["results"]
     assert r["status"] == "verified" and [s["file"] for s in r["sources"]] == ["build-a/report/review-results.json"] and r["rerun"]
     touched(review, review.read_text().replace('"major"', '"minor"'))
-    cited = {"cited": [{"sources": r["sources"], "rerun": r["rerun"]}], "cwd": str(data), "root": str(data)}
-    done = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(cited), capture_output=True, text=True, check=True)
+    cited = {"cited": [{"sources": r["sources"], "rerun": r["rerun"]}], "cwd": str(data), "root": str(data), "tmp": [str(temp)]}
+    done = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(cited), capture_output=True, text=True, check=True, env=env)
     [got] = json.loads(done.stdout)["cited"]
     assert got["sources"][0]["changed"] is True and "rests" not in got
-    # its run wrote nothing in the folder
-    assert sorted(p.name for p in data.iterdir()) == ["build-a", "build-b"]
+    # its runs wrote nothing in the folder, and left nothing in the temp folder
+    assert sorted(p.name for p in data.iterdir()) == ["build-a", "build-b"] and list(temp.iterdir()) == []

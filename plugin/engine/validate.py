@@ -33,6 +33,7 @@ import json
 import math
 import os
 import platform
+import secrets
 import shutil
 import subprocess
 import sys
@@ -48,12 +49,13 @@ from kernel.store import thimble_home  # noqa: E402
 RERUN_S = 60  # seconds a citation's script may run again: the hooks give this command two minutes in all
 NOT_SET_UP = "the sandbox could not be"  # how run.mjs's own failure to set the sandbox up opens (its exit 3)
 # what runs a script again in the sandbox: an audit hook notes each file the script opens to read (a database it
-# connects to too; never one it writes, lists or stats), and writes their absolute paths, one a line, to $THIMBLE_READS
-# as the script ends; the files of Python and of its packages are none of them. Then the script runs from stdin as the
-# call ran it: as __main__, with the call's sys.argv (its first word in $THIMBLE_ARGV0, `-` or `-c`).
+# connects to too; never one it writes, lists or stats), and as the script ends writes their absolute paths to its
+# errors, after a line of the run's own mark ($THIMBLE_READS), one a line; the files of Python and of its packages are
+# none of them. Then the script runs from stdin as the call ran it: as __main__, with the call's sys.argv (its first
+# word in $THIMBLE_ARGV0, `-` or `-c`).
 PRELUDE = r"""
 import atexit, os, sys
-def _thimble_reads(out=os.environ.pop("THIMBLE_READS", "")):
+def _thimble_reads(mark=os.environ.pop("THIMBLE_READS", "")):
     seen, reads = set(), []
     def note(p):
         try:
@@ -83,8 +85,8 @@ def _thimble_reads(out=os.environ.pop("THIMBLE_READS", "")):
             r = os.path.realpath(p)
             return "__pycache__" in r.split(os.sep) or any(r == o or r.startswith(o + os.sep) for o in own)
         try:
-            with open(out, "w", encoding="utf-8", errors="surrogateescape") as f:
-                f.write("".join(p + "\n" for p in reads if not mine(p)))
+            sys.__stderr__.flush()
+            os.write(2, ("\n" + mark + "\n" + "".join(p + "\n" for p in reads if not mine(p))).encode("utf-8", "surrogateescape"))
         except Exception:
             pass
     atexit.register(save)
@@ -119,6 +121,16 @@ def py_dirs(py: str) -> list[str]:
     return [d for d in dict.fromkeys(dirs) if d.startswith("/") and d != "/"]
 
 
+def temp_base(shown: list[str]) -> str:
+    """Where a run's temp folder goes: the first of the usual places for one that lies inside no folder the sandbox
+    shows, since a folder it may write inside one it only reads would be read only too (the session's temp folders are
+    shown, and the hooks' TMPDIR is one of them)."""
+    for base in (tempfile.gettempdir(), "/tmp", "/var/tmp", str(thimble_home())):
+        if os.path.isdir(base) and os.access(base, os.W_OK) and not inside(os.path.join(base, "x"), shown):
+            return base
+    return tempfile.gettempdir()
+
+
 def python_of(word: str, folder: str) -> str | None:
     """The Python a call names (`python3`, `.venv/bin/python`): a path from the folder the script ran in, else the one
     on the PATH; python3 for a name the PATH lacks."""
@@ -134,8 +146,9 @@ def sandboxed(srt: str | None, folders: list[str]) -> Callable[..., dict[str, An
     the script by the Python the call named, with the call's options and sys.argv, from the folder it ran in, in
     thimble's sandbox (codebox.rules, sandbox/run.mjs), and answers {output: what it printed, then its errors, as Claude
     Code's Bash tool gives them, reads: the files it opened to read inside `folders` or that folder, ok: whether it
-    ended well}, or None when the sandbox could not be set up or the script ran out of time. It reads the system, its Python, `folders` and that folder; it writes only a temp folder
-    of its own, removed after; it reaches no network. None when Node or srt is missing: srt is in `srt`, else in
+    ended well}, or None when the sandbox could not be set up, the script ran out of time or the files it read did not
+    come back. It reads the system, its Python, `folders` and that folder; it writes only a temp folder of its own
+    (temp_base), removed after; it reaches no network. None when Node or srt is missing: srt is in `srt`, else in
     thimble's home at the pin of the plugin's sandbox/package.json (sandbox/setup.mjs installs it there at each session
     start)."""
     node = shutil.which("node")
@@ -153,30 +166,30 @@ def sandboxed(srt: str | None, folders: list[str]) -> Callable[..., dict[str, An
     def run(script: str, folder: str, python: str = "python3", flags: Any = (), argv: Any = ("-",)) -> dict[str, Any] | None:
         py = python_of(python, folder) or sys.executable
         argv = [str(a) for a in argv] or ["-"]
-        tmp = tempfile.mkdtemp(prefix="thimble-rerun-")
-        reads = os.path.join(tmp, "reads")
+        tmp = tempfile.mkdtemp(prefix="thimble-rerun-", dir=temp_base([*shown, folder]))
+        mark = f"thimble-reads-{secrets.token_hex(16)}"
         try:
             rules = codebox.rules(linux=linux, srt=str(srt), shown=[*py_dirs(py), *shown, folder], writes=[tmp],
                                   home=str(Path.home()), th=str(thimble_home()))
             tz = [f"TZ={os.environ['TZ']}"] if os.environ.get("TZ") else []
             inner = ["/usr/bin/env", "-i", f"PATH={os.path.dirname(py)}:/usr/bin:/bin", f"HOME={tmp}", f"TMPDIR={tmp}",
-                     "LANG=C.UTF-8", *tz, f"THIMBLE_READS={reads}", f"THIMBLE_ARGV0={argv[0]}", py, "-B", *map(str, flags),
+                     "LANG=C.UTF-8", *tz, f"THIMBLE_READS={mark}", f"THIMBLE_ARGV0={argv[0]}", py, "-B", *map(str, flags),
                      "-c", PRELUDE, *argv[1:]]
             p = subprocess.run(["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", str(node), str(codebox.SANDBOX / "run.mjs"),
                                 "--srt", str(srt), json.dumps(rules), "--", *inner], input=script, capture_output=True,
                                text=True, errors="replace", cwd=folder, timeout=RERUN_S)
-            try:
-                read = Path(reads).read_text(encoding="utf-8", errors="surrogateescape").splitlines()
-            except OSError:
-                read = []
         except (OSError, subprocess.SubprocessError):
             return None
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         if p.returncode == 3 and NOT_SET_UP in p.stderr:
             return None
-        files = [r for r in dict.fromkeys(read) if inside(r, [*shown, folder]) and not inside(r, [tmp]) and os.path.isfile(r)]
-        return {"output": p.stdout + p.stderr, "reads": files, "ok": p.returncode == 0}
+        # the files it read come after the run's mark, at the end of its errors; with no mark they did not come back
+        errors, at, read = p.stderr.rpartition(f"\n{mark}\n")
+        if not at:
+            return None
+        files = [r for r in dict.fromkeys(read.splitlines()) if inside(r, [*shown, folder]) and not inside(r, [tmp]) and os.path.isfile(r)]
+        return {"output": p.stdout + errors, "reads": files, "ok": p.returncode == 0}
 
     return run
 
