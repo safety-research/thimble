@@ -925,22 +925,26 @@ def not_here(rec: dict[str, Any], kind: str) -> str:
     return "" if _holds(config.BOOT_COMMIT, commit) else NOT_YET
 
 
-async def elsewhere() -> None:
+async def elsewhere() -> bool:
     """A fix that went on somewhere else after this server started (not_here's NOT_YET: y in a Claude Code session, or
     thimble fix apply in a shell) gets the notice a fix made here gets when its checks pass: a row of main's chat in each
     workspace this server follows (_row), with Use it now, What changed and Later, which asks while the fix is not in the
     code this server runs (status). Once for each commit of the fix, so that Later holds, and a fix that went on again,
-    or in a new version, asks again."""
-    for fid, said, more in await asyncio.to_thread(_went_on_elsewhere):
+    or in a new version, asks again. False when the kernel's list could not be read."""
+    got = await asyncio.to_thread(_went_on_elsewhere)
+    for fid, said, more in got or []:
         note(fid, "ready", said, **more)
+    return got is not None
 
 
-def _went_on_elsewhere() -> list[tuple[int, str, dict[str, Any]]]:
-    """The notices elsewhere writes, each fix's id, words and what its note keeps beside them. Blocking: the kernel's
-    list and git."""
+def _went_on_elsewhere() -> list[tuple[int, str, dict[str, Any]]] | None:
+    """The notices elsewhere writes, each fix's id, words and what its note keeps beside them; None when the kernel's
+    list could not be read. Blocking: the kernel's list and git."""
     if problem() or not from_live():
         return []
     got = listing()
+    if "fixes" not in got:
+        return None
     kind = str(got.get("kind") or "")
     notes = _notes()
     out = []
@@ -972,18 +976,23 @@ async def watch() -> None:
     """The kernel's list of fixes, as a Claude Code session, a shell or this server changes it: a fix that went on
     somewhere else gets its notice (elsewhere), and each change goes to the pages as a `fix` event, so that what they
     show of each fix is what the list says now. It looks every WATCH_S; its first look counts as a change, for a fix
-    that went on while the server started."""
+    that went on while the server started, and a change whose list could not be read counts again at the next look."""
     seen: Any = ()
+    failing = False
     while True:
         now = await asyncio.to_thread(_listed)
         if now != seen:
             try:
-                await elsewhere()
+                read = await elsewhere()
             except Exception:  # noqa: BLE001 — the watch goes on, and so does the server
-                log.warning("the notices of fixes that went on somewhere else were not written", exc_info=True)
-            if seen != ():
-                _event(0, "listed")
-            seen = now
+                read = False
+                if not failing:
+                    log.warning("the notices of fixes that went on somewhere else were not written", exc_info=True)
+            if read:
+                if seen != ():
+                    _event(0, "listed")
+                seen = now
+            failing = not read
         await asyncio.sleep(WATCH_S)
 
 

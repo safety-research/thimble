@@ -478,6 +478,14 @@ async def test_the_server_watches_the_kernel_s_list_and_a_fix_that_went_on_elsew
     monkeypatch.setattr(fixes, "WATCH_S", 0.01)
     told: list[dict[str, Any]] = []
     monkeypatch.setattr(dev, "_emit_all", lambda event, only=None: told.append(event))
+    unread = {"list": False}
+
+    def kernel(args: list[str], **kw: Any) -> fixes.Ran:
+        if args[0] == "list" and unread["list"]:
+            return fixes.Ran(False, "", "thimble fix list took longer than 30 s")
+        return fixing(args, **kw)
+
+    monkeypatch.setattr(fixes, "kernel", kernel)
     listed = fixes.fixes_home() / "fixes.jsonl"
     listed.parent.mkdir(parents=True, exist_ok=True)
     listed.write_text("")
@@ -485,10 +493,15 @@ async def test_the_server_watches_the_kernel_s_list_and_a_fix_that_went_on_elsew
     try:
         await asyncio.sleep(0.1)
         assert told == [] and _asks() == []
-        # y in a Claude Code session: the kernel puts the fix on and appends its record
+        # y in a Claude Code session: the kernel puts the fix on and appends its record, while its list cannot be read
+        unread["list"] = True
         from_live(1, "More accent colors", "browser/frontend/src/App.tsx")
         with listed.open("a") as f:
             f.write(json.dumps(fixing.recs[1]) + "\n")
+        await asyncio.sleep(0.1)
+        assert told == [] and _asks() == []
+        # the list reads again: the change counts at the next look, with no other change of the file
+        unread["list"] = False
         await _until(lambda: {"type": "fix", "id": 0, "state": "listed"} in told, "the pages never heard of the change")
         assert _asks() == [("thimble fixed: More accent colors", "ready")]
     finally:
