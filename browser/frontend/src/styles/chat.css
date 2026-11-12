@@ -2049,8 +2049,14 @@ button.chat-strip-head:hover {
 .chat-flow > .chat-fix {
   margin: 4px 0;
 }
+/* a fix's quiet row keeps its mark at the start of its first line, and words too long for the line go on beside it */
+.chat-fix-said {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
 .chat-fix-said .chat-fix-ico {
   flex: none;
+  margin-top: 3px;
   color: var(--text-tertiary);
 }
 .chat-fix-said[data-kind='ready'] .chat-fix-ico,

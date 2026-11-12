@@ -2288,12 +2288,33 @@ def _aside_why(rec: dict[str, Any]) -> str:
             "it fits")
 
 
-def _browser_stale(*recs: dict[str, Any]) -> dict[str, str]:
+def _browser_stale(*recs: dict[str, Any], went_on: bool = False) -> dict[str, str]:
     """{browser: "stale"} when a fix among `recs` changes what thimble-browser runs, a file under browser/ or one of the
     plugin's it loads (BROWSER_RUNS): a thimble-browser that runs now keeps the code it started with until it starts
-    again, which also builds its page. {} otherwise."""
+    again, which also builds its page. For a fix that `went_on`, {browser: "notice"} while a thimble-browser runs from
+    live (browser_open): its page shows the fix's notice, whose Use it now starts it again. {} otherwise."""
     paths = [str(f.get("path") or "") for r in recs for f in r.get("files") or [] if isinstance(f, dict)]
-    return {"browser": "stale"} if any(x.startswith("browser/") or x in BROWSER_RUNS for x in paths) else {}
+    if not any(x.startswith("browser/") or x in BROWSER_RUNS for x in paths):
+        return {}
+    return {"browser": "notice" if went_on and browser_open() else "stale"}
+
+
+def browser_open() -> bool:
+    """Whether a thimble-browser runs now from live's browser/: the server that its home's server.json names is a process
+    that lives, and it started from there. Such a server tells a fix that goes on after its start as a notice on its
+    page (the browser's fixes.elsewhere)."""
+    st = read_json(browser_home() / "server.json")
+    pid = st.get("pid") if isinstance(st, dict) else None
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        pass
+    except OSError:
+        return False
+    repo = str(st.get("repo") or "")
+    return bool(repo) and Path(repo).resolve() == (live_dir() / "browser").resolve()
 
 
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
@@ -2301,7 +2322,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
     Claude Code copy live; the plugin then runs /reload-plugins. A y that fails after live moved, such as one whose fix
     does not fit the others, leaves live and state.json as they were (_or_put_back), so a y while every fix is off turns
-    none of them on. `browser`: stale, when the fix changes what thimble-browser runs (_browser_stale)."""
+    none of them on. `browser`: notice or stale, when the fix changes what thimble-browser runs (_browser_stale)."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -2344,7 +2365,8 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
         r.update(state="on", on_at=time.time(), commit=new_commit, error=None)
         _drop_work(r)
         put(r)
-        return {"id": r["id"], "title": r["title"], "commit": new_commit, **synced, **_browser_stale(r)}
+        return {"id": r["id"], "title": r["title"], "commit": new_commit, **synced,
+                **_browser_stale(r, went_on=True)}
 
     return _move(change, copied=True)
 
@@ -2397,7 +2419,7 @@ def _swap(fid: int) -> dict[str, Any]:
     put(r)
     # the version before counts too: a file only it changed goes back to the release's
     return {"id": fid, "title": r["title"], "commit": new_commit, "changed": True, "redo": failed, **synced,
-            **_browser_stale(r, p)}
+            **_browser_stale(r, p, went_on=True)}
 
 
 def merge(ids: list[int | str], secret: str | None) -> dict[str, Any]:

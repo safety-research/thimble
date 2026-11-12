@@ -90,6 +90,32 @@ test('a fix that passed asks, and Use it now puts it on; a fix that is on offers
   expect(sent).toEqual(['POST /fixes/3/apply', 'POST /fixes/3/undo'])
 })
 
+test('a fix that went on in the terminal asks the same while it is off here: Use it now starts the server again with it, and Later asks no more', async () => {
+  const away = (over: Partial<FixRow> = {}) => ready({ state: 'off', why: 'the workbench started before it went on', ...over })
+  fixes = [away()]
+  const el = await mount(<FixResult ws="mini" fid={3} text={SAID} kind="ready" latest />)
+  await settle()
+  expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Use it now', 'What changed', 'Later'])
+  await click(button(el, 'What changed'))
+  expect(el.querySelector('.chat-fix-what')?.textContent).toContain("You asked:make this card's title say how many rows")
+  fixes = [away({ phase: 'applying', kind: null, said: null })]
+  await click(button(el, 'Use it now'))
+  await settle()
+  expect(sent).toEqual(['POST /fixes/3/apply'])
+  expect(el.querySelector('.chat-fix-text')?.textContent).toBe('Reloading thimble…')
+  unmountAll()
+
+  fixes = [away()]
+  const later = await mount(<FixResult ws="mini" fid={3} text={SAID} kind="ready" latest />)
+  await settle()
+  fixes = []
+  await click(button(later, 'Later'))
+  await settle()
+  expect(sent).toEqual(['POST /fixes/3/apply', 'POST /fixes/3/dismiss'])
+  expect(later.querySelector('.chat-fix-said')?.textContent).toBe(SAID)
+  expect(later.querySelector('button')).toBeNull()
+})
+
 test('while the restart waits for a running turn, the row says whose turn, and where in another workspace', async () => {
   const waiting = (waits: FixRow['waits']) => [ready({ phase: 'restarting', kind: null, said: null, waits })]
   const moved = () => act(async () => bus.emit('fix', { id: 3, state: 'restarting' }))

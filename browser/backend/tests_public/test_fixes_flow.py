@@ -428,6 +428,86 @@ async def test_a_fix_that_went_on_in_the_terminal_after_this_server_started_is_o
     assert fixes.on_elsewhere(4)["id"] == 4 and fixes.on_elsewhere(2) is None
 
 
+def _asks() -> list[tuple[str, str]]:
+    """The rows of fixes in main's chat: what each says, and how its fix ended then."""
+    return [(r["text"], r["status"]) for r in _log(CORPUS) if r.get("type") == "chip" and r.get("kind") == "fix"]
+
+
+async def test_a_fix_that_went_on_in_the_terminal_asks_in_the_open_workbench_until_use_it_now_or_later(
+        fixing, from_live, analyst, monkeypatch):
+    # the workspace whose main this server follows, where the person works
+    monkeypatch.setattr(session, "attached_workspaces", lambda: [CORPUS])
+    from_live(1, "More accent colors", "browser/frontend/src/App.tsx")
+    fixing.recs[1].update(tests="passed", made_in="terminal")
+    await fixes.elsewhere()
+    # the notice a fix made here gets when its checks pass, in main's chat, which asks while the fix is off here
+    assert _asks() == [("thimble fixed: More accent colors · tests pass", "ready")]
+    [row] = fixes.status()["fixes"]
+    assert (row["kind"], row["state"], row["why"], row["words"]) == ("ready", "off", fixes.NOT_YET, "More accent colors")
+    # each change of the kernel's list reads it again, and so does each reload of the page: the one notice asks on
+    await fixes.elsewhere()
+    assert len(_asks()) == 1 and fixes.status()["fixes"][0]["kind"] == "ready"
+    # Later: it asks no more, also once the list changes, and Your fixes keeps the fix, off, with its Use it
+    await fixes.dismiss_route(1, analyst)
+    await fixes.elsewhere()
+    assert fixes.status()["fixes"] == [] and len(_asks()) == 1
+    assert _shown() == {1: ("off", fixes.NOT_YET)}
+    # a fix to the terminal plugin alone asks nothing here; a fix to the server asks, and Use it now leaves it as it is
+    # and starts the server again with it, whose row says so
+    from_live(2, "Bar says read", "plugin/bar/bar.tsx")
+    from_live(3, "Bigger minimap button", "browser/backend/app/main.py")
+    await fixes.elsewhere()
+    assert _asks()[1:] == [("thimble fixed: Bigger minimap button", "ready")]
+    await fixes.apply_route(3, analyst)
+    await _went_on(3)
+    await _restarted(fixing, "Use it now")
+    assert "apply" not in [c[0] for c in fixing.calls]
+    assert fixing.restarts == [("fix 3: Bigger minimap button", fixes.live_root() / "backend")]
+    assert _asks()[-1] == ("“Bigger minimap button” is on", "fixed")
+    # the server that started again runs every fix: nothing asks, and nothing asks again
+    fixes._phase.clear()
+    monkeypatch.setattr(config, "BOOT_COMMIT", _live_git("rev-parse", "HEAD"))
+    await fixes.elsewhere()
+    assert fixes.status()["fixes"] == [] and len(_asks()) == 3
+    assert set(_shown().values()) == {("on", None)}
+
+
+async def test_the_server_watches_the_kernel_s_list_and_a_fix_that_went_on_elsewhere_asks_at_once(
+        fixing, from_live, monkeypatch):
+    monkeypatch.setattr(session, "attached_workspaces", lambda: [CORPUS])
+    monkeypatch.setattr(fixes, "WATCH_S", 0.01)
+    told: list[dict[str, Any]] = []
+    monkeypatch.setattr(dev, "_emit_all", lambda event, only=None: told.append(event))
+    unread = {"list": False}
+
+    def kernel(args: list[str], **kw: Any) -> fixes.Ran:
+        if args[0] == "list" and unread["list"]:
+            return fixes.Ran(False, "", "thimble fix list took longer than 30 s")
+        return fixing(args, **kw)
+
+    monkeypatch.setattr(fixes, "kernel", kernel)
+    listed = fixes.fixes_home() / "fixes.jsonl"
+    listed.parent.mkdir(parents=True, exist_ok=True)
+    listed.write_text("")
+    task = asyncio.ensure_future(fixes.watch())
+    try:
+        await asyncio.sleep(0.1)
+        assert told == [] and _asks() == []
+        # y in a Claude Code session: the kernel puts the fix on and appends its record, while its list cannot be read
+        unread["list"] = True
+        from_live(1, "More accent colors", "browser/frontend/src/App.tsx")
+        with listed.open("a") as f:
+            f.write(json.dumps(fixing.recs[1]) + "\n")
+        await asyncio.sleep(0.1)
+        assert told == [] and _asks() == []
+        # the list reads again: the change counts at the next look, with no other change of the file
+        unread["list"] = False
+        await _until(lambda: {"type": "fix", "id": 0, "state": "listed"} in told, "the pages never heard of the change")
+        assert _asks() == [("thimble fixed: More accent colors", "ready")]
+    finally:
+        task.cancel()
+
+
 def test_the_kernel_names_the_browser_s_restart_for_the_plugin_files_this_server_runs():
     # two lists, one in each program: a fix to one of these files is stale in a thimble-browser that runs
     import ast  # noqa: PLC0415

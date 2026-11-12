@@ -196,6 +196,36 @@ def test_y_and_u_on_a_fix_to_what_the_browser_runs_say_that_a_running_browser_is
     assert back["back"] is True and back["browser"] == "stale"
 
 
+def test_y_on_a_fix_to_the_browser_names_the_notice_of_a_thimble_browser_that_runs_from_live(world, monkeypatch):
+    bh = world["tmp"] / "bh"
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(bh))
+    r = FX.new("a note")
+    p = Path(r["work"]) / "browser" / "README.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("made up\n")
+    FX.done(r["id"], "A note", "")
+
+    def runs(pid: int | None, folder: Path) -> None:
+        """thimble-browser's home records the server it started, as its server.json does."""
+        FX.write_json(bh / "server.json", {"port": 8300, "pid": pid, "repo": str(folder)})
+
+    # a server that runs from live (this process stands in for it): y names the notice its page shows, and u, which
+    # the page does not ask about, its restart
+    runs(os.getpid(), FX.live_dir() / "browser")
+    assert FX.apply(r["id"], press(r["id"]))["browser"] == "notice"
+    assert FX.undo(r["id"])["browser"] == "stale"
+    # one that runs from another folder, one that stopped, one that ended without a word, and none: its restart
+    ended = subprocess.Popen(["true"])
+    ended.wait()
+    for pid, folder in ((os.getpid(), world["rel"] / "browser"), (None, FX.live_dir() / "browser"),
+                        (ended.pid, FX.live_dir() / "browser")):
+        runs(pid, folder)
+        assert FX.apply(r["id"], press(r["id"]))["browser"] == "stale"
+        FX.undo(r["id"])
+    (bh / "server.json").unlink()
+    assert FX.apply(r["id"], press(r["id"]))["browser"] == "stale"
+
+
 def on_with_a_round(world, path="plugin/bar/bar.tsx", text=None) -> int:
     """A fix that is on, and a round of it that waits for the person's y (on · change ready)."""
     if text is None:
