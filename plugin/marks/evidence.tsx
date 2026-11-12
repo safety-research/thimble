@@ -2,9 +2,8 @@
 // gave it, its evidence, in the parts the tray shows (tray/tray.ts citationParts), in the same order, each under the
 // same label (tray/tray.mjs partLabel, placeLabel, cardLabel), dim. Nothing is cut: the pane scrolls.
 //
-//   computed   how the code got the value, in the check's words (its `method`); the code the check ran, all of it
-//              (`code · 7 lines`), in Claude Code's colors for Python; a blank row; then that call's real output, all of
-//              it (`output · 62 lines`)
+//   computed   the code the check ran, all of it (`code · 7 lines`), in Claude Code's colors for Python; a blank row;
+//              then that call's real output, all of it (`output · 62 lines`)
 //   quote      each cited place under its label (`changes.log · line 3`): the cited lines with a line around them, the
 //   code       cited words marked
 //   card       under the card (`card · Runs by status`), the header over the cited row, the cited cell marked (or the
@@ -159,8 +158,8 @@ export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb')
 // the citations whose cited words' explainer shows
 const explainShown = new Set<string>()
 
-/** A citation's evidence in parts, each under its label, as the tray shows them: a computed value's method and code, a
- *  blank row, then its output; a file's places; a card's value under the card. */
+/** A citation's evidence in parts, each under its label, as the tray shows them: a computed value's code, a blank row,
+ *  then its output; a file's places; a card's value under the card. */
 function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
   const label = (key: string, words: string) => Text({ key, dimColor: true, wrap: 'wrap', children: words })
@@ -178,7 +177,6 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
     // a last newline ends the last line and starts none
     const code = ev.code.replace(/\n+$/, '')
     return [
-      ...(ev.method ? [Text({ key: 'how', wrap: 'wrap', children: ev.method })] : []),
       ...(code.trim() ? [
         label('ch', partLabel('code', code.split('\n').length)),
         Code({ key: 'code', source: wrapCode(code, width), language: 'python' }),

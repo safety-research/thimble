@@ -1,7 +1,7 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the newest answer's first citation, which draws
 // in focus; its header says the check's status and nothing else does, x repair among its keys on a failed citation,
-// and its card shows the evidence (for a value code computed, how the code got it, over the code, as the side pane
-// shows it too, with a failure's reason); a question typed with it open carries nothing of it and closes
+// and its card shows the evidence (for a value code computed, its code and output right under the head, as the side
+// pane shows them too, with a failure's reason); a question typed with it open carries nothing of it and closes
 // the tray; a press on a citation opens it too; 0 closes it; a press on an older answer's citation marks no answer, and
 // ] from rest still starts at the newest answer; v closes it so the card shows, and a letter after v puts it back; ]
 // and [ reach a card where the reply draws it. All data is made up. `claude plugin test plugin`.
@@ -146,7 +146,8 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-// the check counted the failed runs with code, and said how the code got the value
+// the check counted the failed runs with code; its answer also said how the code got the value, which a citation an
+// earlier build checked keeps in its evidence
 const HOW = 'Counted the rows of runs.csv whose status column is failed, out of all its rows, one row per run, across the three nightly builds the file holds.'
 const COMPUTED = {
   n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40', reason: 'counted',
@@ -154,25 +155,23 @@ const COMPUTED = {
 }
 const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any = {}) => ({ type, props }) })
 
-test("a computed citation's card says how its code got the value, over the code, whole when the card is cut, and so does its side pane", CITES, async ($, on) => {
+test("a computed citation's card shows its code and output right under its head, and so does its side pane, with no words of the check's on how the code got the value", CITES, async ($, on) => {
   await resumed($, on, COMPUTED)
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  // the method in the check's words, the first thing under the head, then the code under its label
-  expect(textOf(await $.ui.render(above()))).toContain(`${HOW}code · 4 lines`)
-  // in the text's own color, not dim as the labels around it
-  const how = all(await $.ui.render(above())).find(n => n.type === 'Text' && textOf(n) === HOW)
-  expect(how?.props?.dimColor).toBeUndefined()
-  // a band too short for the whole card cuts the code and keeps the method whole, on its two rows
-  const cut = all(await $.ui.render(above(9)))
-  expect(textOf(cut)).toContain('⋯')
-  expect(cut.find(n => n.type === 'Text' && textOf(n) === HOW)?.props?.wrap).toBe('wrap')
-  // the side pane shows all of the card, from the reply's marks in the state: the method over the code there too
+  // the code under its label, then the output under its own
+  const card = textOf(await $.ui.render(above()))
+  expect(card).toContain('code · 4 lines')
+  expect(card).toContain('output · 1 line')
+  expect(card).not.toContain(HOW)
+  // the side pane shows all of the card, from the reply's marks in the state: the code and output alone there too
   const kept = new Map<string, unknown>([
     [JSON.stringify({ plugin: 'thimble', key: 'marksRow', id: 'row-t1' }), 'row-t1'],
     [JSON.stringify({ plugin: 'thimble', key: 'marks', id: 'row-t1' }), { key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [COMPUTED] }],
   ])
   const pane$: Any = { state: { get: async (k: Any) => ({ value: kept.get(JSON.stringify(k)) }) }, clock: { now: async () => 1, after: () => ({ cancel() {} }) }, config: { list: async () => [] } }
-  expect(textOf(await drawEvidence(pane$, { props: { bodyColumns: 80 } }, { row: 'row-t1', n: 1 }, els))).toContain(`${HOW}code · 4 lines`)
+  const pane = textOf(await drawEvidence(pane$, { props: { bodyColumns: 80 } }, { row: 'row-t1', n: 1 }, els))
+  expect(pane).toContain('code · 4 lines')
+  expect(pane).not.toContain(HOW)
 })
 
 /** The side pane of the reply that holds `item`, drawn from the reply's marks in the state. */

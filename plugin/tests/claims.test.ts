@@ -321,6 +321,16 @@ test("a citation's card in the pane says its check by its status alone: verified
   expect(correctionsOf({ id: 'c1', turn: 2, sources: [rewritten] }, new Map())).toMatchObject([{ old: 'The app runs on port 8000.', now: 'The app runs on port 9000.' }])
 })
 
+test("a computed citation's card in the pane shows the line of code that printed its value right under the head, and no words of the check's on how the code got it", () => {
+  const code = 'import csv\nrows = list(csv.DictReader(open("runs.csv")))\nprint(f"{sum(r[\'status\'] == \'failed\' for r in rows)} of {len(rows)}")'
+  // evidence a check kept with its words on how the code got the value, as an earlier build stored it
+  const evidence = { kind: 'computed', code, output: '12 of 40\n', highlight: [[0, 8]], by: 'checker', method: 'Counted the rows of runs.csv whose status is failed.' }
+  const card = cardOf({ status: 'verified', shown: '12 of 40', evidence }, 90).rows.map((r: Any[]) => r.map((x: Any) => x.s).join(''))
+  expect(card[0]).toContain('✓ verified')
+  expect(card[1]).toContain('print(f"{sum(')
+  expect(card.join('\n')).not.toContain('Counted the rows')
+})
+
 test("a claim picked says no state of its citations: a correction only by h, and while x repairs one its card says checking and the key row keeps x repair", async () => {
   setOptions({ claimsMode: 'auto' })
   const text = 'Run 4 failed on the [p95 check](#).'

@@ -328,7 +328,7 @@ export function printableEvidence(ev) {
   if (!ev || typeof ev !== 'object') return ev
   const p = v => (typeof v === 'string' ? printable(v) : v)
   const out = { ...ev }
-  for (const k of ['code', 'file', 'title', 'card', 'value', 'made', 'after', 'method']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
+  for (const k of ['code', 'file', 'title', 'card', 'value', 'made', 'after']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
   if (typeof ev.output === 'string') {
     const o = printable(ev.output, Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h)) : [])
     out.output = o.text

@@ -40,17 +40,14 @@ def test_computed_evidence_is_the_real_call_that_printed_the_output_the_check_ga
     assert check_mark(mark("12 of 40"), computed("rows: 40 … merged: 12 of 40"), [call(CODE, long)], "/data")["status"] == "verified"
 
 
-def test_computed_evidence_carries_the_checks_method_and_a_quote_carries_none(tmp_path: Path):
+def test_computed_evidence_is_the_code_and_its_output_whatever_else_the_check_says_of_them():
+    # a check that also says how its code got the value adds nothing to the evidence: the person reads the code itself
     how = "Counted the lines of prs.jsonl whose merged field is true, out of all its lines, one line per pull request."
-    ok = check_mark(mark("12 of 40"), {**computed("12 of 40"), "method": f"  {how}\n"}, [call(CODE, "12 of 40\n")], "/data")
-    assert ok["status"] == "verified" and ok["evidence"]["method"] == how
-    # a claim the check found wrong keeps its real evidence, and the method with it
+    ok = check_mark(mark("12 of 40"), {**computed("12 of 40"), "method": how}, [call(CODE, "12 of 40\n")], "/data")
+    assert ok["status"] == "verified" and ok["evidence"]["code"] == CODE and "method" not in ok["evidence"]
+    # a claim the check found wrong keeps its real evidence, and no more
     wrong = check_mark(mark("15 of 40"), {**computed("12 of 40", status="wrong"), "method": how}, [call(CODE, "12 of 40\n")], "/data")
-    assert wrong["status"] == "failed" and wrong["evidence"]["method"] == how
-    # a quote shows no code, so it carries no method
-    (tmp_path / "board.md").write_text("agent-07: yes, that was me\n")
-    said = check_mark(mark('"yes, that was me"'), {**quote("board.md", 1, "yes, that was me"), "method": how}, [], str(tmp_path))
-    assert said["status"] == "verified" and "method" not in said["evidence"]
+    assert wrong["status"] == "failed" and wrong["evidence"]["output"].startswith("12 of 40") and "method" not in wrong["evidence"]
 
 
 def test_a_typed_in_value_is_no_evidence_but_a_bound_is_a_condition():

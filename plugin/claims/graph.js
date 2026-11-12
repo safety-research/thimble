@@ -612,9 +612,9 @@ const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title 
  * (underlined, tinted on hover; a failed one's red, a stale one's in the warning color) and its check beside them
  * (`✓ verified · citation`, as the tray's header says it), all the card says of the check: no line of why it failed,
  * what it was before the check corrected it or which file changed (History, h, keeps the corrections and their
- * reasons); for a value code computed, how the code got it, in the check's words (its evidence's `method`); then
- * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
- * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
+ * reasons); then its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line
+ * after a dim │, the cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the
+ * output has more.
  * `whole`: the code and output whole (c). {rows, cut}: cut when the code or the line was cut.
  */
 export function cardOf(s, W, { whole = false } = {}) {
@@ -628,8 +628,6 @@ export function cardOf(s, W, { whole = false } = {}) {
   const look = key === 'failed' ? { tone: 'bad', underline: true } : key === 'stale' ? { tone: 'warn', underline: true } : { tint: true }
   const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - len(kind))), ...look, bold: true }, ...right]]
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
-  // how the code got the value, in the check's words (computed evidence's `method`), over the code
-  for (const l of wrap(s.evidence.method, W)) rows.push([{ s: l }])
   if (whole) return { rows: [...rows, ...wholeRows(s.evidence, W)], cut: true }
   const sn = snippetOf(s.evidence, W - 2)
   if (!sn) return { rows, cut: false }
