@@ -75,7 +75,7 @@
 .mark-pop .mark-ev-edge + .refchip-lines { margin-top: 0; }
 .mark-pop .mark-ev-edge { font-size: 12px; line-height: 1.6; color: var(--text-tertiary); white-space: pre; }
 .mark-pop-state { color: var(--text-tertiary); }
-/* a card that changed after the check: said over what the label shows */
+/* a label's version the check read: what changed in the label after it, over its table */
 .mark-ev-changed { margin: 2px 0 4px; }
 /* the mark's state at the right of its first place's head, or of a head of its own while no evidence shows: the
    terminal's sign and word in its tone's color, all the label says of the check, and Repair beside a failed or a stale

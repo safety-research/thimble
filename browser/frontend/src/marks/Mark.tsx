@@ -14,12 +14,13 @@
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
 //              marked, as a card's citation shows it (components/RefChip); a line of its printed output shows as the
 //              computed output does, its chip naming the line as the citation's chip does (lib/refs cardPartLabel),
-//              a click on which shows the line in the card's output. The card is read when the label opens: when it
-//              changed after the check (the card check rewrote it, say), the label shows it as it is now, or says the
-//              place is gone and shows what the check read. A label the check read, as it was when the cited words
-//              were written or an earlier version of it, shows as it was then, under what changed in the label after it
-//              (plugin/tray/tray.mjs versionNote): its own place (`card:label-<id>…`, labelOfPlace), whose chip opens
-//              the label, or the place of the label's card.
+//              a click on which shows the line in the card's output. The place shows as the check read it, whatever
+//              the card shows now: the label's state says whether the card still holds the value, and the chip opens
+//              the card as it is now. Evidence the check kept no copy of shows the card as it is now, read when the
+//              label opens. A label the check read, as it was when the cited words were written or an earlier version
+//              of it, shows as it was then, under what changed in the label after it (plugin/tray/tray.mjs
+//              versionNote): its own place (`card:label-<id>…`, labelOfPlace), whose chip opens the label, or the place
+//              of the label's card.
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked, under `output ·
 // table`. The lines wrap; a long one shows only the words around its highlighted ones, cut at words (lineWindow). The
@@ -431,27 +432,6 @@ function EvidenceView({ ev, value, state }: { ev: Evidence; value: string; state
 
 type Resolved = { state: 'loading' } | { state: 'failed' } | { state: 'gone' } | { state: 'table'; grid: Grid; at: At } | { state: 'lines'; lines: string[]; from: number; to: number }
 
-/** Whether the card still shows what the check read: the same cell in the same table, or the same cited lines. A
- * check's own copy of the card (`table`, `output`) that the card still shows is kept, with its other cited cells and
- * its highlights; else the card's output now is shown, or, when the place is gone, the copy with a note. Pure. */
-export function sameAsChecked(snap: { grid: Grid; at: At } | null, output: string | undefined, highlight: [number, number][] | undefined, live: Resolved): boolean {
-  if (live.state === 'table' && snap) {
-    const cell = (g: Grid, at: At) => g.rows[at.r]?.values[at.c]
-    return snap.grid.cols[snap.at.c] === live.grid.cols[live.at.c] && snap.grid.rows[snap.at.r]?.label === live.grid.rows[live.at.r]?.label && cell(snap.grid, snap.at) === cell(live.grid, live.at)
-  }
-  if (live.state === 'lines' && output != null) {
-    const first = highlight?.length ? highlight[0][0] : -1
-    const line = first < 0 ? null : output.slice(output.lastIndexOf('\n', first - 1) + 1).split('\n')[0]
-    return line != null && live.lines.slice(live.from, live.to + 1).some((l) => l === line)
-  }
-  return false
-}
-
-/** what a card's evidence says when the card changed after its check: the cell it cites shows another value now, or
- * the place (a line of its output, a cell of a column renamed) no longer holds what the check read */
-export const CHANGED_NOW = 'The card changed after the check. It shows this now:'
-export const CHANGED_READ = 'The card changed after the check. The check read this:'
-
 /** The label a place of the check names, `card:label-<label id>…` (backend marks.session_cards, which names the labels as
  * the terminal does), or null for a card's place: a label's place is no card, so the check's copy of its version is
  * all there is to show, and its chip opens the label (its card, where it has one). */
@@ -460,12 +440,12 @@ export function labelOfPlace(card: string): string | null {
 }
 
 /** A value a card shows: the card's chip, by the card's title now, over the table around the cited cell, or the
- * printed lines around the cited one, as the card shows them now (api.resolveRef, as RefChip reads them). A line of the
- * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `card output line 8` in the card,
- * after the card's title elsewhere; a click on the chip shows the line in the card's output. The check's own copy shows while the
- * card is read and stays when the card still shows the same (sameAsChecked). When the card changed, a note says so over
- * the cell as it is now, or over the copy when the place no longer holds what the check read. `state`: the mark's state
- * (MarkState), at the right of the head. */
+ * printed lines around the cited one, as the check read them (its own copy of the card, `table` or `output`, with its
+ * other cited cells and its highlights), whatever the card shows now; evidence with no copy shows them as the card
+ * shows them now (api.resolveRef, as RefChip reads them). A line of the printed output is named as the citation's chip
+ * names it (lib/refs cardPartLabel): `card output line 8` in the card, after the card's title elsewhere; a click on the
+ * chip shows the line in the card's output. `state`: the mark's state (MarkState), at the right of the head, which
+ * says whether the card still holds the value. */
 function CardEvidence({ ev, value, state }: { ev: Evidence; value: string; state: ReactNode }) {
   const open = useContext(OpenPlace)
   const home = useContext(CiteHome)
@@ -505,20 +485,15 @@ function CardEvidence({ ev, value, state }: { ev: Evidence; value: string; state
     }
   }, [ref, label])
   const name = useRefLabel(label ? `concept:${label}` : `card:${card}`)
+  // the check's own copy of the place: the evidence, whatever the card shows now
   const copy = !!own || ev.output != null
   // a label's version the check read (the label as it was when the cited words were written, or an earlier one): its
-  // copy is the evidence, whatever the card shows now, under what changed in the label after it
-  const kept = copy && ev.version != null
-  // the check's copy while the card is read, and after when the card still shows the same; else the card now
-  // (a card that could not be read leaves the copy as it is, with no note)
-  const checked = kept || (copy && (got.state === 'loading' || got.state === 'failed' || got.state === 'gone' || sameAsChecked(own, ev.output, ev.highlight, got)))
-  // a line of the output that reads otherwise now is no longer the place the check read: its copy shows
-  const reread = copy && !checked && got.state === 'lines'
-  const changed = kept ? versionNote(ev) : reread || (copy && got.state === 'gone') ? CHANGED_READ : copy && !checked ? CHANGED_NOW : ''
+  // copy shows under what changed in the label after it
+  const changed = copy && ev.version != null ? versionNote(ev) : ''
   const title = now || ev.title || name || 'card'
   const at = parseRef(ref)
   const head = (at?.kind === 'cell' && at.out != null && at.line != null && cardPartLabel(at, title, home === at.cellId)) || title
-  const table = checked || reread ? own : got.state === 'table' ? got : null
+  const table = copy ? own : got.state === 'table' ? got : null
   return (
     <div className="mark-ev">
       <div className="refchip-pop-head">
@@ -531,7 +506,7 @@ function CardEvidence({ ev, value, state }: { ev: Evidence; value: string; state
       {changed && <div className="mark-pop-state mark-ev-changed">{changed}</div>}
       {table ? (
         <TablePreview grid={table.grid} at={table.at} also={'also' in table ? table.also : undefined} />
-      ) : (checked || reread) && ev.output != null ? (
+      ) : copy && ev.output != null ? (
         <KeyBox className="refchip-lines mono mark-ev-out" label="output">
           {outputLines(ev.output, ev.highlight ?? [])}
         </KeyBox>
