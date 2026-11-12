@@ -470,7 +470,9 @@ def test_each_file_of_the_plugin_the_server_names_is_one_it_keeps_or_reads_at_ea
     # that is new here belongs in one of the two.
     at_each_use = {
         "engine/thimble.py",  # the kernel: a process for each call
+        "engine/validate.py",  # the validator as a command: a process for each run of a citation's code
         "sandbox",  # setup.mjs: a process for each call
+        "sandbox/package.json",  # the sandbox runtime's pin: read for each run of a citation's code
         "prompts",  # the texts: read for each prompt
         ".claude-plugin/plugin.json",  # read for each report
     }
