@@ -109,6 +109,9 @@
     return out
   })(window.__thimbleLabelOrder)
   var MAX_KEPT = 200 // values whose colour is kept per field
+  // px a chip may run past its row's edge and still count as whole (chipsOver): far less than the eye sees, so that a
+  // page zoomed in or out, whose boxes are not on whole pixels, does not hide a chip that fits
+  var EDGE_SLACK = 0.05
   // A record's value of the field colored by, as attr writes it, data-color, or as a page written before may write it,
   // data-colour, the British spelling
   var VALUED = '[data-anchor][data-color],[data-anchor][data-colour]'
@@ -1227,6 +1230,18 @@
     if (shown !== chips.length - lo) hide(lo)
     return lo
   }
+  // Whether a chip that shows in a row of chips, or its "N more", runs past the right edge of the row's box, which cuts
+  // it there: the chips' own width, not the box's, which takes the row's free width. Read from their drawn boxes, since
+  // the box's clientWidth is whole pixels, and the pixel of slack its rounding needs let a chip that ran a pixel past
+  // the edge lose its right border there.
+  function chipsOver(box) {
+    var edge = box.getBoundingClientRect().right + EDGE_SLACK
+    for (var k = 0; k < box.children.length; k++) {
+      var c = box.children[k]
+      if (!c.hidden && c.getBoundingClientRect().right > edge) return true
+    }
+    return false
+  }
   // the chips that do not fit the row go behind "N more", which lists every value. Reset is laid out whether it shows
   // or not, so the box the chips fit in is one width in both states
   Control.prototype.fit = function () {
@@ -1234,15 +1249,8 @@
     var box = this.root.querySelector('.thimble-colour-chips')
     var more = this.root.querySelector('.thimble-colour-more')
     if (!box || !more) return
-    // the chips' own width, not the box's, which takes the row's free width
     var over = function () {
-      var left = box.getBoundingClientRect().left
-      var right = left
-      for (var k = 0; k < box.children.length; k++) {
-        var c = box.children[k]
-        if (!c.hidden) right = Math.max(right, c.getBoundingClientRect().right)
-      }
-      return right - left > box.clientWidth + 1
+      return chipsOver(box)
     }
     var reset = this.root.querySelector('.thimble-reset')
     if (reset) reset.classList.remove('thimble-reset-gone')
@@ -3938,6 +3946,7 @@
     tip: tip,
     untip: untip,
     hideLast: hideLast,
+    chipsOver: chipsOver,
     esc: esc,
     num: num,
     secs: secs,

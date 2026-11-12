@@ -631,17 +631,14 @@
     }
     this.fit()
   }
-  // the toggles that do not fit the mount go behind "N more", the last first
+  // the toggles that do not fit the mount go behind "N more", the last first (Color by's chipsOver)
   Filter.prototype.fit = function () {
     if (!this.root) return
     var box = this.root.querySelector('.thimble-filter-chips')
     var more = this.root.querySelector('.thimble-filter-more')
     if (!box || !more) return
     var over = function () {
-      var left = box.getBoundingClientRect().left
-      var right = left
-      for (var k = 0; k < box.children.length; k++) if (!box.children[k].hidden) right = Math.max(right, box.children[k].getBoundingClientRect().right)
-      return right - left > box.clientWidth + 1
+      return shared.chipsOver(box)
     }
     var chips = box.querySelectorAll('.thimble-filter-chip')
     for (var i = 0; i < chips.length; i++) chips[i].hidden = false
