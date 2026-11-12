@@ -38,7 +38,8 @@ export interface FixRow {
   title: string
   /** the kernel's state: working, ready, failed, on, off, redo, request, ... */
   state: string
-  /** in Your fixes, why a fix that is on is off: it is not in the code the server runs (backend fixes.not_here) */
+  /** why a fix that is on is off here: it is not in the code the server runs (backend fixes.not_here), in Your fixes and
+   *  on the notice of a fix that went on somewhere else (backend fixes.elsewhere) */
   why?: string | null
   /** what this server does with it now; null once it ended */
   phase: 'fixing' | 'testing' | 'applying' | 'restarting' | null
@@ -86,12 +87,12 @@ export function fixText(r: FixRow, ws = ''): string {
 
 export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo' | 'ask'
 
-/** The buttons a fix's row offers: Use it now, What changed and Later on a ready fix, Undo on a fix that is on,
- * Try again and Ask Claude on one that did not pass; no Try again when it needs a file no fix may change (as the
- * terminal's line). Pure. */
+/** The buttons a fix's row offers: Use it now, What changed and Later on a ready fix, and on one that went on somewhere
+ * else and is off here (`why`), Undo on a fix that is on, Try again and Ask Claude on one that did not pass; no Try
+ * again when it needs a file no fix may change (as the terminal's line). Pure. */
 export function fixActions(r: FixRow): FixAction[] {
   if (r.phase) return []
-  if (r.kind === 'ready' && r.state === 'ready') return ['use', 'what', 'later']
+  if (r.kind === 'ready' && (r.state === 'ready' || (r.state === 'off' && !!r.why))) return ['use', 'what', 'later']
   if (r.kind === 'fixed' && r.state === 'on') return ['undo']
   if ((r.kind === 'failed' || r.kind === 'problem') && ['failed', 'off', 'redo', 'ready', 'request'].includes(r.state)) return r.blocked ? ['ask'] : ['redo', 'ask']
   return []

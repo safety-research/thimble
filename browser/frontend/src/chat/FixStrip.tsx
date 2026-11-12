@@ -10,7 +10,9 @@
 //               Try again (not when it needs a file no fix may change, as the terminal's line) and Ask Claude, which
 //               shows what it tried and puts its failure in main's composer for the person to send, with its change
 //               and the end of its tests' output, once: it is not offered again. An earlier row, or one the person
-//               answered, is a quiet line of what it said.
+//               answered, is a quiet line of what it said. A fix that went on somewhere else (y in a Claude Code
+//               session) asks the same in main's chat, with Use it now, which starts the server again with it, while
+//               this server runs without it (backend fixes.elsewhere).
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
