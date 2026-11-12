@@ -1,11 +1,12 @@
-"""app.render: a card's figure as an export draws it (render_figure), whole as an export of the card alone shows it, and
-the files the harness makes of one drawing besides its picture (FIGURE_FILES). The browser is never launched here: the
-pool and the page are stood in for. All data is made up."""
+"""app.render: a card's figure as an export draws it (render_figure), whole as an export of the card alone shows it, the
+files the harness makes of one drawing besides its picture (FIGURE_FILES), and the theme a card is drawn in (put_theme).
+The browser is never launched here: the pool and the page are stood in for. All data is made up."""
 from __future__ import annotations
 
 import base64
 
 import pytest
+from fastapi import HTTPException
 
 from app import render
 
@@ -40,6 +41,22 @@ async def test_render_figure_names_the_files_to_make_of_the_drawing_and_refuses_
     with pytest.raises(ValueError, match="files"):
         await render.render_figure(CORPUS, CELL, width=480, files=("gif",))
     assert len(drawn) == 2
+
+
+async def test_the_theme_takes_an_accent_the_page_added_and_the_cards_drawn_here_are_drawn_in_it(drawn):
+    """The page's list is the one list of accents (frontend lib/theme.ts ACCENTS): an accent added there, which the
+    server never named, is taken and kept, and the cards drawn after it, an export's figure too, are drawn in it. A name
+    of another form is refused and changes nothing."""
+    teal = {"paper": "warm", "accent": "teal"}
+    assert await render.put_theme(CORPUS, render.ThemeBody(**teal)) == teal
+    await render.render_card(CORPUS, CELL)
+    await render.render_figure(CORPUS, CELL, width=480)
+    assert [r["theme"] for r in drawn] == [teal, {"paper": "neutral", "accent": "teal"}]
+    for name in ("Teal", "teal'] body {", ""):
+        with pytest.raises(HTTPException) as e:
+            await render.put_theme(CORPUS, render.ThemeBody(paper="warm", accent=name))
+        assert e.value.status_code == 400, name
+    assert render.theme(CORPUS) == teal
 
 
 async def test_a_figures_files_come_from_the_drawing_its_picture_shows():

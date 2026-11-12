@@ -57,7 +57,10 @@ RENDER_ORIGIN = "http://thimble.render"
 RENDER_PAGE = "render.html"
 THEMES_FILE = "render-theme.json"  # workspaces/<c>/: the theme the analyst's browser last reported
 PAPERS = ("warm", "neutral", "dark")  # frontend/src/lib/theme.ts
-ACCENTS = ("pink", "orange", "yellow", "lime", "blue", "iris", "graphite")
+# an accent's name: the page's list is the one list of accents (frontend/src/lib/theme.ts ACCENTS), and the page a card
+# is drawn on here gives each its own tokens (styles/tokens.css), so any name of this form is taken, and an accent added
+# to that list reaches the cards drawn here
+ACCENT_NAME = re.compile(r"[a-z][a-z0-9-]*")
 DEFAULT_THEME = {"paper": "warm", "accent": "iris"}
 FIGURE_FILES = ("webp", "pdf", "svg")  # what a figure's request may also make besides its PNG (render_figure)
 NO_MARGIN = {"top": "0", "right": "0", "bottom": "0", "left": "0"}  # a figure's PDF: the figure alone, edge to edge
@@ -534,6 +537,11 @@ def label_names(c: str, cell: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def is_accent(name: Any) -> bool:
+    """Whether `name` is an accent's name (ACCENT_NAME). Pure."""
+    return isinstance(name, str) and ACCENT_NAME.fullmatch(name) is not None
+
+
 def theme(c: str) -> dict[str, str]:
     """The theme the analyst's browser last reported for workspace `c` (PUT /ws/{c}/render/theme), else Warm and iris."""
     try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
@@ -541,7 +549,7 @@ def theme(c: str) -> dict[str, str]:
     except (OSError, ValueError):
         return dict(DEFAULT_THEME)
     paper = data.get("paper") if data.get("paper") in PAPERS else DEFAULT_THEME["paper"]
-    accent = data.get("accent") if data.get("accent") in ACCENTS else DEFAULT_THEME["accent"]
+    accent = data.get("accent") if is_accent(data.get("accent")) else DEFAULT_THEME["accent"]
     return {"paper": paper, "accent": accent}
 
 
@@ -664,9 +672,12 @@ class ThemeBody(BaseModel):
 
 @router.put("/ws/{c}/render/theme")
 async def put_theme(c: str, body: ThemeBody) -> dict[str, str]:
-    """The browser reports its paper and accent (lib/theme.ts), so a card is drawn offscreen in the analyst's colours."""
-    if body.paper not in PAPERS or body.accent not in ACCENTS:
-        raise HTTPException(400, f"paper must be one of {', '.join(PAPERS)} and accent one of {', '.join(ACCENTS)}")
+    """The browser reports its paper and accent (lib/theme.ts), so a card is drawn offscreen in the analyst's colours.
+    Any accent's name is taken (ACCENT_NAME)."""
+    if body.paper not in PAPERS:
+        raise HTTPException(400, f"paper must be one of {', '.join(PAPERS)}")
+    if not is_accent(body.accent):
+        raise HTTPException(400, "an accent's name must be lowercase letters, digits and hyphens, starting with a letter")
     try:
         p = config.workspace_dir(c) / THEMES_FILE
     except ValueError as e:
