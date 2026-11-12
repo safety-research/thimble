@@ -7,12 +7,14 @@
 // (backend files_timeline.html). The reader feeds the page (ViewerFrame's `host`): every record with a time and its
 // values of the keys Color by offers in the Transcript and Table views (GET /source/events, colorKeys), Color by opening
 // on the key those views open on (defaultChoice) and Rows on the next key with few values; a record that opens in the
-// side panel is read whole (GET /ref). The labels that are on mark the records the table draws, and a citation of the
-// file opens the record it names.
+// side panel is read whole (GET /ref). The labels that are on mark the rows the table draws, a label colored by colors
+// every record, in the lanes and the strip too (backend viewer_colour.js markFor), and a citation of the file opens the
+// record it names.
 import { useMemo } from 'react'
 import { api } from '../../lib/api'
 import type { SourceEvents, SourceKey, SourceKind, TimeHint, TranscriptHint } from '../../lib/types'
 import { colorKeys, defaultChoice, KEY_COLORS } from '../colorChoice'
+import { useViewLabelActions } from '../labelCalls'
 import { useFilesFilter } from '../useLabels'
 import { ViewerFrame, type FrameHost } from '../ViewerFrame'
 import type { ViewDef, ViewProps } from './common'
@@ -39,6 +41,9 @@ export function timelineAnswer(got: SourceEvents): SourceEvents & { initial: { c
 
 function Timeline({ workspace, path, targetRef, labels }: ViewProps) {
   const filter = useFilesFilter(workspace)
+  // the page's label controls: Color by's menu turns a label on and opens its editor, and a chip recolors a value; a new
+  // label applies to this file
+  const labelActions = useViewLabelActions(labels, [path])
   const host = useMemo<FrameHost>(
     () => ({
       page: () => api.timelinePage(workspace),
@@ -62,6 +67,7 @@ function Timeline({ workspace, path, targetRef, labels }: ViewProps) {
       filter={filter}
       filterFiles={filter ? labels?.presence.get(filter.concept) : undefined}
       byId={labels?.byId}
+      labelActions={labelActions}
     />
   )
 }

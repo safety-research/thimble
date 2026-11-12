@@ -461,6 +461,11 @@ export function wantRecordLabels(ws: string, path: string, ref: string, soon = f
   fetchRefs(ws, path, [ref], soon)
 }
 
+/** wantRecordLabels for many records of `path` at once, such as every row a view's table holds. */
+export function wantRecordsLabels(ws: string, path: string, refs: readonly string[], soon = false): void {
+  fetchRefs(ws, path, refs, soon)
+}
+
 /** The labels on one file, block by block as its records ask for them (`want`), cached per path; a `concepts` event
  * reads the shown blocks again. */
 export function usePathLabels(ws: string, path: string): { rows: Map<string, Map<string, LabelRow>>; want: (line: number) => void } {

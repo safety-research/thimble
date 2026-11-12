@@ -65,7 +65,7 @@
   },
   "LABELS_SHOWN": {
     "terminal": "under your answer or card, with its name, how it was made and its values",
-    "browser": "by its name in the chat and on each card that reads it"
+    "browser": "on its own card, by its name in the chat and on each card that reads it"
   },
   "CARD_ADD": {
     "terminal": "the `card` tool",

@@ -4,11 +4,14 @@
 // its document has the activation and the frame has the focus, so a page cannot turn labels on or off, filter by them
 // or mark records on load, on a timer or from its script alone. The editor a page opens (`edit`) stands in a popover
 // over the page beside the control that asked (files/LabelEditor), which the page gives as a rect in its frame.
+import { useMemo } from 'react'
 import type { PopoverAnchor } from '../components/Menu'
 import { api, labelApi } from '../lib/api'
 import { recordKey, recordOf } from '../lib/refs'
 import type { Concept } from '../lib/types'
+import { openLabelEditor } from './LabelEditor'
 import { classesOf, isFilesLabel, PALETTE } from './labels'
+import type { FilesLabels } from './useLabels'
 
 export const NO_GESTURE = 'thimble changes labels only while the analyst clicks or types in the view'
 
@@ -20,6 +23,32 @@ export interface ViewLabelActions {
   setColour: (id: string, value: string, colour: number) => void
   /** open the label editor on a label, or on a new one with null, beside the control that asked */
   edit?: (id: string | null, at?: LabelEditAt) => void
+}
+
+/** The label controls of a page in a frame (a view's, the reader's file viewer's, the Timeline mode's), done with
+ * Files' labels: a label turned on, and focused, or off, a value given a colour, and the label editor opened beside the
+ * control that asked, a new label applying to `appliesTo` (the files the view claims, or the file open). None without
+ * Files' labels. */
+export function useViewLabelActions(labels: FilesLabels | undefined, appliesTo: readonly string[]): ViewLabelActions | undefined {
+  const byId = labels?.byId
+  const toggle = labels?.toggle
+  const setFocus = labels?.setFocus
+  const setColour = labels?.setColour
+  const files = JSON.stringify(appliesTo)
+  return useMemo(() => {
+    if (!byId || !toggle || !setFocus || !setColour) return undefined
+    const to = JSON.parse(files) as string[]
+    return {
+      setOn: (id, on) => {
+        const k = byId.get(id)
+        if (!k || !!k.shown === on) return
+        if (on) setFocus(id)
+        toggle(id)
+      },
+      setColour,
+      edit: (id, at) => at && openLabelEditor({ id, ...at, appliesTo: to }),
+    }
+  }, [byId, toggle, setFocus, setColour, files])
 }
 
 /** A rect of a view's page, in its frame's coordinates. */

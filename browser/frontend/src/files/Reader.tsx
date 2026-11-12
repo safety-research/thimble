@@ -32,10 +32,10 @@ import { labelPaint, PlaceFeed, ReaderTracks, type LoupeRecord, type OverviewPai
 import { recordRows, useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
-import { openLabelEditor } from './LabelEditor'
+import { useViewLabelActions } from './labelCalls'
 import { accepts, slugOf, viewValue } from './viewChoice'
 import { fileLineShows, ResidueList, useLabelsOfFile, useResidueOpen, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
-import { ViewerFrame, type ViewLabelActions } from './ViewerFrame'
+import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
@@ -183,21 +183,8 @@ function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string
   useEffect(() => setHidden(null), [pin.pinned])
   const noted = fileLineShows(notes, shownLabels)
   const pick = (ref: string) => bus.emit('openRef', { ref, browser: true })
-  // the page's label controls, as ViewPane gives them; a new label applies to the file open here
-  const { byId, toggle, setFocus, setColour } = labels
-  const labelActions = useMemo<ViewLabelActions>(
-    () => ({
-      setOn: (id, on) => {
-        const k = byId.get(id)
-        if (!k || !!k.shown === on) return
-        if (on) setFocus(id)
-        toggle(id)
-      },
-      setColour,
-      edit: (id, at) => at && openLabelEditor({ id, ...at, appliesTo: [path] }),
-    }),
-    [byId, toggle, setFocus, setColour, path],
-  )
+  // the page's label controls; a new label applies to the file open here
+  const labelActions = useViewLabelActions(labels, [path])
   return (
     <div className="reader-main reader-viewer">
       {(noted || (filter && filterLabel)) && (

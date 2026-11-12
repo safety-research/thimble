@@ -11,7 +11,7 @@ import { Icon } from '../components/Icon'
 import { Popover } from '../components/Menu'
 import { useTooltip } from '../components/Tooltip'
 import type { Concept, SourceKey } from '../lib/types'
-import { choiceName, valuesWord } from './ColorBy'
+import { choiceName, fitChips, valuesWord } from './ColorBy'
 import { choiceId, labelChips, NONE, type ColorChoice, type ColorValue } from './colorChoice'
 import { filterKeyValues } from './useFilterBy'
 import { openLabelEditor } from './LabelEditor'
@@ -40,20 +40,7 @@ export function FilterBy({ choice, keys, labels, values, off, onChoose, onToggle
   const [listOpen, setListOpen] = useState(false)
   // the toggles that do not fit the line go behind "N more", the last first (ColorBy's fit)
   const fit = useCallback(() => {
-    const box = chipsBox.current
-    const btn = more.current
-    if (!box || !btn) return
-    const chips = box.querySelectorAll<HTMLElement>('.filterby-chip')
-    chips.forEach((c) => (c.hidden = false))
-    btn.hidden = true
-    if (box.scrollWidth <= box.clientWidth + 1) return
-    btn.hidden = false
-    let hid = 0
-    for (let j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
-      chips[j].hidden = true
-      hid++
-      if (moreN.current) moreN.current.textContent = `${hid.toLocaleString()} more`
-    }
+    if (chipsBox.current && more.current) fitChips(chipsBox.current, more.current, moreN.current, '.filterby-chip')
   }, [])
   useLayoutEffect(fit, [fit, values, off, choice])
   useEffect(() => {

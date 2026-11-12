@@ -49,17 +49,30 @@ interface Props {
   pickedOf?: (id: string) => Readonly<Record<string, number>> | undefined
 }
 
-/** The value chips in `box` that fit its one line, the rest behind `more` ("N more", its count in `count`), the last
- * first (viewer_colour.js fit). Reads and writes the chips' `hidden`, so a copy of the markup fits as the control does
- * (the tour's example). */
-export function fitChips(box: HTMLElement, more: HTMLElement, count: HTMLElement | null): void {
-  const chips = box.querySelectorAll<HTMLElement>('.colorby-chip')
+/** px the last chip may run past the box's edge and still count as whole: far less than the eye sees, so that a page
+ * zoomed in or out, whose boxes are not on whole pixels, does not hide a chip that fits */
+const EDGE_SLACK = 0.05
+
+/** Whether the last thing that shows in `box` (a chip, or "N more") runs past the box's right edge, where the box cuts
+ * it. Read from their drawn boxes: the box's scrollWidth and clientWidth are whole pixels, and the pixel of slack their
+ * rounding needs let a chip that ran a pixel past the edge lose its right border there. */
+function overflows(box: HTMLElement): boolean {
+  let last = box.lastElementChild as HTMLElement | null
+  while (last && last.hidden) last = last.previousElementSibling as HTMLElement | null
+  return !!last && last.getBoundingClientRect().right > box.getBoundingClientRect().right + EDGE_SLACK
+}
+
+/** The value chips (`chip`, a selector) in `box` that fit its one line, the rest behind `more` ("N more", its count in
+ * `count`), the last first (viewer_colour.js fit), for Color by and Filter by. Reads and writes the chips' `hidden`, so
+ * a copy of the markup fits as the control does (the tour's example). */
+export function fitChips(box: HTMLElement, more: HTMLElement, count: HTMLElement | null, chip = '.colorby-chip'): void {
+  const chips = box.querySelectorAll<HTMLElement>(chip)
   chips.forEach((c) => (c.hidden = false))
   more.hidden = true
-  if (box.scrollWidth <= box.clientWidth + 1) return
+  if (!overflows(box)) return
   more.hidden = false
   let hid = 0
-  for (let j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
+  for (let j = chips.length - 1; j >= 0 && overflows(box); j--) {
     chips[j].hidden = true
     hid++
     if (count) count.textContent = `${hid.toLocaleString()} more`
