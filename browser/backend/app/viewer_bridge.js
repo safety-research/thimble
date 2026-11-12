@@ -35,7 +35,7 @@
 //                          not reported in view before, whose labels thimble reads first
 //   seen {refs}            frame to page: the same for the anchored elements a scroll, a resize or a redraw brought into
 //                          view
-//   labels {marks, on, filter, all, palette, answered}
+//   labels {marks, merge?, on, filter, all, palette, answered}
 //                          page to frame: marks {ref: {bar, names, values: [{id, label, value, colour}], spans: [{text,
 //                          colour}], keep?}}, the marks of the labels that are on for the records and units among those
 //                          refs, drawn over every element with that data-anchor, `values` each label that highlights the
@@ -45,7 +45,9 @@
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
 //                          here, colour, values: [{name, colour, highlight}], count}], every label over files, those
 //                          that mark records in the view's files first with `here` true; palette, the
-//                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
+//                          colours a label's value can take. Each replaces the last, but for the marks of a message with
+//                          `merge`, which change only the refs they name (null takes a ref's mark away);
+//                          window.thimble.onLabels hears all
 //                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. A colour
 //                          that is a CSS variable, var(--label-3), is resolved here to the colour it stands for, so a
 //                          canvas can draw every colour the page is given
@@ -323,18 +325,27 @@
   // A labels message's marks taken in by ref: a ref whose mark is the same as in the last message keeps its resolved
   // mark, so a message costs a comparison per ref rather than the whole map copied and serialized. Whether any changed.
   var given = {} // ref -> the mark as the page last sent it
-  function takeMarks(raw) {
+  // the marks of a `labels` message: all of them, or with `merge` those of the refs it names alone
+  function takeMarks(raw, merge) {
     if (!raw || typeof raw !== 'object') raw = {}
     var changed = false
-    for (var ref in given) {
-      if (Object.prototype.hasOwnProperty.call(raw, ref) && raw[ref] && typeof raw[ref] === 'object') continue
-      delete given[ref]
-      delete marks[ref]
-      changed = true
-    }
+    if (!merge)
+      for (var ref in given) {
+        if (Object.prototype.hasOwnProperty.call(raw, ref) && raw[ref] && typeof raw[ref] === 'object') continue
+        delete given[ref]
+        delete marks[ref]
+        changed = true
+      }
     for (var r in raw) {
       var m = raw[r]
-      if (!m || typeof m !== 'object') continue
+      if (!m || typeof m !== 'object') {
+        if (merge && Object.prototype.hasOwnProperty.call(given, r)) {
+          delete given[r]
+          delete marks[r]
+          changed = true
+        }
+        continue
+      }
       if (Object.prototype.hasOwnProperty.call(given, r) && same(given[r], m)) continue
       given[r] = m
       marks[r] = realMark(m)
@@ -587,7 +598,7 @@
         }
       } else showWait()
     } else if (d.type === P + 'labels') {
-      var marksChanged = takeMarks(d.marks)
+      var marksChanged = takeMarks(d.marks, d.merge === true)
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
       if (filter && 'colour' in filter) filter = realLabelList([filter])[0]
       answered = typeof d.answered === 'number' ? d.answered : -1
