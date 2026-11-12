@@ -39,13 +39,11 @@ export interface Evidence {
   value?: string
   /** a card's cell, or printed output that is a table: the header and the rows around the cited one */
   table?: EvidenceTable
-  /** computed: the code that ran, its real output, the spans of the output that show the words, who ran it, and how
-   * the code got the value, in the check's words (`method`, the terminal's engine/kernel/evidence.py with_method) */
+  /** computed: the code that ran, its real output, the spans of the output that show the words, and who ran it */
   code?: string
   output?: string
   highlight?: [number, number][]
   by?: string
-  method?: string
   /** quote and code: the place, its lines around it, and the spans of each cited line that hold the words */
   file?: string
   line?: string | number

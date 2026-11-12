@@ -34,9 +34,7 @@ export type Place = { file: string; line: string; lines: { n: number; text: stri
  *  several values (a range, a pair) cite. */
 export type EvidenceTable = { corner: string; cols: string[]; rows: { label: string; values: string[] }[]; at: { r: number; c: number }; above: number; below: number; also?: { r: number; c: number }[] }
 export type Evidence =
-  /** code that computed the value: its real output, who ran it, and `method`, how the code got the value in the check's
-   *  words (engine/kernel/evidence.py with_method) */
-  | { kind: 'computed'; code: string; output: string; highlight: [number, number][]; by: 'checker' | 'main'; table?: EvidenceTable; method?: string }
+  | { kind: 'computed'; code: string; output: string; highlight: [number, number][]; by: 'checker' | 'main'; table?: EvidenceTable }
   | ({ kind: 'quote' | 'code'; more?: Place[] } & Place)
   /** a value a card shows: its cell (`table`), or a line of its printed output (`output`, `highlight`, and `table` when
    *  that output is a table); `ref` names the place as a card's citation does. Words with several values cite a place

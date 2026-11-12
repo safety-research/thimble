@@ -3,7 +3,8 @@
 // the page reports in the frame's coordinates: files/labelCalls frameAnchor).
 // Menu: a trigger that opens a Popover of items. A disabled item with a `tip` stays in the menu, dimmed, and says why in
 // the shared tooltip on hover and keyboard focus; it is aria-disabled rather than disabled, since a disabled button gets
-// neither focus nor, in every browser, hover.
+// neither focus nor, in every browser, hover. A `toggle` item is a switch: chosen, it turns over and the menu stays open,
+// so the person can go on to another item.
 import { Children, cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './Icon'
@@ -170,8 +171,10 @@ export type MenuItem =
       /** small text after the label, tertiary */
       note?: ReactNode
       icon?: IconName
-      /** the chosen one of a radio group: a check at the right, accent text */
+      /** the chosen one of a radio group, or a `toggle` that is on: a check at the right, accent text */
       checked?: boolean
+      /** a switch of its own (a menuitemcheckbox): choosing it keeps the menu open */
+      toggle?: boolean
       disabled?: boolean
       /** with `disabled`, why the choice cannot take effect: said beside the item on hover and on keyboard focus */
       tip?: string
@@ -221,7 +224,7 @@ export function Menu({ trigger, items, align = 'start', label, width, onOpenChan
     // show at once.
     const raf = requestAnimationFrame(() => {
       const list = listEl.current
-      const first = list?.querySelector<HTMLButtonElement>('.menu-item.checked:not(:disabled):not([aria-disabled])') ?? list?.querySelector<HTMLButtonElement>('.menu-item:not(:disabled):not([aria-disabled])')
+      const first = list?.querySelector<HTMLButtonElement>('.menu-item.checked:not([role="menuitemcheckbox"]):not(:disabled):not([aria-disabled])') ?? list?.querySelector<HTMLButtonElement>('.menu-item:not(:disabled):not([aria-disabled])')
       first?.focus()
     })
     return () => cancelAnimationFrame(raf)
@@ -269,7 +272,7 @@ export function Menu({ trigger, items, align = 'start', label, width, onOpenChan
               <button
                 key={it.id}
                 type="button"
-                role={it.checked != null ? 'menuitemradio' : 'menuitem'}
+                role={it.toggle ? 'menuitemcheckbox' : it.checked != null ? 'menuitemradio' : 'menuitem'}
                 aria-checked={it.checked != null ? it.checked : undefined}
                 className={`menu-item${it.checked ? ' checked' : ''}${it.danger ? ' danger' : ''}`}
                 disabled={it.disabled && !tipText}
@@ -287,7 +290,7 @@ export function Menu({ trigger, items, align = 'start', label, width, onOpenChan
                     e.stopPropagation()
                     return
                   }
-                  close()
+                  if (!it.toggle) close()
                   it.onSelect()
                 }}
               >

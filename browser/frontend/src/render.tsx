@@ -43,8 +43,7 @@ export interface RenderRequest {
   /** draw the card's art as a report figure shows it, `width` wide, in place of the card face: the picture an export
    * shows for the figure, whole where a wide table or chart would scroll on the page */
   figure?: boolean
-  /** with `figure`, how many times larger than its layout the art is drawn, so the picture stays sharp printed or on a
-   * slide */
+  /** with `figure`, how many times larger than its layout the art is drawn, so the picture stays sharp printed */
   zoom?: number
   /** with `figure`, the figure whole as one picture `width` wide: the card's question over its art and its takeaway
    * beside the rule under it, as an export of the card alone shows it */

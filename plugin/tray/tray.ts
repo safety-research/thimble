@@ -48,8 +48,7 @@
 // card shows no line of what the check found (why it failed, what it was before a correction, which file changed),
 // which the side pane gives in full. A citation's evidence shows in parts, each under its label, dim: the
 // code (`code · 7 lines`, its whole size), a blank row, then its printed output (`output · 62 lines`); a file's lines
-// under their place (`changes.log · line 3`); a card's value under the card. Over the code, how it got the value, in
-// the check's words, the first thing a reader sees of the method. A taller card is cut to those rows: a
+// under their place (`changes.log · line 3`); a card's value under the card. A taller card is cut to those rows: a
 // citation keeps the line of code that printed its value and the output line that holds it in view, with what fits
 // around them; an explainer, a heads-up or a file's lines show from their start. Where it leaves lines out a marker says
 // how many, dim (`⋯ 5 lines above`, `⋯ 13 lines below`), and the header names + among its keys (`+ show all`): +, a
@@ -820,16 +819,16 @@ function labelRow(els: Any, key: string, words: string): Unit {
  *  part, between it and the part above it (the output's, under the code). */
 type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; gap?: Unit }
 
-/** A citation's card under its header, whose status is all it says of the check (statusOf): its evidence, nothing
- *  of what the check found about it. For a value code computed: how the code got it, in the check's words and the
- *  text's own color (the evidence's `method`), over its evidence (`top`); then its evidence in parts (Block), each
- *  under its label: the code under `code · 7 lines`, in Claude Code's colors for Python (unitEls), around the line that
- *  printed the value (tray.mjs printedAt; from its start when the code does not show which line printed it), a blank
- *  row, then under `output · 62 lines` the printed output around the line that holds it in the ruled block; printed
- *  output that is a table shows as its header over the cited row, under `output · table`. For a file: its place
- *  (`place`, a click opens the side pane), then its lines around the cited one in the ruled block. For a card's value:
- *  the card, then the header over the cited row, or its printed lines around the cited one. The cited words stand on
- *  the citations' purple tint. While its check runs, and for a check that gave no evidence, the card is empty. */
+/** A citation's card under its header, whose status is all it says of the check (statusOf): its evidence in parts
+ *  (Block), each under its label, nothing of what the check found about it. For a value code computed: the code under
+ *  `code · 7 lines`, in Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs
+ *  printedAt; from its start when the code does not show which line printed it), a blank row, then under `output · 62
+ *  lines` the printed output around the line that holds it in the ruled block; printed output that is a table shows as
+ *  its header over the cited row, under `output · table`. For a file: its place (`place`, a click opens the side
+ *  pane), then its lines around the cited one in the ruled block. For a card's value: the card, then the header over
+ *  the cited row, or its printed lines around the cited one. The cited words stand on the citations' purple tint.
+ *  While its check runs, and for a check that gave no evidence, the card is empty; for a citation no longer in the
+ *  session it says so (`top`). */
 function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null): { top: Unit[]; blocks: Block[] } {
   const { Text } = els
   if (!m) return { top: [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }], blocks: [] }
@@ -864,8 +863,6 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
     return { top, blocks: [tl ? tableBlock(tl as { text: string; spans: [number, number][] }[], lead) : outputBlock(lead)] }
   }
   if (ev.kind === 'computed') {
-    // how the code got the value, in the check's words (its `method`), right over the code and whole in a cut card
-    if (ev.method) top.push({ h: rowsOf(ev.method, w), el: Text({ key: 'how', wrap: 'wrap', children: ev.method }) })
     const blocks: Block[] = []
     // its lines, without the empty one a last newline leaves; an empty line as a space, so Claude Code gives it its row
     // at the end of the window too
@@ -918,8 +915,8 @@ function cutUnits(blocks: Block[], show: { size: number[]; lead: boolean[]; gap:
   return out
 }
 
-/** A citation's card in at most `rows` rows: whole when it fits, with no marker. Else cut: how its code got the value,
- *  whole, then its parts (cutUnits), a marker at each place it leaves lines out, which says how many.
+/** A citation's card in at most `rows` rows: whole when it fits, with no marker. Else cut: what it says over its
+ *  evidence on a row each, then its parts (cutUnits), a marker at each place it leaves lines out, which says how many.
  *  A marker shows before anything that may be left out, so no line is left out without one: first the key lines (the
  *  value's line, then the line that printed it), with their markers; then, while each part shows a line, the blank row
  *  between the code and its output, then the parts' labels; then a line more to each part in turn, as rows allow. */
