@@ -63,8 +63,9 @@ API_WHY = "only a Claude Code sign-in can publish one, and thimble reaches Claud
 API_HOW = {"api-key": "an Anthropic API key", "wif": "Workload Identity Federation"}  # claude_access's choices
 NO_WAY = "thimble has no way to reach Claude yet"
 API_FIX = "To publish from thimble, choose your Claude Code sign-in in Settings, Claude access."
-NO_TOOL_WHY = "Claude Code had no Artifact tool, which needs a claude.ai sign-in that allows artifacts"
-NO_TOOL_FIX = "In your terminal: sign in to claude.ai with /login, then export again."
+NO_TOOL_WHY = "Claude Code had no Artifact tool"
+NO_TOOL_FIX = ("In your terminal: run `claude update` and sign in to claude.ai with /login, then export again. Your "
+               "organization must also allow artifacts.")
 HELD_WHY = "main's session runs a command in the background, and that session has no Artifact tool"
 HELD_FIX = "Export again once the command ends."
 TOOL_WHY = "Claude Code's Artifact tool answered: {error}"
@@ -275,8 +276,8 @@ def turn_ended(c: str, event: str, end: Any) -> None:
     elif w.error:
         _tell(c, w.doc, TOOL_WHY.format(error=w.error), AGAIN_FIX)
     elif TOOL not in (main.tools or ()):
-        # the turn ran in the session kept open for a command in the background (runtime.spec_of), or Claude Code has
-        # no Artifact tool with this sign-in
+        # the turn ran in the session kept open for a command in the background (runtime.spec_of), or Claude Code
+        # withheld the tool: an older Claude Code, a sign-in other than claude.ai, or artifacts off for the organization
         _tell(c, w.doc, *((HELD_WHY, HELD_FIX) if main.cc is not None else (NO_TOOL_WHY, NO_TOOL_FIX)))
     elif end.status == "failed":
         _tell(c, w.doc, FAILED_WHY.format(error=_short(end.error) or "no reason given"), AGAIN_FIX)
