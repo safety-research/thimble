@@ -82,3 +82,18 @@ test('without figure the page draws the card face, as the card check reads it', 
   expect(document.querySelector('article.canvas-card')).not.toBeNull()
   expect(document.querySelector('.render-figure')).toBeNull()
 })
+
+test("each render's theme stays on its own page: the page stores none, so pages drawing side by side in other themes keep theirs", async () => {
+  const { PAPER_KEY, applyTheme } = await import('../../src/lib/theme')
+  localStorage.removeItem(PAPER_KEY)
+  const res = await draw(request({ figure: true, theme: { paper: 'dark', accent: 'iris' } }))
+  expect(res.error).toBeUndefined()
+  expect(document.documentElement.dataset.paper).toBe('dark')
+  expect(localStorage.getItem(PAPER_KEY)).toBeNull()
+  // another page of the pool draws in Neutral, which a stored theme would have carried here
+  localStorage.setItem(PAPER_KEY, 'neutral')
+  window.dispatchEvent(new StorageEvent('storage', { key: PAPER_KEY, newValue: 'neutral' }))
+  applyTheme()
+  expect(document.documentElement.dataset.paper).toBe('dark')
+  localStorage.removeItem(PAPER_KEY)
+})

@@ -59,8 +59,12 @@ function write(key: string, value: string): void {
   }
 }
 
-export const getPaper = (): Paper => readPaper(read(PAPER_KEY))
-export const getAccent = (): Accent => readAccent(read(ACCENT_KEY))
+/** A theme the page holds for itself (holdTheme), which it neither stores nor takes from another tab; null for the stored
+ * theme. */
+let held: { paper: Paper; accent: Accent } | null = null
+
+export const getPaper = (): Paper => held?.paper ?? readPaper(read(PAPER_KEY))
+export const getAccent = (): Accent => held?.accent ?? readAccent(read(ACCENT_KEY))
 export const getResolved = (): Resolved => paperScheme(getPaper())
 
 /** Write the attributes tokens.css reads. */
@@ -84,6 +88,15 @@ export function setPaper(paper: Paper): void {
 export function setAccent(accent: Accent): void {
   write(ACCENT_KEY, accent)
   applyTheme(getPaper(), accent)
+  notify()
+}
+
+/** The theme this page draws in from now on, kept to itself: nothing is stored, so another page of the same origin keeps
+ * its own, and what another tab stores does not reach this one. The card harness's pages (render.tsx) draw side by side,
+ * each in the theme of its own request. */
+export function holdTheme(paper: Paper, accent: Accent): void {
+  held = { paper, accent }
+  applyTheme(paper, accent)
   notify()
 }
 
