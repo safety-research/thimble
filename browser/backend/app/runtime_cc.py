@@ -19,9 +19,11 @@ shows the session's Bash call that runs (a session runs one at a time), which th
 A PreToolUse hook callback (in this process, not a plugin hook) hears each call of thimble's tools with Claude Code's
 id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8, and each
 Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. Main has Claude
-Code's Artifact tool in the turns an export waits for (artifact_export.py): the hook refuses every call of it but the
-publish of that export's page and the read of the artifact it updates, which the permission callback allows when Claude
-Code asks, and each result of such a call goes to artifact_export.result, which reads the artifact's link. The
+Code's Artifact tool in the turns an export waits for (artifact_export.py), in a session that starts with the variable
+a headless session needs for that tool (artifact_export.ENV) and without the tools Claude Code adds with it
+(artifact_export.COMPANIONS). The hook refuses every call of the Artifact tool but the publish of that export's page and
+the read of the artifact it updates, which the permission callback allows when Claude Code asks, and each result of
+such a call goes to artifact_export.result, which reads the artifact's link. The
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
 session as a fork of it (fork_session). After a rewind of main (runtime.rewind_main) the state also names the entry of
 the session that main's next turn, and a fork until then, resumes it up to (resume_at), as a fork of it.
@@ -421,6 +423,9 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
 
     bash = "Bash" in spec.builtins and cc_settings.sandbox_ok()
     builtins = [b for b in spec.builtins if b != "Bash" or bash]
+    # a turn an export waits for (runtime.spec_of) has the Artifact tool in its spec, so it never goes on in a session
+    # started without it (turn): its session starts with the variable that gives it the tool, without its companions
+    artifact = artifact_export.TOOL in builtins
     secs = tools.tool_sections(spec.thimble, getattr(spec, "labels", True))
 
     def handler(name: str) -> Any:
@@ -484,6 +489,7 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         cwd=str(spec.cwd),
         tools=builtins,
         allowed_tools=allowed,
+        disallowed_tools=list(artifact_export.COMPANIONS) if artifact else [],
         permission_mode="default",
         can_use_tool=ask,
         mcp_servers={SERVER: server},
@@ -497,7 +503,8 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         strict_mcp_config=True,
         add_dirs=[str(w) for w in spec.write_roots],
         # Claude Code keeps its own temp folder in the short TMPDIR too, whatever CLAUDE_CODE_TMPDIR the server has
-        env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}),
+        env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {}),
+                          **({artifact_export.ENV: "1"} if artifact else {})}),
         # the session echoes each message it reads, so a message handed to main mid-turn is known read (_hand), and a
         # turn's prompt too, before which a result is one of a turn Claude Code ran of its own (_session)
         extra_args={"safe-mode": None, "replay-user-messages": None},

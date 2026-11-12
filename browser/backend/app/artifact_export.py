@@ -1,15 +1,17 @@
 """A document published as a Claude artifact: Export, Claude artifact, in the report's Export menu.
 
 Only Claude Code publishes an artifact, with its Artifact tool (TOOL), which a session has when Claude Code is signed in
-to claude.ai and artifacts are allowed there. So the server writes the document's artifact page (exports.artifact_page)
-into the workspace's exports folder (DIR), and main publishes it (publish):
+to claude.ai and artifacts are allowed there. A headless session, as main's is, has it only with ENV set in its
+environment. So the server writes the document's artifact page (exports.artifact_page) into the workspace's exports
+folder (DIR), and main publishes it (publish):
 - with an API key or WIF (runtime.engine "api"), nothing is published: the notice (KEY) says why, and that Settings,
   Claude access, can choose the Claude Code sign-in; the page downloads the artifact page instead (GET …/export/artifact);
 - with the Claude Code sign-in, the analyst's line goes into main's chat and main gets the request (prompts/tools.md
   `export-artifact`), which waits for main's running turn to end, as a /thimble-fix does. Main's session has the
   Artifact tool in the turns an export waits for (runtime.spec_of), not in others, since its text asks Claude to
-  publish finished work by itself. A session kept open for a command main runs in the background goes on without it,
-  so the command is not stopped: an export then publishes nothing and says why.
+  publish finished work by itself; such a turn's session starts with ENV, and without the tool's COMPANIONS
+  (runtime_cc.options). A session kept open for a command main runs in the background goes on without it, so the
+  command is not stopped: an export then publishes nothing and says why.
 
 In that turn main may publish that page and nothing else: runtime_cc's hook refuses every other call of the Artifact
 tool (may_publish), and its permission callback allows the publish when Claude Code asks. runtime_cc hands each
@@ -46,6 +48,10 @@ router = APIRouter()
 # <doc>.json, the link of the artifact it was published as (link_path)
 DIR = "exports"
 TOOL = "Artifact"  # Claude Code's tool that publishes a page as a private claude.ai artifact and gives its link
+# set to "1", it gives a headless Claude Code session the Artifact tool, which only an interactive one has otherwise
+ENV = "CLAUDE_CODE_ARTIFACT"
+# the tools Claude Code adds to a session that names TOOL among its tools, which an export does not use
+COMPANIONS = ("ArtifactComments", "ArtifactData")
 KEY = "export-artifact"  # the notice's key (notices.py), cleared by a later publish
 RECORD = "export"  # the type of the record on the workspace stream that ends an export (frontend lib/events.ts)
 # a claude.ai artifact's link, as the Artifact tool gives it (the terminal reads a card's the same way, cards/head.ts)

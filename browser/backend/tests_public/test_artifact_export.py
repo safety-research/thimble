@@ -15,8 +15,9 @@ from claude_agent_sdk import (AssistantMessage, PermissionResultAllow, Permissio
 from fastapi import FastAPI
 
 from app import agents, artifact_export, claude_access, exports, investigation, notices, runtime, runtime_cc
+from test_claude_access_setup import wif_file
 from test_exports import BASE, _comment_on, _write_with_figure, artifact_rules, chart, harness  # noqa: F401 — `chart`, `harness` are fixtures
-from test_runtime import CORPUS, fake_sdk, main_records, on  # noqa: F401 — `on` is a fixture
+from test_runtime import CORPUS, fake_sdk, main_records, main_turn, on  # noqa: F401 — `on` is a fixture
 
 LINK = "https://claude.ai/code/artifact/5f3a1c2e-7b4d-4c8a-9e21-0d6b7f8a9c10"
 OTHER = "https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -116,6 +117,36 @@ async def test_on_claude_code_sign_in_main_publishes_the_page_with_its_artifact_
     assert records == [{"type": "export", "format": "artifact", "doc": "report", "status": "published", "link": LINK}]
     assert told() == [] and not artifact_export.waiting(CORPUS)
     assert "Artifact" not in runtime.ensure(CORPUS).main.spec().builtins
+
+
+async def test_only_the_export_turn_s_claude_code_session_starts_with_the_variable_that_gives_it_the_artifact_tool(
+        on, chart, harness, monkeypatch, tmp_path):
+    await _write_with_figure(chart)
+    # with an API key or WIF no `claude` starts for an export, so none gets the variable
+    for how, given in ((claude_access.API_KEY, {"key": "sk-ant-test-key"}),
+                       (claude_access.WIF, {"wif_file": str(wif_file(tmp_path))})):
+        seen: dict[str, Any] = {}
+        fake_sdk(monkeypatch, session(), seen)
+        claude_access.save(how, **given)
+        async with client() as api:
+            r = await api.post(f"{BASE}/report/export/artifact")
+            assert r.status_code == 200 and r.json() == {"publishing": False}, how
+        assert "options" not in seen and not runtime.ensure(CORPUS).main.running, how
+    # on Claude Code sign-in the export turn's session starts with it, since a headless session has no Artifact tool
+    # without it, and leaves out the tools Claude Code adds with that tool
+    seen = {}
+    fake_sdk(monkeypatch, session(AssistantMessage(content=[TextBlock(text="It could not be published.")], model=MODEL)),
+             seen)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    agents.ensure_main(CORPUS)
+    await export_now()
+    opts = seen["options"]
+    assert "Artifact" in opts.tools and opts.env["CLAUDE_CODE_ARTIFACT"] == "1"
+    assert sorted(opts.disallowed_tools) == ["ArtifactComments", "ArtifactData"]
+    # main's next turn starts a session with neither
+    await main_turn("Thanks.")
+    opts = seen["options"]
+    assert "Artifact" not in opts.tools and "CLAUDE_CODE_ARTIFACT" not in opts.env and opts.disallowed_tools == []
 
 
 async def test_main_s_artifact_tool_publishes_only_the_page_of_an_export_that_waits(on, monkeypatch):
