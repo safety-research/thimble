@@ -46,7 +46,7 @@ async def test_a_written_document_exports_with_its_citations_as_markdown_footnot
     monkeypatch.setattr(exports, "browser", lambda: ("off", "the browser is off in thimble's config"))
     client = TestClient(app)
     by = {f["id"]: f for f in client.get(f"{BASE}/report/exports").json()["formats"]}
-    assert list(by) == ["markdown", "html", "pdf", "artifact"], "no slides"
+    assert list(by) == ["markdown", "html", "pdf", "artifact"]
     assert by["markdown"]["ok"] and by["html"]["ok"] and not by["pdf"]["ok"], "PDF needs the browser"
     assert by["artifact"] == {"id": "artifact", "name": "Claude artifact", "ext": "html", "note": "link", "ok": True}
     # a page, whose HTML is its own, offers no Claude artifact
