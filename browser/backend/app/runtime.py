@@ -627,7 +627,9 @@ class Space:
             builtins = list(MAIN_BUILTINS)
             if conv.kind == "main" and engine() == "cc" and conv.cc is None and artifact_export.waiting(self.c):
                 # an export waits for main to publish it: the turns it waits for have Claude Code's Artifact tool
-                # (artifact_export.py), and a session kept open for a command in the background goes on without it
+                # (artifact_export.py), each in a new session, which starts with the variable that gives a headless
+                # session the tool (runtime_cc.options), and a session kept open for a command in the background goes
+                # on without it
                 builtins.append(artifact_export.TOOL)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
