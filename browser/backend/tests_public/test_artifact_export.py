@@ -1,7 +1,8 @@
 """Export, Claude artifact (artifact_export.py): with an API key or WIF nothing is published, the notice says why with the
 fix, and the page downloads the artifact page; on Claude Code sign-in main gets the request, publishes the page with its
-Artifact tool and nothing else, and the page gets the link, or the notice says why there is none. No model call and no
-`claude`: the Agent SDK is a fake ClaudeSDKClient, and the card harness's pictures are faked."""
+Artifact tool and nothing else, and the page gets the link, or the notice says why there is none. A document is one
+artifact: a later export updates the artifact the first published. No model call and no `claude`: the Agent SDK is a
+fake ClaudeSDKClient, and the card harness's pictures are faked."""
 from __future__ import annotations
 
 from typing import Any
@@ -17,6 +18,7 @@ from test_exports import BASE, _write_with_figure, artifact_rules, chart, harnes
 from test_runtime import CORPUS, fake_sdk, main_records, on  # noqa: F401 — `on` is a fixture
 
 LINK = "https://claude.ai/code/artifact/5f3a1c2e-7b4d-4c8a-9e21-0d6b7f8a9c10"
+OTHER = "https://claude.ai/code/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 MODEL = "claude-opus-5-5"
 
 
@@ -153,3 +155,78 @@ async def test_on_claude_code_sign_in_without_the_artifact_tool_the_notice_says_
     # the record has the page download the artifact page, and nothing waits any more
     assert records == [{"type": "export", "format": "artifact", "doc": "report", "status": "failed"}]
     assert not artifact_export.waiting(CORPUS)
+
+
+def published(tool_id: str, inp: dict[str, Any], said: str, is_error: bool = False) -> list[Any]:
+    """Main's call of its Artifact tool with `inp`, and the tool's answer."""
+    return [AssistantMessage(content=[ToolUseBlock(id=tool_id, name="Artifact", input=inp)], model=MODEL),
+            UserMessage(content=[ToolResultBlock(tool_use_id=tool_id, content=said, is_error=is_error)])]
+
+
+async def test_a_second_export_updates_the_artifact_the_first_published_also_from_a_new_chat_of_main(
+        on, chart, harness, records, monkeypatch):
+    await _write_with_figure(chart)
+    page = artifact_export.page_path(CORPUS, "report")
+    first = {"file_path": str(page), "icon": "report"}
+    fake_sdk(monkeypatch, session(*published("toolu_1", first, f"Published {LINK} as a private artifact."),
+                                  AssistantMessage(content=[TextBlock(text=LINK)], model=MODEL)), {})
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    agents.ensure_main(CORPUS)
+    await export_now()
+    # the link is kept with the report, in the workspace
+    assert artifact_export.kept_link(CORPUS, "report") == LINK
+    # a new chat of main: the next export asks main to publish the page to that link; the tool refuses until this
+    # session read the artifact, main reads it and publishes again, and the same artifact has the new page
+    assert await runtime._spaces[CORPUS].switch(None)
+    seen: dict[str, Any] = {}
+    update = {**first, "url": LINK}
+    fake_sdk(monkeypatch, session(
+        *published("toolu_2", update, "Refused: this session has not read that artifact. Read it, then publish again.",
+                   is_error=True),
+        *published("toolu_3", {"action": "read", "url": LINK}, "The artifact as it is now."),
+        *published("toolu_4", update, f"Published {LINK}."),
+        AssistantMessage(content=[TextBlock(text=LINK)], model=MODEL)), seen)
+    await export_now()
+    assert f"It was published before as {LINK}." in seen["prompt"]
+    assert f"Publish that file as it is, with your Artifact tool, and give {LINK} as its `url`." in seen["prompt"]
+    assert records[-1] == {"type": "export", "format": "artifact", "doc": "report", "status": "published", "link": LINK}
+    assert told() == [] and artifact_export.kept_link(CORPUS, "report") == LINK
+    # an update the tool answers with an error: the notice says the next export publishes a new artifact, and it does
+    fake_sdk(monkeypatch, session(*published("toolu_5", update, "No artifact has that link.", is_error=True),
+                                  AssistantMessage(content=[TextBlock(text="That artifact no longer exists.")],
+                                                   model=MODEL)), seen)
+    await export_now()
+    assert [n["text"] for n in told()] == [
+        "The report was not published as a Claude artifact: Claude Code's Artifact tool answered: No artifact has that "
+        "link. Its page downloaded instead. Export again to publish it as a new Claude artifact."]
+    assert artifact_export.kept_link(CORPUS, "report") == ""
+    fake_sdk(monkeypatch, session(*published("toolu_6", first, f"Published {OTHER} as a private artifact."),
+                                  AssistantMessage(content=[TextBlock(text=OTHER)], model=MODEL)), seen)
+    await export_now()
+    assert "It was published before" not in seen["prompt"]
+    assert told() == [] and artifact_export.kept_link(CORPUS, "report") == OTHER
+
+
+async def test_main_may_read_the_artifact_an_export_updates_and_publish_the_page_to_it_and_to_no_other(on, monkeypatch):
+    fake_sdk(monkeypatch, [], {})
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    sp = runtime.ensure(CORPUS)
+    page = artifact_export.page_path(CORPUS, "report")
+    monkeypatch.setitem(artifact_export._waiting, CORPUS,
+                        {"e1": artifact_export.Waiting("report", page, "e1", link=LINK)})
+    opts = runtime_cc.options(sp.main, sp.main.spec(), {})
+    pre = opts.hooks["PreToolUse"][0].hooks[0]
+    ctx = ToolPermissionContext(tool_use_id="toolu_a")
+    publish = {"file_path": str(page), "icon": "report"}
+    for ok in ({**publish, "url": LINK}, publish, {"action": "read", "url": LINK}):
+        assert isinstance(await opts.can_use_tool("Artifact", ok, ctx), PermissionResultAllow), ok
+        assert await pre({"tool_name": "Artifact", "tool_input": ok}, "toolu_a", {}) == {}, ok
+    for other in ({**publish, "url": OTHER}, {"action": "read", "url": OTHER},
+                  {"action": "read", "url": LINK, "out_dir": "/made-up/elsewhere"}, {"action": "delete", "url": LINK}):
+        assert isinstance(await opts.can_use_tool("Artifact", other, ctx), PermissionResultDeny), other
+        refused = (await pre({"tool_name": "Artifact", "tool_input": other}, "toolu_b", {}))["hookSpecificOutput"]
+        assert refused["permissionDecision"] == "deny", other
+    # with no artifact to update, the page goes to no artifact by its link
+    monkeypatch.setitem(artifact_export._waiting, CORPUS, {"e1": artifact_export.Waiting("report", page, "e1")})
+    assert isinstance(await opts.can_use_tool("Artifact", {**publish, "url": LINK}, ctx), PermissionResultDeny)
+    assert isinstance(await opts.can_use_tool("Artifact", {"action": "read", "url": LINK}, ctx), PermissionResultDeny)

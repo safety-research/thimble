@@ -20,8 +20,8 @@ A PreToolUse hook callback (in this process, not a plugin hook) hears each call 
 id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8, and each
 Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. Main has Claude
 Code's Artifact tool in the turns an export waits for (artifact_export.py): the hook refuses every call of it but the
-publish of that export's page, which the permission callback allows when Claude Code asks, and each result of such a
-call goes to artifact_export.result, which reads the artifact's link. The
+publish of that export's page and the read of the artifact it updates, which the permission callback allows when Claude
+Code asks, and each result of such a call goes to artifact_export.result, which reads the artifact's link. The
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
 session as a fork of it (fork_session). After a rewind of main (runtime.rewind_main) the state also names the entry of
 the session that main's next turn, and a fork until then, resumes it up to (resume_at), as a fork of it.
@@ -453,7 +453,7 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
 
     async def ask(name: str, inp: dict[str, Any], _ctx: Any) -> Any:
         if name == artifact_export.TOOL and artifact_export.may_publish(conv.c, inp):
-            return PermissionResultAllow()  # the analyst's Export asked for this publish
+            return PermissionResultAllow()  # the analyst's Export asked for this publish, or the read before it
         if name != host_asks.TOOL:
             return PermissionResultDeny(message=REFUSED.format(tool=name))
         # the request is the running Bash call's (module note, permissions): the one started last, should two run

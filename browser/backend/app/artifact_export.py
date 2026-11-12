@@ -18,8 +18,12 @@ whose link the page shows), and an error is kept as the reason. When main's turn
 (turn_ended), the export failed: the notice says why (the session had no Artifact tool, the tool's error, main's last
 words, or the turn stopped or failed) with the fix, and the `export` record has the page download the artifact page.
 
-A document's page is always the same file, so an export again in the same chat of main updates the artifact it
-published, as the Artifact tool publishes a file it published before in the conversation to the same link.
+A document is one artifact: the link its first publish gives is kept beside its page (link_path), and each later
+export asks main to publish to that link (prompts/tools.md `export-artifact-update`), so a second export updates the
+same artifact, also from a new chat of main or after the server's restart. A session that has not read that artifact
+reads it before it publishes to it, as the Artifact tool asks, and the hook allows that read too. An update the tool
+answered with an error ends with the link forgotten (the artifact may be gone, or no longer the analyst's to change),
+so the next export publishes a new artifact, as the notice says.
 """
 from __future__ import annotations
 
@@ -33,12 +37,14 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from . import config, nofollow
+from . import config, ledger, nofollow
 
 log = logging.getLogger("thimble.artifact_export")
 router = APIRouter()
 
-DIR = "exports"  # in the workspace, out of reach of a card's code and of main's commands: <doc>.html, the page to publish
+# in the workspace, out of reach of a card's code and of main's commands: <doc>.html, the page to publish, and
+# <doc>.json, the link of the artifact it was published as (link_path)
+DIR = "exports"
 TOOL = "Artifact"  # Claude Code's tool that publishes a page as a private claude.ai artifact and gives its link
 KEY = "export-artifact"  # the notice's key (notices.py), cleared by a later publish
 RECORD = "export"  # the type of the record on the workspace stream that ends an export (frontend lib/events.ts)
@@ -60,16 +66,18 @@ SAID_WHY = "main did not publish it, and said: {said}"
 STOPPED_WHY = "main's turn stopped before it published"
 FAILED_WHY = "main's turn failed: {error}"
 AGAIN_FIX = "Export again to try once more."
+NEW_FIX = "Export again to publish it as a new Claude artifact."
 
 
 @dataclass
 class Waiting:
-    """An export that waits for main: its document, the page's file, the event main reads it in, and the Artifact
-    tool's last error in that turn."""
+    """An export that waits for main: its document, the page's file, the event main reads it in, the Artifact tool's
+    last error in that turn, and the link of the artifact it updates ('' for a first publish)."""
     doc: str
     page: Path
     event: str
     error: str = ""
+    link: str = ""
 
 
 _waiting: dict[str, dict[str, Waiting]] = {}  # workspace -> by event id, its exports that wait for main
@@ -78,6 +86,34 @@ _waiting: dict[str, dict[str, Waiting]] = {}  # workspace -> by event id, its ex
 def page_path(c: str, slug: str) -> Path:
     """The file of document `slug`'s artifact page, the same at each export."""
     return config.workspace_dir(c) / DIR / f"{slug}.html"
+
+
+def link_path(c: str, slug: str) -> Path:
+    """The file that keeps the link of the artifact document `slug` was published as, beside its page: {"link": …}."""
+    return config.workspace_dir(c) / DIR / f"{slug}.json"
+
+
+def kept_link(c: str, slug: str) -> str:
+    """The link of the artifact document `slug` was published as (link_path); '' before its first publish, and after an
+    update of it failed."""
+    try:
+        got = ledger.read_json(link_path(c, slug), {})
+    except (OSError, ValueError):
+        return ""
+    link = str(got.get("link") or "") if isinstance(got, dict) else ""
+    return link if LINK_RE.fullmatch(link) else ""
+
+
+def _keep_link(c: str, slug: str, link: str) -> None:
+    """`link` kept as the artifact document `slug` was published as ('' forgets it), for its next export."""
+    path = link_path(c, slug)
+    try:
+        if link:
+            ledger.write_json(path, {"link": link})
+        else:
+            nofollow.unlink(path)
+    except OSError:  # the publish happened either way; the next export publishes a new artifact
+        log.warning("%s: the link of %s's artifact was not kept", c, slug, exc_info=True)
 
 
 def waiting(c: str) -> bool:
@@ -144,13 +180,16 @@ async def publish(c: str, inv_id: str, slug: str) -> dict[str, Any]:
     page = page_path(c, slug)
     text = await exports.artifact_page(c, m)
     await asyncio.to_thread(nofollow.write_text, page, text, make=True)
+    # the artifact an earlier export published, which this one updates
+    link = await asyncio.to_thread(kept_link, c, slug)
     eid = secrets.token_hex(4)
-    _waiting.setdefault(c, {})[eid] = Waiting(slug, page, eid)
+    _waiting.setdefault(c, {})[eid] = Waiting(slug, page, eid, link=link)
     said = LINE.format(doc=slug)
     agents.mirror(c, "user", by=agents.BROWSER, text=said, event=eid)
+    request = tools.hint("export-artifact-update" if link else "export-artifact", doc=slug, title=m["title"],
+                         page=str(page), link=link)
     try:
-        events.post(c, events.MAIN, {"text": tools.hint("export-artifact", doc=slug, title=m["title"], page=str(page))},
-                    mirror=False, line=said, event_id=eid)
+        events.post(c, events.MAIN, {"text": request}, mirror=False, line=said, event_id=eid)
     except HTTPException:
         _waiting.get(c, {}).pop(eid, None)
         raise
@@ -171,18 +210,27 @@ def _waiting_for(c: str, inp: Any) -> Waiting | None:
 
 def may_publish(c: str, inp: Any) -> bool:
     """Whether a call of main's Artifact tool with input `inp` publishes the page of an export that waits, and nothing
-    else: the publish action (the tool's default), with that page as its file and no other files (runtime_cc)."""
-    if not isinstance(inp, dict) or inp.get("action") not in (None, "", "publish"):
+    else: the publish action (the tool's default), with that page as its file, no other files, and as its `url` none or
+    the artifact the export updates (runtime_cc). Or the read of that artifact alone, which the tool asks of a session
+    that has not read it before it publishes to it."""
+    if not isinstance(inp, dict):
+        return False
+    if inp.get("action") == "read":
+        url = str(inp.get("url") or "")
+        return bool(url) and not any(inp.get(k) for k in ("path", "paths", "out_dir")) and any(
+            w.link == url for w in _waiting.get(c, {}).values())
+    if inp.get("action") not in (None, "", "publish"):
         return False
     if any(inp.get(k) for k in ("files", "root", "type_url")):
         return False
-    return _waiting_for(c, inp) is not None
+    w = _waiting_for(c, inp)
+    return w is not None and (not inp.get("url") or (bool(w.link) and str(inp["url"]) == w.link))
 
 
 def result(c: str, inp: Any, content: Any, is_error: bool) -> None:
     """A result of main's Artifact tool (runtime_cc). For the page of an export that waits, a link publishes it: the
-    notice goes, and the record gives the page the link. An error, or a result with no link, is kept as the reason
-    should the turn end without one."""
+    notice goes, the link is kept for the document's next export, and the record gives the page the link. An error, or a
+    result with no link, is kept as the reason should the turn end without one."""
     from . import notices  # noqa: PLC0415
 
     w = _waiting_for(c, inp)
@@ -195,6 +243,7 @@ def result(c: str, inp: Any, content: Any, is_error: bool) -> None:
         return
     _waiting.get(c, {}).pop(w.event, None)
     notices.clear(c, KEY)
+    _keep_link(c, w.doc, link.group(0))
     _record(c, w.doc, "published", link=link.group(0))
 
 
@@ -212,6 +261,11 @@ def turn_ended(c: str, event: str, end: Any) -> None:
         _tell(c, w.doc, STOPPED_WHY, AGAIN_FIX)
     elif runtime.engine() != "cc":
         _tell(c, w.doc, _api_why(), API_FIX, notices.SETTINGS)
+    elif w.error and w.link:
+        # the artifact took no new page (it may be gone, or no longer the analyst's to change): the next export
+        # publishes a new one
+        _keep_link(c, w.doc, "")
+        _tell(c, w.doc, TOOL_WHY.format(error=w.error), NEW_FIX)
     elif w.error:
         _tell(c, w.doc, TOOL_WHY.format(error=w.error), AGAIN_FIX)
     elif TOOL not in (main.tools or ()):

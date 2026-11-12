@@ -1239,6 +1239,10 @@ The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Sto
 
 The analyst chose Export, Claude artifact, on the {doc} “{title}”. thimble wrote the {doc} as one page: {page}. Publish that file as it is, with your Artifact tool. The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
 
+## export-artifact-update
+
+The analyst chose Export, Claude artifact, on the {doc} “{title}”. It was published before as {link}. thimble wrote the {doc} again as one page: {page}. Publish that file as it is, with your Artifact tool, and give {link} as its `url`. The new page replaces the old one. If the tool refuses because this session has not read that artifact, read it with the tool, then publish the file again. The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
+
 ## artifact-refused
 
 In thimble, the Artifact tool publishes only the page of a document the analyst exported as a Claude artifact.
