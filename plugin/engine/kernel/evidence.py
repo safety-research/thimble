@@ -1846,15 +1846,20 @@ def read_again(again: dict[str, Any], run: Runner | None) -> list[str] | None:
     return ran_reads(again, run(*key)) if key and run else None
 
 
-def sources_of(paths: list[str], folders: list[str]) -> list[dict[str, Any]]:
+def sources_of(paths: list[str], folders: list[str], read: dict[tuple[str, str], Any] | None = None) -> list[dict[str, Any]]:
     """The sources of computed evidence: each regular file of `paths` once, by its real path, its whole read, named from
-    the folder it lies in."""
+    the folder it lies in. `read` keeps the sources already made, so the citations of one code read each file once."""
     seen: dict[str, str] = {}
     for p in paths:
         real = _real(p)
         if real and real not in seen:
             seen[real] = p
-    return [s for p in seen.values() for s in [source(p, file_named(p, folders) or os.path.basename(p))] if s]
+    read = {} if read is None else read
+    for real, p in seen.items():
+        name = file_named(p, folders) or os.path.basename(p)
+        if (real, name) not in read:
+            read[(real, name)] = source(p, name)
+    return [s for real, p in seen.items() for s in [read[(real, file_named(p, folders) or os.path.basename(p))]] if s]
 
 
 def _mtime_ms(st: os.stat_result) -> float:
@@ -2156,6 +2161,7 @@ def ran_again(items: list[Any], out: list[Any], run: Runner) -> None:
 
     with ThreadPoolExecutor(max_workers=min(len(keys), os.cpu_count() or 1)) as pool:
         ran = dict(zip(keys, pool.map(one, keys)))
+    read: dict[tuple[str, str], Any] = {}
     for i in due:
         again = items[i]["rerun"]
         reads = ran_reads(again, ran[run_key(again)])
@@ -2164,7 +2170,7 @@ def ran_again(items: list[Any], out: list[Any], run: Runner) -> None:
         root, cwd = again.get("root") or None, str(again.get("cwd") or ".")
         files = [*code_files(str(again.get("command") or ""), cwd, root), *reads]
         clear = [{k: v for k, v in s.items() if k not in ("changed", "gone")} for s in out[i]["sources"]]
-        out[i] = {**out[i], "sources": clear, "rests": sources_of(files, [f for f in (root, cwd) if f])}
+        out[i] = {**out[i], "sources": clear, "rests": sources_of(files, [f for f in (root, cwd) if f], read)}
 
 
 # ------------------------------------------------------------------------------------------------ tables and cards
