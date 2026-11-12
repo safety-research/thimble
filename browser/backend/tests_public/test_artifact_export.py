@@ -1,7 +1,8 @@
 """Export, Claude artifact (artifact_export.py): with an API key or WIF nothing is published, the notice says why with the
 fix, and the page downloads the artifact page; on Claude Code sign-in main gets the request, publishes the page with its
-Artifact tool and nothing else, and the page gets the link, or the notice says why there is none. A document is one
-artifact: a later export updates the artifact the first published. No model call and no `claude`: the Agent SDK is a
+Artifact tool and nothing else, and the page gets the link, or the notice says why there is none. The page holds the
+citations and the comments when the Export menu asks for them. A document is one artifact: a later export updates the
+artifact the first published. No model call and no `claude`: the Agent SDK is a
 fake ClaudeSDKClient, and the card harness's pictures are faked."""
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ from claude_agent_sdk import (AssistantMessage, PermissionResultAllow, Permissio
 from fastapi import FastAPI
 
 from app import agents, artifact_export, claude_access, exports, investigation, notices, runtime, runtime_cc
-from test_exports import BASE, _write_with_figure, artifact_rules, chart, harness  # noqa: F401 — `chart`, `harness` are fixtures
+from test_exports import BASE, _comment_on, _write_with_figure, artifact_rules, chart, harness  # noqa: F401 — `chart`, `harness` are fixtures
 from test_runtime import CORPUS, fake_sdk, main_records, on  # noqa: F401 — `on` is a fixture
 
 LINK = "https://claude.ai/code/artifact/5f3a1c2e-7b4d-4c8a-9e21-0d6b7f8a9c10"
@@ -55,10 +56,10 @@ def session(*middle: Any, tools: tuple[str, ...] = ("Read", "Artifact")) -> list
                           session_id="sess-art")]
 
 
-async def export_now() -> None:
-    """Export, Claude artifact, on the report, and main's turn on it."""
+async def export_now(asked: str = "") -> None:
+    """Export, Claude artifact, on the report, with what the Export menu `asked` for, and main's turn on it."""
     async with client() as api:
-        r = await api.post(f"{BASE}/report/export/artifact")
+        r = await api.post(f"{BASE}/report/export/artifact{asked}")
         assert r.status_code == 200 and r.json() == {"publishing": True}, r.text
     task = runtime.ensure(CORPUS).main.task
     assert task is not None
@@ -97,9 +98,12 @@ async def test_on_claude_code_sign_in_main_publishes_the_page_with_its_artifact_
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     agents.ensure_main(CORPUS)
     notices.post(CORPUS, kind="export", key=artifact_export.KEY, text="An earlier export published nothing.")
-    await export_now()
-    # main got the request, which names the page it publishes: the report's artifact page, in the workspace
+    await _comment_on(chart)
+    await export_now("?citations=true&comments=true")
+    # main got the request, which names the page it publishes: the report's artifact page, in the workspace, with the
+    # citations and the comments the Export menu asked for
     assert artifact_rules(page.read_text()) == []
+    assert 'id="note-1"' in page.read_text() and '<div class="cm-name">Comment</div>' in page.read_text()
     assert f"thimble wrote the report as one page: {page}. Publish that file as it is, with your Artifact tool." in seen["prompt"]
     # it says the artifact is private and that sharing it is up to the analyst's settings, so main's reply promises none
     assert "The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings." in seen["prompt"]
@@ -173,6 +177,8 @@ async def test_a_second_export_updates_the_artifact_the_first_published_also_fro
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     agents.ensure_main(CORPUS)
     await export_now()
+    # with nothing asked, the page holds the report's text and figures alone
+    assert "note-" not in page.read_text() and "<figure" in page.read_text()
     # the link is kept with the report, in the workspace
     assert artifact_export.kept_link(CORPUS, "report") == LINK
     # a new chat of main: the next export asks main to publish the page to that link; the tool refuses until this

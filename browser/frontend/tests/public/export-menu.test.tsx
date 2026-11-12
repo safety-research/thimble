@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // The report's Export (src/report/ExportMenu.tsx): the formats the server offers, Claude artifact among them noted by
-// what it gives, a link. Claude artifact asks the server to have main publish the report (POST …/export/artifact) and
-// says it is exporting until main's turn ends (the stream's `export` record): the artifact's link then comes in a toast,
-// and when nothing was published the artifact page downloads in its place, as it does at once when the server can
-// publish nothing here.
+// what it gives, a link, and under them Include, two switches both off at first, Citations and Comments, which go with
+// the format picked next and stay as set for the report. Claude artifact asks the server to have main publish the report
+// (POST …/export/artifact) and says it is exporting until main's turn ends (the stream's `export` record): the
+// artifact's link then comes in a toast, and when nothing was published the artifact page downloads in its place, as it
+// does at once when the server can publish nothing here.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { bus } from '../../src/lib/bus.ts'
@@ -19,6 +20,7 @@ const FORMATS = [
 ]
 const LINK = 'https://claude.ai/code/artifact/5f3a1c2e-7b4d-4c8a-9e21-0d6b7f8a9c10'
 const PAGE = 'Test-runs-per-agent.artifact.html'
+const OFF = '?citations=false&comments=false'
 
 let asked: string[] = []
 let saved: string[] = []
@@ -29,6 +31,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const made = { create: URL.createObjectURL, revoke: URL.revokeObjectURL }
 
 beforeEach(() => {
+  localStorage.clear()
   asked = []
   saved = []
   toasts = []
@@ -36,9 +39,10 @@ beforeEach(() => {
   offToast = bus.on('toast', (t) => void toasts.push(t))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-    const u = String(url)
-    asked.push(`${init?.method ?? 'GET'} ${u.replace(/^.*\/types\//, '')}`)
-    if (u.endsWith('/report/exports')) return json({ formats: FORMATS })
+    const full = String(url)
+    asked.push(`${init?.method ?? 'GET'} ${full.replace(/^.*\/types\//, '')}`)
+    const u = full.split('?')[0]
+    if (u.endsWith('/exports')) return json({ formats: FORMATS })
     if (u.endsWith('/export/artifact') && init?.method === 'POST') return json({ publishing })
     if (u.endsWith('/export/artifact')) return new Response('<title>Test runs</title>', { status: 200, headers: { 'x-export-name': PAGE } })
     return json({})
@@ -78,7 +82,7 @@ async function exportArtifact() {
   await mount(<ExportMenu ws="ws" slug="report" page={false} />)
   await click(q('.wu-export'))
   await click(q('.menu-item[data-item="artifact"]'))
-  await until(() => asked.includes('POST report/export/artifact'))
+  await until(() => asked.includes(`POST report/export/artifact${OFF}`))
 }
 const ended = (status: string, link?: string) => act(async () => dispatch({ type: 'export', doc: 'report', format: 'artifact', status, ...(link ? { link } : {}) }))
 
@@ -90,7 +94,46 @@ test('Export lists Claude artifact, noted as a link, after the files', async () 
     ['HTML', '.html'],
     ['PDF', '.pdf'],
     ['Claude artifact', 'link'],
+    ['Citations', undefined],
+    ['Comments', undefined],
   ])
+})
+
+test("Include's Citations and Comments are off at first, a click turns one on and keeps the menu open, and the next format's file and the report's next export carry them", async () => {
+  await mount(<ExportMenu ws="ws" slug="report" page={false} />)
+  await click(q('.wu-export'))
+  const switches = () => [...document.body.querySelectorAll<HTMLElement>('.menu-item[role="menuitemcheckbox"]')].map((b) => [b.textContent, b.getAttribute('aria-checked')])
+  expect(q('.menu-heading')?.textContent).toBe('Include')
+  expect(switches()).toEqual([['Citations', 'false'], ['Comments', 'false']])
+  // a format picked with both off asks for the text and figures alone
+  await click(q('.menu-item[data-item="markdown"]'))
+  await until(() => saved.length)
+  expect(asked.at(-1)).toBe(`GET report/export/markdown${OFF}`)
+  // a switch turns over where it stands, with its check, and the menu stays open for the format
+  await click(q('.wu-export'))
+  await click(q('.menu-item[data-item="comments"]'))
+  expect(switches()).toEqual([['Citations', 'false'], ['Comments', 'true']])
+  expect(q('.menu-item[data-item="comments"] .menu-check')).not.toBeNull()
+  await click(q('.menu-item[data-item="citations"]'))
+  expect(switches()).toEqual([['Citations', 'true'], ['Comments', 'true']])
+  await click(q('.menu-item[data-item="pdf"]'))
+  await until(() => saved.length === 2)
+  expect(asked.at(-1)).toBe('GET report/export/pdf?citations=true&comments=true')
+  expect(q('.menu')).toBeNull()
+  // the report keeps them: the menu opens with them set, and a Claude artifact carries them too
+  unmountAll()
+  await mount(<ExportMenu ws="ws" slug="report" page={false} />)
+  await click(q('.wu-export'))
+  expect(switches()).toEqual([['Citations', 'true'], ['Comments', 'true']])
+  publishing = false
+  await click(q('.menu-item[data-item="artifact"]'))
+  await until(() => saved.length === 3)
+  expect(asked.slice(-2)).toEqual(['POST report/export/artifact?citations=true&comments=true', 'GET report/export/artifact?citations=true&comments=true'])
+  // another report keeps its own, off
+  unmountAll()
+  await mount(<ExportMenu ws="ws" slug="story" page={false} />)
+  await click(q('.wu-export'))
+  expect(switches()).toEqual([['Citations', 'false'], ['Comments', 'false']])
 })
 
 test("Claude artifact says it is exporting until main's turn ends, and the artifact's link comes in a toast", async () => {
@@ -114,7 +157,7 @@ test('when main publishes nothing, the artifact page downloads in its place', as
   await ended('failed')
   await until(() => saved.length)
   expect(saved).toEqual([PAGE])
-  expect(asked.at(-1)).toBe('GET report/export/artifact')
+  expect(asked.at(-1)).toBe(`GET report/export/artifact${OFF}`)
   expect(toasts).toEqual([])
 })
 

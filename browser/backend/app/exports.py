@@ -1,12 +1,15 @@
 """A written document exported as a file: Markdown, HTML or PDF, or as a page to publish as a Claude artifact.
 
-Every format starts from one reading of the document (read_model): its title, units (a report's sections), their
-figures and the citations, numbered in order of first use;
-a card a sentence names as a noun is written as the card's title (report_types.card_nouns).
-Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
-the citations as numbered notes linked from the text, set as the report is on the page, in its faces and sizes on white,
-each figure the card's question, its art and its caption; PDF is that HTML printed by the browser on A4 pages,
-a heading kept with what follows it and a figure, a table row or a note never split. The artifact's page (to_artifact)
+Every format starts from one reading of the document (read_model): its title, units (a report's sections) and their
+figures; a card a sentence names as a noun is written as the card's title (report_types.card_nouns). An export holds
+those alone, unless the Export menu asks for more: `citations`, numbered in order of first use, with the citation
+check's mark on a sentence nothing shows; `comments`, the comments the report's margin shows (comments_of), each after
+the passage it is on. Markdown writes the citations as footnotes and a comment as a quote under its passage; HTML is one
+self-contained file (fonts, pictures and styles inlined) with the citations as numbered notes linked from the text, set
+as the report is on the page, in its faces and sizes on white, each figure the card's question, its art and its
+caption, each comment beside a rule in its check's color, the passage it is on tinted in that color as on the page; PDF
+is that HTML printed by the browser on A4 pages, a heading kept with what follows it and a figure, a table row, a
+comment or a note never split. The artifact's page (to_artifact)
 is that HTML made to claude.ai's rules for an artifact: nothing loaded from elsewhere, light and dark from tokens, each
 figure's art drawn on both papers, readable at a phone's width; main publishes it (artifact_export.py), and where it
 cannot, the page downloads. A page document, whose HTML is its own, has no artifact export.
@@ -32,6 +35,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from . import config, frames, headless, investigation, refs, userconf
+from .kernel_thimble import LABEL_COLOURS
 from .report import _collapse, plain_text
 
 log = logging.getLogger("thimble.exports")
@@ -56,6 +60,15 @@ FIGURE_ZOOM = 1.5
 # (render.export_theme)
 PAPER = "#ffffff"
 DARK = "dark"  # the paper the art of an artifact's figures is drawn on for its dark theme (to_artifact)
+# a comment's check's color on Dark, by its palette place as LABEL_COLOURS has it on the light papers (frontend
+# styles/tokens.css, Dark's --label-none and --label-1..18), which the artifact's dark theme draws a comment's rule and
+# tint in
+LABEL_DARK = ("#a09c93", "#2275e8", "#da7306", "#17a973", "#0c9edc", "#beb222", "#5fcfca", "#9b7239", "#9ebdff", "#50c14d",
+              "#0985b4", "#f6b896", "#0bb8d6", "#ef5b51", "#f7a39c", "#a585f5", "#cdb9ff", "#ec6aa8", "#f6b0d2")
+# the name over a comment no check left: Claude's for a note of main's, else the analyst's own, which the page calls You
+NOTE_NAMES = {"claude": "Claude"}
+COMMENT_NAME = "Comment"
+UNVERIFIED = "unverified"  # the check the citation check's unverified tags belong to (checks.RETIRED)
 _MARK_RE = re.compile(r"\[([^\]]*)\]\(#\)")  # a citation mark in a card's text, `[words](#)`
 _INLINE_RE = re.compile(r"\*\*(.+?)\*\*|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|`([^`]+)`|\[([^\]]+)\]\((https?://[^)\s]+)\)")
 
@@ -114,18 +127,21 @@ class Notes:
         return out
 
 
-def _sentence(x: dict[str, Any], notes: Notes) -> dict[str, Any]:
+def _sentence(x: dict[str, Any], notes: Notes, cite: bool) -> dict[str, Any]:
+    """A sentence as an export writes it: its words, and with `cite` its citations' numbers and the citation check's
+    mark when nothing shows it."""
     from .report_types import UNVERIFIED_MARK, _sentence_refs, card_nouns  # noqa: PLC0415
 
     text = plain_text(card_nouns(str(x.get("text") or ""), notes.cites))
-    if "unverified" in (x.get("tags") or []):
+    if cite and "unverified" in (x.get("tags") or []):
         text += f" {UNVERIFIED_MARK}"
     # a list item's marker, "1." for a numbered list, else "-"; None for a sentence of prose
     bullet = ("1." if x.get("bullet") == "1." else "-") if x.get("bullet") else None
-    return {"text": text, "notes": notes.of(_sentence_refs(x)), "bullet": bullet}
+    return {"id": str(x.get("id") or ""), "text": text, "notes": notes.of(_sentence_refs(x)) if cite else [],
+            "bullet": bullet}
 
 
-def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
+def _figure(f: Any, notes: Notes, cite: bool) -> dict[str, Any] | None:
     if isinstance(f, str):
         f = {"cell": f}
     if not isinstance(f, dict):
@@ -143,26 +159,85 @@ def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
 
     raw_caption = str(f.get("caption") or "")
     return {"card": cid, "caption": plain_text(card_nouns(raw_caption, notes.cites)), "lead": bool(f.get("lead")),
-            "after": f.get("after_paragraph"), "notes": notes.of([f"card:{cid}", *refs.extract_refs(raw_caption)])}
+            "after": f.get("after_paragraph"),
+            "notes": notes.of([f"card:{cid}", *refs.extract_refs(raw_caption)]) if cite else []}
 
 
-def read_model(c: str, doc: dict[str, Any]) -> dict[str, Any]:
-    """The document as every format reads it (module note)."""
+def comments_of(c: str, doc: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """The comments the report's margin shows (frontend report/checkComments openComments and shownComments), by the id
+    of the passage each is on (a sentence, the first sentence of a paragraph for one on the whole paragraph, a section's
+    heading, the title): the open ones, the analyst's and Claude's always and a check's while that check is on, then the
+    citation check's unverified tags where its check is on and left none. Each {name, colour, text, details, whole}:
+    the check's name and its palette place, else NOTE_NAMES or COMMENT_NAME and the place of no match (0); its
+    statement and its details, their citations flattened to their values; whether it is on its whole paragraph."""
+    from . import checks, report_types  # noqa: PLC0415
+
+    on = {str(x["id"]): x for x in checks.list_checks(c) if x.get("shown")}
+    place = lambda check: int(check.get("colour")) if check.get("colour") in range(len(LABEL_COLOURS)) else 0  # noqa: E731
+    out: dict[str, list[dict[str, Any]]] = {}
+    marked: set[str] = set()
+    for cm in doc.get("comments") or []:
+        if not isinstance(cm, dict) or (cm.get("status") or "open") != "open":
+            continue
+        sid, text = str(cm.get("sentence_id") or ""), plain_text(str(cm.get("text") or ""))
+        check = str(cm["check"]) if cm.get("check") else None
+        if not sid or not text:
+            continue
+        if check == UNVERIFIED:
+            marked.add(sid)
+        if check is not None and check not in on:
+            continue
+        name = (on[check].get("name") or check) if check else NOTE_NAMES.get(str(cm.get("author")), COMMENT_NAME)
+        out.setdefault(sid, []).append({"name": str(name), "colour": place(on[check]) if check else 0, "text": text,
+                                        "details": str(cm.get("details") or "").strip(), "whole": cm.get("paragraph") is True})
+    if UNVERIFIED in on:
+        for x in report_types.all_sentences(doc):
+            sid = str(x.get("id") or "")
+            if sid and sid not in marked and "unverified" in (x.get("tags") or []):
+                note = str(((x.get("tag_notes") or {}) if isinstance(x.get("tag_notes"), dict) else {}).get("unverified") or "")
+                out.setdefault(sid, []).append({"name": str(on[UNVERIFIED].get("name") or UNVERIFIED),
+                                                "colour": place(on[UNVERIFIED]), "text": plain_text(note) or "Not checked",
+                                                "details": "", "whole": False})
+    return out
+
+
+def _placed(sentences: list[dict[str, Any]], by: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """The comments on `sentences` (a paragraph, a list, a page's claims) in their order, which an export sets after
+    them. A sentence a comment is on takes the colour of its first as its tint (`tint`), and each sentence of a paragraph
+    a comment on the whole paragraph is on, as the page tints them."""
+    out = [cm for x in sentences for cm in by.get(x["id"], [])]
+    for x in sentences:
+        if by.get(x["id"]):
+            x["tint"] = by[x["id"]][0]["colour"]
+    for cm in out:
+        for x in sentences if cm["whole"] else []:
+            x.setdefault("tint", cm["colour"])
+    return out
+
+
+def read_model(c: str, doc: dict[str, Any], *, citations: bool = False, comments: bool = False) -> dict[str, Any]:
+    """The document as every format reads it (module note): with `citations` its citations, with `comments` the comments
+    the page shows, each list of them after the passage they are on (`comments` of the title, a claims list, a heading,
+    a paragraph)."""
     from . import report_types  # noqa: PLC0415
 
     notes = Notes(c)
+    by = comments_of(c, doc) if comments else {}
     title = _collapse(doc.get("title")) or _collapse(doc.get("type")) or "Report"
-    claims = [_sentence(x, notes) for x in doc.get("claims") or [] if isinstance(x, dict)] if doc.get("html") else []
+    claims = [_sentence(x, notes, citations) for x in doc.get("claims") or [] if isinstance(x, dict)] if doc.get("html") else []
     units: list[dict[str, Any]] = []
     for u in report_types.units(doc):
-        paras = [{"id": p.get("id"), "sentences": [_sentence(x, notes) for x in p.get("sentences") or [] if isinstance(x, dict)]}
+        paras = [{"id": p.get("id"), "sentences": [_sentence(x, notes, citations) for x in p.get("sentences") or [] if isinstance(x, dict)]}
                  for p in u.get("paragraphs") or [] if isinstance(p, dict)]
-        figs = [f for f in (_figure(x, notes) for x in u.get("figures") or []) if f]
-        units.append({"heading": _collapse(u.get("heading")), "level": report_types._level(u.get("level")),
-                      "tldr": report_types._is_tldr(u.get("heading")), "paragraphs": [p for p in paras if p["sentences"]],
-                      "figures": figs})
+        paras = [{**p, "comments": _placed(p["sentences"], by)} for p in paras if p["sentences"]]
+        figs = [f for f in (_figure(x, notes, citations) for x in u.get("figures") or []) if f]
+        heading = _collapse(u.get("heading"))
+        units.append({"heading": heading, "level": report_types._level(u.get("level")),
+                      "tldr": report_types._is_tldr(u.get("heading")), "paragraphs": paras, "figures": figs,
+                      "comments": by.get(str(u.get("id")), []) if heading else []})
     units.sort(key=lambda u: 0 if u["tldr"] else 1)
-    return {"title": title, "claims": claims, "units": units, "notes": notes.rows,
+    return {"title": title, "comments": by.get(report_types.TITLE_BLOCK, []), "claims": claims,
+            "claims_comments": _placed(claims, by), "units": units, "notes": notes.rows,
             "page_html": doc.get("html") if isinstance(doc.get("html"), str) else None}
 
 
@@ -173,22 +248,45 @@ def _md_sentence(s: dict[str, Any]) -> str:
     return s["text"] + "".join(f"[^{n}]" for n in s["notes"])
 
 
+_ITEM_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+")  # a list item's marker at the start of a line of a comment's details
+
+
+def detail_blocks(details: str) -> list[list[str]]:
+    """A comment's details as its blocks (paragraphs, lists), each its lines, their citations flattened to their values
+    as the comment's statement is (report.plain_text)."""
+    blocks = [[plain_text(line) for line in b.splitlines() if line.strip()] for b in re.split(r"\n\s*\n", details or "")]
+    return [b for b in blocks if any(b)]
+
+
+def _md_comments(cms: list[dict[str, Any]]) -> list[str]:
+    """Comments as Markdown, each a quote under its passage: the name of its check (or who left it) bold, its statement,
+    then its details."""
+    out: list[str] = []
+    for cm in cms:
+        out.append(f"> **{cm['name']}:** {cm['text']}")
+        for block in detail_blocks(cm["details"]):
+            out += [">", *(f"> {line}" for line in block)]
+        out.append("")
+    return out
+
+
 def to_markdown(m: dict[str, Any]) -> str:
-    """The document as Markdown, each citation a footnote naming what it cites and quoting it."""
-    out = [f"# {m['title']}", ""]
+    """The document as Markdown, each citation a footnote naming what it cites and quoting it, each comment a quote under
+    its passage."""
+    out = [f"# {m['title']}", ""] + _md_comments(m["comments"])
     for s in m["claims"]:
         out.append(f"- {_md_sentence(s)}")
     if m["claims"]:
-        out.append("")
+        out += [""] + _md_comments(m["claims_comments"])
     for u in m["units"]:
         if u["heading"]:
-            out += [f"{'#' * max(2, u['level'])} {u['heading']}", ""]
+            out += [f"{'#' * max(2, u['level'])} {u['heading']}", ""] + _md_comments(u["comments"])
         for p in u["paragraphs"]:
             bullets = [s for s in p["sentences"] if s["bullet"]]
             if bullets and len(bullets) == len(p["sentences"]):
-                out += [f"{s['bullet']} {_md_sentence(s)}" for s in bullets] + [""]
+                out += [f"{s['bullet']} {_md_sentence(s)}" for s in bullets] + [""] + _md_comments(p["comments"])
                 continue
-            out += [" ".join(_md_sentence(s) for s in p["sentences"]), ""]
+            out += [" ".join(_md_sentence(s) for s in p["sentences"]), ""] + _md_comments(p["comments"])
         for f in u["figures"]:
             if f["caption"]:
                 out += [f"*Figure: {f['caption']}*" + "".join(f"[^{n}]" for n in f["notes"]), ""]
@@ -238,10 +336,23 @@ def font_faces() -> str:
 # thimble's tokens, which a page (a custom type written as HTML) may name in its own styles (_page_html)
 TOKENS_CSS = """:root{--paper-0:#fbfaf7;--paper-1:#f5f3ee;--white:#fffdf8;--ink-900:#000;--ink-700:#4a4844;--ink-500:#64625b;
 --ink-300:#c6c2b9;--ink-rgb:27,26,24;--font-body:'Hanken Grotesk',system-ui,sans-serif;--font-mono:'Geist Mono',ui-monospace,monospace}"""
+# A comment under its passage (_comments_html): its check's name over its statement and its details, beside a 2 px
+# rule in its check's color (--cm), which tints its passage at 16% (_tinted), as the page tints one (styles/report.css
+# .wu-flag).
+COMMENT_CSS = """.cm{display:flex;gap:10px;margin:0 0 12px;font-size:13px;line-height:1.55;color:var(--ink-700);break-inside:avoid}
+.cm::before{content:'';flex:none;width:2px;background:var(--cm)}
+.cm>div{min-width:0}
+.cm-name{font-size:12px;font-weight:500;color:var(--ink-900)}
+.cm p,.cm ul,.cm ol{margin:2px 0 0}
+.cm ul,.cm ol{padding-left:18px}
+.cm-more{color:var(--ink-500)}
+.cm-on{background:color-mix(in oklab,var(--cm) 16%,transparent);border-radius:2px;-webkit-box-decoration-break:clone;
+box-decoration-break:clone}"""
 # The report as the page sets it (frontend styles/report.css): Hanken Grotesk at 15/1.7 on white (PAPER) in Neutral's
 # inks, the title at 28/600 and a section at 18/600, a column as wide as a figure's art (FIGURE_W); a figure is its card's
-# question, its art and its caption beside the 2 px ink rule. In print a heading stays with what follows it, a figure, a
-# list item, a table row and a note are never split, and a figure's art taller than a page is drawn smaller, whole.
+# question, its art and its caption beside the 2 px ink rule; a comment as COMMENT_CSS sets it. In print a heading stays
+# with what follows it, a figure, a list item, a table row, a comment and a note are never split, and a figure's art
+# taller than a page is drawn smaller, whole.
 BASE_CSS = f"""
 :root{{--ink-700:#47474c;--ink-500:#636368;--ink-rgb:24,24,27}}
 *{{box-sizing:border-box}}
@@ -272,6 +383,7 @@ figcaption::before{{content:'';flex:none;width:2px;background:var(--ink-900)}}
 .fig-text th,.fig-text td{{text-align:left;padding:3px 8px;border-bottom:1px solid rgba(var(--ink-rgb),.1)}}
 .fig-text th{{font-weight:500;color:var(--ink-500)}}
 tr{{break-inside:avoid}}
+{COMMENT_CSS}
 .notes{{margin-top:44px;padding-top:14px;border-top:1px solid rgba(var(--ink-rgb),.14);font-size:12px;line-height:1.5;
 color:var(--ink-700)}}
 .notes h2{{font-size:13px;margin:0 0 8px;color:var(--ink-500);font-weight:500;letter-spacing:0}}
@@ -310,16 +422,57 @@ def _cites_html(ns: list[int]) -> str:
     return '<sup class="cite">' + ",".join(f'<a href="#note-{n}">{n}</a>' for n in ns) + "</sup>"
 
 
-def _sentence_html(s: dict[str, Any]) -> str:
-    return inline_html(s["text"]) + _cites_html(s["notes"])
+def _cm_style(colour: int, themed: bool = False) -> str:
+    """The style attribute that gives an element a comment's check's color: on white (`--cm`), or on the artifact's page
+    (`themed`) its color on both papers, of which its theme takes one (ARTIFACT_CSS)."""
+    at = colour if 0 <= colour < len(LABEL_COLOURS) else 0
+    return (f' style="--cm-light:{LABEL_COLOURS[at]};--cm-dark:{LABEL_DARK[at]}"' if themed
+            else f' style="--cm:{LABEL_COLOURS[at]}"')
 
 
-def _para_html(p: dict[str, Any]) -> str:
+def _tinted(words: str, colour: int | None, themed: bool = False) -> str:
+    """A passage's words, tinted in the color of the first comment on it (`colour`, None for none), as the page tints a
+    commented passage."""
+    return words if colour is None else f'<span class="cm-on"{_cm_style(colour, themed)}>{words}</span>'
+
+
+def _sentence_html(s: dict[str, Any], themed: bool = False) -> str:
+    return _tinted(inline_html(s["text"]) + _cites_html(s["notes"]), s.get("tint"), themed)
+
+
+def _para_html(p: dict[str, Any], themed: bool = False) -> str:
     bullets = [s for s in p["sentences"] if s["bullet"]]
     if bullets and len(bullets) == len(p["sentences"]):
         tag = "ol" if all(s["bullet"] == "1." for s in bullets) else "ul"
-        return f"<{tag}>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in bullets) + f"</{tag}>"
-    return f"<p>{' '.join(_sentence_html(s) for s in p['sentences'])}</p>"
+        return f"<{tag}>" + "".join(f"<li>{_sentence_html(s, themed)}</li>" for s in bullets) + f"</{tag}>"
+    # sentences side by side in one tint read as one passage, the space between them tinted too, as on the page
+    runs: list[tuple[int | None, list[str]]] = []
+    for s in p["sentences"]:
+        words = inline_html(s["text"]) + _cites_html(s["notes"])
+        if runs and s.get("tint") is not None and runs[-1][0] == s.get("tint"):
+            runs[-1][1].append(words)
+        else:
+            runs.append((s.get("tint"), [words]))
+    return f"<p>{' '.join(_tinted(' '.join(words), tint, themed) for tint, words in runs)}</p>"
+
+
+def _comments_html(cms: list[dict[str, Any]], themed: bool = False) -> str:
+    """Comments as an export sets them after their passage: each beside a rule in its check's color, the name of its
+    check (or who left it) over its statement, then its details in the quieter ink."""
+    out = []
+    for cm in cms:
+        more = "".join(_detail_html(b) for b in detail_blocks(cm["details"]))
+        out.append(f'<aside class="cm"{_cm_style(cm["colour"], themed)}><div><div class="cm-name">{_esc(cm["name"])}</div>'
+                   f'<p>{inline_html(cm["text"])}</p>{more}</div></aside>')
+    return "".join(out)
+
+
+def _detail_html(lines: list[str]) -> str:
+    """A block of a comment's details: a list when each of its lines is a list item, else a paragraph."""
+    if all(_ITEM_RE.match(x) for x in lines):
+        tag = "ol" if all(x[0].isdigit() for x in lines) else "ul"
+        return f'<{tag} class="cm-more">' + "".join(f"<li>{inline_html(_ITEM_RE.sub('', x))}</li>" for x in lines) + f"</{tag}>"
+    return f'<p class="cm-more">{inline_html(" ".join(lines))}</p>'
 
 
 def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]] | None = None) -> str:
@@ -376,7 +529,9 @@ def unit_blocks(u: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
 
 
 def _unit_body(u: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]] | None = None) -> str:
-    return "".join(_para_html(x) if kind == "paragraph" else _figure_html(x, pics, dark) for kind, x in unit_blocks(u))
+    themed = dark is not None
+    return "".join(_para_html(x, themed) + _comments_html(x["comments"], themed) if kind == "paragraph"
+                   else _figure_html(x, pics, dark) for kind, x in unit_blocks(u))
 
 
 def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | None = None) -> str:
@@ -388,14 +543,19 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
 
 
 def _main_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], dark: dict[str, dict[str, Any]] | None = None) -> str:
-    """The document's title, sections, figures and notes, as `<main>`; with `dark`, each figure's art on Dark too."""
-    parts = [f"<h1>{inline_html(m['title'])}</h1>"]
+    """The document's title, sections, figures, comments and notes, as `<main>`; with `dark` (the artifact's page), each
+    figure's art and each comment's color on Dark too."""
+    themed = dark is not None
+    first = lambda cms: cms[0]["colour"] if cms else None  # noqa: E731 — the tint of a passage with comments
+    parts = [f"<h1>{_tinted(inline_html(m['title']), first(m['comments']), themed)}</h1>", _comments_html(m["comments"], themed)]
     if m["claims"]:
-        parts.append("<ul>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in m["claims"]) + "</ul>")
+        parts.append("<ul>" + "".join(f"<li>{_sentence_html(s, themed)}</li>" for s in m["claims"]) + "</ul>")
+        parts.append(_comments_html(m["claims_comments"], themed))
     for u in m["units"]:
         if u["heading"]:
             lvl = min(4, max(2, u["level"]))
-            parts.append(f"<h{lvl}>{inline_html(u['heading'])}</h{lvl}>")
+            parts.append(f"<h{lvl}>{_tinted(inline_html(u['heading']), first(u['comments']), themed)}</h{lvl}>")
+            parts.append(_comments_html(u["comments"], themed))
         parts.append(_unit_body(u, pics, dark))
     parts.append(_notes_html(m))
     return "<main>" + "".join(parts) + "</main>"
@@ -420,7 +580,8 @@ def _page_html(m: dict[str, Any], faces: str) -> str:
 
 # The report as the page sets it (BASE_CSS) in the two themes an artifact shows: Neutral's white and inks, and Dark's
 # card and inks (frontend styles/tokens.css), as tokens that the viewer's theme picks (its data-theme, else the system's
-# scheme). Each figure's art is drawn on both papers and the theme shows one (--art-light, --art-dark). The column is as
+# scheme). Each figure's art is drawn on both papers and the theme shows one (--art-light, --art-dark), and a comment's
+# rule and tint take its check's color on the paper shown (--cm-light, --cm-dark, _cm_style). The column is as
 # wide as a figure's art, with the side gutter claude.ai asks for at a phone's width; a picture, a table or a long name
 # never widens the page.
 ARTIFACT_DARK = ("--paper:#25252a;--ink-900:#fdfcfa;--ink-700:#e2dfd8;--ink-500:#b8b5ad;--ink-rgb:248,246,242;"
@@ -464,6 +625,10 @@ color:var(--ink-700)}}
 .fig-text th,.fig-text td{{text-align:left;padding:3px 8px;border-bottom:1px solid rgba(var(--ink-rgb),.1);
 font-variant-numeric:tabular-nums}}
 .fig-text th{{font-weight:500;color:var(--ink-500)}}
+{COMMENT_CSS}
+.cm,.cm-on{{--cm:var(--cm-light)}}
+@media (prefers-color-scheme:dark){{:root:not([data-theme="light"]) :is(.cm,.cm-on){{--cm:var(--cm-dark)}}}}
+:root[data-theme="dark"] :is(.cm,.cm-on){{--cm:var(--cm-dark)}}
 .notes{{margin-top:44px;padding-top:14px;border-top:1px solid rgba(var(--ink-rgb),.14);font-size:12px;line-height:1.5;
 color:var(--ink-700)}}
 .notes h2{{font-size:13px;margin:0 0 8px;color:var(--ink-500);font-weight:500;letter-spacing:0}}
@@ -637,9 +802,10 @@ def _filename(title: str, slug: str, ext: str) -> str:
     return f"{base}.{ext}"
 
 
-async def read_for(c: str, inv_id: str, slug: str, fmt: str) -> dict[str, Any]:
-    """The document read for format `fmt` (read_model). HTTPException 404 for no document or no such format, 409 for a
-    format that cannot run here, with the reason."""
+async def read_for(c: str, inv_id: str, slug: str, fmt: str, *, citations: bool = False,
+                   comments: bool = False) -> dict[str, Any]:
+    """The document read for format `fmt` (read_model), with its citations and its comments when asked. HTTPException
+    404 for no document or no such format, 409 for a format that cannot run here, with the reason."""
     from . import report_types  # noqa: PLC0415
 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
@@ -651,7 +817,7 @@ async def read_for(c: str, inv_id: str, slug: str, fmt: str) -> dict[str, Any]:
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
     if not f["ok"]:
         raise HTTPException(409, f["why"])
-    return await asyncio.to_thread(read_model, c, doc)
+    return await asyncio.to_thread(lambda: read_model(c, doc, citations=citations, comments=comments))
 
 
 async def artifact_page(c: str, m: dict[str, Any]) -> str:
@@ -668,10 +834,11 @@ def artifact_name(m: dict[str, Any], slug: str) -> str:
     return _filename(m["title"], slug, "artifact.html")
 
 
-async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, str]:
-    """(content, file name, mime) of the document in format `fmt`: for a Claude artifact, the page main publishes. The
-    HTTPExceptions of read_for."""
-    m = await read_for(c, inv_id, slug, fmt)
+async def export(c: str, inv_id: str, slug: str, fmt: str, *, citations: bool = False,
+                 comments: bool = False) -> tuple[bytes, str, str]:
+    """(content, file name, mime) of the document in format `fmt`, with its citations and its comments when asked: for
+    a Claude artifact, the page main publishes. The HTTPExceptions of read_for."""
+    m = await read_for(c, inv_id, slug, fmt, citations=citations, comments=comments)
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
     if fmt == "markdown":
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
@@ -711,8 +878,9 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")
-async def export_route(c: str, inv_id: str, slug: str, fmt: str) -> Response:
+async def export_route(c: str, inv_id: str, slug: str, fmt: str, citations: bool = False,
+                       comments: bool = False) -> Response:
     slug = _slug(c, inv_id, slug)
-    data, name, mime = await export(c, inv_id, slug, fmt)
+    data, name, mime = await export(c, inv_id, slug, fmt, citations=citations, comments=comments)
     return Response(content=data, media_type=mime,
                     headers={"Content-Disposition": f'attachment; filename="{name}"', "X-Export-Name": name})

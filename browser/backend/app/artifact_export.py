@@ -162,15 +162,15 @@ def _api_why() -> str:
     return API_WHY.format(how=how) if how else NO_WAY
 
 
-async def publish(c: str, inv_id: str, slug: str) -> dict[str, Any]:
-    """Export, Claude artifact, on document `slug` (module note): {publishing: true} once main has the request, else
-    {publishing: false} with the notice told, and the page downloads the artifact page. The HTTPExceptions of
-    exports.read_for, and events.post's."""
+async def publish(c: str, inv_id: str, slug: str, *, citations: bool = False, comments: bool = False) -> dict[str, Any]:
+    """Export, Claude artifact, on document `slug` (module note), with its citations and its comments when asked:
+    {publishing: true} once main has the request, else {publishing: false} with the notice told, and the page downloads
+    the artifact page. The HTTPExceptions of exports.read_for, and events.post's."""
     from fastapi import HTTPException  # noqa: PLC0415
 
     from . import agents, events, exports, notices, runtime, tools  # noqa: PLC0415
 
-    m = await exports.read_for(c, inv_id, slug, "artifact")
+    m = await exports.read_for(c, inv_id, slug, "artifact", citations=citations, comments=comments)
     if runtime.engine() != "cc":
         _tell(c, slug, _api_why(), API_FIX, notices.SETTINGS)
         return {"publishing": False}
@@ -289,7 +289,7 @@ def forget(c: str) -> None:
 
 
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/export/artifact")
-async def publish_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
+async def publish_route(c: str, inv_id: str, slug: str, citations: bool = False, comments: bool = False) -> dict[str, Any]:
     from .exports import _slug  # noqa: PLC0415
 
-    return await publish(c, inv_id, _slug(c, inv_id, slug))
+    return await publish(c, inv_id, _slug(c, inv_id, slug), citations=citations, comments=comments)
