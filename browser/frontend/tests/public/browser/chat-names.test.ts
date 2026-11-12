@@ -1,7 +1,8 @@
 // Long names in the chat, in a real browser's layout (src/styles/chat.css), which jsdom cannot show. A subagent's chip
 // whose name is wider than the chat starts the name at its left edge and ends it in … (a bare button centers its words,
 // so live check br19 saw the names cut at the left), and a side thread's line, such as a fix's, shows its thread's
-// whole name, over a second line in its chip when one line is too short for it.
+// whole name, over a second line in its chip when one line is too short for it. A fix's quiet row too long for one line
+// keeps its mark beside its words.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -22,7 +23,8 @@ beforeAll(async () => {
     `import { ThreadsContext } from '${src('chat/Notes.tsx')}'`,
     `const name = ${JSON.stringify(NAME)}`,
     // a fix's line in main, and a subagent of main's with as long a name
-    `const rows = [{ kind: 'agent', index: 1, chat: 'f1', role: 'fixer', title: name }, { kind: 'agent', index: 2, chat: 's9', role: 'subagent', title: name }]`,
+    `const said = 'thimble fixed: Three more accent colors: red, teal, grape · tests pass'`,
+    `const rows = [{ kind: 'agent', index: 1, chat: 'f1', role: 'fixer', title: name }, { kind: 'agent', index: 2, chat: 's9', role: 'subagent', title: name }, { kind: 'chip', index: 3, chip: 'fix', ref: 'fix:1', text: said, status: 'ready' }]`,
     `const ctx = { labels: new Map([['f1', 'main/' + name]]), metas: new Map([['f1', { id: 'f1', kind: 'agent', role: 'fixer', title: name, status: 'running' }]]) }`,
     `const el = document.createElement('div')`,
     `el.style.width = '${WIDTH}px'`,
@@ -45,6 +47,7 @@ beforeAll(async () => {
   }
   await page.addScriptTag({ path: script })
   await page.waitForSelector('.chat-agent-name')
+  await page.waitForSelector('.chat-fix-said')
 })
 
 afterAll(async () => {
@@ -70,4 +73,14 @@ test("a fix's line shows its thread's whole name, on two lines in its chip, insi
     return { name: text.textContent, whole: text.scrollWidth <= text.clientWidth, lines: box.height > 30, inside: box.right <= width + 8 }
   }, WIDTH)
   assert.deepEqual(got, { name: `main/${NAME}`, whole: true, lines: true, inside: true })
+})
+
+test("a fix's quiet row too long for one line keeps its mark at the start of its first line, its words beside it", async () => {
+  const got = await page.evaluate((width) => {
+    const row = document.querySelector<HTMLElement>('.chat-fix-said')!
+    const mark = row.querySelector('.chat-fix-ico')!.getBoundingClientRect()
+    const words = row.querySelector('.chat-note-text')!.getBoundingClientRect()
+    return { beside: words.left >= mark.right, top: mark.top < words.top + 10, lines: words.height > 30, inside: words.right <= width + 2 }
+  }, WIDTH)
+  assert.deepEqual(got, { beside: true, top: true, lines: true, inside: true })
 })
