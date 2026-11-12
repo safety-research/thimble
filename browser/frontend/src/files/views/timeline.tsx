@@ -14,6 +14,8 @@ import { useMemo } from 'react'
 import { api } from '../../lib/api'
 import type { SourceEvents, SourceKey, SourceKind, TimeHint, TranscriptHint } from '../../lib/types'
 import { colorKeys, defaultChoice, KEY_COLORS } from '../colorChoice'
+import type { ViewLabelActions } from '../labelCalls'
+import { openLabelEditor } from '../LabelEditor'
 import { useFilesFilter } from '../useLabels'
 import { ViewerFrame, type FrameHost } from '../ViewerFrame'
 import type { ViewDef, ViewProps } from './common'
@@ -40,6 +42,22 @@ export function timelineAnswer(got: SourceEvents): SourceEvents & { initial: { c
 
 function Timeline({ workspace, path, targetRef, labels }: ViewProps) {
   const filter = useFilesFilter(workspace)
+  // the page's label controls, as ViewPane gives them: Color by's menu turns a label on and opens its editor, and a chip
+  // recolors a value; a new label applies to this file
+  const labelActions = useMemo<ViewLabelActions | undefined>(
+    () =>
+      labels && {
+        setOn: (id, on) => {
+          const k = labels.byId.get(id)
+          if (!k || !!k.shown === on) return
+          if (on) labels.setFocus(id)
+          labels.toggle(id)
+        },
+        setColour: labels.setColour,
+        edit: (id, at) => at && openLabelEditor({ id, ...at, appliesTo: [path] }),
+      },
+    [labels, path],
+  )
   const host = useMemo<FrameHost>(
     () => ({
       page: () => api.timelinePage(workspace),
@@ -63,6 +81,7 @@ function Timeline({ workspace, path, targetRef, labels }: ViewProps) {
       filter={filter}
       filterFiles={filter ? labels?.presence.get(filter.concept) : undefined}
       byId={labels?.byId}
+      labelActions={labelActions}
     />
   )
 }
