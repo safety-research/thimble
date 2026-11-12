@@ -16,7 +16,7 @@
 //   checking     as pending, and a turning glyph (purple) right after it, until its own verdict arrives
 //   verified     as pending
 //   corrected    the corrected words in place of the marked ones, as verified, with no sign: a click on them opens
-//                the tray, whose status says the check corrected them, and what they were, with the evidence. A
+//                the tray, whose status says verified, with the evidence. A
 //                narrowed one (`narrowed`) keeps its words: only the part the check cited is the mark, the rest reads
 //                as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence

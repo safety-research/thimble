@@ -16,14 +16,15 @@
 // Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words, under
 // `output · table`.
 //
-// Its status in the tray's words (tray/tray.mjs checkStatus), with the sign the reply draws after the mark: two outcomes,
-// verified (✓ verified; a corrected mark, its right words in place of Claude's, says ✓ corrected, or ✓ repaired after x,
-// and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real; and
-// before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. A verified one whose file
-// changed after its check says ↻ stale, and which file in the warning color (tray/tray.mjs staleLine); x in the tray
-// checks it again. The cited words in the
-// evidence stand on the citations' purple tint (evidenceWords), as in the tray. What the check found wrong in the rest
-// of the sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane.
+// Its status at the right of the cited words, as the tray's header has it (tray/tray.mjs checkStatus), with the sign the
+// reply draws after the mark: two outcomes, ✓ verified (a mark the check corrected too, its right words in place of
+// Claude's, by itself or after x) and × failed, with the evidence the check gave when it is real; ↻ stale for a checked
+// one whose file changed after its check (x in the tray checks it again); and before an outcome, ⠋ checking (the turning
+// glyph, as after the mark) or ? not checked. The status is all the head says of the check. Under it, the check's
+// reason, whole: a failed one's in red, the one place a person opens on purpose that says why it failed. What the
+// check found wrong in the rest of the sentence follows. The cited words in the evidence stand on the citations' purple
+// tint (evidenceWords), as in the tray. The mark's sentence shows as the person read it. Code is cut between tokens to
+// fit the pane.
 // The pane shows all of the evidence, the line that holds the value in view when it opens (core/pane.ts keepsInView),
 // and scrolls the rest with the wheel and ↑ ↓. It reads the reply's marks in the state, so it draws again when the
 // check settles.
@@ -32,12 +33,11 @@ import type { EngineInterface } from 'claude-code'
 import { spinNow } from '../bar/busy'
 import { quiet } from '../core/askcell.js'
 import { keepsInView } from '../core/pane'
-import { printable } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { rowsAt, treeRows } from '../core/trail.mjs'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
-import { cardLabel, checkStatus, evidenceLine, partLabel, placeLabel, printableEvidence, staleLine, staleOf, TABLE_LABEL, versionNote, wasLine } from '../tray/tray.mjs'
+import { cardLabel, checkStatus, evidenceLine, partLabel, placeLabel, printableEvidence, staleOf, TABLE_LABEL, versionNote } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
@@ -50,9 +50,9 @@ type Any = any
  *  sign and its word in its tone's color (a checked one's success green, a failed one's error red, a stale one's
  *  warning color, else dim), the sign of a check that runs the turning glyph's frame now (`spin`), in thimble's color
  *  as the reply draws it. */
-export function statusEls(els: Any, s: { sign: string; word: string; tone: string }, spin: string, o: { bold?: boolean } = {}): Any[] {
+export function statusEls(els: Any, s: { sign: string; word: string; tone: string }, spin: string): Any[] {
   const { Text } = els
-  const look = { ...(s.tone === 'good' ? { color: 'success' } : s.tone === 'bad' ? { color: 'error' } : s.tone === 'warn' ? { color: 'warning' } : { dimColor: true }), ...(o.bold ? { bold: true } : {}) }
+  const look = s.tone === 'good' ? { color: 'success' } : s.tone === 'bad' ? { color: 'error' } : s.tone === 'warn' ? { color: 'warning' } : { dimColor: true }
   const sign = s.sign === 'spin' ? Text({ key: 'sg', color: accent(), children: spin }) : Text({ key: 'sg', ...look, children: s.sign })
   return [sign, Text({ key: 's', ...look, children: ` ${s.word}` })]
 }
@@ -206,17 +206,16 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   // a check that did not run is failed too (store.ts notRun); its reason says so
   const st = checkStatus(m)
   const stale = staleOf(m)
-  // the citation's words as the reply draws them; the head joins their hover group, as they are nested in it
+  // the citation's words as the reply draws them, in a Text that joins their hover group, as they are nested in it;
+  // its status at the right, as the tray's header has it
   const id = `evidence:${row}:${n}`
-  const head = Text({ key: 'head', wrap: 'wrap', ...citeHeat(id), children: [
-    ...statusEls(els, st, st.sign === 'spin' ? await spinNow($) : '', { bold: true }),
-    '  ',
-    Text({ key: 'w', ...wordsLook(m.status, id, stale.length > 0), children: m.shown.replace(/\*\*|`/g, '') }),
+  const head = Box({ key: 'head', flexDirection: 'row', justifyContent: 'space-between', children: [
+    Box({ key: 'l', flexShrink: 1, children: [Text({ key: 'hw', wrap: 'wrap', ...citeHeat(id), children: [
+      Text({ key: 'w', ...wordsLook(m.status, id, stale.length > 0), children: m.shown.replace(/\*\*|`/g, '') }),
+    ] })] }),
+    Box({ key: 'r', flexDirection: 'row', flexShrink: 0, marginLeft: 2, children: statusEls(els, st, st.sign === 'spin' ? await spinNow($) : '') }),
   ] })
   const rows: Any[] = [head]
-  if (stale.length) rows.push(Text({ key: 'stale', wrap: 'wrap', color: 'warning', children: printable(staleLine(stale)) }))
-  // a rewritten sentence shows as it reads now, under these lines: the status is all they say of the change
-  if (m.status === 'corrected' && m.was && !m.rewrite) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: wasLine({ narrowed: !!m.narrowed, was: m.was }) }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person reads it (a rewrite's, once the check rewrote it), the cited words in bold
@@ -226,7 +225,6 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   rows.push(Text({ key: 'sent', dimColor: true, italic: true, wrap: 'wrap', children: at < 0 ? sentence : [
     sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + cited.length) }), sentence.slice(at + cited.length),
   ] }))
-  if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'checking…' }))
   const me = `${row}:${n}`
   const words = m.shown.replace(/\*\*|`/g, '').trim()
   // the cited words explained in place (e, as e explains words everywhere): the session's explainer, else one being written, else why there is none

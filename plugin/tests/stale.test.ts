@@ -1,6 +1,6 @@
 // A citation whose source changed after its check (marks/stale.ts): the pass stats each cited file once, from the index
 // of cited files (store.ts citedFiles), and sends the kernel only the citations that rest on a file whose stat changed;
-// a citation whose cited lines changed draws stale in the answer, and its card says which file changed and offers x,
+// a citation whose cited lines changed draws stale in the answer, and its card says stale and offers x,
 // which checks it again against the files as they are now, and so each x after it until one of those checks passes,
 // with the other stale citations of its sentence. Cited lines that only moved take their new numbers. A rewritten
 // sentence's card says its status and no more. All data is made up. `claude plugin test plugin`.
@@ -102,7 +102,7 @@ async function session($: Any, on: Any, item: Any, file: () => Any, cited: (req:
   return { asked, bash }
 }
 
-test('a citation whose cited lines changed after its check draws stale; its card says which file changed and offers x', CITES, async ($, on) => {
+test('a citation whose cited lines changed after its check draws stale; its card says stale and offers x, and no more', CITES, async ($, on) => {
   // the cited file as it stands: as the check read it, until Claude's edit changes its size and mtime
   let file = { kind: 'file', size: 30, mtimeMs: 1000.0004, isLink: false }
   // the kernel: the cited lines hashed again, now another hash
@@ -128,23 +128,26 @@ test('a citation whose cited lines changed after its check draws stale; its card
   await bash()
   expect(asked.length).toBe(1)
 
-  // its card: the status says stale, which file changed, and x checks it again
+  // its card: the status says stale, x repair first among its keys checks it again, and no line says which file
+  // changed or what x does
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('↻ stale')
-  expect(band).toContain('runs/summary.txt changed after the check.')
-  expect(band).toContain('x repair: check it again against the file as it is now')
+  expect(band).toContain('↻ stale  x repair · a ask · 0 close')
+  expect(band).not.toContain('changed after the check')
+  expect(band).not.toContain('repair:')
+  expect(band).toContain('runs/summary.txt · line 4')
 })
 
-test("a sentence the check rewrote: its card says repaired and shows its evidence, with no line of what the sentence was", CITES, async ($, on) => {
+test("a sentence the check rewrote: its card says verified and shows its evidence, with no line of what the sentence was", CITES, async ($, on) => {
   const rewrite = 'Of the runs, [15 of 40] failed on the p95 check.'
   const item = { ...QUOTED, status: 'corrected', shown: '15 of 40', was: '12 of 40', rewrite, repair: true, evidence: { ...QUOTED.evidence, lines: [{ n: 4, text: 'failed: 15', highlight: [8, 10] }] } }
   await session($, on, item, () => ({ kind: 'file', size: 30, mtimeMs: 1000, isLink: false }))
   expect(textOf(await $.ui.render(answer('row-t1', TEXT)))).toContain('15 of 40')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('✓ repaired')
+  expect(band).toContain('✓ verified')
   expect(band).toContain('failed: 15')
+  expect(band).not.toContain('repaired')
   expect(band).not.toContain('sentence rewritten')
   expect(band).not.toContain('was ')
 })

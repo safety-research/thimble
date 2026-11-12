@@ -229,11 +229,11 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   await buttons(picked).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
   // its citation as the tray's card in a frame; its reply has no check in the store: it did not run, so the citation
-  // is failed; the card is one press that opens it as a press on it in the reply does
+  // is failed, which its status alone says; the card is one press that opens it as a press on it in the reply does
   const shown = await draw({ claim: 'c1', open: true })
   const st = textOf(shown)
   expect(st).toMatch(/│ p95 check +× failed │/)
-  expect(st).toContain('The check did not run.')
+  expect(st).not.toContain('The check did not run.')
   expect(buttons(shown).some(b => /^p\d+:ev:0$/.test(b.key) && textOf(b.children).includes('p95 check'))).toBe(true)
   // one citation: k j still the claims; e hides it, back to the claim
   expect(keysOf(shown)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'hide evidence']])
@@ -300,15 +300,23 @@ test('a long claim is kept whole: its cluster lists it whole when current, a pre
   expect(flat(await draw({ claim: 'c1' }))).toContain(LONG)
 })
 
-test("a citation whose check rewrote its sentence: its card in the pane says its status and nothing of what the sentence was; History still shows the sentence before and after", () => {
+test("a citation's card in the pane says its check by its status alone: verified once the check corrected or rewrote it, failed with no reason, stale with no file; History still shows the sentence before and after", () => {
   const lines = (s: Any) => cardOf(s, 90).rows.map((r: Any[]) => r.map((x: Any) => x.s).join(''))
   const rewritten = { status: 'corrected', repair: true, shown: 'port 9000', was: 'The app runs on port 8000.', now: 'The app runs on port 9000.', rewritten: true, reason: 'the README says 9000' }
   const card = lines(rewritten)
-  expect(card[0]).toContain('✓ repaired')
-  expect(card.join('\n')).not.toContain('sentence rewritten')
-  expect(card.join('\n')).not.toContain('port 8000')
-  // a citation whose words alone the check corrected still says what they were
-  expect(lines({ status: 'corrected', shown: '12 of 40', was: '15 of 40' })).toContain('was 15 of 40')
+  expect(card[0]).toContain('✓ verified')
+  expect(card.join('\n')).not.toMatch(/repaired|corrected|rewritten|port 8000/)
+  // words alone the check corrected: verified, and nothing of what they were
+  const fixed = lines({ status: 'corrected', shown: '12 of 40', was: '15 of 40' })
+  expect(fixed[0]).toContain('✓ verified')
+  expect(fixed.join('\n')).not.toContain('15 of 40')
+  // a failed one: no reason and no file its check could not read; a stale one: no file that changed
+  const failed = lines({ status: 'failed', shown: '12 of 40', reason: 'Line 4 says 15.', unread: [{ tool: 'Read', file: 'runs.csv', fix: 'ok' }] })
+  expect(failed[0]).toContain('× failed')
+  expect(failed.join('\n')).not.toMatch(/Line 4|runs\.csv/)
+  const stale = lines({ status: 'verified', shown: 'port 8000', sources: [{ file: 'README.md', path: '/made-up/data/README.md', size: 1, mtime: 1, sha256: 'a1', changed: true }] })
+  expect(stale[0]).toContain('↻ stale')
+  expect(stale.join('\n')).not.toContain('README.md')
   expect(correctionsOf({ id: 'c1', turn: 2, sources: [rewritten] }, new Map())).toMatchObject([{ old: 'The app runs on port 8000.', now: 'The app runs on port 9000.' }])
 })
 

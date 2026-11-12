@@ -8,12 +8,12 @@
 //   failed     the check could not confirm it (wrong, not confirmed, or no check could run): red words, underlined,
 //              `×` after them and a soft red tint on hover, as the terminal draws it
 // and a verified one whose source changed after its check is `stale`: amber words, underlined, `↻` after them, as the
-// terminal draws it (plugin/marks/stale.ts); its label says which file changed, and Repair checks it again.
+// terminal draws it (plugin/marks/stale.ts); Repair checks it again.
 // While its check runs (`checking`) it has the plain look and a spinner. Before any check said anything of it
 // (`pending`: the reply still streams, or no check has begun on it) its underline is dotted: not checked, so it never
-// reads as a checked mark.
+// reads as a checked mark. Its label says which in one word at its upper right (stateOf), as the terminal's card does.
 import { marksIn, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
-import { staleLine, staleOf } from '../../../../plugin/tray/tray.mjs'
+import { checkStatus, staleOf } from '../../../../plugin/tray/tray.mjs'
 
 /** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them
  * (c = -1: the row's name), and how many rows are left out above and below. */
@@ -123,16 +123,13 @@ export function canRepair(item: MarkItem | undefined): boolean {
   return !!item && (item.status === 'failed' || item.status === 'unchecked' || staleOf(item).length > 0) && !!(item.turn || item.card)
 }
 
-/** What a stale mark's label says of the files that changed after its check, as the terminal's card says it
- * (plugin/tray/tray.mjs staleLine). Pure. */
-export const staleWhy = (item: MarkItem | undefined): string => staleLine(staleOf(item))
-
-/** What a corrected mark was, as the terminal says it under the words: `corrected; was 15 of 40`; for a sentence the
- * check rewrote, whose new words the text shows, `corrected` alone. Pure. */
-export function wasLine(item: MarkItem | undefined): string {
-  if (item?.status !== 'corrected' || !item.was) return ''
-  if (item.rewrite) return 'corrected'
-  return `${item.narrowed ? 'narrowed' : 'corrected'}; was ${item.was.replace(/\*\*|`/g, '')}`
+/** What a mark's label says of its state, at its upper right: the terminal's sign and word for it (plugin/tray/tray.mjs
+ * checkStatus: ✓ verified, a corrected mark too, × failed, ↻ stale, `spin` checking), and before any check `not checked
+ * yet`; `tone` names its color (good, bad, warn, dim). The one thing the label says of the check. Pure. */
+export function stateOf(item: MarkItem | undefined, look: MarkLook): { sign: string; word: string; tone: string } {
+  if (look === 'pending' || !item) return { sign: '', word: LOOK_WORD.pending, tone: 'dim' }
+  const { sign, word, tone } = checkStatus(item)
+  return { sign, word, tone }
 }
 
 /** Why a failed mark failed, in one line: the check's reason, else what kind of failure it was. Pure. */

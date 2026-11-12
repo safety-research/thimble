@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A mark whose source changed after its check (marks/marks.ts lookOf, marks/Mark.tsx): it draws stale, amber with ↻
-// after the words, as the terminal draws it, and its label says stale and which file changed, with Repair, which checks
-// it again against the files as they are now.
+// after the words, as the terminal draws it, and its label says ↻ stale at its head's right, with Repair, which checks
+// it again against the files as they are now, and no more.
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -14,7 +14,7 @@ const SOURCE = { file: 'README.md', path: '/made-up/data/README.md', line: '26',
 const item = (k: number, words: string, rest: Partial<MarkItem>): MarkItem => ({ n: k + 1, piece: 0, k, words, sentence: '', status: 'verified', shown: words, turn: 'a1b2c3d4', ...rest })
 const open = (words: Element) => act(async () => void words.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 
-test('a mark whose cited file changed after its check draws stale, and its label says which file, with Repair', async () => {
+test('a mark whose cited file changed after its check draws stale, and its label says stale, with Repair, and no file', async () => {
   const evidence = { kind: 'quote' as const, file: 'README.md', line: '26', lines: [{ n: 26, text: 'uvicorn app.main:app --port 8000', highlight: [23, 32] as [number, number] }] }
   const checks = [
     item(0, 'port 8000', { evidence, sources: [{ ...SOURCE, changed: true }] }),
@@ -31,9 +31,12 @@ test('a mark whose cited file changed after its check draws stale, and its label
   ])
   await open(el.querySelectorAll<HTMLElement>('.mark .mark-words')[0])
   await settle()
-  const head = document.querySelector('.mark-pop .mark-pop-head')
-  expect(head?.querySelector('.mark-pop-stale')?.textContent).toBe('↻ stale README.md changed after the check.')
-  expect(head?.querySelector('button')?.textContent).toBe('Repair')
+  // the head of its place: the place's chip, then at the right ↻ stale and Repair
+  const head = document.querySelector('.mark-pop .refchip-pop-head')
+  expect(head?.querySelector('.refchip-pop-chip')?.textContent).toContain('README.md · line 26')
+  expect(head?.querySelector('.mark-pop-side')?.textContent).toBe('↻ staleRepair')
+  expect(head?.querySelector('.mark-pop-status')?.className).toContain('is-warn')
+  expect(document.querySelector('.mark-pop')?.textContent).not.toContain('changed after the check')
   // the evidence under it is what the check read
   expect(document.querySelector('.mark-pop .cite-cell')?.textContent).toBe('port 8000')
 })

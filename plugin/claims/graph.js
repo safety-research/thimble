@@ -36,7 +36,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, inverse, part}.
 import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
-import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, staleLine, staleOf, unreadLine, wasLine } from '../tray/tray.mjs'
+import { checkStatus, evidenceLine, hiddenOutput, lineWindow, moreLines, printedBy, staleOf } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -487,11 +487,12 @@ function layOf(claims, groups, edges, W, h, cols) {
 }
 
 // a citation's check as the citation's card says it beside `cite`, in the tray's words (tray/tray.mjs checkStatus, as the
-// tray's header and the evidence pane say it): the sign and word, its tone. Two outcomes: verified (`✓ verified`; one
-// the check corrected `✓ corrected`, or `✓ repaired` after x, with what it was under it), and failed (the check could
-// not confirm it, or did not run); and the states before an outcome: checking, and `? not checked` for one that waits
-// until the person opens it (the setting Citations, auto or manual), which x checks. A drawing here has no turning
-// glyph, so checking stands alone. A citation no longer in the session says so
+// tray's header and the evidence pane say it): the sign and word, its tone, all the card says of the check. Two
+// outcomes: verified (`✓ verified`, one the check corrected too, by itself or after x), and failed (the check could not
+// confirm it, or did not run); `↻ stale` for a checked one whose file changed after its check; and the states before an
+// outcome: checking, and `? not checked` for one that waits until the person opens it (the setting Citations, auto or
+// manual), which x checks. A drawing here has no turning glyph, so checking stands alone. A citation no longer in the
+// session says so
 const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
 const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)
 
@@ -608,11 +609,10 @@ const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title 
 
 /**
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
- * (underlined, tinted on hover; a failed one's red) and
- * its check beside them (`✓ verified · citation`, as the tray's header says it); what it was, when the check corrected
- * its words (`✓ corrected · citation` over `was 15 of 40`; a sentence the check rewrote reads as it is now, and its
- * card says no more of the change than its status), or why it failed and each file its check could not read, dim; for
- * a value code computed, how the code got it, in the check's words (its evidence's `method`); then
+ * (underlined, tinted on hover; a failed one's red, a stale one's in the warning color) and its check beside them
+ * (`✓ verified · citation`, as the tray's header says it), all the card says of the check: no line of why it failed,
+ * what it was before the check corrected it or which file changed (History, h, keeps the corrections and their
+ * reasons); for a value code computed, how the code got it, in the check's words (its evidence's `method`); then
  * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
  * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
  * `whole`: the code and output whole (c). {rows, cut}: cut when the code or the line was cut.
@@ -627,11 +627,6 @@ export function cardOf(s, W, { whole = false } = {}) {
   const words = one(s.shown || s.label)
   const look = key === 'failed' ? { tone: 'bad', underline: true } : key === 'stale' ? { tone: 'warn', underline: true } : { tint: true }
   const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - len(kind))), ...look, bold: true }, ...right]]
-  const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
-  if (key === 'stale') dim(one(staleLine(staleOf(s))))
-  if (s.status === 'corrected' && s.was) { if (!s.rewritten) dim(wasLine({ narrowed: s.narrowed, was: one(s.was) })) }
-  else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
-  if (s.status === 'failed') for (const file of new Set((s.unread || []).map(u => u.file))) dim(unreadLine(file))
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
   // how the code got the value, in the check's words (computed evidence's `method`), over the code
   for (const l of wrap(s.evidence.method, W)) rows.push([{ s: l }])
@@ -1037,7 +1032,7 @@ function citeLine(s, inner) {
 }
 
 /** A citation's card as the tray draws it, the rows inside its frame: its words and check (citeTitle), then what
- *  cardOf draws under them (what it was or why it failed, the code line or the file's place, the cited line after │),
+ *  cardOf draws under them (how the code got the value, the code line or the file's place, the cited line after │),
  *  without the count of output lines left out; `whole`: the code and output whole. {rows, cut} */
 function citeBody(s, inner, whole) {
   const card = cardOf(s, inner, { whole })
