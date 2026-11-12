@@ -1237,7 +1237,7 @@ The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Sto
 
 ## export-artifact
 
-The analyst chose Export, Claude artifact, on the {doc} “{title}”. thimble wrote the {doc} as one page: {page}. Publish that file as it is, with your Artifact tool. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
+The analyst chose Export, Claude artifact, on the {doc} “{title}”. thimble wrote the {doc} as one page: {page}. Publish that file as it is, with your Artifact tool. The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings. End with the artifact's link alone. If you cannot publish it, end with one sentence that says why.
 
 ## artifact-refused
 

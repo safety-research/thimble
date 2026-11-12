@@ -99,6 +99,8 @@ async def test_on_claude_code_sign_in_main_publishes_the_page_with_its_artifact_
     # main got the request, which names the page it publishes: the report's artifact page, in the workspace
     assert artifact_rules(page.read_text()) == []
     assert f"thimble wrote the report as one page: {page}. Publish that file as it is, with your Artifact tool." in seen["prompt"]
+    # it says the artifact is private and that sharing it is up to the analyst's settings, so main's reply promises none
+    assert "The artifact is private. Whether it can be shared depends on the analyst's claude.ai settings." in seen["prompt"]
     # the turn had the Artifact tool, which Claude Code asks about (the permission callback), and main's chat shows the
     # analyst's line
     opts = seen["options"]

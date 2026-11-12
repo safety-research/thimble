@@ -76,8 +76,9 @@ function awaitEnd(doc: string): { end: Promise<Events['export']>; stop: () => vo
   return { end, stop: () => off() }
 }
 
-/** Export, Claude artifact: main publishes the document, and its link comes in a toast; when nothing is published, the
- * artifact page downloads, and the notice the server posts says why. */
+/** Export, Claude artifact: main publishes the document, and its link comes in a toast that says the artifact is
+ * private, as Claude Code makes it, and promises no sharing, which the person's claude.ai settings decide; when nothing
+ * is published, the artifact page downloads, and the notice the server posts says why. */
 async function publish(ws: string, slug: string, f: ExportFormat) {
   const waiting = awaitEnd(slug) // before the request, so no end is missed
   try {
@@ -86,7 +87,7 @@ async function publish(ws: string, slug: string, f: ExportFormat) {
     const { publishing } = (await res.json()) as { publishing: boolean }
     const done = publishing ? await waiting.end : null
     if (done?.status === 'published' && done.link) {
-      bus.emit('toast', { text: 'Published as a Claude artifact', link: { href: done.link, label: done.link.replace(/^https?:\/\//, '') } })
+      bus.emit('toast', { text: 'Published as a private Claude artifact', link: { href: done.link, label: done.link.replace(/^https?:\/\//, '') } })
       return
     }
   } finally {

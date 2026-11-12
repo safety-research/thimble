@@ -103,7 +103,8 @@ test("Claude artifact says it is exporting until main's turn ends, and the artif
   expect(q('.wu-export')?.textContent).toBe('Exporting Claude artifact')
   await ended('published', LINK)
   await until(() => toasts.length)
-  expect(toasts).toEqual([{ text: 'Published as a Claude artifact', link: { href: LINK, label: LINK.slice('https://'.length) } }])
+  // the toast says the artifact is private and promises no sharing: the person's claude.ai settings decide it
+  expect(toasts).toEqual([{ text: 'Published as a private Claude artifact', link: { href: LINK, label: LINK.slice('https://'.length) } }])
   expect(saved).toEqual([])
   expect(q('.wu-export')?.textContent).toBe('Export')
 })
