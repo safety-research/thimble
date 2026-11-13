@@ -14,11 +14,11 @@ A folder can have several sessions open at once, in two shells or two tabs. Each
 is a workspace of its own, `c.2`, `c.3` … (config.add_session), so they run side by side, each with its own main,
 agents, kernels, temp folder, chat, canvas, report, labels and settings, and only the folder's files are shared, as two
 Claude Code sessions in one folder share them. A session is open while a page shows it (a tab follows its events) or a
-thimble-browser holds it (cli.hold_session); one the picker opened a moment ago counts as open too, until its tab has
-loaded (is_open). An open session is never moved aside: a new or resumed session goes into the first of the folder's
-workspaces that is not open, or a new one (open_session). The page's session picker (GET /api/ws/{c}/sessions, POST
-/api/ws/{c}/sessions/open) and thimble-browser's --new, --continue and --resume (POST /api/ws/{c}/sessions, the CLI's
-route) choose the same way.
+thimble-browser holds it (cli.hold_session); one the picker opened counts as open too, until its tab follows its
+events (is_open, arrived). An open session is never moved aside: a new or resumed session goes into the first of the
+folder's workspaces that is not open, or a new one (open_session). The page's session picker (GET
+/api/ws/{c}/sessions, POST /api/ws/{c}/sessions/open) and thimble-browser's --new, --continue and --resume (POST
+/api/ws/{c}/sessions, the CLI's route) choose the same way.
 
 A workbench that ran with another workspaces folder (THIMBLE_WORKSPACES_DIR) left its sessions there, and a start with
 this one finds none of them. `elsewhere` reads a workspace's sessions in such a folder, so that the start says where
@@ -30,8 +30,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-OPENING_S = 60.0  # how long a session opened from the page or the CLI counts as open before a tab shows it (is_open)
-_opening: dict[str, float] = {}  # workspace -> when open_session opened it
+# the workspaces whose session the page's picker opened and whose tab follows no events yet (is_open, arrived)
+_opening: set[str] = set()
 
 
 def _mtime(paths: list[Path]) -> float:
@@ -117,14 +117,18 @@ def elsewhere(c: str, folder: Path) -> list[dict[str, Any]]:
 
 def is_open(w: str) -> bool:
     """Whether workspace `w`'s session is open now (module note): a tab follows its events, a thimble-browser holds it
-    (cli.held_elsewhere), or open_session opened it within OPENING_S."""
+    (cli.held_elsewhere), or the page's picker opened it and its tab follows no events yet (open_session, arrived)."""
     from . import cli, investigation  # noqa: PLC0415
 
-    if investigation._subscribers.get((w, investigation.MAIN)):
-        return True
-    if time.monotonic() - _opening.get(w, -OPENING_S) < OPENING_S:
+    if investigation._subscribers.get((w, investigation.MAIN)) or w in _opening:
         return True
     return cli.held_elsewhere(w)
+
+
+def arrived(w: str) -> None:
+    """A tab follows workspace `w`'s events (investigation._stream): a session the page's picker opened there is that
+    tab's now, open while a tab follows it (is_open)."""
+    _opening.discard(w)
 
 
 def sessions(c: str) -> dict[str, Any]:
@@ -149,9 +153,9 @@ async def open_session(c: str, *, new: bool = False, archive: str | None = None,
     folder's workspaces that is not open, else a new one (config.add_session): there a session that holds anything
     moves aside (ledger.archive_workspace) and the archived one comes back (ledger.restore_workspace). The chat is
     `chat`, else the session's latest chat of main with a turn, else a new one. With `reserve` (the page's picker, whose
-    tab then loads the workspace) the workspace counts as open for OPENING_S (is_open); the CLI holds the one it opens
-    itself (cli.hold_session). {name: the workspace that shows it, open: whether it was open already}. ValueError for a
-    slot or archive the folder does not have."""
+    tab then loads the workspace) the workspace counts as open until that tab follows its events (is_open, arrived); the
+    CLI holds the one it opens itself (cli.hold_session). {name: the workspace that shows it, open: whether it was open
+    already}. ValueError for a slot or archive the folder does not have."""
     from . import config, ledger, runtime  # noqa: PLC0415
 
     folder = config.session_of(c)
@@ -172,7 +176,7 @@ async def open_session(c: str, *, new: bool = False, archive: str | None = None,
                 raise ValueError(f"{folder!r} has no session moved aside as {archive!r}")
         target = next((w for w in family if not is_open(w)), None) or config.add_session(folder)["name"]
         if reserve:
-            _opening[target] = time.monotonic()  # held from here, so a second open at once takes another workspace
+            _opening.add(target)  # held from here, so a second open at once takes another workspace
         if src is not None:
             pick = chat or summary(src)["chat"] or runtime.NEW
             await ledger.restore_workspace(target, {"archive": archive})
@@ -182,6 +186,6 @@ async def open_session(c: str, *, new: bool = False, archive: str | None = None,
             if ws.is_dir() and holds(summary(ws)):
                 await ledger.archive_workspace(target)
     if reserve:
-        _opening[target] = time.monotonic()
+        _opening.add(target)
     await runtime.ensure(target).switch(None if pick == runtime.NEW else pick)
     return {"name": target, "open": False}

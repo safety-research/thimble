@@ -73,8 +73,9 @@ async def test_a_session_open_in_a_tab_or_a_shell_is_never_moved_aside(data_tmp,
     """The page's picker and the CLI open a session through folder_sessions.open_session. A session a tab shows (it
     follows the workspace's events) or a thimble-browser in another shell holds is open: the picker marks it, picking it
     opens it as it is, and a new session goes into a workspace of the folder that is not open, a new one beside it when
-    none is, so the open one keeps its cards. Once nothing holds the folder's own workspace, a new session takes it
-    and moves its session aside, which comes back whole. main's chat switch is faked."""
+    none is, so the open one keeps its cards. One the picker opened is open until its tab follows its events, however
+    long the tab takes, and then while a tab follows it. Once nothing holds the folder's own workspace, a new session
+    takes it and moves its session aside, which comes back whole. main's chat switch is faked."""
     from app import config, folder_sessions, investigation, runtime  # noqa: PLC0415
 
     switched: list[tuple[str, str | None]] = []
@@ -88,7 +89,7 @@ async def test_a_session_open_in_a_tab_or_a_shell_is_never_moved_aside(data_tmp,
             return True
 
     monkeypatch.setattr(runtime, "ensure", Space)
-    monkeypatch.setattr(folder_sessions, "_opening", {})
+    monkeypatch.setattr(folder_sessions, "_opening", set())
     _card("mini", "the first tab's card")
     monkeypatch.setitem(investigation._subscribers, ("mini", investigation.MAIN), {object()})
     rows = folder_sessions.sessions("mini")["sessions"]
@@ -98,7 +99,14 @@ async def test_a_session_open_in_a_tab_or_a_shell_is_never_moved_aside(data_tmp,
     assert switched == [("mini.2", None)] and config.sessions_of("mini") == ["mini", "mini.2"]
     assert folder_sessions.is_open("mini.2"), "the picker's tab is still loading it"
     assert folder_sessions.sessions("mini.2")["label"] == "mini"
-    folder_sessions._opening.clear()
+
+    class Request:  # the picker's tab: its event stream opens, then it closes
+        headers: dict[str, str] = {}
+
+    await investigation._stream("mini.2", investigation.MAIN, Request())  # type: ignore[arg-type]
+    assert folder_sessions.is_open("mini.2") and not folder_sessions._opening
+    investigation._subscribers.pop(("mini.2", investigation.MAIN))
+    assert not folder_sessions.is_open("mini.2"), "no tab follows it, and the picker holds it no longer"
     other = _other_shell("mini.2")
     try:
         assert folder_sessions.is_open("mini.2")
