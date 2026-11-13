@@ -1,8 +1,0 @@
-{"monitor": "4.0.2", "started": 1779062400000, "rules": 38}
-{"id": "alr-68", "ts": 1779086910000, "state": "FIRING", "service": "web", "severity": "warning", "incident": "INC-313", "summary": "web: p95 latency 2.8 s on /timetable (limit 2 s)"}
-{"id": "alr-68", "ts": 1779086910000, "state": "FIRING", "service": "web", "severity": "warning", "incident": "INC-313", "summary": "web: p95 latency 2.8 s on /timetable (limit 2 s)"}
-{"id": "alr-69", "ts": 1779087305000, "state": "FIRING", "service": "bookings-db", "severity": "warning", "incident": "INC-313", "summary": "bookings-db: connections at 232 of 300"}
-{"id": "alr-70", "ts": 1779088600000, "state": "RESOLVED", "service": "bookings-db", "severity": "warning", "incident": "INC-313", "summary": "bookings-db: connections at 88 of 300", "resolves": "alr-69"}
-{"id": "alr-71", "ts": 1779088750000, "state": "RESOLVED", "service": "web", "severity": "warning", "incident": "INC-313", "summary": "web: p95 latency 0.4 s on /timetable", "resolves": "alr-68"}
-{"id": "alr-72", "ts": 1779114010000, "state": "FIRING", "service": null, "severity": "warning", "incident": null, "summary": "web-2: log disk 85% full"}
-{"id": "alr-73", "ts": 1779115120000, "state": "RESOLVED", "service": "web", "severity": "warning", "incident": null, "summary": "web-2: log disk 61% full after rotation", "resolves": "alr-72"}

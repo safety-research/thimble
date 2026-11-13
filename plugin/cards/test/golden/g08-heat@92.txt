@@ -1,4 +1,0 @@
-ada   ▇▇▇ ▇▇▇ ▇▇▇  runs 1 to 3
-bram  ▇▇▇ ▇▇▇ ▇▇▇  runs 1 to 3
-cleo  ▇▇▇ ▇▇▇ ▇▇▇  runs 1 to 3
-dov   ▇▇▇ ▇▇▇ ▇▇▇  runs 1 to 3

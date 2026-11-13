@@ -1,1 +1,0 @@
-thimble is {{SURFACE}} for understanding what agents did. Every thimble agent serves one goal: make it easy for the analyst to understand and check what agents did, and leave the judgment calls to them.

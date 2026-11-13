@@ -1,5 +1,0 @@
-{"id": "alr-41", "ts": 1778900240000, "state": "firing", "svc": "payments", "severity": "warning", "incident": "INC-311", "msg": "payments: database connections at 181 of 200 for 5 min"}
-{"id": "alr-42", "ts": 1778900448000, "state": "firing", "svc": "payments", "severity": "critical", "incident": "INC-311", "msg": "payments: health check failing on 2 of 3 replicas"}
-{"id": "alr-43", "ts": 1778900920000, "state": "resolved", "svc": "payments", "severity": "critical", "incident": "INC-311", "msg": "payments: health check passing on 3 of 3 replicas", "resolves": "alr-42"}
-{"id": "alr-44", "ts": 1778901195000, "state": "resolved", "svc": "payments", "severity": "warning", "incident": "INC-311", "msg": "payments: database connections at 96 of 200", "resolves": "alr-41"}
-{"id": "alr-45", "ts": 1778904750000, "state": "firing", "svc": "web", "severity": "warning", "msg": "web-2: log disk 85% full"}
