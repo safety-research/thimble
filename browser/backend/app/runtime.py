@@ -898,6 +898,12 @@ def spaces() -> list[Space]:
     return list(_spaces.values())
 
 
+def working(c: str) -> bool:
+    """Whether main or one of the agents this server runs for workspace `c` is in a turn now (Conv.running)."""
+    sp = _spaces.get(c)
+    return sp is not None and any(conv.running for conv in (sp.main, *sp.convs.values()))
+
+
 # --------------------------------------------------------------------------- turns
 
 

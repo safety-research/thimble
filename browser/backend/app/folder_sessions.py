@@ -13,10 +13,10 @@ inside a session are runtime.py's.
 A folder can have several sessions open at once, in two shells or two tabs. Each session open beside the folder's own
 is a workspace of its own, `c.2`, `c.3` … (config.add_session), so they run side by side, each with its own main,
 agents, kernels, temp folder, chat, canvas, report, labels and settings, and only the folder's files are shared, as two
-Claude Code sessions in one folder share them. A session is open while a page shows it (a tab follows its events) or a
-thimble-browser holds it (cli.hold_session); one the picker opened counts as open too, until its tab follows its
-events (is_open, arrived). An open session is never moved aside: a new or resumed session goes into the first of the
-folder's workspaces that is not open, or a new one (open_session). The page's session picker (GET
+Claude Code sessions in one folder share them. A session is open while a page shows it (a tab follows its events), a
+thimble-browser holds it (cli.hold_session) or its agents work; one the picker opened counts as open too, until its tab
+follows its events (is_open, arrived). An open session is never moved aside: a new or resumed session goes into the
+first of the folder's workspaces that is not open, or a new one (open_session). The page's session picker (GET
 /api/ws/{c}/sessions, POST /api/ws/{c}/sessions/open) and thimble-browser's --new, --continue and --resume (POST
 /api/ws/{c}/sessions, the CLI's route) choose the same way.
 
@@ -117,10 +117,11 @@ def elsewhere(c: str, folder: Path) -> list[dict[str, Any]]:
 
 def is_open(w: str) -> bool:
     """Whether workspace `w`'s session is open now (module note): a tab follows its events, a thimble-browser holds it
-    (cli.held_elsewhere), or the page's picker opened it and its tab follows no events yet (open_session, arrived)."""
-    from . import cli, investigation  # noqa: PLC0415
+    (cli.held_elsewhere), the page's picker opened it and its tab follows no events yet (open_session, arrived), or its
+    main or one of its agents is in a turn (runtime.working), which moving the session aside would end."""
+    from . import cli, investigation, runtime  # noqa: PLC0415
 
-    if investigation._subscribers.get((w, investigation.MAIN)) or w in _opening:
+    if investigation._subscribers.get((w, investigation.MAIN)) or w in _opening or runtime.working(w):
         return True
     return cli.held_elsewhere(w)
 

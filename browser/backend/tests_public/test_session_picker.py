@@ -128,6 +128,33 @@ async def test_a_session_open_in_a_tab_or_a_shell_is_never_moved_aside(data_tmp,
             await folder_sessions.open_session("mini", **bad)
 
 
+async def test_a_session_whose_agents_work_is_never_moved_aside(data_tmp, workspaces_tmp, monkeypatch):
+    """A session whose main or one of its agents is in a turn is open with no tab and no shell, since moving it aside
+    would end that work (ledger._end_work): the picker marks it, and a new session goes beside it. Once the turn ends,
+    a new session may take its workspace. main's chat switch is faked."""
+    from app import folder_sessions, runtime  # noqa: PLC0415
+
+    class Conv:
+        running = True
+
+    class Space:
+        def __init__(self, c: str) -> None:
+            self.c, self.main, self.convs = c, Conv(), {}
+
+        async def switch(self, sid: str | None) -> bool:
+            return True
+
+    monkeypatch.setattr(folder_sessions, "_opening", set())
+    monkeypatch.setattr(runtime, "ensure", Space)
+    _card("mini", "a long question still running")
+    monkeypatch.setitem(runtime._spaces, "mini", Space("mini"))
+    assert [(r["slot"], r["open"]) for r in folder_sessions.sessions("mini")["sessions"]] == [("mini", True)]
+    assert await folder_sessions.open_session("mini", new=True) == {"name": "mini.2", "open": False}
+    assert len(list((workspaces_tmp / "mini" / "notebooks").glob("*.json"))) == 1, "its work goes on, nothing moved"
+    runtime._spaces.pop("mini")  # its turn ended, and nothing runs there now
+    assert await folder_sessions.open_session("mini", new=True) == {"name": "mini", "open": False}
+
+
 async def test_two_sessions_of_one_folder_share_its_files_and_nothing_else(data_tmp, workspaces_tmp):
     """A folder's second session open at once (config.add_session) is a workspace of its own over the same folder:
     its corpus is the folder, the folder still opens as its own workspace, the switcher numbers the second (the
