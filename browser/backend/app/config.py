@@ -603,7 +603,8 @@ def sidecar_match(p: Path, recs: list[dict] | None = None) -> tuple[dict, Path] 
     the folder; pass 3: the deepest root or path that contains it. So a corpus registered under a registered ancestor wins
     for its own folder and everything below it. None when no sidecar holds it."""
     recs = registered_corpora() if recs is None else recs
-    bases = [(rec, _sidecar_bases(rec)) for rec in recs]
+    # a session that runs beside the folder's own (add_session) names the same folder, which maps to the folder's own
+    bases = [(rec, _sidecar_bases(rec)) for rec in recs if not rec.get(SESSION_OF)]
     exact = [(rec, b) for rec, b in bases if b.get("path") == p]
     if exact:
         return next((rec for rec, b in exact if b.get("root") != p), exact[0][0]), p
@@ -739,6 +740,74 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
         rec["shown"] = alias
     _write_sidecar(rec)
     log.info("registered corpus %r at %s (sidecar %s)", name, p, sidecar_path(name))
+    return rec
+
+
+# --------------------------------------------------------------------------- a folder's sessions open at once
+#
+# Two shells can run thimble-browser in one folder at once, each on a session of its own (folder_sessions.py). Each such
+# session is a workspace: the folder's own `c`, and `c.2`, `c.3` … for those that run beside it, each a sidecar like a
+# registered folder's, which names the same folder and `session_of: c`. So every route, tool and kernel of each reads
+# the folder's files, and what thimble keeps (its chats, cards, labels, documents and settings) is each workspace's own.
+# Only `c` maps a path to its workspace (sidecar_match), so a folder opens as `c`, as before.
+
+SESSION_OF = "session_of"
+
+
+def session_of(name: str) -> str:
+    """The workspace of the folder that workspace `name` is a session of (module note above): its sidecar's
+    `session_of`, else `name` itself."""
+    rec = read_sidecar(name) if _dir_corpus(name) is None else None
+    of = rec.get(SESSION_OF) if rec else None
+    return of if isinstance(of, str) and _valid_name(of) else name
+
+
+def _session_number(c: str, name: str) -> int | None:
+    m = re.fullmatch(rf"{re.escape(c)}\.([1-9][0-9]*)", name)
+    return int(m.group(1)) if m and int(m.group(1)) >= 2 else None
+
+
+def sessions_of(c: str) -> list[str]:
+    """Folder workspace `c` and the workspaces of its sessions that run beside it (add_session), by number: `c`,
+    `c.2`, `c.3` …"""
+    found: list[tuple[int, str]] = []
+    for rec in registered_corpora():
+        n = _session_number(c, str(rec["name"]))
+        if rec.get(SESSION_OF) == c and n is not None:
+            found.append((n, str(rec["name"])))
+    return [c, *(name for _, name in sorted(found))]
+
+
+def session_number(name: str) -> int:
+    """The number of workspace `name` among its folder's sessions (sessions_of): 1 for the folder's own."""
+    return _session_number(session_of(name), name) or 1
+
+
+def add_session(c: str, name: str | None = None) -> dict:
+    """The record of a session of folder workspace `c` that runs beside the open one (module note above): `name` when
+    it is one already, else a sidecar written under `name` (`c.<n>`, n >= 2) or, without one or when another corpus
+    holds it, the next free `c.<n>`. Raises ValueError for a `c` that is no folder's workspace and for a `name` that is
+    not of the form `c.<n>`."""
+    if session_of(c) != c:
+        raise ValueError(f"{c!r} is a session of {session_of(c)!r}, not a folder's workspace")
+    here = corpus_dir(c)
+    if name is not None:
+        if _session_number(c, name) is None:
+            raise ValueError(f"{name!r} is not a session of {c!r} (its name is {c}.<n>, n from 2)")
+        if name in sessions_of(c):
+            return read_sidecar(name) or {}
+    if name is None or name_taken(name):
+        n = 2
+        while name_taken(f"{c}.{n}"):
+            n += 1
+        name = f"{c}.{n}"
+    own = read_sidecar(c) if _dir_corpus(c) is None else None
+    rec = {"name": name, "root": str((own or {}).get("root") or here), "path": str(here),
+           "registered_at": _now(), "manifest": corpus_manifest(c), SESSION_OF: c}
+    if own and own.get("shown"):
+        rec["shown"] = own["shown"]
+    _write_sidecar(rec)
+    log.info("session %r of %r registered at %s", name, c, here)
     return rec
 
 

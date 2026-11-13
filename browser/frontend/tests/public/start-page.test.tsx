@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// thimble's start page (src/shell/StartPage.tsx): a URL with no workspace shows the server's workspaces (GET
-// /workspaces), each row a link to its workspace, named by the server's label, else the folder's name.
+// thimble's start page (src/shell/StartPage.tsx): a URL with no workspace shows the server's folders (GET /workspaces),
+// each row a link to its session picker, named by the folder's name.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '../../src/App.tsx'
 import type { CorpusInfo, WorkspaceRow } from '../../src/lib/types.ts'
@@ -31,10 +31,10 @@ afterEach(() => {
   window.history.replaceState(null, '', '/')
 })
 
-test('a URL with no workspace is the start page: a row per workspace, each a link to it', async () => {
+test('a URL with no workspace is the start page: a row per folder, each a link to its session picker', async () => {
   const el = await mount(<App />)
   await settle()
   const rows = [...el.querySelectorAll<HTMLAnchorElement>('a.ws-row')]
-  expect(rows.map((a) => a.getAttribute('href'))).toEqual(['/?ws=logs', '/?ws=runs-2'])
+  expect(rows.map((a) => a.getAttribute('href'))).toEqual(['/?pick=logs', '/?pick=runs-2'])
   expect(rows.map((a) => a.querySelector('.ws-row-name')?.textContent)).toEqual(['logs', 'runs'])
 })

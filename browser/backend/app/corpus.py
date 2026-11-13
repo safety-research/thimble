@@ -1109,6 +1109,13 @@ def list_corpora() -> list[dict[str, Any]]:
         if rec.get("shown"):
             row["shown"] = rec["shown"]
         out.append(row)
+    # a folder with sessions open at once: each of its workspaces says which session it is (config.sessions_of)
+    families: dict[str, list[str]] = {}
+    for row in out:
+        families.setdefault(config.session_of(row["name"]), []).append(row["name"])
+    for row in out:
+        if len(families.get(config.session_of(row["name"]), [])) > 1:
+            row["session"] = config.session_number(row["name"])
     return out
 
 
@@ -1772,6 +1779,6 @@ def get_csv_rows(c: str, path: str, lines: str) -> dict[str, Any]:
 @router.get("/corpora/{c}/ref")
 def get_ref(c: str, ref: str) -> dict[str, Any]:
     try:
-        return refs.resolve(_corpus(c), ref)
+        return refs.resolve(_corpus(c), ref, c)
     except refs.RefError as e:
         raise HTTPException(e.status, e.detail)

@@ -78,7 +78,7 @@ CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert",
     "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
 })
-CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(archive|restore)")  # POST
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(archive|restore|sessions)")  # POST
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
 AUTH_HEADER = "x-thimble-auth"

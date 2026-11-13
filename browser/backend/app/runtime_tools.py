@@ -14,6 +14,11 @@ reaches past those folders: every path is resolved, symlinks included, and check
 file or folder is then opened by that real path one part at a time from the agent's folder that holds it (Box.root)
 without following a link (nofollow), so a link a card's code or a command puts on the way after the check fails the
 call rather than lead outside.
+
+As Claude Code's do, Write and Edit refuse a file that changed on disk since the conversation last read or wrote it
+(STALE): the analyst, a card's code or another session of the same folder wrote it meanwhile, so the agent reads it
+again before its change lands, and never writes over what it has not seen. The times are the conversation's own
+(Box.reads, runtime.Conv.reads), kept from turn to turn of one chat.
 """
 from __future__ import annotations
 
@@ -98,6 +103,11 @@ DEFS: dict[str, dict[str, Any]] = {
 }
 
 
+# what Write and Edit answer for a file that changed since the conversation read it: Claude Code's own words
+STALE = ("File has been modified since read, either by the user or by a linter. Read it again before attempting to "
+         "write it.")
+
+
 # Settings' switch that keeps main and its thread forks from writing the corpus folder (on while ledger.corpus_edits is
 # false), by its name, as their tools' texts and their prompt (events.CORPUS_WRITES) name it
 READ_ONLY_SWITCH = "Read only"
@@ -132,6 +142,22 @@ class Box:
     temp: Path | None = None  # Spec.temp: the TMPDIR of its commands when not inside `home`, inside a write root
     no_write: list[Path] = field(default_factory=list)  # never written, inside a write root or not (runtime.protected)
     corpus_edits: bool | None = None  # Spec.corpus_edits: what a refused write in the corpus tells the agent
+    # each file's modification time (ns) when the conversation last read or wrote it, by its real path (STALE)
+    reads: dict[str, int] | None = None
+
+    def seen(self, q: Path) -> None:
+        """The conversation has read or written the file at the real path `q` as it is now."""
+        if self.reads is not None:
+            with contextlib.suppress(OSError):
+                self.reads[str(q)] = os.stat(q).st_mtime_ns
+
+    def stale(self, q: Path) -> bool:
+        """Whether the file at `q` changed on disk since the conversation last read or wrote it (STALE)."""
+        was = None if self.reads is None else self.reads.get(str(q))
+        try:
+            return was is not None and os.stat(q).st_mtime_ns != was
+        except OSError:
+            return False
 
     def _inside(self, q: Path, roots: list[Path]) -> bool:
         return any(q == r or r in q.parents for r in roots)
@@ -360,10 +386,12 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
         pic = await asyncio.to_thread(shown)
         if pic is None:
             return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
+        box.seen(q)
         w, h = pic.was or pic.size
         return Out([{"type": "text", "text": f"{a.get('file_path')} is a picture of {w} x {h} px{pic.scaled}"},
                     {"type": "image", "source": {"type": "base64", "media_type": pic.mime, "data": pic.data}}])
     lines, more = got
+    box.seen(q)
     out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines, offset)]
     if more > 0:
         out.append(f"[{more} more lines: read on with offset {offset + limit}]")
@@ -455,8 +483,11 @@ def _not_searched(files: list[str]) -> str:
 async def _write(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
     text = str(a.get("content") or "")
+    if box.stale(q):
+        return Out(STALE, True)
     # by the real path Box checked, its missing folders made, never through a link (nofollow)
     await asyncio.to_thread(nofollow.write_text, q, text, root=box.root(q), make=True)
+    box.seen(q)
     return Out(f"wrote {q} ({len(text)} characters)")
 
 
@@ -464,6 +495,8 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
     if not q.is_file():
         return Out(f"there is no file {a.get('file_path')}", True)
+    if box.stale(q):
+        return Out(STALE, True)
     text = await asyncio.to_thread(nofollow.read_text, q, root=box.root(q))
     old, new = str(a.get("old_string") or ""), str(a.get("new_string") or "")
     n = text.count(old) if old else 0
@@ -474,6 +507,7 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
     await asyncio.to_thread(nofollow.write_text, q,
                             text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1),
                             root=box.root(q))
+    box.seen(q)
     return Out(f"edited {q}")
 
 

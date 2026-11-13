@@ -45,7 +45,7 @@ def server(home, monkeypatch):
     server names the last spawn's pid as its leader. The folder's session opens with no request (open_session)."""
     sp = FakeServer()
     monkeypatch.setattr(cli, "spawn", sp)
-    monkeypatch.setattr(cli, "open_session", lambda url, name, cwd, chosen: True)
+    monkeypatch.setattr(cli, "open_session", lambda url, name, cwd, chosen: name)
     monkeypatch.setattr(cli, "port_free", PORT_FREE)
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: bool(sp.port) and
                         (url or cli.api_url()) == f"http://127.0.0.1:{sp.port}")

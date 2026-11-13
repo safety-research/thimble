@@ -238,6 +238,8 @@ class Conv:
     switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
     cc: Any = None  # its Claude Code session, open past its turn while a background command runs (runtime_cc.Held)
     tools: list[str] | None = None  # the tools its last Claude Code session listed as it started (runtime_cc)
+    # on the Messages API, when it last read or wrote each file, by its chat's state (runtime_tools.Box.reads)
+    reads: dict[str, dict[str, int]] = field(default_factory=dict)
 
     @property
     def c(self) -> str:
@@ -620,7 +622,7 @@ class Space:
             # main and its thread forks write the corpus, as Claude Code does in its folder, unless the analyst turned
             # on Read only in Settings (ledger.corpus_edits)
             edits: bool | None = ledger.corpus_edits(self.c)
-            system = events.session_prompt(str(self.corpus), edits=edits)
+            system = events.session_prompt(str(self.corpus), edits=edits, c=self.c)
             names = [s.name for s in tools.REGISTRY.values()
                      if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)
                      and (labels or s.name not in labels_off.TOOLS)]
@@ -644,7 +646,7 @@ class Space:
             prompt = str(role.get("prompt") or "")
             skills = role.get("skills") or []
             if any(str(s).endswith("shared") for s in skills):
-                prompt = f"{prompt}\n\n{events.render_prompts(['shared'], str(self.corpus))}"
+                prompt = f"{prompt}\n\n{events.render_prompts(['shared'], str(self.corpus), c=self.c)}"
             system = prompt
             denied = set(role.get("disallowedTools") or [])
             own = subagents.own_tools(conv.role)

@@ -22,6 +22,7 @@ import { track } from '../lib/telemetry'
 import type { LabelDraft, SourceKind } from '../lib/types'
 import { findView } from '../lib/views'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
+import { useFolderName } from '../lib/folderName'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
 import { viewSurface } from '../shell/panes'
 import { typingIn } from '../shell/undo'
@@ -258,6 +259,7 @@ function useFlag(ws: string, name: string, def: boolean): [boolean, (v: boolean)
 
 export function FilesTab({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
   const folders = useFolderStore(ws)
+  const folder = useFolderName(ws)  // the tree's root: the folder's name, the same in each of its sessions
   const labels = useFilesLabels(ws)
   const { views, proposals, ready: viewsReady } = useViews(ws)
   const viewKeyName = storageKey(ws, 'filesView')
@@ -694,7 +696,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
                   <div className="files-side-head">
                     <button type="button" className="files-side-title" aria-expanded={treeOpen} onClick={() => setTreeOpen(!treeOpen)}>
                       <Icon name="chevron-right" size={14} className="files-caret" />
-                      <span className="files-side-name">{ws}</span>
+                      <span className="files-side-name">{folder}</span>
                     </button>
                     <Button variant="icon" size="sm" icon="sidebar" title="Hide sidebar" aria-label="Hide sidebar" onClick={side.hide} />
                   </div>

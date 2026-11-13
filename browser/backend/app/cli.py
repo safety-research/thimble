@@ -1,7 +1,7 @@
 """The workbench's command line: `browser` starts the server and opens a folder (thimble-browser runs it), and the
 others look after the server and its workspaces from a shell.
 
-    python -m app.cli browser [--cwd <path>] [--detach] [--session new|continue|pick|<chat id>]
+    python -m app.cli browser [--cwd <path>] [--detach] [--session auto|new|continue|pick|<chat id>]
     python -m app.cli restart [--keep-vite] [--yes] | stop [--yes]
     python -m app.cli doctor [--verbose] | unpair | fix | revert
     python -m app.cli feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
@@ -597,6 +597,70 @@ def last_holder() -> bool:
     except OSError as e:
         _log(f"could not lock {home() / HOLDERS_LOCK}: {e}")
     return True
+
+
+SESSION_HOLDS = "holds"  # <home>/holds/<workspace>.lock: each thimble-browser holds its session's shared (hold_session)
+SESSION_CHOICE_LOCK = "holds.lock"  # <home>/: taken alone while a start chooses the workspace it opens (choosing)
+HELD_SESSIONS: dict[str, int] = {}  # hold_session's file descriptors, by workspace, open until this process ends
+
+
+def _session_lock(name: str) -> Path:
+    return home() / SESSION_HOLDS / f"{name}.lock"
+
+
+def held_elsewhere(name: str) -> bool:
+    """Whether a thimble-browser in another shell holds workspace `name` now (hold_session), so that its session is open
+    there: a session that no start may move aside, and that a start which picks it opens as it is. False for one this
+    process holds, and when the lock cannot be read."""
+    if name in HELD_SESSIONS:
+        return False
+    try:
+        fd = os.open(_session_lock(name), os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return False
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)  # which lets go of the lock it took
+
+
+def hold_session(name: str) -> None:
+    """Hold workspace `name` for this thimble-browser, as hold_server holds the server: a shared lock on
+    <home>/holds/<name>.lock, which the system lets go when the process ends, however it ends (held_elsewhere)."""
+    if name in HELD_SESSIONS:
+        return
+    path = _session_lock(name)
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as e:
+        _log(f"could not open {path}: {e}")
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+    except OSError as e:
+        os.close(fd)
+        _log(f"could not lock {path}: {e}")
+        return
+    HELD_SESSIONS[name] = fd
+
+
+@contextmanager
+def choosing() -> Iterator[None]:
+    """The block in which a start chooses the workspace it opens and holds it (open_session, hold_session), with
+    <home>/holds.lock taken alone, so that two starts in one folder at the same moment never take the same one."""
+    ensure_home()
+    fd = os.open(home() / SESSION_CHOICE_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _detach() -> None:
@@ -1389,13 +1453,14 @@ def pair_code(api: str) -> str:
     return ""
 
 
-def ui_url(name: str | None, pair: bool = False) -> str:
+def ui_url(name: str | None, pair: bool = False, view: str = "ws") -> str:
     """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` the
     link's key after `#p=` (hook_auth.link_key, pair_code), which the page trades for the browser's cookie. The URL
-    without a key when the server gives none."""
+    without a key when the server gives none. `view` "pick" opens the session picker of workspace `name`'s folder in
+    place of the workspace (`?pick=`)."""
     st = read_state()
     base = str(st.get("url") or api_url())
-    url = f"{base}/?ws={name}" if name else f"{base}/"
+    url = f"{base}/?{view}={name}" if name else f"{base}/"
     code = pair_code(str(st.get("api") or api_url())) if pair else ""
     return f"{url}#p={code}" if code else url
 
@@ -2519,6 +2584,11 @@ SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
 SESSION_UNKNOWN_LINE = "no session with chat {id} in {cwd} (thimble-browser --resume lists the sessions)."
 PICK_HEAD = "Sessions in {cwd}, the latest first:"
 PICK_ASK = "Number to resume (Enter to cancel): "
+HELD_MARK = "open in another shell"  # --resume's mark of a session a thimble-browser in another shell holds
+HELD_LINE = "this session is open in another shell or tab too, and both show it as it is"
+# pick_session's answer for a plain start in a folder that has a session: the page opens on its session picker
+PICK_IN_PAGE = {"pick": True}
+PICK_LINE = "this folder has sessions: the page lists them, to open one or start a new one"
 # pick_session's answer for a new session, which alone moves the open one aside (open_session): a session picked that
 # holds no chat of main with a turn gets chat "new" too, and stays
 NEW_SESSION = {"archive": None, "chat": "new", "new": True}
@@ -2566,29 +2636,33 @@ def resume_line(name: str) -> str | None:
                               cards=_counted(r["cards"], "card"))
 
 
-def session_lines(rows: list[dict[str, Any]], width: int = 100, now: float | None = None) -> list[str]:
-    """The picker's rows, numbered from 1: when, the number of turns and of cards, and the first message, cut to
-    `width`."""
+def session_lines(rows: list[dict[str, Any]], width: int = 100, now: float | None = None, start: int = 1) -> list[str]:
+    """The picker's rows, numbered from `start`: when, the number of turns and of cards, and the first message, after
+    HELD_MARK for a session open in another shell, cut to `width`."""
     out = []
-    for i, r in enumerate(rows, 1):
+    for i, r in enumerate(rows, start):
         turns, cards = _counted(r["turns"], "turn"), _counted(r["cards"], "card")
         head = f"{i:>3}. {_ago(r['at'], now):<16} {turns:>9}  {cards:>9}  "
-        first = r["first"] or "(no message)"
+        first = (f"[{HELD_MARK}] " if r.get("held") else "") + (r["first"] or "(no message)")
         room = max(10, width - len(head))
         out.append(head + (first if len(first) <= room else first[: room - 1] + "…"))
     return out
 
 
 def _chosen(row: dict[str, Any], chat: str | None = None) -> dict[str, Any]:
-    return {"archive": row["archive"], "chat": chat or row["chat"] or "new"}
+    return {"archive": row["archive"], "chat": chat or row["chat"] or "new", "slot": row.get("slot"),
+            "held": bool(row.get("held"))}
 
 
 def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
-    """The session of the folder thimble-browser opens (folder_sessions.py): NEW_SESSION for `new`; else the latest
+    """The session of the folder thimble-browser opens (folder_sessions.py): NEW_SESSION for `new`; for `auto` (a plain
+    start) PICK_IN_PAGE when the folder has a session, open in a shell now or not, so the page opens on its session
+    picker, else NEW_SESSION, so a folder never opened before starts at once; else the latest
     (`continue`), one picked by number from a list printed here (`pick`), or the one that holds the chat of main with
-    that id (or the start of one), as {archive: the name of its folder in the archive, None for the session open now;
-    chat: the chat of main to open, "new" for a session with no chat of main that holds a turn}. None, with a line that
-    says why, when there is no such session or the pick was cancelled."""
+    that id (or the start of one), as {archive: the name of its folder in the archive, None for a session open now;
+    chat: the chat of main to open, "new" for a session with no chat of main that holds a turn; slot: the workspace it
+    is open in or was moved aside from; held: whether a thimble-browser in another shell holds it now}. None, with a
+    line that says why, when there is no such session or the pick was cancelled."""
     from . import folder_sessions  # noqa: PLC0415
 
     if how == "new":
@@ -2596,7 +2670,12 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
     here = cwd.resolve()
     known = known_corpus(here, data_dir.resolve())
     mine = known is not None and (known[1] == here or known[1].parent == data_dir.resolve())
-    rows = folder_sessions.listing(known[0]) if known is not None and mine else []
+    rows: list[dict[str, Any]] = []
+    if known is not None and mine:
+        held = {w for w in config.sessions_of(known[0]) if held_elsewhere(w)}
+        rows = folder_sessions.listing(known[0], held)
+    if how == "auto":
+        return dict(PICK_IN_PAGE) if rows else dict(NEW_SESSION)
     if how in SESSION_NONE_LINE and not rows:
         print(BROWSER_LINE.format(what=SESSION_NONE_LINE[how].format(cwd=cwd)))
         return None
@@ -2625,35 +2704,33 @@ def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
         print(f"  a number from 1 to {len(rows)}, or Enter to cancel")
 
 
-def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool:
-    """Put the session pick_session chose in place in workspace `name`, then open its chat of main (the register
-    route's `chat`). A new session (NEW_SESSION) moves the open one aside when it holds anything (`POST
-    /api/ws/{c}/archive`), and the start's last line says how to resume it (resume_line); an earlier one comes back
-    from the archive (`POST /api/ws/{c}/restore`), the open one going there; the open one picked stays, with a new chat when it holds no chat of main with a turn. False, with a line that
-    says why, when the session was not brought back; a session that was not moved aside stays open, with a new chat and
-    a line that says so."""
-    from . import folder_sessions  # noqa: PLC0415
-
-    chat = str(chosen.get("chat") or "new")
-    if chosen.get("archive"):
-        status, body = restore_workspace(url, name, str(chosen["archive"]))
-        if status != 200:
-            print(BROWSER_LINE.format(what=BACK_FAILED_LINE.format(why=body.get("detail") or status or "no answer",
-                                                                    log=log_path())))
-            return False
-    elif chosen.get("new"):
-        ws = Path(resolve_env()["workspaces_dir"]) / name
-        if ws.is_dir() and folder_sessions.holds(folder_sessions.summary(ws)):
-            answered, moved = archive_workspace(url, name)
-            if not moved:
-                why = "the server found no workspace to move" if answered else "the server did not move it"
-                print(BROWSER_LINE.format(what=SET_ASIDE_FAILED_LINE.format(why=why, log=log_path())))
-    status, resp = _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True,
-                                                                     "chat": chat})
-    if status not in (200, 201):
-        why = resp.get("detail") if isinstance(resp, dict) else None
-        print(BROWSER_LINE.format(what=f"the chat was not opened ({why or status}); see {log_path()}"))
-    return True
+def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> str | None:
+    """Open the session pick_session chose among the workspaces of folder workspace `name`, and its chat of main (`POST
+    /api/ws/{c}/sessions`, folder_sessions.open_session): the workspace that shows it. A session open in another shell
+    or tab is opened as it is, nothing moved, and the start says so (HELD_LINE). A new or resumed session goes into the
+    first of the folder's workspaces that is not open, whose session moves aside when it holds anything (the start's
+    last line then says how to resume it: resume_line), else into a new workspace beside them, so a session open
+    elsewhere is never moved aside. None, with a line that says why, when the server opened none."""
+    choice: dict[str, Any] = {"chat": str(chosen.get("chat") or "new")}
+    if chosen.get("new"):
+        choice["new"] = True
+    elif chosen.get("archive"):
+        choice["archive"] = str(chosen["archive"])
+    else:
+        choice["slot"] = str(chosen.get("slot") or name)
+    try:
+        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/sessions", choice,
+                                timeout=ARCHIVE_TIMEOUT_S)
+    except Exception as e:  # noqa: BLE001 — never a traceback at the start
+        status, body = 0, {"detail": f"{type(e).__name__}: {e}"}
+    if status != 200 or not isinstance(body, dict) or not body.get("name"):
+        why = (body.get("detail") if isinstance(body, dict) else None) or status or "no answer"
+        _log(f"open the session {choice} of {name}: {status} {str(body)[:200]}")
+        print(BROWSER_LINE.format(what=BACK_FAILED_LINE.format(why=why, log=log_path())))
+        return None
+    if body.get("open"):
+        print(BROWSER_LINE.format(what=HELD_LINE))
+    return str(body["name"])
 
 
 # elsewhere_line's words. {then} is ELSEWHERE_QUIT while a server of this home runs: a start that names another
@@ -2740,9 +2817,12 @@ def cmd_browser(args: argparse.Namespace) -> int:
     and how thimble reaches Claude (claude_access.py), then hold the terminal until Ctrl-C, which stops the server
     unless a thimble-browser in another terminal holds it too (hold_server). No Claude
     Code session starts here: the server runs main and every agent itself (runtime.py). `--session` says which session
-    of the folder the page opens (pick_session, open_session): a new one, as each `claude` starts a new session, as
-    empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
-    chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets the new
+    of the folder the page opens (pick_session, open_session): by default (`auto`), in a folder that has a session, the
+    one picked in the page, whose link opens on the folder's session picker (a new one, an earlier one or one open
+    now), and a new one at once in a folder that has none; a new one (`new`), as each `claude` starts a new session, as
+    empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds
+    a chat of main by id. A session open in another shell or tab stays as it is there, and a new one runs beside it in
+    a workspace of its own, which this terminal holds (hold_session). While it holds the terminal, a browser that is not signed in and opens the page gets the new
     link there once `thimble-browser --unpair` changed its key (watch_links). With `--detach` it returns once the link is printed and
     the server keeps running. A start that finds no session with anything in it for the folder says where another
     workspaces folder holds some (elsewhere_line)."""
@@ -2757,7 +2837,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
     env = resolve_env()
     data_dir = Path(env["data_dir"])
     with server_dirs():
-        chosen = pick_session(cwd, data_dir, getattr(args, "session", None) or "new")
+        chosen = pick_session(cwd, data_dir, getattr(args, "session", None) or "auto")
     if chosen is None:
         if line := elsewhere_line(cwd, data_dir):
             print(BROWSER_LINE.format(what=line))
@@ -2780,26 +2860,34 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if not name:
         print(BROWSER_LINE.format(what=f"could not open {cwd} as a workspace; see {log_path()}"))
         return 1
-    if not opened:  # a folder opened before: its session is put in place, and its chat of main opened, at once
-        with server_dirs():
-            if not open_session(url, name, cwd, chosen):
-                return 1
-    link = ui_url(name, pair=to_terminal())
+    folder = name
+    in_page = bool(chosen.get("pick")) and not opened  # the page's picker opens the session (folder_sessions.py)
+    if not in_page:
+        with server_dirs(), choosing():
+            if not opened:  # a folder opened before: its session is put in place, and its chat of main opened, at once
+                name = open_session(url, folder, cwd, chosen)
+                if name is None:
+                    return 1
+            if not getattr(args, "detach", False):
+                hold_session(name)  # no other start moves this session aside while this terminal holds it
+    link = ui_url(name, pair=to_terminal(), view="pick" if in_page else "ws")
     print(BROWSER_LINE.format(what=link), flush=True)
+    if in_page:
+        print(BROWSER_LINE.format(what=PICK_LINE), flush=True)
     print(BROWSER_LINE.format(what=claude_access.start_line()), flush=True)
     # the start's last line is about the folder's earlier sessions: where they are when another workspaces folder
     # holds them, else how to resume the latest one when this start is a new session
-    earlier = elsewhere_line(cwd, data_dir, name, new=opened)
+    earlier = elsewhere_line(cwd, data_dir, folder, new=opened)
     if earlier is None and not opened and chosen.get("new"):
         with server_dirs():
-            earlier = resume_line(name)
+            earlier = resume_line(folder)
     if earlier:
         print(BROWSER_LINE.format(what=earlier), flush=True)
     if not env["dev"] and not has_ui_build():
         print(NO_UI_LINE, flush=True)
     if getattr(args, "detach", False):
         return 0
-    stop = watch_links(name, link)
+    stop = watch_links(name, link, "pick" if in_page else "ws")
     try:
         hold_until_quit()
     finally:
@@ -2807,16 +2895,17 @@ def cmd_browser(args: argparse.Namespace) -> int:
     return 0
 
 
-def watch_links(name: str, printed: str) -> threading.Event:
+def watch_links(name: str, printed: str, view: str = "ws") -> threading.Event:
     """new_links for workspace `name` after the link `printed`, in a thread of its own, when stdout is the terminal
     (to_terminal), which alone gets the key, as with the start's link. The event that ends it."""
     stop = threading.Event()
     if to_terminal():
-        threading.Thread(target=new_links, args=(name, stop, printed), name="thimble-new-links", daemon=True).start()
+        threading.Thread(target=new_links, args=(name, stop, printed, view), name="thimble-new-links",
+                         daemon=True).start()
     return stop
 
 
-def new_links(name: str, stop: threading.Event, printed: str) -> None:
+def new_links(name: str, stop: threading.Event, printed: str, view: str = "ws") -> None:
     """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
     a minute), the sign-in link for workspace `name` (ui_url), printed as at the start (NEW_LINK_LINE) when it differs
     from the one printed last (`printed` at first): its key changed (`thimble-browser --unpair`). It waits for one at GET
@@ -2837,7 +2926,7 @@ def new_links(name: str, stop: threading.Event, printed: str) -> None:
         boot = str(got.get("boot") or "")
         before = seen["wanted"] if seen and seen["boot"] == boot else 0
         if seen and wanted > before and not stop.is_set():
-            link = ui_url(name, pair=True)
+            link = ui_url(name, pair=True, view=view)
             if "#p=" in link and link != printed:
                 _say(BROWSER_LINE.format(what=NEW_LINK_LINE.format(link=link)))
                 printed = link
@@ -2930,8 +3019,8 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("browser", help="thimble-browser: start the server, open this folder, print the sign-in link")
     b.add_argument("--cwd")
     b.add_argument("--detach", action="store_true")
-    b.add_argument("--session", default="new",
-                   help="new | continue | pick | a chat's id: the session of the folder to open (pick_session)")
+    b.add_argument("--session", default="auto",
+                   help="auto | new | continue | pick | a chat's id: the session of the folder to open (pick_session)")
     b.set_defaults(fn=cmd_browser)
     r = sub.add_parser("restart", help="stop, then start; asks first while work runs")
     add_restart_flags(r)
