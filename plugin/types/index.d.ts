@@ -157,6 +157,9 @@ declare module 'claude-code' {
       fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean; browser?: 'restart' | 'notice'; box?: string } | null
       /** the fixers' ends the conversation shows in a box, by the id of the row placed for each (fixer.ts FixEnd) */
       fixEnds: Record<string, { id: number; kind: string; title: string; tests: string; why?: string; blocked?: boolean; changed?: boolean; kept?: boolean }>
+      /** a fixer's end that came while Claude's turn ran, whose box is placed once the turn ends, and its one line for
+       *  the conversation where no box can show it (fixer.ts placeDue) */
+      fixEndDue: { end: { id: number; kind: string; title: string; tests: string; why?: string; blocked?: boolean; changed?: boolean; kept?: boolean }; text: string } | null
       /** whether this session looked for a newer release already (register.ts) */
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */

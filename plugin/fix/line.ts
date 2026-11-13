@@ -47,13 +47,16 @@
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //
 // A fixer's end (ready, failed, request) shows in the conversation, in a box of thimble's color as the tour's rows are
-// (fixer.ts showEnd, fixEndRow), which draws the line in place of the bar: the same rows, keys and d's view. Once the
-// line goes (a key acted on it, the next prompt took it, another fix's line came), the box keeps its first row, its
-// border dim. Where no box can be placed, the bar draws the line, as above:
+// (fixer.ts showEnd, fixEndRow), which draws the line in place of the bar while the box is the last thing there: the
+// same rows, keys and d's view.
 //   ╭──────────────────────────────────────────────────────────╮
 //   │  ✓ thimble fixed: <title> · tests pass                   │
 //   │    y use it now · d what changed · n later               │
 //   ╰──────────────────────────────────────────────────────────╯
+// An end that comes while Claude's turn runs shows on the bar until the turn ends, and its box then comes under the
+// answer. Once Claude's next turn starts, the bar draws the line again (lineBack), so its keys never act out of sight.
+// Once the box no longer draws the line, the box keeps its first row, its border dim. Where no box can be placed, the
+// bar draws the line, as above.
 //
 // y applies a ready fix: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts); on a
 // failed fix, y tries it again, in its copy while that holds a change no check took, else in a new copy (request.ts
@@ -177,6 +180,13 @@ export async function lineSeen($: Engine): Promise<void> {
   if (l && (['off', 'problem', 'update', 'release', 'failed', 'request'].includes(l.kind) || (l.kind === 'applied' && !l.reload))) await setFixLine($, null)
 }
 
+/** Claude's turn starts: its answer goes on under the box that draws the line (fixEndRow), so the bar draws the line
+ *  again, and the box keeps its first row, dim. */
+export async function lineBack($: Engine): Promise<void> {
+  const l = await fixLineNow($)
+  if (l?.box) await setFixLine($, { ...l, box: undefined })
+}
+
 /** A key and its words, a click that does what the key does (`press`). */
 function keyText(els: Any, k: string, words: string, i: number, press: (k: string) => unknown): Any[] {
   const { Button, Text } = els
@@ -237,8 +247,8 @@ export const NOTICE_HINT = 'For the browser: click Use it now in the workbench'
 /** The box in the conversation for a fixer's end (fixer.ts showEnd), `cols` cells wide as a card's frame (cards/draw.ts).
  *  While the fix's line names this row (box), the box draws the line itself, as the bar would (fixLineRows), with its
  *  keys, a click on each doing what the key does, and d's view of what changed; the bar then leaves it out. Once the
- *  line no longer names it (a key acted on it, the next prompt took it, another line came), the box keeps the line's
- *  first row as it was, its border dim. */
+ *  line no longer names it (Claude's next turn started, a key acted on it, the next prompt took it, another line came),
+ *  the box keeps the line's first row as it was, its border dim. */
 export async function fixEndRow($: Engine, els: Any, end: FixEnd, row: string, cols: number): Promise<Any> {
   const { Box, Text } = els
   const width = Math.max(30, cols - 4)

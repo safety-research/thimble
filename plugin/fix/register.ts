@@ -32,9 +32,11 @@
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
 //   the fixer's end        thimble commits and tests the change; a box in the conversation (a row placed at the
-//                          transcript's end, drawn here at ui.render for `Placed`) offers y use it now · d what
-//                          changed · n later, the fix's line in place of the bar's (the bar draws it where no box
-//                          can be placed), and Claude Code sends a notification
+//                          transcript's end, drawn here at ui.render for `Placed`; under Claude's answer, once its
+//                          turn ends, when the end came while it ran) offers y use it now · d what changed · n later,
+//                          the fix's line in place of the bar's (the bar draws it where no box can be placed), and
+//                          Claude Code sends a notification
+//   Claude's next turn     the bar draws the fix's line again, and the box keeps its first row (line.ts lineBack)
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
 //   the prompt box         while a failed fix's view shows what it tried (d), each change of the box draws the bar
 //                          again: its keys show only while the box is empty, where they act (line.ts)
@@ -58,9 +60,9 @@ import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { FIX_ARGUMENT_HINT, FIX_DESCRIPTION } from './command.mjs'
-import { busyFixer, fixEndOf, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
+import { busyFixer, fixEndOf, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, placeDue, recoverFixers, watch } from './fixer'
 import { type Fix, carryFixes, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
-import { fixEndRow, lineSeen, redrawFor } from './line'
+import { fixEndRow, lineBack, lineSeen, redrawFor } from './line'
 import { fixesContext, redoFix, request } from './request'
 
 type Engine = EngineInterface
@@ -371,7 +373,14 @@ export const registerFix: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the end of main's turn: a reload of the plugins asked inside it runs now
+  // the start of main's turn: its answer goes on under a fixer's box, so the bar draws the fix's line again
+  on('turn.start', { turnId: /\S/ }, async ($, e, next) => {
+    if (e.agentId === undefined) await lineBack($).catch(() => undefined)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // the end of main's turn: a reload of the plugins asked inside it runs now, and the box of a fixer's end that came
+  // while it ran is placed under its answer
   on('turn.complete', { reason: /^[\s\S]*$/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) {
@@ -380,6 +389,7 @@ export const registerFix: Register = on => {
       $.clock.after(0, () => {
         void reloadIfDue($).catch(() => undefined)
         void (async () => recoverFixers($, ((await fixesNow($))?.fixes ?? []).filter(f => f.state === 'working')))().catch(() => undefined)
+        void placeDue($).catch(() => undefined)
       })
     }
     return r

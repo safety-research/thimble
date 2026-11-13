@@ -377,6 +377,41 @@ test("the fixer's end is a box in the conversation, which draws the fix's line i
   expect(ready[0]).toContain('y use it now · d what changed · n later')
 })
 
+test("a fixer that ends while Claude's turn runs gets its box under the answer, once the turn ends; Claude's next turn gives the line back to the bar, and the box keeps its first row", async () => {
+  // the box draws the line only while it is the last thing in the conversation, so the line's keys never act out of
+  // sight: a box placed during Claude's turn would stand above the rest of its answer, and the next answer pushes a box
+  // up and out of view
+  const TURN = { plugin: 'thimble', key: 'mainTurn' }
+  const s = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.$.state.set(TURN, 't-main')
+  await s.end('Done.\n\nTitle: Bar says read for coverage\nWhat it does: The bar says r read 14%.')
+  // while the turn runs: no box yet, and the bar draws the line with its keys
+  const line = ['  ✓ thimble fixed: Bar says read for coverage · tests pass', '    y use it now · d what changed · n later']
+  expect(s.placed).toEqual([])
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual(line)
+  // the turn ends: the box comes under its answer and draws the line, which the bar leaves out
+  await s.$.state.set(TURN, null)
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Two runs.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.placed.length).toBe(1)
+  expect((await s.placedRow(s.placed[0]!)).props.children.map(textOf)).toEqual(line)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.logs.filter(l => l.includes('Bar says read for coverage'))).toEqual([])
+  // Claude's next turn starts: the bar draws the line again, with the keys that act on it, and the box its first row
+  await s.call('turn.start', { turnId: 't-next' })
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual(line)
+  expect(await fixKey(s.$, 'y')).not.toBe(null)
+  const box = await s.placedRow(s.placed[0]!)
+  expect(box.props.borderDimColor).toBe(true)
+  expect(box.props.children.map(textOf)).toEqual([line[0]])
+  // a turn that ends with no fixer's end from its time places no other box
+  await s.call('turn.complete', { turnId: 't-next', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.placed.length).toBe(1)
+})
+
 test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {
   const s = setup()
   await requested(s)
