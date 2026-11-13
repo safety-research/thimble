@@ -61,8 +61,9 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
   const spawns: Any[] = []
   const commands: string[] = []
   const notes: { text: string; title?: string }[] = []
-  // the lines the plugin put in the transcript ($.ui.log), not the debug log's
+  // the lines the plugin put in the transcript ($.ui.log), not the debug log's, and the rows it placed there
   const logs: string[] = []
+  const placed: string[] = []
   const agents: { id: string; status: string }[] = []
   // each prompt the plugin gave Claude
   const prompts: Any[] = []
@@ -147,7 +148,7 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
         return { text: a.text }
       },
     },
-    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (text: string, o: Any = {}) => { if (o.to !== 'debug') logs.push(text) }, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
+    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (text: string, o: Any = {}) => { if (o.to !== 'debug') logs.push(text) }, place: async (a: Any) => { placed.push(a.id); return { isPlaced: true, requestId: `r-${a.id}` } }, resolve: () => ELS, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -169,7 +170,9 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, ran, spawns, commands, files, notes, logs, verbs, prompts }
+  /** A row placed in the transcript, as the module's hooks draw it, `cols` wide. */
+  const placedRow = async (id: string, cols = 110) => call('ui.render', { plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: `r-${id}`, viewport: { columns: cols, rows: 40, isFullscreen: true }, props: { id, plugin: 'thimble' } })
+  return { $, call, tick, end, ran, spawns, commands, files, notes, logs, placed, placedRow, verbs, prompts }
 }
 
 /** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
@@ -323,24 +326,35 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(await fixKey(s.$, 'u')).toBe(null)
 })
 
-test("the fixer's end is a line in the conversation too, beside the line above the bar: what came of it, and the keys that act on it", async () => {
-  // the person who looks at the conversation, not the bar, still reads that the fix is done and how to use it
+test("the fixer's end is a box in the conversation too, beside the line above the bar: what came of it, and the keys that act on it while the line shows it", async () => {
+  // the person who looks at the conversation, not the bar, still sees that the fix is done and how to use it
   const s = setup()
   await requested(s)
-  const ready = s.logs.filter(l => l.includes('Bar says read for coverage'))
-  expect(ready.length).toBe(1)
-  expect(ready[0]).toContain('✓ fixed: Bar says read for coverage')
-  expect(ready[0]).toContain('tests pass')
-  expect(ready[0]).toContain('y use it now · d what changed · n later')
+  expect(s.placed.length).toBe(1)
+  expect(s.placed[0]).toMatch(/^fix-end-1-/)
+  expect(s.logs.filter(l => l.includes('Bar says read for coverage'))).toEqual([])
+  const box = await s.placedRow(s.placed[0]!)
+  expect(box.props.borderStyle).toBe('round')
+  expect(box.props.children.map(textOf)).toEqual(['✓ thimble fixed: Bar says read for coverage · tests pass', '  y use it now · d what changed · n later'])
   // the bar's line stays, with its keys
   expect(textOf((await fixLineRows(s.$, ELS, 110))[1])).toBe('    y use it now · d what changed · n later')
+  // n on the line: the box keeps its words, with no keys, and its border goes dim
+  await (await fixKey(s.$, 'n'))!.later()
+  const after = await s.placedRow(s.placed[0]!)
+  expect(after.props.children.map(textOf)).toEqual(['✓ thimble fixed: Bar says read for coverage · tests pass'])
+  expect(after.props.borderDimColor).toBe(true)
   // a fixer that cannot do it: the failure, and its keys
   const f = setup()
   await requested(f, 'Cannot: the bar has no room for it')
-  const failed = f.logs.filter(l => l.includes('did not pass'))
-  expect(failed.length).toBe(1)
-  expect(failed[0]).toContain('the bar has no room for it')
-  expect(failed[0]).toContain('y try again · d ask Claude · n dismiss')
+  expect((await f.placedRow(f.placed[0]!)).props.children.map(textOf)).toEqual(['× make the bar say read did not pass · the bar has no room for it', '  y try again · d ask Claude · n dismiss'])
+  // a Claude Code that places no rows: one line in the transcript says it, with the keys
+  const o = setup()
+  delete o.$.ui.place
+  await requested(o)
+  const ready = o.logs.filter(l => l.includes('Bar says read for coverage'))
+  expect(ready.length).toBe(1)
+  expect(ready[0]).toContain('✓ fixed: Bar says read for coverage · tests pass')
+  expect(ready[0]).toContain('y use it now · d what changed · n later')
 })
 
 test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {

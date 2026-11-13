@@ -46,6 +46,14 @@
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //
+// A fixer's end shows in the conversation too, in a box of thimble's color as the tour's rows are (fixer.ts showEnd,
+// fixEndRow): the line's first row, and its keys while the line still shows that end; once it no longer does (a key
+// acted on it, the next prompt took it, another fix's line came), the box stays with its words, its border dim:
+//   ╭──────────────────────────────────────────────────────────╮
+//   │ ✓ thimble fixed: <title> · tests pass                    │
+//   │   y use it now · d what changed · n later                │
+//   ╰──────────────────────────────────────────────────────────╯
+//
 // y applies a ready fix: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts); on a
 // failed fix, y tries it again, in its copy while that holds a change no check took, else in a new copy (request.ts
 // redoFix). n leaves a ready
@@ -57,7 +65,7 @@ import { thimbleHome } from '../core/home'
 import { quiet } from '../core/askcell.js'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
-import { testsWord } from './fixer'
+import { type FixEnd, testsWord } from './fixer'
 import { applyFix, askedWords, type Fix, fixesDir, fixesNow, type FixLine, fixLineNow, fixName, fixOf, noticeText, notNow, setFixLine, shownPath, undoFix } from './fixes'
 import { redoFix } from './request'
 
@@ -224,6 +232,40 @@ function failedKeys(els: Any, f: Fix | null, open: boolean, press: (k: string) =
  *  its page shows, whose Use it now starts it again (the browser's fixes.elsewhere). */
 export const BROWSER_HINT = 'For the browser: restart thimble-browser'
 export const NOTICE_HINT = 'For the browser: click Use it now in the workbench'
+
+/** The box in the conversation for a fixer's end (fixer.ts showEnd), `cols` cells wide as a card's frame (cards/draw.ts):
+ *  the first row of the line that end put above the bar, and the line's keys while it shows that end, a click on each
+ *  doing what the key does; after that, its words alone, the border dim. */
+export async function fixEndRow($: Engine, els: Any, end: FixEnd, row: string, cols: number): Promise<Any> {
+  const { Box, Text } = els
+  const l = await fixLineNow($)
+  const live = !!l && l.id === end.id && l.kind === end.kind
+  const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
+  const width = Math.max(30, cols - 4)
+  const title = cut(end.title, Math.max(12, width - 30))
+  let first: Any[]
+  let keys: [string, string][]
+  if (end.kind === 'ready') {
+    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: end.changed ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${end.tests}`)]
+    keys = [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']]
+  } else if (end.kind === 'failed') {
+    first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: end.changed ? 'The change to ' : '' }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }), dim('m', ` · ${end.why || 'its tests failed'}`)]
+    keys = [...(end.blocked ? [] : [['y', 'try again'] as [string, string]]), ['d', 'ask Claude'], ['n', 'dismiss']]
+  } else {
+    first = end.kept
+      ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]
+      : [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title }), dim('m', ' · thimble fix list, in a shell, lists it')]
+    keys = [['n', 'ok']]
+  }
+  const press = (k: string) => pressLine($, end.id, end.kind, k)
+  return Box({
+    key: `fix-end-${row}`, flexDirection: 'column', borderStyle: 'round', ...(live ? { borderColor: accent() } : { borderDimColor: true }),
+    paddingX: 1, marginLeft: 2, marginTop: 1, width, children: [
+      Box({ key: 'r1', flexDirection: 'row', flexWrap: 'wrap', children: first }),
+      ...(live ? [Box({ key: 'r2', flexDirection: 'row', flexWrap: 'wrap', children: [Text({ key: 'i', children: '  ' }), ...keys.flatMap(([k, w], i) => keyText(els, k, w, i, press))] })] : []),
+    ],
+  })
+}
 
 /** The line's rows, `width` cells wide, or none. */
 export async function fixLineRows($: Engine, els: Any, width: number): Promise<Any[]> {

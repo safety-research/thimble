@@ -32,8 +32,9 @@
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
-//                          changed · n later, a line in the conversation says so with the same keys, and Claude Code
-//                          sends a notification
+//                          changed · n later, a box in the conversation says so with the same keys (a row placed
+//                          at the transcript's end, drawn here at ui.render for `Placed`), and Claude Code sends a
+//                          notification
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
 //   the prompt box         while a failed fix's view shows what it tried (d), each change of the box draws the bar
 //                          again: its keys show only while the box is empty, where they act (line.ts)
@@ -57,9 +58,9 @@ import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { FIX_ARGUMENT_HINT, FIX_DESCRIPTION } from './command.mjs'
-import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
+import { busyFixer, fixEndOf, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, carryFixes, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
-import { lineSeen, redrawFor } from './line'
+import { fixEndRow, lineSeen, redrawFor } from './line'
 import { fixesContext, redoFix, request } from './request'
 
 type Engine = EngineInterface
@@ -379,6 +380,17 @@ export const registerFix: Register = on => {
       })
     }
     return r
+  }).catch(($, e, next) => next(e))
+
+  // a fixer's end in the conversation: the box of the row placed for it (fixer.ts showEnd, line.ts fixEndRow); another
+  // row, the tour's or another plugin's, is left to its own hook
+  on('ui.render', { component: 'Placed' }, async ($, e, next) => {
+    const p = (e as Any).props
+    const row = String(p?.id ?? '')
+    if (p?.plugin !== 'thimble' || !row.startsWith('fix-end-')) return next(e)
+    const els = $.ui.resolve(e) as Any
+    const end = await fixEndOf($, row)
+    return end ? fixEndRow($, els, end, row, Math.max(34, Number((e as Any).viewport?.columns ?? 100))) : els.Box({ key: `fix-end-none-${row}`, children: [] })
   }).catch(($, e, next) => next(e))
 
   // the person's prompt: a line that only told something goes
