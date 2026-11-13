@@ -1,5 +1,5 @@
-// The top bar: at the left the thimble mark and the corpus's folder in mono, with its session's number while the folder
-// has sessions open at once, which opens the switcher, the server's workspaces as the start page lists them
+// The top bar: at the left the thimble mark and the corpus's folder in mono, with the session's number when it is one
+// open beside the folder's own, which opens the switcher, the server's workspaces as the start page lists them
 // (WorkspaceList), this one marked; the surfaces' tabs over the main area (a click shows the surface, a drag takes it to
 // a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
 // the citations toggle (Hide citations), the theme popover and the settings gear.

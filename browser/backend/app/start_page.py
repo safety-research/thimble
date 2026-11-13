@@ -2,7 +2,7 @@
 not hold) and the top bar's switcher (frontend shell/WorkspaceList.tsx): GET /api/workspaces.
 
 Each corpus of GET /corpora is one row, of kind `folder`, labeled by its folder's name, with its path, ordered by folder
-name. A folder with sessions open at once (config.sessions_of) has a row for each, labeled with its number after the
+name. A session open beside a folder's own (config.add_session) has a row of its own, labeled with its number after the
 folder's name, `logs · session 2`, and each row names its folder's own workspace (`of`), by which the page lists a
 folder once and opens its session picker (frontend shell/SessionPicker.tsx).
 
@@ -38,7 +38,7 @@ def rows() -> list[dict[str, Any]]:
         folder = Path(shown).name or name
         row = {"name": name, "folder": folder, "path": shown, "kind": "folder", "label": folder,
                "of": config.session_of(name)}
-        if c.get("session"):  # one of a folder's sessions open at once (config.sessions_of)
+        if c.get("session"):  # a session open beside its folder's own (config.add_session)
             row.update(session=int(c["session"]), label=f"{folder} · session {c['session']}")
         out.append(row)
     out.sort(key=lambda r: (r["folder"].lower(), r["path"], r.get("session") or 0))

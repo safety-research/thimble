@@ -130,9 +130,10 @@ async def test_a_session_open_in_a_tab_or_a_shell_is_never_moved_aside(data_tmp,
 
 async def test_two_sessions_of_one_folder_share_its_files_and_nothing_else(data_tmp, workspaces_tmp):
     """A folder's second session open at once (config.add_session) is a workspace of its own over the same folder:
-    its corpus is the folder, the folder still opens as its own workspace, the switcher numbers both, and its labels
-    switch, prompt and temp folder are its own. An earlier session of either workspace comes back in the other, and
-    listing names the workspace each session is in."""
+    its corpus is the folder, the folder still opens as its own workspace, the switcher numbers the second (the
+    folder's own shows no number, as before it had a second), and its labels switch, prompt and temp folder are its
+    own. An earlier session of either workspace comes back in the other, and listing names the workspace each session
+    is in."""
     from app import config, corpus, events, folder_sessions, ledger, runtime_cc, start_page  # noqa: PLC0415
 
     folder = config.corpus_dir("mini")
@@ -144,8 +145,8 @@ async def test_two_sessions_of_one_folder_share_its_files_and_nothing_else(data_
             config.add_session(*bad)
     assert config.sessions_of("mini") == ["mini", "mini.2"] and config.session_of("mini.2") == "mini"
     assert config.corpus_dir("mini.2") == folder and config.workspace_for_cwd(folder / "sub") == "mini"
-    assert {r["name"]: r.get("session") for r in corpus.list_corpora()} == {"mini": 1, "mini.2": 2}
-    assert [r["label"] for r in start_page.rows()] == ["mini · session 1", "mini · session 2"]
+    assert {r["name"]: r.get("session") for r in corpus.list_corpora()} == {"mini": None, "mini.2": 2}
+    assert [r["label"] for r in start_page.rows()] == ["mini", "mini · session 2"]
 
     (config.workspace_dir("mini.2") / "settings.json").write_text(json.dumps({ledger.LABELS_KEY: False}))
     assert ledger.labels_on("mini") and not ledger.labels_on("mini.2")

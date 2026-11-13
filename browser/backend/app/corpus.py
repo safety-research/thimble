@@ -1109,12 +1109,10 @@ def list_corpora() -> list[dict[str, Any]]:
         if rec.get("shown"):
             row["shown"] = rec["shown"]
         out.append(row)
-    # a folder with sessions open at once: each of its workspaces says which session it is (config.sessions_of)
-    families: dict[str, list[str]] = {}
+    # a session open beside its folder's own (config.add_session) says which it is: 2 for `c.2` …; the folder's own says
+    # nothing, so a folder used one session at a time looks as it did before it had a second
     for row in out:
-        families.setdefault(config.session_of(row["name"]), []).append(row["name"])
-    for row in out:
-        if len(families.get(config.session_of(row["name"]), [])) > 1:
+        if config.session_of(row["name"]) != row["name"]:
             row["session"] = config.session_number(row["name"])
     return out
 
