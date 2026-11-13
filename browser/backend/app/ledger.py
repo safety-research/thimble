@@ -719,12 +719,33 @@ async def archives_route(c: str) -> dict[str, list[str]]:
     return {"archives": [p.name for p in archives(c)]}
 
 
+@router.post("/ws/{c}/sessions")
+async def add_session_route(c: str, body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    """thimble-browser in a second shell (cli.open_session): a workspace for a session of folder workspace `c` that runs
+    beside the open one (config.add_session), `name` when the body gives a free one. {name}. 404 for no such workspace,
+    400 for a name that is not `c.<n>`."""
+    try:
+        config.corpus_dir(c)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    want = body.get("name") if isinstance(body, dict) else None
+    try:
+        rec = config.add_session(c, str(want) if want else None)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"name": rec["name"]}
+
+
 @router.post("/ws/{c}/restore")
 async def restore_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[str, str | None]:
     """`/thimble restore <archive>`: archive the current workspace as `/thimble fresh` does, then move the named archive
     back as workspaces/<c>/. {restored, archived}. 404 when there is no archive of that name."""
     name = str(body.get("archive") or "").strip()
-    src = next((p for p in archives(c) if p.name == name), None)
+    try:
+        family = config.sessions_of(config.session_of(c))  # a folder's session comes back in any of its workspaces
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    src = next((p for s in family for p in archives(s) if p.name == name), None)
     if src is None:
         raise HTTPException(404, f"{c} has no archive named {name!r}")
     replaced = (await archive_workspace(c))["archived"]

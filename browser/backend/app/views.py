@@ -2121,7 +2121,7 @@ def _fragment_of(ref: str) -> str | None:
     return ref.split("#", 1)[1] if "#" in ref else None
 
 
-def enrich_file_ref(corpus_dir: Path, ref: str, out: dict[str, Any]) -> None:
+def enrich_file_ref(corpus_dir: Path, ref: str, out: dict[str, Any], c: str | None = None) -> None:
     """refs.resolve's last step for a file ref with a fragment: the first view that claims the file, accepts the
     fragment and knows the locator gives the excerpt, and the answer names the view. Never raises; a view that fails
     leaves the file's own resolution as it was."""
@@ -2130,7 +2130,7 @@ def enrich_file_ref(corpus_dir: Path, ref: str, out: dict[str, Any]) -> None:
     if not fragment or not path:
         return
     try:
-        c = config.workspace_for_corpus_dir(corpus_dir)
+        c = c or config.workspace_for_corpus_dir(corpus_dir)
         candidates = views_for(c, str(path), fragment)
     except Exception:  # noqa: BLE001
         return
@@ -2151,11 +2151,11 @@ def enrich_file_ref(corpus_dir: Path, ref: str, out: dict[str, Any]) -> None:
             return  # asked on the loop: the answer lands in the memo for the next reader of this ref
 
 
-def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
+def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str, c: str | None = None) -> dict[str, Any]:
     """`view:<slug>` (the view itself: its name and what it is for) or `view:<slug>/<key>` (the unit the key names:
     its excerpt, label and the file refs it stands for). A key whose view is gone answers from key-refs.json with
     meta.deleted. Raises refs.RefError 404 for what no view, proposal or kept answer knows."""
-    c = config.workspace_for_corpus_dir(corpus_dir)
+    c = c or config.workspace_for_corpus_dir(corpus_dir)
     slug, key = p["slug"], p.get("key")
     view = read_built(c, slug)
     if not key:
@@ -3525,7 +3525,7 @@ def source_text(c: str, file_ref: str) -> str | None:
     source. The cited lines as the file writes them count too, so a record's own JSON line is its text, and so do a
     .json document's decoded string values. '' when the ref does not resolve, None for a binary file."""
     try:
-        res = refs.resolve_base(config.corpus_dir(c), file_ref)
+        res = refs.resolve_base(config.corpus_dir(c), file_ref, c)
     except refs.RefError:
         return ""
     suffix = Path(str(res.get("path") or "")).suffix.lower()
@@ -4361,7 +4361,7 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
     missed: dict[str, list[tuple[Any, str]]] = {}
     for ref, rec in recs.items():
         try:
-            res = refs.resolve_base(config.corpus_dir(c), ref)
+            res = refs.resolve_base(config.corpus_dir(c), ref, c)
         except (refs.RefError, ValueError):
             continue
         if (res.get("meta") or {}).get("binary"):

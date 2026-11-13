@@ -10,12 +10,20 @@ workspace keeps its one name for every route, agent and tab (a tab drops what it
 workspace's instance changes, App.tsx), and a workspace from before sessions is its folder's first session. Main's chats
 inside a session are runtime.py's.
 
+Two shells can run thimble-browser in one folder at once. The session the second one opens is a workspace of its own,
+`c.2` (config.add_session), so both run side by side, each with its own main, agents, kernels, temp folder, chat,
+canvas, report, labels and settings, and only the folder's files are shared, as two Claude Code sessions in one folder
+share them. A workspace a thimble-browser holds is never moved aside by another start (cli.hold_session), and a start
+whose folder has a session lists them all to pick from, each workspace's open one and those moved aside from any of them
+(listing; cli.pick_session).
+
 A workbench that ran with another workspaces folder (THIMBLE_WORKSPACES_DIR) left its sessions there, and a start with
 this one finds none of them. `elsewhere` reads a workspace's sessions in such a folder, so that the start says where
 they are (cli.elsewhere_line).
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -60,16 +68,26 @@ def holds(s: dict[str, Any]) -> bool:
     return bool(s["turns"] or s["cards"] or s["labels"] or s["documents"] or s["threads"])
 
 
-def listing(c: str) -> list[dict[str, Any]]:
-    """The sessions of workspace `c` that hold anything, the latest first: summary's fields, and `archive`, the name of
-    the session's folder in the archive, or None for the session the page opens now."""
+def listing(c: str, held: frozenset[str] | set[str] = frozenset()) -> list[dict[str, Any]]:
+    """The sessions of the folder of workspace `c` that hold anything, in each of its workspaces (config.sessions_of),
+    the latest first: summary's fields, `slot`, the workspace the session is open in or was moved aside from, and
+    `archive`, the name of the session's folder in the archive, or None for a session open now. A session open in a
+    workspace of `held` (one a thimble-browser in another shell holds) is listed even when it holds nothing yet, with
+    `held` True."""
     from . import config, ledger  # noqa: PLC0415
 
-    found = [(None, config.WORKSPACES_DIR / c), *((p.name, p) for p in ledger.archives(c))]
+    found = []
+    for slot in config.sessions_of(config.session_of(c)):
+        found += [(slot, None, config.WORKSPACES_DIR / slot), *((slot, p.name, p) for p in ledger.archives(slot))]
     rows = []
-    for archive, ws in found:
-        if ws.is_dir() and holds(s := summary(ws)):
-            rows.append({**s, "archive": archive})
+    for slot, archive, ws in found:
+        live = archive is None and slot in held
+        s = summary(ws) if ws.is_dir() else None
+        if live and s is None:
+            s = {"at": time.time(), "first": "", "turns": 0, "cards": 0, "labels": 0, "documents": [], "threads": 0,
+                 "chat": "", "chats": []}
+        if s is not None and (live or holds(s)):
+            rows.append({**s, "archive": archive, "slot": slot, "held": live})
     return sorted(rows, key=lambda r: r["at"], reverse=True)
 
 

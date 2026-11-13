@@ -853,7 +853,7 @@ def unit_texts(c: str, concept: dict, refs_wanted: list[str], cap: int = EXAMPLE
         return out
     for ref in wanted:
         try:
-            t = str(refs.resolve(corpus_dir, ref).get("excerpt") or "")
+            t = str(refs.resolve(corpus_dir, ref, c).get("excerpt") or "")
         except Exception:  # noqa: BLE001
             continue
         if t.strip():

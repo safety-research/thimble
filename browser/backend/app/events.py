@@ -81,11 +81,11 @@ def kinds() -> list[str]:
     return _KIND_RE.findall(prompts.section(PROMPT, EVENTS_SECTION))
 
 
-def session_prompt(workdir: str, edits: bool | None = None) -> str:
+def session_prompt(workdir: str, edits: bool | None = None, c: str | None = None) -> str:
     """Main's system-prompt append, as the launcher passes it with --append-system-prompt. Claude Code cuts MCP server
     instructions at 2 KB, so this text cannot travel as the shim's instructions, while an append reaches main and every
-    fork of it whole. `edits`: whether main may write the corpus (render_prompts)."""
-    return render_prompts(SESSION_PROMPTS, workdir, edits)
+    fork of it whole. `edits`: whether main may write the corpus, `c` its workspace (render_prompts)."""
+    return render_prompts(SESSION_PROMPTS, workdir, edits, c)
 
 
 # main.md's {{corpus_writes}} in the browser: what main's sandbox lets it write, by Settings' Read only switch
@@ -127,15 +127,18 @@ def network_words(c: str | None, edits: bool | None) -> str:
     return NETWORK[(runtime.network() if edits is not None else "ask", not userconf.main_web_off(c))]
 
 
-def render_prompts(names: tuple[str, ...] | list[str], workdir: str, edits: bool | None = None) -> str:
+def render_prompts(names: tuple[str, ...] | list[str], workdir: str, edits: bool | None = None,
+                   c: str | None = None) -> str:
     """Prompt files for a session in `workdir`, rendered and joined by a blank line, with the corpus root and the citation
     forms of the folder's views filled in. Main's append and the shared skill's command both come from here. `edits`:
     whether main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which
     requests to a host ask the analyst follows the way main reaches Claude (network_words). While the workspace's
-    Label tool is off (ledger.labels_on), each text leaves out what it says of labels (labels_off.py)."""
+    Label tool is off (ledger.labels_on), each text leaves out what it says of labels (labels_off.py). The workspace is
+    `c`, else the one `workdir` opens as (config.workspace_for_cwd): a session of the folder that runs beside its own
+    (config.sessions_of) shares its folder, and its prompt reads its own labels and views."""
     from . import views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
-    c = config.workspace_for_cwd(workdir)
+    c = c or config.workspace_for_cwd(workdir)
     labels = ledger.labels_on(c)
     forms = views.forms_text(c) if c else ""
     values = {"workdir": str(workdir), "forms": forms, "corpus_writes": CORPUS_WRITES[edits],

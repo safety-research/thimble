@@ -2563,6 +2563,7 @@ class _Citations:
     """Resolves a document's refs to citations a reader can reproduce; `titles` lists every cited cell's title."""
 
     def __init__(self, c: str):
+        self.c = c
         try:
             self.corpus: Path | None = config.corpus_dir(c)
         except ValueError:
@@ -2579,7 +2580,7 @@ class _Citations:
         if self.corpus is None:
             return None
         try:
-            return refs.resolve(self.corpus, ref)
+            return refs.resolve(self.corpus, ref, self.c)
         except Exception:  # noqa: BLE001
             return None
 

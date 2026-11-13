@@ -1203,6 +1203,9 @@ export interface CorpusInfo {
   path?: string
   /** the same folder as the analyst named it, through a symlink, which the dashboard shows in place of `path` */
   shown?: string
+  /** which of its folder's sessions open at once this workspace is (backend config.sessions_of): 1 for the folder's
+   * own, absent while the folder has one */
+  session?: number
 }
 
 /** One row of `GET /workspaces` (backend start_page.py): a folder's workspace as the start page and the top bar's
@@ -1216,6 +1219,8 @@ export interface WorkspaceRow {
   folder: string
   /** the folder as the analyst opened it */
   path: string
+  /** which of its folder's sessions open at once this workspace is, as CorpusInfo's `session` */
+  session?: number
 }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'

@@ -1,6 +1,7 @@
-// The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
-// workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area (a
-// click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
+// The top bar: at the left the thimble mark and the corpus's folder in mono, with its session's number while the folder
+// has sessions open at once, which opens the switcher, the server's workspaces as the start page lists them
+// (WorkspaceList), this one marked; the surfaces' tabs over the main area (a click shows the surface, a drag takes it to
+// a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
 // the citations toggle (Hide citations), the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
@@ -78,6 +79,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
   const [prefill, setPrefill] = useState<ProblemPrefill | null>(null)
   const [tools, setTools] = useState<HTMLSpanElement | null>(null)
   const [path, setPath] = useState<string | null>(null)
+  const [session, setSession] = useState<number | null>(null)
   const links = useLinksVisible()
   const history = useUndo(ws)
   useEffect(
@@ -104,7 +106,12 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
     let alive = true
     api
       .corpora()
-      .then((cs) => alive && setPath(shownPath(cs.find((c) => c.name === ws))))
+      .then((cs) => {
+        if (!alive) return
+        const c = cs.find((c) => c.name === ws)
+        setPath(shownPath(c))
+        setSession(c?.session ?? null)
+      })
       .catch(() => undefined)
     return () => {
       alive = false
@@ -115,7 +122,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
       <span className="shell-brand">
         <Icon name="thimble" size={18} className="shell-mark" />
         <span className="shell-word">thimble</span>
-        <WorkspaceSwitcher ws={ws} label={path ? shortPath(path) : ws} />
+        <WorkspaceSwitcher ws={ws} label={`${path ? shortPath(path) : ws}${session ? ` · session ${session}` : ''}`} />
       </span>
       <nav className="tabs shell-tabs" role="tablist" aria-label="Surfaces">
         {tabs.map((t) => (
