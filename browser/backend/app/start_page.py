@@ -3,7 +3,8 @@ not hold) and the top bar's switcher (frontend shell/WorkspaceList.tsx): GET /ap
 
 Each corpus of GET /corpora is one row, of kind `folder`, labeled by its folder's name, with its path, ordered by folder
 name. A folder with sessions open at once (config.sessions_of) has a row for each, labeled with its number after the
-folder's name, `logs · session 2`.
+folder's name, `logs · session 2`, and each row names its folder's own workspace (`of`), by which the page lists a
+folder once and opens its session picker (frontend shell/SessionPicker.tsx).
 
 A registered folder that is gone is left out, since its workspace cannot open. The route is a read like GET /corpora,
 open to the page with or without the key's cookie (hook_auth guards writes only).
@@ -35,7 +36,8 @@ def rows() -> list[dict[str, Any]]:
             continue
         shown = str(c.get("shown") or here)
         folder = Path(shown).name or name
-        row = {"name": name, "folder": folder, "path": shown, "kind": "folder", "label": folder}
+        row = {"name": name, "folder": folder, "path": shown, "kind": "folder", "label": folder,
+               "of": config.session_of(name)}
         if c.get("session"):  # one of a folder's sessions open at once (config.sessions_of)
             row.update(session=int(c["session"]), label=f"{folder} · session {c['session']}")
         out.append(row)
@@ -45,5 +47,5 @@ def rows() -> list[dict[str, Any]]:
 
 @router.get("/workspaces")
 def list_workspaces() -> list[dict[str, Any]]:
-    """The start page's rows (module note): {name, kind, label, folder, path, session?}."""
+    """The start page's rows (module note): {name, kind, label, folder, path, of, session?}."""
     return rows()

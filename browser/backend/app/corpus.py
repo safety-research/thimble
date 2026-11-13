@@ -1124,25 +1124,18 @@ class RegisterBody(BaseModel):
     exact: bool = False  # register this folder even inside a registered one
     shown: str | None = None  # the folder as the analyst named it, through a symlink; null clears it, absent keeps it
     chat: str | None = None  # thimble-browser's chat of main: "new", or an earlier chat's id (runtime.open_chat)
-    session: str | None = None  # the folder's workspace whose chat opens: its own, or one of config.sessions_of's
 
 
 @router.post("/corpora/register", status_code=201)
 def register_corpus(body: RegisterBody) -> dict[str, Any]:
     """Register a directory as a corpus: writes the sidecar DATA_DIR/<name>.corpus.json, never into the directory. 400
     for a non-directory. A taken basename gets the next free name (`logs-2`); a folder registered already keeps its
-    name; a path inside a corpus returns that corpus unless `exact`. With `session`, a workspace of a session of the
-    folder that runs beside its own (config.sessions_of), the record and the chat are that workspace's; 400 for a
-    workspace that is not one of the folder's."""
+    name; a path inside a corpus returns that corpus unless `exact`."""
     shown = body.shown if "shown" in body.model_fields_set else config.KEEP_SHOWN
     try:
         rec = config.register_corpus(body.path, exact=body.exact, shown=shown)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    if body.session and body.session != rec["name"]:
-        if body.session not in config.sessions_of(str(rec["name"])):
-            raise HTTPException(400, f"{body.session!r} is not a session of {rec['name']!r}")
-        rec = {**(config.read_sidecar(body.session) or {}), "name": body.session}
     view_calls.registered(str(rec["name"]))
     from . import runtime  # noqa: PLC0415
 

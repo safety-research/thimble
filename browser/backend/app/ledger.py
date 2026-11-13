@@ -6,6 +6,7 @@ settings routes, the workspace reset, its archive (`/thimble fresh`) and an arch
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -719,21 +720,47 @@ async def archives_route(c: str) -> dict[str, list[str]]:
     return {"archives": [p.name for p in archives(c)]}
 
 
-@router.post("/ws/{c}/sessions")
-async def add_session_route(c: str, body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
-    """thimble-browser in a second shell (cli.open_session): a workspace for a session of folder workspace `c` that runs
-    beside the open one (config.add_session), `name` when the body gives a free one. {name}. 404 for no such workspace,
-    400 for a name that is not `c.<n>`."""
+@router.get("/ws/{c}/sessions")
+async def sessions_route(c: str) -> dict[str, Any]:
+    """The page's session picker: the sessions of the folder of workspace `c`, open now and moved aside
+    (folder_sessions.sessions). 404 for no such workspace."""
+    from . import folder_sessions  # noqa: PLC0415
+
     try:
         config.corpus_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    want = body.get("name") if isinstance(body, dict) else None
+    return await asyncio.to_thread(folder_sessions.sessions, c)
+
+
+async def _open_session(c: str, body: Any, *, reserve: bool = False) -> dict[str, Any]:
+    from . import folder_sessions  # noqa: PLC0415
+
     try:
-        rec = config.add_session(c, str(want) if want else None)
+        config.corpus_dir(c)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    b = body if isinstance(body, dict) else {}
+    pick = {k: str(b[k]) for k in ("archive", "slot", "chat") if isinstance(b.get(k), str) and b[k]}
+    try:
+        return await folder_sessions.open_session(c, new=bool(b.get("new")), reserve=reserve, **pick)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return {"name": rec["name"]}
+
+
+@router.post("/ws/{c}/sessions/open")
+async def open_session_route(c: str, body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    """The page's session picker opens a session of the folder of workspace `c` ({new: true}, {archive}, or {slot}),
+    and its chat (folder_sessions.open_session): {name, open}. A signed-in browser's write, as the page's others. 404
+    for no such workspace, 400 for a slot or an archive the folder does not have."""
+    return await _open_session(c, body, reserve=True)
+
+
+@router.post("/ws/{c}/sessions")
+async def open_session_cli(c: str, body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    """thimble-browser's --new, --continue and --resume (cli.open_session): open_session_route for the CLI, with its
+    token, and `chat` the chat of main to open."""
+    return await _open_session(c, body)
 
 
 @router.post("/ws/{c}/restore")

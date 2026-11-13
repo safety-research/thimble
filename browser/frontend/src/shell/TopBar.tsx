@@ -19,6 +19,7 @@ import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
+import { SessionPicker } from './SessionPicker'
 import { useCommentItems } from './CommentsList'
 import { listedLabels, type SideSection } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
@@ -178,16 +179,19 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
   )
 }
 
-/** The corpus's folder in the top bar, a button that opens the server's workspaces (WorkspaceList), loaded each time it
- * opens, this one marked; a row opens its workspace in this tab. */
+/** The corpus's folder in the top bar, a button that opens the server's folders (WorkspaceList), loaded each time it
+ * opens, this one's marked; a folder's row shows its session picker (SessionPicker) in place of the list, whose choice
+ * opens in this tab, and Back goes back to the list. */
 export function WorkspaceSwitcher({ ws, label }: { ws: string; label: string }) {
   const [open, setOpen] = useState(false)
+  const [folder, setFolder] = useState<string | null>(null)
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [rows, setRows] = useState<WorkspaceRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     if (!open) return
     let alive = true
+    setFolder(null)
     setError(null)
     api
       .workspaces()
@@ -216,7 +220,21 @@ export function WorkspaceSwitcher({ ws, label }: { ws: string; label: string }) 
         <Icon name="chevron-down" size={12} className="shell-corpus-caret" />
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} label="Workspaces" className="ws-switcher" width={480}>
-        {error ? <p className="ws-switcher-error">{error}</p> : rows == null ? <Spinner size={12} label="Loading" className="ws-switcher-wait" /> : <WorkspaceList rows={rows} current={ws} compact />}
+        {folder ? (
+          <div className="ws-switcher-pick">
+            <button type="button" className="ws-switcher-back" onClick={() => setFolder(null)} data-tel="switcher-back">
+              <Icon name="chevron-left" size={12} />
+              Your folders
+            </button>
+            <SessionPicker ws={folder} current={ws} compact />
+          </div>
+        ) : error ? (
+          <p className="ws-switcher-error">{error}</p>
+        ) : rows == null ? (
+          <Spinner size={12} label="Loading" className="ws-switcher-wait" />
+        ) : (
+          <WorkspaceList rows={rows} current={ws} compact onFolder={setFolder} />
+        )}
       </Popover>
     </>
   )

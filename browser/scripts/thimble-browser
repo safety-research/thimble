@@ -5,12 +5,12 @@
 # as a workspace and prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and
 # thimble's agents itself, on the way to reach Claude chosen at install or in the page: your Claude Code sign-in, an
 # Anthropic API key, or Workload Identity Federation. Ctrl-C stops the server, unless a thimble-browser in another
-# terminal still uses it. In a folder that has a session, a start asks in the terminal which to open: a new one (an
-# empty chat, canvas, report and labels, as at the folder's first start), an earlier one, whole, or one open in another
-# shell; in a folder never opened, it starts a new one at once. Two shells can run sessions of one folder side by side.
+# terminal still uses it. In a folder that has a session, the page opens on the folder's session picker: a new session
+# (an empty chat, canvas, report and labels, as at the folder's first start), an earlier one, whole, or one open now; in
+# a folder never opened, a new one starts at once. Sessions of one folder can run side by side, in two shells or tabs.
 #
-#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; picks or starts a session
-#   thimble-browser -n | --new            start a new session without asking
+#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given
+#   thimble-browser -n | --new            start a new session, without the picker
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it

@@ -6,8 +6,18 @@ import type { WorkspaceRow } from './types'
 const NAME_RE = /^[A-Za-z0-9._-]+$/
 
 export function workspaceFromUrl(): string | null {
+  return nameFromUrl('ws')
+}
+
+/** `?pick=<name>`: the session picker of that workspace's folder (shell/SessionPicker), which thimble-browser opens in
+ * a folder that has sessions, and a start page's row of a folder. */
+export function pickFromUrl(): string | null {
+  return nameFromUrl('pick')
+}
+
+function nameFromUrl(key: string): string | null {
   if (typeof window === 'undefined') return null
-  const v = new URLSearchParams(window.location.search).get('ws')?.trim() ?? ''
+  const v = new URLSearchParams(window.location.search).get(key)?.trim() ?? ''
   return v && NAME_RE.test(v) ? v : null
 }
 
@@ -17,10 +27,32 @@ export function workspaceLabel(row: Pick<WorkspaceRow, 'name' | 'label' | 'folde
   return row.label || row.folder || row.name
 }
 
-/** Where a row of the start page goes: the page at `pathname` with its workspace. It carries no sign-in key: the start
- * page signed this browser in already. Pure. */
+/** The page at `pathname` with a workspace. It carries no sign-in key: the start page signed this browser in already.
+ * Pure. */
 export function workspaceHref(row: Pick<WorkspaceRow, 'name'>, pathname = '/'): string {
   return `${pathname}?${new URLSearchParams({ ws: row.name }).toString()}`
+}
+
+/** Where a folder's row of the start page goes: its session picker (pickFromUrl). Pure. */
+export function pickHref(folder: string, pathname = '/'): string {
+  return `${pathname}?${new URLSearchParams({ pick: folder }).toString()}`
+}
+
+/** The server's workspaces as folders, in their order: one row per folder (a folder's sessions open at once share
+ * its own workspace, `of`), named by its own workspace and labeled with the folder's name, and the workspaces it
+ * holds. Pure. */
+export function folderRows(rows: readonly WorkspaceRow[]): { row: WorkspaceRow; names: string[] }[] {
+  const out: { row: WorkspaceRow; names: string[] }[] = []
+  const at = new Map<string, number>()
+  for (const r of rows) {
+    const folder = r.of || r.name
+    const i = at.get(folder)
+    if (i == null) {
+      at.set(folder, out.length)
+      out.push({ row: { ...r, name: folder, label: r.folder || r.label, session: undefined }, names: [r.name] })
+    } else out[i].names.push(r.name)
+  }
+  return out
 }
 
 /** A key in browser storage, per workspace. */

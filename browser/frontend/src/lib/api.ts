@@ -45,6 +45,8 @@ import type {
   ViewProblems,
   ViewShown,
   WorkspaceRow,
+  FolderSessions,
+  OpenSessionBody,
   Writeup,
 } from './types'
 import type { AnswerComments } from '../chat/answerComments'
@@ -402,6 +404,11 @@ export const api = {
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
   instance: (c: string) => j<{ stamp: string | null }>(`${ws(c)}/instance`),
+  /** `GET /ws/{c}/sessions`: the sessions of workspace c's folder, open now and moved aside (the session picker). */
+  sessions: (c: string) => j<FolderSessions>(`${ws(c)}/sessions`),
+  /** `POST /ws/{c}/sessions/open`: open a session of c's folder, a new one, one moved aside or one open now; the
+   * workspace that shows it. */
+  openSession: (c: string, body: OpenSessionBody) => j<{ name: string; open: boolean }>(`${ws(c)}/sessions/open`, { method: 'POST', body: JSON.stringify(body) }),
   chat: (c: string, id: string) => j<ChatDetail>(`${ws(c)}/chats/${enc(id)}`),
   createThread: (c: string, body: NewThreadBody) => j<ChatMeta>(`${ws(c)}/chats`, { method: 'POST', body: JSON.stringify(body) }),
   updateChat: (c: string, id: string, patch: ChatPatch) => j<ChatMeta>(`${ws(c)}/chats/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),

@@ -1,9 +1,9 @@
-"""A folder's sessions at a start of thimble-browser, and two of them open at once (folder_sessions.py, cli.pick_session,
-cli.open_session, config.add_session): a plain start in a folder that has a session asks in the terminal which to open,
-a new one first; a folder never opened starts a new session at once, as does a start that cannot ask. A second shell's
-session runs beside the one the first shell holds, in a workspace of its own over the same folder, so nothing of the
-first moves, and each keeps its own chat, cards, labels, settings and temp folder; only the folder's files are shared,
-and a write over a file that changed since it was read is refused, as Claude Code refuses it."""
+"""A folder's sessions at a start of thimble-browser, and several of them open at once (folder_sessions.py,
+cli.pick_session, cli.open_session, config.add_session): a plain start in a folder that has a session opens the page on
+its session picker; a folder never opened starts a new session at once. A session opened beside one that a tab shows or
+a shell holds runs in a workspace of its own over the same folder, so nothing of the open one moves, and each keeps its
+own chat, cards, labels, settings and temp folder; only the folder's files are shared, and a write over a file that
+changed since it was read is refused, as Claude Code refuses it."""
 from __future__ import annotations
 
 import json
@@ -26,22 +26,6 @@ def _card(c: str, words: str) -> None:
     notebook.insert_cell(c, nb["id"], notebook.new_cell("note", "test", words, nb["id"], payload={"text": words}))
 
 
-def _answers(monkeypatch, *typed: str) -> list[str]:
-    """The terminal, answering the picker with `typed` in turn; what it was asked."""
-    asked: list[str] = []
-    left = list(typed)
-
-    def answer(prompt: str = "") -> str:
-        asked.append(prompt)
-        if not left:
-            raise EOFError
-        return left.pop(0)
-
-    monkeypatch.setattr("builtins.input", answer)
-    monkeypatch.setattr(cli, "interactive", lambda: True)
-    return asked
-
-
 def _other_shell(name: str) -> subprocess.Popen:
     """A thimble-browser in another shell that holds workspace `name` (cli.hold_session) until it is killed."""
     other = subprocess.Popen([sys.executable, "-c", f"from app import cli; cli.hold_session({name!r}); "
@@ -51,94 +35,88 @@ def _other_shell(name: str) -> subprocess.Popen:
     return other
 
 
-def test_a_folder_never_opened_starts_a_new_session_and_one_with_a_session_asks_first(home, data, monkeypatch, capsys):
-    """A plain start (`auto`) in a folder with no session starts a new one without asking. Once the folder has a
-    session, the start lists a new session first and then the folder's sessions, the latest first; Enter or 1 takes a
-    new session, and a number one of the sessions. A start that cannot ask (stdin or stdout not a terminal) and an
-    explicit `--session new` start a new session without asking, as before."""
+def test_a_start_in_a_folder_with_sessions_opens_the_page_on_its_picker(home, data, monkeypatch, capsys):
+    """A plain start (`auto`) in a folder with no session starts a new one at once. Once the folder has a session, the
+    start opens nothing itself: its link opens the page on the folder's session picker (`?pick=`), it says so, and it
+    holds no session, since the page opens the one picked. An explicit `--session new` (`-n`) starts a new session
+    without the picker, as --continue and --resume do. The server is faked."""
     cwd = data / "mini"
-    asked = _answers(monkeypatch)
     with cli.server_dirs():
         assert cli.pick_session(cwd, data, "auto") == cli.NEW_SESSION
-    assert asked == [] and capsys.readouterr().out == ""
-    with cli.server_dirs():
         _card("mini", "two incidents")
-    for typed, want in (("", cli.NEW_SESSION), ("1", cli.NEW_SESSION),
-                        ("2", {"archive": None, "chat": "new", "slot": "mini", "held": False})):
-        asked = _answers(monkeypatch, "7", typed)
-        with cli.server_dirs():
-            assert cli.pick_session(cwd, data, "auto") == want, typed
-        out = capsys.readouterr().out.splitlines()
-        assert asked == [cli.PICK_NEW_ASK] * 2
-        assert out[:2] == [cli.PICK_HEAD.format(cwd=cwd), f"  1. {cli.PICK_NEW}"], out
-        assert out[2].startswith("  2. ") and "1 card" in out[2] and "(no message)" in out[2], out
-        assert out[3] == "  a number from 1 to 2, or Enter for a new session", out
-    asked = _answers(monkeypatch)
-    with cli.server_dirs():
+        assert cli.pick_session(cwd, data, "auto") == cli.PICK_IN_PAGE
         assert cli.pick_session(cwd, data, "new") == cli.NEW_SESSION
-        monkeypatch.setattr(cli, "interactive", lambda: False)
-        assert cli.pick_session(cwd, data, "auto") == cli.NEW_SESSION
-    assert asked == []
-    asked = _answers(monkeypatch)  # Ctrl-D at the picker: nothing opens
-    with cli.server_dirs():
-        assert cli.pick_session(cwd, data, "auto") is None
+    sent: list[str] = []
+
+    def answer(method, url, body=None, timeout=5.0):
+        sent.append(url.split("/api/", 1)[1])
+        return 200, {"code": "k" * 16} if url.endswith("/ui/pair") else {"name": "mini", "open": False}
+
+    monkeypatch.setattr(cli, "_request", answer)
+    monkeypatch.setattr(cli, "ensure_running", lambda wait_s: True)
+    monkeypatch.setattr(cli, "refuse_foreign", lambda url: False)
+    monkeypatch.setattr(cli, "open_workspace", lambda *a, **k: ("mini", False))
+    monkeypatch.setattr(cli, "elsewhere_line", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "HELD_SESSIONS", {})
+    assert cli.main(["browser", "--cwd", str(cwd), "--detach"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("thimble browser: http://") and out[0].endswith("/?pick=mini"), out
+    assert out[1] == cli.BROWSER_LINE.format(what=cli.PICK_LINE)
+    assert "ws/mini/sessions" not in sent and cli.HELD_SESSIONS == {}
+    assert cli.main(["browser", "--cwd", str(cwd), "--detach", "--session", "new"]) == 0
+    assert capsys.readouterr().out.splitlines()[0].endswith("/?ws=mini") and "ws/mini/sessions" in sent
 
 
 @pytest.mark.timeout(120)
-def test_a_second_shell_runs_a_session_beside_the_one_another_shell_holds(home, data, monkeypatch, capsys):
-    """While a thimble-browser in another shell holds the folder's session, a start lists that session marked
-    `open in another shell`, even when it holds nothing yet. Picking it opens it as it is: nothing moves and no request
-    is sent. A new session does not move it aside: it opens in a second workspace of the folder (`POST
-    /api/ws/mini/sessions`), whose chat the register route opens, and this shell holds it. Once the other shell has
-    ended, the folder's own workspace is free again, and a new session takes it, moving its session aside. The server's
-    routes are faked; the sessions route writes the workspace's sidecar as config.add_session does."""
-    from app import config  # noqa: PLC0415
+async def test_a_session_open_in_a_tab_or_a_shell_is_never_moved_aside(data_tmp, workspaces_tmp, monkeypatch):
+    """The page's picker and the CLI open a session through folder_sessions.open_session. A session a tab shows (it
+    follows the workspace's events) or a thimble-browser in another shell holds is open: the picker marks it, picking it
+    opens it as it is, and a new session goes into a workspace of the folder that is not open, a new one beside it when
+    none is, so the open one keeps its cards. Once nothing holds the folder's own workspace, a new session takes it
+    and moves its session aside, which comes back whole. main's chat switch is faked."""
+    from app import config, folder_sessions, investigation, runtime  # noqa: PLC0415
 
-    cwd = data / "mini"
-    sent: list[tuple[str, dict]] = []
+    switched: list[tuple[str, str | None]] = []
 
-    def answer(method, url, body=None, timeout=5.0):
-        route = url.split("/api/", 1)[1]
-        sent.append((route, body or {}))
-        if route == "ws/mini/sessions":
-            return 200, {"name": config.add_session("mini")["name"]}
-        if route.endswith("/archive"):
-            return 200, {"archived": "aside"}
-        return 200, {"name": "mini"}
+    class Space:
+        def __init__(self, c: str) -> None:
+            self.c = c
 
-    monkeypatch.setattr(cli, "_request", answer)
-    monkeypatch.setattr(cli, "HELD_SESSIONS", {})
-    other = _other_shell("mini")
+        async def switch(self, sid: str | None) -> bool:
+            switched.append((self.c, sid))
+            return True
+
+    monkeypatch.setattr(runtime, "ensure", Space)
+    monkeypatch.setattr(folder_sessions, "_opening", {})
+    _card("mini", "the first tab's card")
+    monkeypatch.setitem(investigation._subscribers, ("mini", investigation.MAIN), {object()})
+    rows = folder_sessions.sessions("mini")["sessions"]
+    assert [(r["slot"], r["open"], r["cards"]) for r in rows] == [("mini", True, 1)]
+    assert await folder_sessions.open_session("mini", slot="mini") == {"name": "mini", "open": True}
+    assert await folder_sessions.open_session("mini", new=True, reserve=True) == {"name": "mini.2", "open": False}
+    assert switched == [("mini.2", None)] and config.sessions_of("mini") == ["mini", "mini.2"]
+    assert folder_sessions.is_open("mini.2"), "the picker's tab is still loading it"
+    assert folder_sessions.sessions("mini.2")["label"] == "mini"
+    folder_sessions._opening.clear()
+    other = _other_shell("mini.2")
     try:
-        assert cli.held_elsewhere("mini") and not cli.held_elsewhere("mini.2")
-        _answers(monkeypatch, "2")
-        with cli.server_dirs():
-            chosen = cli.pick_session(cwd, data, "auto")
-        out = capsys.readouterr().out.splitlines()
-        assert chosen == {"archive": None, "chat": "new", "slot": "mini", "held": True}
-        assert f"[{cli.HELD_MARK}] (no message)" in out[2], out
-        with cli.server_dirs():
-            assert cli.open_session("http://127.0.0.1:1", "mini", cwd, chosen) == "mini"
-        assert sent == [] and capsys.readouterr().out.splitlines() == [cli.BROWSER_LINE.format(what=cli.HELD_LINE)]
-        with cli.server_dirs():
-            _card("mini", "the first shell's card")
-            assert cli.open_session("http://127.0.0.1:1", "mini", cwd, dict(cli.NEW_SESSION)) == "mini.2"
-            cli.hold_session("mini.2")
-            assert config.sessions_of("mini") == ["mini", "mini.2"]
-            assert (config.WORKSPACES_DIR / "mini" / "notebooks").is_dir(), "the other shell's session stays"
-        assert [r for r, _ in sent] == ["ws/mini/sessions", "corpora/register"]
-        assert sent[-1][1] == {"path": str(cwd.resolve()), "exact": True, "chat": "new", "session": "mini.2"}
-        assert not cli.held_elsewhere("mini.2"), "this process's own hold"
+        assert folder_sessions.is_open("mini.2")
+        assert (await folder_sessions.open_session("mini", new=True))["name"] == "mini.3"
     finally:
         other.kill()
         other.wait(timeout=10)
-    assert not cli.held_elsewhere("mini")
-    sent.clear()
-    with cli.server_dirs():
-        assert cli.open_session("http://127.0.0.1:1", "mini", cwd, dict(cli.NEW_SESSION)) == "mini"
-    assert [r for r, _ in sent] == ["ws/mini/archive", "corpora/register"] and "session" not in sent[-1][1]
-    for fd in cli.HELD_SESSIONS.values():
-        os.close(fd)
+    assert len(list((workspaces_tmp / "mini" / "notebooks").glob("*.json"))) >= 1, "the open session keeps its card"
+    investigation._subscribers.pop(("mini", investigation.MAIN))
+    folder_sessions._opening.clear()
+    assert await folder_sessions.open_session("mini", new=True) == {"name": "mini", "open": False}
+    [aside] = [r for r in folder_sessions.sessions("mini")["sessions"] if r["archive"]]
+    assert aside["cards"] == 1 and aside["slot"] == "mini"
+    folder_sessions._opening.clear()
+    assert (await folder_sessions.open_session("mini", archive=aside["archive"]))["name"] == "mini"
+    assert [r["cards"] for r in folder_sessions.sessions("mini")["sessions"] if r["slot"] == "mini" and not r["archive"]] == [1]
+    for bad in ({"slot": "other"}, {"archive": "nope"}):
+        with pytest.raises(ValueError):
+            await folder_sessions.open_session("mini", **bad)
 
 
 async def test_two_sessions_of_one_folder_share_its_files_and_nothing_else(data_tmp, workspaces_tmp):
