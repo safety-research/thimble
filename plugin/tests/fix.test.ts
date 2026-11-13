@@ -61,6 +61,8 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
   const spawns: Any[] = []
   const commands: string[] = []
   const notes: { text: string; title?: string }[] = []
+  // the lines the plugin put in the transcript ($.ui.log), not the debug log's
+  const logs: string[] = []
   const agents: { id: string; status: string }[] = []
   // each prompt the plugin gave Claude
   const prompts: Any[] = []
@@ -145,7 +147,7 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
         return { text: a.text }
       },
     },
-    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
+    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (text: string, o: Any = {}) => { if (o.to !== 'debug') logs.push(text) }, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -167,7 +169,7 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, ran, spawns, commands, files, notes, verbs, prompts }
+  return { $, call, tick, end, ran, spawns, commands, files, notes, logs, verbs, prompts }
 }
 
 /** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
@@ -319,6 +321,26 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(s.commands).toEqual(['reload-plugins', 'reload-plugins'])
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again')
   expect(await fixKey(s.$, 'u')).toBe(null)
+})
+
+test("the fixer's end is a line in the conversation too, beside the line above the bar: what came of it, and the keys that act on it", async () => {
+  // the person who looks at the conversation, not the bar, still reads that the fix is done and how to use it
+  const s = setup()
+  await requested(s)
+  const ready = s.logs.filter(l => l.includes('Bar says read for coverage'))
+  expect(ready.length).toBe(1)
+  expect(ready[0]).toContain('✓ fixed: Bar says read for coverage')
+  expect(ready[0]).toContain('tests pass')
+  expect(ready[0]).toContain('y use it now · d what changed · n later')
+  // the bar's line stays, with its keys
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[1])).toBe('    y use it now · d what changed · n later')
+  // a fixer that cannot do it: the failure, and its keys
+  const f = setup()
+  await requested(f, 'Cannot: the bar has no room for it')
+  const failed = f.logs.filter(l => l.includes('did not pass'))
+  expect(failed.length).toBe(1)
+  expect(failed[0]).toContain('the bar has no room for it')
+  expect(failed[0]).toContain('y try again · d ask Claude · n dismiss')
 })
 
 test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {

@@ -32,7 +32,8 @@
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
-//                          changed · n later, and Claude Code sends a notification
+//                          changed · n later, a line in the conversation says so with the same keys, and Claude Code
+//                          sends a notification
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
 //   the prompt box         while a failed fix's view shows what it tried (d), each change of the box draws the bar
 //                          again: its keys show only while the box is empty, where they act (line.ts)

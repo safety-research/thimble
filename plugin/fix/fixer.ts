@@ -19,9 +19,10 @@
 //                               through Claude Code's own permission handling in the person's mode
 //   liveFixer($, N)             the fix whose fixer still works, and its agent: more words for it go to that fixer
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
-//                               then the line above the bar asks whether to use it (y; the person's key applies it), and
-//                               Claude Code sends a notification. When the check does not use the change (a file no fix
-//                               may change, a binary file, failing tests), a new fixer gets another round in the same
+//                               then the line above the bar asks whether to use it (y; the person's key applies it), a
+//                               line in the conversation says the same with its keys (endText), and Claude Code sends a
+//                               notification. When the check does not use the change (a file no fix may change, a binary
+//                               file, failing tests), a new fixer gets another round in the same
 //                               copy at once (`thimble fix again`), told why; the person sees a failure only when a fixer
 //                               ends with `Cannot: <why>`. What came of a check that no session waited for is shown the
 //                               same way at the session's start (`checked`), and the kernel told it was shown (`thimble
@@ -473,6 +474,8 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
   await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}) })
   const title = done?.title || fix?.title || `fix ${id}`
   const changed = !!(done?.prev || (fix && fix.prev))
+  // the line in the conversation too, where the person reads, with the keys the line above the bar takes
+  try { $.ui.log(endText(kind, title, done ?? fix, changed)) } catch { /* the line above the bar says it */ }
   if (kind === 'ready') {
     // the person may be in another window: Claude Code's own notification, with the line's words
     try { await $.ui.notify(`thimble ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(done)}`, { title: 'thimble' }) } catch { /* the line says it */ }
@@ -481,6 +484,18 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
       : `thimble's fixer finished the fix "${title}"; it waits for the person's y. Nothing for you to do.`)
   }
   return null
+}
+
+/** What came of a fixer's end, as one line in the conversation ($.ui.log), which Claude Code draws after the plugin's
+ *  name (`thimble: `): the words of the line above the bar (line.ts), then the keys it takes at an empty prompt. A
+ *  failed fix whose fixer could not do without the files no fix may change (blocked) offers no y there. */
+export function endText(kind: string, title: string, f: Pick<Fix, 'tests' | 'error' | 'blocked' | 'unchanged'> | null, changed: boolean): string {
+  if (kind === 'ready') return `✓ ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(f)}. At an empty prompt: y use it now · d what changed · n later.`
+  if (kind === 'failed') {
+    const keys = [...(f?.blocked?.length ? [] : ['y try again']), 'd ask Claude', 'n dismiss'].join(' · ')
+    return `× ${changed ? 'The change to ' : ''}${title} did not pass · ${f?.error || 'its tests failed'}. At an empty prompt: ${keys}.`
+  }
+  return f?.unchanged ? `◇ Claude changed no code: ${title} stays as it was.` : `◇ Saved as a request with no code: ${title} · thimble fix list, in a shell, lists it.`
 }
 
 /** What came of a fix's tests, in the line's words: `tests pass`. */
