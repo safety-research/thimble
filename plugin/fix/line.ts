@@ -248,30 +248,43 @@ export const NOTICE_HINT = 'For the browser: click Use it now in the workbench'
  *  While the fix's line names this row (box), the box draws the line itself, as the bar would (fixLineRows), with its
  *  keys, a click on each doing what the key does, and d's view of what changed; the bar then leaves it out. Once the
  *  line no longer names it (Claude's next turn started, a key acted on it, the next prompt took it, another line came),
- *  the box keeps the line's first row as it was, its border dim. */
+ *  the box keeps the line's first rows as the line drew them (endRows), its border dim. */
 export async function fixEndRow($: Engine, els: Any, end: FixEnd, row: string, cols: number): Promise<Any> {
-  const { Box, Text } = els
   const width = Math.max(30, cols - 4)
   const l = await fixLineNow($)
   const rows = l?.box === row ? await fixLineRows($, els, width - 2, row) : []
-  const frame = (live: boolean, children: Any[]) => Box({
+  const frame = (live: boolean, children: Any[]) => els.Box({
     key: `fix-end-${row}`, flexDirection: 'column', borderStyle: 'round', ...(live ? { borderColor: accent() } : { borderDimColor: true }),
     marginLeft: 2, marginTop: 1, width, children,
   })
-  if (rows.length) return frame(true, rows)
+  return rows.length ? frame(true, rows) : frame(false, endRows(els, end, width - 2))
+}
+
+/** The first row of a fixer's end (ready, failed, request), `width` cells wide, and the reason of a failed fix that the
+ *  row has no room for, on rows of its own under the title: as the line draws them, above the bar or in the box
+ *  (fixLineRows), and as the box keeps them once it no longer draws the line (fixEndRow). */
+function endRows(els: Any, e: Pick<FixEnd, 'kind' | 'title' | 'tests' | 'why' | 'changed' | 'kept'>, width: number): Any[] {
+  const { Box, Text } = els
+  const title = cut(e.title, Math.max(12, width - 40))
   const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
-  const title = cut(end.title, Math.max(12, width - 30))
-  let first: Any[]
-  if (end.kind === 'ready') {
-    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: end.changed ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${end.tests}`)]
-  } else if (end.kind === 'failed') {
-    first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: end.changed ? 'The change to ' : '' }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }), dim('m', ` · ${end.why || 'its tests failed'}`)]
-  } else {
-    first = end.kept
-      ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]
-      : [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
+  const row = (children: Any[]) => Box({ key: 'fix-line-1', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'in', children: '  ' }), ...children] })
+  if (e.kind === 'ready') {
+    return [row([Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: e.changed ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${e.tests}`)])]
   }
-  return frame(false, [Box({ key: 'r1', flexDirection: 'row', flexWrap: 'wrap', children: [Text({ key: 'in', children: '  ' }), ...first] })])
+  if (e.kind === 'failed') {
+    // the reason whole: after the title when it fits there, else under it, each of its rows as far in as the first
+    const reason = e.why || 'its tests failed'
+    const lead = e.changed ? 'The change to ' : ''
+    const fits = textWidth(`  × ${lead}${title} did not pass · ${reason}`) <= width
+    const first = row([Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: lead }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }),
+      ...(fits ? [dim('m', ` · ${reason}`)] : [])])
+    return fits ? [first] : [first, Box({ key: 'fix-line-why', flexDirection: 'row', width, children: [
+      Box({ key: 'in', width: 4, flexShrink: 0, children: [Text({ key: 't', children: '    ' })] }),
+      Box({ key: 'w', flexShrink: 1, children: [Text({ key: 't', dimColor: true, wrap: 'wrap', children: reason })] })] })]
+  }
+  return [row(e.kept
+    ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]
+    : [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })])]
 }
 
 /** The line's rows, `width` cells wide, or none: above the bar, or in the box of the row `box` placed in the
@@ -298,9 +311,11 @@ export async function fixLineRows($: Engine, els: Any, width: number, box?: stri
     return [...whatChanged(els, f, width, triedRows(f)), ...keys]
   }
   let first: Any[] = []
+  // a fixer's end (ready, failed, request): its first rows, as its box keeps them (endRows)
+  let head: Any[] | null = null
   let second: Any[] = []
-  let why: Any[] = []
   let note: Any[] = []
+  const end = { kind: l.kind, title: f?.title || `fix ${l.id}`, tests: testsWord(f), why: f?.error || undefined, changed: !!f?.prev, kept: l.kept }
   // a fix that changes what thimble-browser runs went on or off: a thimble-browser that runs now loads the change when
   // it starts again, by the Use it now its page shows or by a restart, in a row of its own, as the first row has room
   // for the title and its keys alone
@@ -309,7 +324,7 @@ export async function fixLineRows($: Engine, els: Any, width: number, box?: stri
   if (l.kind === 'ready' && f) {
     // a round of a fix the person has: its new version, which y puts in place of the one they have; a fix that changes
     // the files the person is told of says which, in a row of its own, before they press y
-    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: f.prev ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`)]
+    head = endRows(els, end, width)
     if (noticeText(f)) note = [Text({ key: 'w', wrap: 'wrap', children: `  ${noticeText(f)}` })]
     second = keysRow(els, [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']], press)
   } else if (l.kind === 'applied') {
@@ -325,18 +340,10 @@ export async function fixLineRows($: Engine, els: Any, width: number, box?: stri
       ? [Text({ key: 'g', dimColor: true, children: '↺ ' }), Text({ key: 't', children: `${title} is back to its version before` }), dim('m', ' · thimble reloaded')]
       : [Text({ key: 'g', dimColor: true, children: '○ ' }), Text({ key: 't', children: `${title} is off` }), dim('m', ' · thimble reloaded · thimble fix on, in a shell, turns it on again')]
   } else if (l.kind === 'failed') {
-    // the reason whole: after the title when it fits there, else on a row of its own
-    const reason = f?.error || 'its tests failed'
-    const lead = f?.prev ? 'The change to ' : ''
-    const fits = textWidth(`  × ${lead}${title} did not pass · ${reason}`) <= width
-    first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: lead }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }),
-      ...(fits ? [dim('m', ` · ${reason}`)] : [])]
-    if (!fits) why = [Text({ key: 'w', dimColor: true, wrap: 'wrap', children: `  ${reason}` })]
+    head = endRows(els, end, width)
     second = failedKeys(els, f, false, press)
   } else if (l.kind === 'request') {
-    first = l.kept
-      ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]
-      : [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
+    head = endRows(els, end, width)
     second = l.kept ? keysRow(els, [['n', 'ok']], press) : [...keysRow(els, [['n', 'ok']], press), dim('m', ' · thimble fix list, in a shell, lists it')]
   } else if (l.kind === 'update') {
     first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', `${l.loads ? ' · thimble reloaded' : ''} · thimble fix list, in a shell, lists your fixes`)]
@@ -345,7 +352,7 @@ export async function fixLineRows($: Engine, els: Any, width: number, box?: stri
   } else if (l.kind === 'problem') {
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `${f ? `“${fixName(f)}”` : `fix ${l.id}`} did not go through`}` })]
   } else return []
-  return [row('fix-line-1', first), ...(why.length ? [row('fix-line-why', why)] : []), ...(note.length ? [row('fix-line-notice', note)] : []),
+  return [...(head ?? [row('fix-line-1', first)]), ...(note.length ? [row('fix-line-notice', note)] : []),
     ...(browser.length ? [row('fix-line-browser', browser)] : []),
     ...(second.length ? [Box({ key: 'fix-line-2', flexDirection: 'row', flexWrap: 'wrap', width, children: second })] : [])]
 }

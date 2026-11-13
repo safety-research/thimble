@@ -412,6 +412,19 @@ test("a fixer that ends while Claude's turn runs gets its box under the answer, 
   expect(s.placed.length).toBe(1)
 })
 
+test("a failed fix's box keeps the rows the line drew: a reason too long for the title's row stands under it, as on the bar", async () => {
+  const why = 'Claude Code draws the prompt box itself, so no change to thimble can give it another border or color.'
+  const s = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await requested(s, `Cannot: ${why}`)
+  const head = ['  × make the bar say read did not pass', `    ${why}`]
+  expect((await s.placedRow(s.placed[0]!, 80)).props.children.map(textOf)).toEqual([...head, '    y try again · d ask Claude · n dismiss'])
+  // n: the line goes, and the box keeps those rows as they were, dim
+  await (await fixKey(s.$, 'n'))!.later()
+  const after = await s.placedRow(s.placed[0]!, 80)
+  expect(after.props.borderDimColor).toBe(true)
+  expect(after.props.children.map(textOf)).toEqual(head)
+})
+
 test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {
   const s = setup()
   await requested(s)
