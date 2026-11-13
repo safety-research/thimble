@@ -1470,34 +1470,6 @@ def to_terminal() -> bool:
     return sys.stdout.isatty()
 
 
-def archive_workspace(url: str, name: str) -> tuple[bool, str | None]:
-    """`POST /api/ws/{c}/archive` (ledger.archive_workspace): (whether it answered, the folder the workspace went to,
-    None when it had none). A failure is logged, never raised."""
-    try:
-        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/archive", {}, timeout=ARCHIVE_TIMEOUT_S)
-    except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
-        _log(f"archive of {name}: {type(e).__name__}: {e}")
-        return False, None
-    if status != 200 or not isinstance(body, dict):
-        _log(f"archive of {name}: {status} {str(body)[:200]}")
-        return False, None
-    return True, (str(body["archived"]) if body.get("archived") else None)
-
-
-def restore_workspace(url: str, name: str, archive: str) -> tuple[int, dict[str, Any]]:
-    """`POST /api/ws/{c}/restore {archive}` (ledger.restore_workspace): (status, body); 0 when it did not answer. A
-    failure is logged, never raised."""
-    try:
-        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/restore", {"archive": archive},
-                                timeout=ARCHIVE_TIMEOUT_S)
-    except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
-        _log(f"restore of {archive} into {name}: {type(e).__name__}: {e}")
-        return 0, {}
-    if status != 200:
-        _log(f"restore of {archive} into {name}: {status} {str(body)[:200]}")
-    return status, body if isinstance(body, dict) else {}
-
-
 def agent_definition(name: str) -> tuple[str, dict[str, Any]]:
     """(its name, the definition `--agents` takes) for an agent file among prompts.AGENT_FILES: its description, AGENT_FIELDS,
     its body as prompt, its tools when it names any (with none it has every tool of the session), and its skills
@@ -2589,14 +2561,12 @@ HELD_LINE = "this session is open in another shell or tab too, and both show it 
 # pick_session's answer for a plain start in a folder that has a session: the page opens on its session picker
 PICK_IN_PAGE = {"pick": True}
 PICK_LINE = "this folder has sessions: the page lists them, to open one or start a new one"
-# pick_session's answer for a new session, which alone moves the open one aside (open_session): a session picked that
-# holds no chat of main with a turn gets chat "new" too, and stays
+# pick_session's answer for a new session, which goes into a workspace of the folder that is not open and moves its
+# session aside (open_session): a session picked that holds no chat of main with a turn gets chat "new" too, and stays
 NEW_SESSION = {"archive": None, "chat": "new", "new": True}
 # the last start line of a new session in a folder that has an earlier one, in the same words at each start, as Claude
 # Code's start screen lists a folder's recent sessions: the start is a new session and says how to resume the latest
 RESUME_LINE = "to resume your latest session ({when}, {turns}, {cards}) run: thimble-browser --continue"
-SET_ASIDE_FAILED_LINE =("the last session was not moved aside ({why}), so the page opens it with a new chat; "
-                         "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
 
 
