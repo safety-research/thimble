@@ -383,10 +383,12 @@ export async function checkUpdate($: Engine): Promise<void> {
   if (d?.newer && d.say !== false) await setFixLine($, { id: 0, kind: 'release', said: d.line || `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
 }
 
-/** How long the kernel may take to check the fixes an update set aside: the quick tests of the release with their
- *  changes, once for them all, then once for each fix when they fail together, the hooks tests twice when they fail
- *  (engine/kernel/fixes.py _carry_check). */
-const CARRY_MS = 1_800_000
+/** How long the kernel may take to check the fixes an update set aside: 10 minutes, the most Claude Code gives a
+ *  command, as it refuses a longer timeoutMs before the command starts. The check runs the quick tests of the release
+ *  with their changes once for them all, in 9 minutes at most (engine/kernel/fixes.py TESTS_LIMIT), and more rounds
+ *  only when they fail (_carry_check). A check stopped at this limit says so on its line, which names thimble fixes: in
+ *  a shell, it checks them with no such limit. */
+const CARRY_MS = 600_000
 
 /** At session start, when the fixes an update set aside wait for their check (the list's `due`): an update by thimble
  *  0.10.5 or before set every fix aside and stopped there, and this load is the first that runs after it, from

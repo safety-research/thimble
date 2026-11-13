@@ -526,6 +526,18 @@ test("the session start's check of the fixes an update set aside asks for no mor
   expect((await fixLineNow(s.$))?.said).toContain('1 fix on again')
 })
 
+test("a check of the fixes an update set aside that Claude Code stops at its time limit says so, and its line names thimble fixes, which checks them in a shell", async () => {
+  const s = setup()
+  const base = s.$.process.run
+  // as Claude Code stops a run past its timeoutMs
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (!argv.includes('carry')) return base(argv, o)
+    throw new Error(`thimble: $.process.run(${argv[0]}) aborted: still running after ${o.timeoutMs}ms`)
+  }
+  await carryFixes(s.$, { due: { to: '1.0.1' } } as never)
+  expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1: your fixes stay off, as thimble could not put them back (it ran longer than 10 minutes, the most it may take, and was stopped) · in a shell: thimble fixes')
+})
+
 test("more words for a fix an update set aside: its fixer works in a new copy and reads where the fix's change from before the update is", async () => {
   const s = setup()
   const COPY = `${HOME}/fixes/work/2`
