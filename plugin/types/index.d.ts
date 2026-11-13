@@ -153,8 +153,8 @@ declare module 'claude-code' {
       fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; due?: { to: string; n: number } | null } | null
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
        *  changed; a reload that waits for Claude's turn or a restart; for an update, whether the session loads what
-       *  changed (fixes.ts FixLine) */
-      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean; browser?: 'restart' | 'notice' } | null
+       *  changed; the row in the conversation that draws it in the bar's place (fixes.ts FixLine) */
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean; browser?: 'restart' | 'notice'; box?: string } | null
       /** the fixers' ends the conversation shows in a box, by the id of the row placed for each (fixer.ts FixEnd) */
       fixEnds: Record<string, { id: number; kind: string; title: string; tests: string; why?: string; blocked?: boolean; changed?: boolean; kept?: boolean }>
       /** whether this session looked for a newer release already (register.ts) */

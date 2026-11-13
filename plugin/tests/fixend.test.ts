@@ -1,6 +1,6 @@
 // A fix's end in the conversation, with the whole hooks module in one session: what came of a fixer's check reaches
-// Claude Code as a row placed in the transcript ($.ui.place), drawn as a box with the keys that act on it, beside the
-// line above the bar, so the person sees that it is done where they read. All data is made up.
+// Claude Code as a row placed in the transcript ($.ui.place), drawn as a box with the keys that act on it, in place of
+// the line above the bar, so the person sees that it is done where they read, once. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
@@ -18,7 +18,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-test("a fix checked while no session waited shows at the session's start as a box in the transcript, with its keys", async ($, on) => {
+test("a fix checked while no session waited shows at the session's start as a box in the transcript, with its keys, and the bar draws no copy of it", async ($, on) => {
   mock.env(on, { THIMBLE_HOME: HOME, HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp' })
   const clock = mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-fixend' }))
@@ -54,5 +54,8 @@ test("a fix checked while no session waited shows at the session's start as a bo
   expect(logs.filter(l => l.to === 'transcript' && l.text.includes('Bar says read for coverage'))).toEqual([])
   const box = (await $.ui.render({ plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: `r-${placed[0]}`, viewport: { columns: 110, rows: 40, isFullscreen: true }, props: { id: placed[0], plugin: 'thimble' } } as never)) as Any
   expect(box.props.borderStyle).toBe('round')
-  expect(textOf(box)).toBe('✓ thimble fixed: Bar says read for coverage · tests pass  y use it now · d what changed · n later')
+  expect(textOf(box)).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass    y use it now · d what changed · n later')
+  const band = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 110, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 110, rows: 40, isFullscreen: true } } as never))
+  expect(band).toContain('thimble')
+  expect(band).not.toContain('Bar says read for coverage')
 })

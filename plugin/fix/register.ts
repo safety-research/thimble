@@ -31,10 +31,10 @@
 //   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
-//   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
-//                          changed · n later, a box in the conversation says so with the same keys (a row placed
-//                          at the transcript's end, drawn here at ui.render for `Placed`), and Claude Code sends a
-//                          notification
+//   the fixer's end        thimble commits and tests the change; a box in the conversation (a row placed at the
+//                          transcript's end, drawn here at ui.render for `Placed`) offers y use it now · d what
+//                          changed · n later, the fix's line in place of the bar's (the bar draws it where no box
+//                          can be placed), and Claude Code sends a notification
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
 //   the prompt box         while a failed fix's view shows what it tried (d), each change of the box draws the bar
 //                          again: its keys show only while the box is empty, where they act (line.ts)
@@ -248,8 +248,11 @@ export const registerFix: Register = on => {
       await knowFixers($)
       const list = await refreshFixes($)
       // a fix's line that no longer holds (the shell turned the fixes off, or the fix went off): it goes
-      const l = await fixLineNow($)
-      const lf = l ? list?.fixes.find(f => f.id === l.id) : null
+      let l = await fixLineNow($)
+      // a row placed in the conversation does not come back with a resumed one, nor need it show after a reload: the
+      // bar draws the line again, and the box, if it still shows, keeps its words alone
+      if (l?.box) await setFixLine($, (l = { ...l, box: undefined }))
+      const lf = l ? list?.fixes.find(f => f.id === l!.id) : null
       if (l?.kind === 'applied' && (list?.on === false || (lf && lf.state !== 'on'))) await setFixLine($, null)
       // a reload the line waited for: this is it
       else await reloaded($)

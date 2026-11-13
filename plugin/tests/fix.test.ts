@@ -46,7 +46,7 @@ let now = 0
  *  kernel's check does not use the fixer's first change, with this refusal. `path`: the file the fixer's change is in;
  *  as the kernel does, y and u on a fix to the browser workbench say that a thimble-browser that runs is stale, and y,
  *  while one runs from live (`open`), that its page shows the fix's notice. */
-function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
+function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false, places = false) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
@@ -148,7 +148,9 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
         return { text: a.text }
       },
     },
-    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (text: string, o: Any = {}) => { if (o.to !== 'debug') logs.push(text) }, place: async (a: Any) => { placed.push(a.id); return { isPlaced: true, requestId: `r-${a.id}` } }, resolve: () => ELS, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
+    // `places`: a Claude Code that places rows in the transcript ($.ui.place), where a fixer's end is a box; else the
+    // bar draws its line, as on a Claude Code before 2.1.314
+    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (text: string, o: Any = {}) => { if (o.to !== 'debug') logs.push(text) }, ...(places ? { place: async (a: Any) => { placed.push(a.id); return { isPlaced: true, requestId: `r-${a.id}` } } } : {}), resolve: () => ELS, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -326,31 +328,49 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(await fixKey(s.$, 'u')).toBe(null)
 })
 
-test("the fixer's end is a box in the conversation too, beside the line above the bar: what came of it, and the keys that act on it while the line shows it", async () => {
-  // the person who looks at the conversation, not the bar, still sees that the fix is done and how to use it
-  const s = setup()
+test("the fixer's end is a box in the conversation, which draws the fix's line in place of the bar: its keys act at an empty prompt and on a click, d opens what changed in the box, and once the line goes the box keeps its words", async () => {
+  // the person who looks at the conversation, not the bar, still sees that the fix is done and how to use it, once
+  const s = setup(null, 'plugin/bar/bar.tsx', false, true)
   await requested(s)
   expect(s.placed.length).toBe(1)
   expect(s.placed[0]).toMatch(/^fix-end-1-/)
   expect(s.logs.filter(l => l.includes('Bar says read for coverage'))).toEqual([])
+  const rowsOf = async () => (await s.placedRow(s.placed[0]!)).props.children.map(textOf)
   const box = await s.placedRow(s.placed[0]!)
   expect(box.props.borderStyle).toBe('round')
-  expect(box.props.children.map(textOf)).toEqual(['✓ thimble fixed: Bar says read for coverage · tests pass', '  y use it now · d what changed · n later'])
-  // the bar's line stays, with its keys
-  expect(textOf((await fixLineRows(s.$, ELS, 110))[1])).toBe('    y use it now · d what changed · n later')
-  // n on the line: the box keeps its words, with no keys, and its border goes dim
-  await (await fixKey(s.$, 'n'))!.later()
+  expect(await rowsOf()).toEqual(['  ✓ thimble fixed: Bar says read for coverage · tests pass', '    y use it now · d what changed · n later'])
+  // the bar draws no copy of it
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // d at an empty prompt: what changed, in the box
+  await (await fixKey(s.$, 'd'))!.later()
+  expect(await rowsOf()).toContain('    Changed     1 file · tests pass')
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // a click on n in the box does what n does: the box keeps the line's first row, its border dim, and no keys
+  const walk = (n: Any): Any => (!n || typeof n !== 'object' ? null : Array.isArray(n) ? n.map(walk).find(Boolean) ?? null : n.type === 'Button' && n.props?.key === 'fix-key-n' ? n : walk(n.props?.children))
+  await walk(await s.placedRow(s.placed[0]!)).props.onPress()
   const after = await s.placedRow(s.placed[0]!)
-  expect(after.props.children.map(textOf)).toEqual(['✓ thimble fixed: Bar says read for coverage · tests pass'])
+  expect(after.props.children.map(textOf)).toEqual(['  ✓ thimble fixed: Bar says read for coverage · tests pass'])
   expect(after.props.borderDimColor).toBe(true)
-  // a fixer that cannot do it: the failure, and its keys
-  const f = setup()
+  expect(await fixKey(s.$, 'y')).toBe(null)
+  // y at an empty prompt acts on the boxed line as on the bar's
+  const y = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await requested(y)
+  expect(await fixKey(y.$, 'y')).not.toBe(null)
+  // a fixer that cannot do it: the failure, and its keys, in the box
+  const f = setup(null, 'plugin/bar/bar.tsx', false, true)
   await requested(f, 'Cannot: the bar has no room for it')
-  expect((await f.placedRow(f.placed[0]!)).props.children.map(textOf)).toEqual(['× make the bar say read did not pass · the bar has no room for it', '  y try again · d ask Claude · n dismiss'])
-  // a Claude Code that places no rows: one line in the transcript says it, with the keys
+  expect((await f.placedRow(f.placed[0]!)).props.children.map(textOf)).toEqual(['  × make the bar say read did not pass · the bar has no room for it', '    y try again · d ask Claude · n dismiss'])
+  expect(await fixLineRows(f.$, ELS, 110)).toEqual([])
+  // a session that starts again (a reload, a resumed conversation): the bar draws the line again, and the box its words
+  await y.call('session.start', { cwd: '/made-up/data' })
+  await y.tick()
+  expect(textOf((await fixLineRows(y.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
+  expect((await y.placedRow(y.placed[0]!)).props.borderDimColor).toBe(true)
+  // a Claude Code that places no rows: the bar draws the line, and one line in the transcript says it, with the keys
   const o = setup()
-  delete o.$.ui.place
   await requested(o)
+  expect(o.placed).toEqual([])
+  expect(textOf((await fixLineRows(o.$, ELS, 110))[1])).toBe('    y use it now · d what changed · n later')
   const ready = o.logs.filter(l => l.includes('Bar says read for coverage'))
   expect(ready.length).toBe(1)
   expect(ready[0]).toContain('✓ fixed: Bar says read for coverage · tests pass')

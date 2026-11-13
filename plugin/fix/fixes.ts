@@ -158,6 +158,9 @@ export type FixLine = {
   back?: boolean
   /** request: a round of a fix the person has changed no code, so the fix stays as it was */
   kept?: boolean
+  /** ready, failed, request: the row placed in the conversation that draws this line (fixer.ts showEnd), in place of
+   *  the bar */
+  box?: string
   /** update: the session loads what changed */
   loads?: boolean
   /** applied, off: the fix changes what thimble-browser runs, which loads it when it starts again: `notice` for a fix

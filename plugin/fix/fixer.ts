@@ -19,9 +19,9 @@
 //                               through Claude Code's own permission handling in the person's mode
 //   liveFixer($, N)             the fix whose fixer still works, and its agent: more words for it go to that fixer
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
-//                               then the line above the bar asks whether to use it (y; the person's key applies it), a
-//                               box in the conversation says the same with its keys (showEnd), and Claude Code sends a
-//                               notification. When the check does not use the change (a file no fix may change, a binary
+//                               then a box in the conversation asks whether to use it (y; the person's key applies
+//                               it), which draws the fix's line in place of the bar (showEnd; the bar draws it where no
+//                               box can show), and Claude Code sends a notification. When the check does not use the change (a file no fix may change, a binary
 //                               file, failing tests), a new fixer gets another round in the same
 //                               copy at once (`thimble fix again`), told why; the person sees a failure only when a fixer
 //                               ends with `Cannot: <why>`. What came of a check that no session waited for is shown the
@@ -473,11 +473,12 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
   }
   // a round of a fix the person has that changed no code: the fix stays as it was
   const kind = done?.unchanged ? 'request' : done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
-  await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}) })
   const title = done?.title || fix?.title || `fix ${id}`
   const changed = !!(done?.prev || (fix && fix.prev))
-  // in the conversation too, where the person reads: a box with the words and the keys of the line above the bar
-  await showEnd($, { id, kind, title, tests: testsWord(done ?? fix), ...endWhy(kind, done ?? fix), ...(changed ? { changed } : {}) }, endText(kind, title, done ?? fix, changed))
+  // in the conversation, where the person reads: a box that draws the fix's line, with its keys, in the bar's place;
+  // the bar draws the line where no box could be placed
+  const box = await showEnd($, { id, kind, title, tests: testsWord(done ?? fix), ...endWhy(kind, done ?? fix), ...(changed ? { changed } : {}) }, endText(kind, title, done ?? fix, changed))
+  await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}), ...(box ? { box } : {}) })
   if (kind === 'ready') {
     // the person may be in another window: Claude Code's own notification, with the line's words
     try { await $.ui.notify(`thimble ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(done)}`, { title: 'thimble' }) } catch { /* the line says it */ }
@@ -505,20 +506,22 @@ function endWhy(kind: string, f: Pick<Fix, 'error' | 'blocked' | 'unchanged'> | 
 }
 
 /** The fixer's end in the conversation: a row placed at the transcript's end ($.ui.place), which line.ts fixEndRow
- *  draws as a box, as the tour's rows and the tray are drawn; where no row can be placed (a Claude Code without
- *  $.ui.place, a session whose conversation thimble does not draw, a place that failed), one line ($.ui.log, `text`),
- *  which a host that shows the conversation itself receives too. */
-async function showEnd($: Engine, end: FixEnd, text: string): Promise<void> {
+ *  draws as a box, as the tour's rows and the tray are drawn, and the row's id, which the fix's line names (box) so
+ *  that the bar does not draw the line too. Where no row can be placed (a Claude Code without $.ui.place, a session
+ *  whose conversation thimble does not draw, a place that failed), one line ($.ui.log, `text`), which a host that shows
+ *  the conversation itself receives too, and null: the bar draws the fix's line. */
+async function showEnd($: Engine, end: FixEnd, text: string): Promise<string | null> {
   if (drawsHere()) {
     try {
       const row = `fix-end-${end.id}-${Math.round(Number(await $.clock.now()))}`
       await update($, ENDS, cur => Object.fromEntries([...Object.entries(cur ?? {}), [row, end]].slice(-ENDS_KEPT)))
-      if ((await $.ui.place({ id: row })).isPlaced) return
+      if ((await $.ui.place({ id: row })).isPlaced) return row
     } catch {
       // the line below says it
     }
   }
   try { $.ui.log(text) } catch { /* the line above the bar says it */ }
+  return null
 }
 
 /** A fixer's end that a row placed in the conversation shows (showEnd), or null. */
