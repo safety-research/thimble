@@ -17,7 +17,9 @@ const INSTANCE_WAIT = 1500
 
 export default function App() {
   const ws = workspaceFromUrl()
-  // a URL naming a workspace this server does not hold (a tab kept from another run or another server): the start page
+  const pick = ws ? null : pickFromUrl()
+  // a URL naming a workspace this server does not hold (a tab kept from another run or another server, or a picker's
+  // link from one): the start page
   const [missing, setMissing] = useState(false)
   // the instance check has settled (INSTANCE_WAIT caps it)
   const [checked, setChecked] = useState(false)
@@ -52,20 +54,21 @@ export default function App() {
     }
   }, [ws])
   useEffect(() => {
-    if (!ws) return
+    const named = ws ?? pick
+    if (!named) return
     let alive = true
     api
       .corpora()
       .then((cs) => {
-        if (alive) setMissing(!cs.some((c) => c.name === ws))
+        if (alive) setMissing(!cs.some((c) => c.name === named))
       })
       .catch(() => undefined)
     return () => {
       alive = false
     }
-  }, [ws])
-  if (!ws) return <StartPage pick={pickFromUrl()} />
-  if (missing) return <StartPage missing={ws} />
+  }, [ws, pick])
+  if (missing) return <StartPage missing={ws ?? pick} />
+  if (!ws) return <StartPage pick={pick} />
   if (!checked) return null
   return <Shell key={ws} ws={ws} />
 }

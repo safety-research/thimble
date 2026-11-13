@@ -35,6 +35,7 @@ beforeEach(() => {
       return json({ name: 'logs.3', open: false })
     }
     if (url === '/api/corpora') return json([{ name: 'logs', manifest: {}, path: '/home/t/data/logs' }])
+    if (url === '/api/workspaces') return json([{ name: 'logs', kind: 'folder', label: 'logs', folder: 'logs', path: '/home/t/data/logs', of: 'logs' }])
     return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
   })
 })
@@ -59,6 +60,14 @@ test('a launch in a folder with sessions opens on its picker: New session first,
   await act(async () => rows[0].click())
   await settle()
   expect(posted).toEqual([{ url: '/api/ws/logs/sessions/open', body: { new: true } }])
+})
+
+test('a picker link for a workspace this server does not hold is the start page: it says so and lists the folders', async () => {
+  window.history.replaceState(null, '', '/?pick=gone')
+  const el = await mount(<App />)
+  await settle()
+  expect(el.querySelector('.start-missing')?.textContent).toBe('No workspace “gone” on this server.')
+  expect([...el.querySelectorAll<HTMLAnchorElement>('a.ws-row')].map((a) => a.getAttribute('href'))).toEqual(['/?pick=logs'])
 })
 
 test('in the switcher the row of the session this tab shows says so, and a past session is opened by its archive', async () => {
