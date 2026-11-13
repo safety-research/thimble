@@ -31,8 +31,10 @@
 //   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
-//   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
-//                          changed · n later, and Claude Code sends a notification
+//   the fixer's end        thimble commits and tests the change; a box in the conversation (a row placed at the
+//                          transcript's end, drawn here at ui.render for `Placed`) offers y use it now · d what
+//                          changed · n later, the fix's line in place of the bar's (the bar draws it where no box
+//                          can be placed), and Claude Code sends a notification
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
 //   the prompt box         while a failed fix's view shows what it tried (d), each change of the box draws the bar
 //                          again: its keys show only while the box is empty, where they act (line.ts)
@@ -56,9 +58,9 @@ import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { FIX_ARGUMENT_HINT, FIX_DESCRIPTION } from './command.mjs'
-import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
+import { busyFixer, fixEndOf, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, carryFixes, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
-import { lineSeen, redrawFor } from './line'
+import { fixEndRow, lineSeen, redrawFor } from './line'
 import { fixesContext, redoFix, request } from './request'
 
 type Engine = EngineInterface
@@ -246,8 +248,11 @@ export const registerFix: Register = on => {
       await knowFixers($)
       const list = await refreshFixes($)
       // a fix's line that no longer holds (the shell turned the fixes off, or the fix went off): it goes
-      const l = await fixLineNow($)
-      const lf = l ? list?.fixes.find(f => f.id === l.id) : null
+      let l = await fixLineNow($)
+      // a row placed in the conversation does not come back with a resumed one, nor need it show after a reload: the
+      // bar draws the line again, and the box, if it still shows, keeps its words alone
+      if (l?.box) await setFixLine($, (l = { ...l, box: undefined }))
+      const lf = l ? list?.fixes.find(f => f.id === l!.id) : null
       if (l?.kind === 'applied' && (list?.on === false || (lf && lf.state !== 'on'))) await setFixLine($, null)
       // a reload the line waited for: this is it
       else await reloaded($)
@@ -378,6 +383,17 @@ export const registerFix: Register = on => {
       })
     }
     return r
+  }).catch(($, e, next) => next(e))
+
+  // a fixer's end in the conversation: the box of the row placed for it (fixer.ts showEnd, line.ts fixEndRow); another
+  // row, the tour's or another plugin's, is left to its own hook
+  on('ui.render', { component: 'Placed' }, async ($, e, next) => {
+    const p = (e as Any).props
+    const row = String(p?.id ?? '')
+    if (p?.plugin !== 'thimble' || !row.startsWith('fix-end-')) return next(e)
+    const els = $.ui.resolve(e) as Any
+    const end = await fixEndOf($, row)
+    return end ? fixEndRow($, els, end, row, Math.max(34, Number((e as Any).viewport?.columns ?? 100))) : els.Box({ key: `fix-end-none-${row}`, children: [] })
   }).catch(($, e, next) => next(e))
 
   // the person's prompt: a line that only told something goes

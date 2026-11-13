@@ -514,9 +514,16 @@ async def test_a_writer_a_killed_server_left_running_ends_stopped_when_the_sessi
 # --------------------------------------------------------------------------- main's chats (thimble-browser -c / -r)
 
 
-def asked(client: FakeClient, i: int) -> str:
-    """The text of request `i`'s messages, to see which chat's turns it carried."""
-    return json.dumps(client.bodies[i]["messages"])
+def asked(client: FakeClient, words: str) -> str:
+    """The text of the messages of main's request for the analyst's `words`, to see which chat's turns it carried: the
+    newest request whose last message ends with them. Not a request's place in the list: the look after an answer, a
+    request of its own, runs beside main and may come before main's next request or after it."""
+    for body in reversed(client.bodies):
+        content = body["messages"][-1].get("content")
+        last = content if isinstance(content, str) else "".join(str(c.get("text") or "") for c in content or [] if isinstance(c, dict))
+        if last.rstrip().endswith(f"\n{words}\n</thimble-event>"):
+            return json.dumps(body["messages"])
+    raise AssertionError(f"no request of main's carried {words!r}")
 
 
 async def test_a_new_chat_starts_main_anew_and_resume_brings_the_earlier_one_back(on, monkeypatch):
@@ -527,14 +534,14 @@ async def test_a_new_chat_starts_main_anew_and_resume_brings_the_earlier_one_bac
     assert await sp.switch(None)
     assert sp.sid != first and json.loads((sp.dir / "main.json").read_text())["session"] == sp.sid
     await main_turn("Hi")
-    assert "What happened?" not in asked(client, 1)  # the new chat holds none of the first one's turns
+    assert "What happened?" not in asked(client, "Hi")  # the new chat holds none of the first one's turns
     got = shape(main_records())
     assert ("chip", "New chat") in got and ("user", "What happened?") in got  # the earlier chat stays in the page
     rows = runtime.main_chats(CORPUS)
     assert [(r["first"], r["turns"], r["current"]) for r in rows] == [("Hi", 1, True), ("What happened?", 1, False)]
     assert await sp.switch(first)
     await main_turn("And now?")
-    assert "What happened?" in asked(client, 2) and "Hi" not in asked(client, 2)
+    assert "What happened?" in asked(client, "And now?") and "Hi" not in asked(client, "And now?")
     assert ("chip", "Resumed the chat that began with: What happened?") in shape(main_records())
     assert shape(main_records())[-1][0] == "done"
 
@@ -557,7 +564,7 @@ async def test_a_new_session_is_empty_and_the_last_comes_back_whole(on, monkeypa
     moved = (await ledger.archive_workspace(CORPUS))["archived"]
     assert CORPUS not in runtime._spaces, "the runtime of the folder that went is dropped"
     await main_turn("Hi")
-    assert runtime._spaces[CORPUS].sid != first and "What happened?" not in asked(client, 1)
+    assert runtime._spaces[CORPUS].sid != first and "What happened?" not in asked(client, "Hi")
     assert ("user", "What happened?") not in shape(main_records()), "the new session's chat holds none of the last one's"
     assert not notebook.list_notebooks(config.workspace_dir(CORPUS), figures=False)
     rows = folder_sessions.listing(CORPUS)
@@ -566,7 +573,7 @@ async def test_a_new_session_is_empty_and_the_last_comes_back_whole(on, monkeypa
     assert CORPUS not in runtime._spaces
     await main_turn("And now?")
     assert runtime._spaces[CORPUS].sid == first
-    assert "What happened?" in asked(client, 2) and "Hi" not in asked(client, 2)
+    assert "What happened?" in asked(client, "And now?") and "Hi" not in asked(client, "And now?")
     got = shape(main_records())
     assert ("user", "What happened?") in got and ("user", "And now?") in got and ("user", "Hi") not in got
     assert sum(r["n_cells"] for r in notebook.list_notebooks(config.workspace_dir(CORPUS), figures=False)) == 1
@@ -795,7 +802,7 @@ async def test_a_rewind_cuts_main_s_conversation_before_the_message_and_hides_it
     assert runtime.rewound(recs) == set(range(second[0], len(recs) - 1))
     assert [w for _, w, _ in analyst_messages()] == ["What happened?"]
     await main_turn("Count the outage too?")
-    sent = asked(client, 3)
+    sent = asked(client, "Count the outage too?")
     assert "What happened?" in sent and "Two incidents." in sent
     assert "Which was worse?" not in sent and "Sure?" not in sent and "worse." not in sent
     assert [w for _, w, _ in analyst_messages()] == ["What happened?", "Count the outage too?"]
