@@ -425,6 +425,12 @@ test("a failed fix's box keeps the rows the line drew: a reason too long for the
   expect(after.props.children.map(textOf)).toEqual(head)
 })
 
+test("where no row can be placed, a failed fix's end is one line in the transcript: its reason, ended once, then its keys", async () => {
+  const o = setup()
+  await requested(o, 'Cannot: the bar has no room for it.')
+  expect(o.logs.filter(l => l.includes('did not pass'))).toEqual(['× make the bar say read did not pass · the bar has no room for it. At an empty prompt: y try again · d ask Claude · n dismiss.'])
+})
+
 test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {
   const s = setup()
   await requested(s)

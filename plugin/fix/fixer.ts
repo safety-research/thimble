@@ -484,7 +484,7 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
   // the bar draws the line where no box could be placed. While Claude's turn runs, a box placed now would stand above
   // the rest of the answer: the bar draws the line until the turn ends, and the box comes then, under it (placeDue)
   const end: FixEnd = { id, kind, title, tests: testsWord(done ?? fix), ...endWhy(kind, done ?? fix), ...(changed ? { changed } : {}) }
-  const text = endText(kind, title, done ?? fix, changed)
+  const text = endText(kind, id, title, done ?? fix, changed, drawsHere())
   const due = drawsHere() && (await mainRuns($))
   const box = due ? null : await showEnd($, end, text)
   await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}), ...(box ? { box } : {}) })
@@ -557,14 +557,21 @@ export async function fixEndOf($: Engine, row: string): Promise<FixEnd | null> {
 }
 
 /** What came of a fixer's end, as one line in the conversation ($.ui.log) where no box can show it (showEnd), which
- *  Claude Code draws after the plugin's name (`thimble: `): the words of the line above the bar (line.ts), then the keys
- *  it takes at an empty prompt. A failed fix whose fixer could not do without the files no fix may change (blocked)
- *  offers no y there. */
-export function endText(kind: string, title: string, f: Pick<Fix, 'tests' | 'error' | 'blocked' | 'unchanged'> | null, changed: boolean): string {
-  if (kind === 'ready') return `✓ ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(f)}. At an empty prompt: y use it now · d what changed · n later.`
+ *  Claude Code draws after the plugin's name (`thimble: `): the words of the line above the bar (line.ts), then what acts
+ *  on it. Where thimble draws (`drawn`), that is the keys it takes at an empty prompt; a failed fix whose fixer could not
+ *  do without the files no fix may change (blocked) offers no y there. Where it draws nothing (core/host.ts), a key at an
+ *  empty prompt is typed as any key, so the line names what works there: thimble fix apply in a shell, or /thimble-fix N
+ *  for another try. */
+export function endText(kind: string, id: number, title: string, f: Pick<Fix, 'tests' | 'error' | 'blocked' | 'unchanged'> | null, changed: boolean, drawn: boolean): string {
+  if (kind === 'ready') {
+    const how = drawn ? 'At an empty prompt: y use it now · d what changed · n later.' : `In a shell, thimble fix apply ${id} ${changed ? 'puts the new one on' : 'turns it on'}.`
+    return `✓ ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(f)}. ${how}`
+  }
   if (kind === 'failed') {
-    const keys = [...(f?.blocked?.length ? [] : ['y try again']), 'd ask Claude', 'n dismiss'].join(' · ')
-    return `× ${changed ? 'The change to ' : ''}${title} did not pass · ${f?.error || 'its tests failed'}. At an empty prompt: ${keys}.`
+    const blocked = !!f?.blocked?.length
+    const how = drawn ? ` At an empty prompt: ${[...(blocked ? [] : ['y try again']), 'd ask Claude', 'n dismiss'].join(' · ')}.`
+      : blocked ? '' : ` /thimble-fix ${id} tries it again.`
+    return `× ${changed ? 'The change to ' : ''}${title} did not pass · ${(f?.error || 'its tests failed').replace(/[\s.]+$/, '')}.${how}`
   }
   return f?.unchanged ? `◇ Claude changed no code: ${title} stays as it was.` : `◇ Saved as a request with no code: ${title} · thimble fix list, in a shell, lists it.`
 }

@@ -1,7 +1,8 @@
 // A fix's end in the conversation, with the whole hooks module in one session: what came of a fixer's check reaches
 // Claude Code as a row placed in the transcript ($.ui.place), drawn as a box with the keys that act on it, in place of
-// the line above the bar, so the person sees that it is done where they read, once. All data is made up.
-// `claude plugin test plugin`.
+// the line above the bar, so the person sees that it is done where they read, once. Where thimble draws nothing (a host
+// that shows the conversation itself), it is one line in the transcript that names what works there. All data is made
+// up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { test } from './kit'
@@ -18,8 +19,11 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-test("a fix checked while no session waited shows at the session's start as a box in the transcript, with its keys, and the bar draws no copy of it", async ($, on) => {
-  mock.env(on, { THIMBLE_HOME: HOME, HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp' })
+/** A session of `start`, as Claude Code starts it, whose kernel has one fix of this session's, ready, whose outcome no
+ *  session showed yet: the lines Claude Code put in the transcript (and those it keeps for the debug log), and the rows
+ *  placed there. */
+async function session($: Any, on: Any, start: Any, env: Record<string, string> = {}) {
+  mock.env(on, { THIMBLE_HOME: HOME, HOME: '/made-up/home', PATH: '/usr/bin', TMPDIR: '/made-up/tmp', ...env })
   const clock = mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-fixend' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
@@ -34,12 +38,10 @@ test("a fix checked while no session waited shows at the session's start as a bo
   on('ui.notify', () => ({ value: { isSent: true } }))
   on('command.register', (_$: unknown, e: Any) => ({ value: { command: e.name } }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
-  // the lines Claude Code puts in the transcript, and those it keeps for the debug log
   const logs: { text: string; to: string }[] = []
   on('ui.log', (_$: unknown, e: Any) => { logs.push({ text: String(e.text), to: String(e.to) }); return { value: undefined } })
   const placed: string[] = []
   on('ui.place', (_$: unknown, e: Any) => { placed.push(String(e.id)); return { value: { isPlaced: true, requestId: `r-${e.id}` } } })
-  // the kernel: one fix of this session's, ready, whose outcome no session showed yet
   const fix = { id: 1, title: 'Bar says read for coverage', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'ready', unshown: true, session: 's-fixend', work: `${HOME}/fixes/work/1`, commit: 'c0ffee1', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], tests: 'passed', summary: 'The bar says r read 14%.', error: null }
   const ok = (out: unknown) => ({ value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
@@ -48,8 +50,13 @@ test("a fix checked while no session waited shows at the session's start as a bo
     if (i >= 0 && e.argv[i + 1] === 'shown') { fix.unshown = false; return ok(fix) }
     return ok({})
   })
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.session.start(start as never)
   await clock.advance(100)
+  return { logs, placed }
+}
+
+test("a fix checked while no session waited shows at the session's start as a box in the transcript, with its keys, and the bar draws no copy of it", async ($, on) => {
+  const { logs, placed } = await session($, on, { cwd: '/made-up/data', surface: 'terminal', isInteractive: true })
   expect(placed.length).toBe(1)
   expect(logs.filter(l => l.to === 'transcript' && l.text.includes('Bar says read for coverage'))).toEqual([])
   const box = (await $.ui.render({ plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: `r-${placed[0]}`, viewport: { columns: 110, rows: 40, isFullscreen: true }, props: { id: placed[0], plugin: 'thimble' } } as never)) as Any
@@ -58,4 +65,11 @@ test("a fix checked while no session waited shows at the session's start as a bo
   const band = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 110, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 110, rows: 40, isFullscreen: true } } as never))
   expect(band).toContain('thimble')
   expect(band).not.toContain('Bar says read for coverage')
+})
+
+test('where thimble draws nothing, as in a host that runs Claude Code through its SDK, the fix is one line in the transcript that names what works there, and no key, which would be typed as any key', async ($, on) => {
+  const { logs, placed } = await session($, on, { cwd: '/made-up/data', surface: null, isInteractive: false }, { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' })
+  expect(placed).toEqual([])
+  expect(logs.filter(l => l.to === 'transcript' && l.text.includes('Bar says read for coverage')).map(l => l.text))
+    .toEqual(['✓ fixed: Bar says read for coverage · tests pass. In a shell, thimble fix apply 1 turns it on.'])
 })
