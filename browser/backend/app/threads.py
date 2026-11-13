@@ -262,7 +262,7 @@ async def warm(c: str, meta: dict) -> None:
 
     async def one(ref: str) -> None:
         try:
-            await asyncio.to_thread(refs.resolve, corpus, ref)
+            await asyncio.to_thread(refs.resolve, corpus, ref, c)
         except Exception:  # noqa: BLE001 — _read says why a ref does not resolve
             return
 

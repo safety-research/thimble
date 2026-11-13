@@ -1139,7 +1139,7 @@ async def check_refs(c: str, refs_: list[str]) -> tuple[list[str], list[str]]:
 
     async def one(r: str) -> bool:
         try:
-            res = refs_mod.resolve(corpus, r, workspace=c) if "workspace" in refs_mod.resolve.__code__.co_varnames else refs_mod.resolve(corpus, r)
+            res = refs_mod.resolve(corpus, r, c)
             if asyncio.iscoroutine(res):
                 res = await res
             return res is not None

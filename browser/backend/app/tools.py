@@ -1120,7 +1120,7 @@ async def _warm_view_refs(c: str | None, args: dict[str, Any]) -> None:
 
     for ref in [r for r in wanted if read_by_view(r)][:WARM_REFS_MAX]:
         try:
-            await asyncio.to_thread(refs_mod.resolve, config.corpus_dir(c), ref)
+            await asyncio.to_thread(refs_mod.resolve, config.corpus_dir(c), ref, c)
         except Exception:  # noqa: BLE001 — _example_ref reports a ref that does not resolve
             continue
 
@@ -1896,7 +1896,7 @@ async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
     from . import refs
 
     try:
-        res = await asyncio.to_thread(refs.resolve, config.corpus_dir(ctx.c), ref)
+        res = await asyncio.to_thread(refs.resolve, config.corpus_dir(ctx.c), ref, ctx.c)
     except refs.RefError as e:
         return err(f"read_ref: {ref} does not resolve: {e.detail}")
     meta = res.get("meta") or {}

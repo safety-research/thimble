@@ -19,11 +19,12 @@ from app import cli
 BACKEND = Path(__file__).resolve().parents[1]
 
 
-def _card(c: str, words: str) -> None:
+def _card(c: str, words: str) -> str:
     from app import config, notebook  # noqa: PLC0415
 
     nb = notebook.create_notebook(config.workspace_dir(c), "G")
-    notebook.insert_cell(c, nb["id"], notebook.new_cell("note", "test", words, nb["id"], payload={"text": words}))
+    cell = notebook.new_cell("note", "test", words, nb["id"], payload={"text": words})
+    return str(notebook.insert_cell(c, nb["id"], cell)["id"])
 
 
 def _other_shell(name: str) -> subprocess.Popen:
@@ -160,6 +161,22 @@ async def test_two_sessions_of_one_folder_share_its_files_and_nothing_else(data_
     assert not any(r["held"] for r in rows)
     empty = folder_sessions.listing("mini", held={"mini.3"})
     assert empty == rows, "a workspace the folder does not have is no session"
+
+
+async def test_a_second_session_s_checks_and_renders_read_its_own_cards(data_tmp, workspaces_tmp):
+    """A second session of a folder resolves every ref in its own workspace, as its tools do, since the folder maps to
+    the folder's own: its report's links (agents.check_refs), a card's render and card check (render.resolve_all), a
+    takeaway's links (verify._ref_check) and main's read of a ref (tools._read_excerpt) find the session's own card,
+    which the folder's own workspace does not hold."""
+    from app import agents, config, render, tools, verify  # noqa: PLC0415
+
+    config.add_session("mini")
+    ref = f"card:{_card('mini.2', 'the second session')}"
+    assert await agents.check_refs("mini.2", [ref]) == ([ref], [])
+    assert "error" not in render.resolve_all("mini.2", [ref])[ref]
+    assert await verify._ref_check(config.corpus_dir("mini.2"), ref, None, c="mini.2") is None
+    assert not (await tools._read_excerpt(tools.Ctx("mini.2", tools.ANALYST), ref)).is_error
+    assert await agents.check_refs("mini", [ref]) == ([], [ref]), "the folder's own session has no such card"
 
 
 def test_two_sessions_cc_writes_tidy_waits_for_the_last_one(tmp_path):
