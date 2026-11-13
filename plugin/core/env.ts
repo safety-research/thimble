@@ -85,6 +85,10 @@ export type Ran = { code: number; stdout: string; stderr: string; cut?: boolean 
 /** The session the person's own `thimble` commands run under (runThimble): its records are never Claude's, and its
  *  change feed is its own (core/feed.ts withPersonFeed). */
 const personOf = (key: string) => `person-${key.slice(0, 8)}`
+
+/** The longest time Claude Code gives a command: process.run refuses a timeoutMs over 600000 (10 minutes), so a run
+ *  that asks for more (the check of the fixes an update set aside, fix/fixes.ts CARRY_MS) gets this much, not none. */
+export const RUN_MAX_MS = 600_000
 export async function personSession($: Engine): Promise<string> {
   return personOf(await sessionKey($))
 }
@@ -100,7 +104,7 @@ export async function runThimble($: Engine, root: string, args: string[], o: { s
   const session = o.session ?? personOf(key)
   // THIMBLE_PLUGIN_ROOT: the folder this plugin was loaded from, for a launcher of another folder
   const r = await $.process.run([o.bin ?? `${dir}/bin/thimble`, ...args], {
-    cwd: root, env: { ...o.env, THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key, THIMBLE_PLUGIN_ROOT: dir }, timeoutMs: o.timeoutMs ?? 120000,
+    cwd: root, env: { ...o.env, THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key, THIMBLE_PLUGIN_ROOT: dir }, timeoutMs: Math.min(o.timeoutMs ?? 120000, RUN_MAX_MS),
     ...(o.stdin != null ? { stdin: o.stdin } : {}),
   }).catch((err: unknown) => { throw new Error(runWhy(err)) })
   // `cut`: its output went past what Claude Code reads of it (4 MiB), so a record in it is cut short

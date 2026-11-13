@@ -204,7 +204,7 @@ test('↑ and ↓ pick the rows in their order, docked or inline, the Verifier r
   const set = settingsWorld(on, rows)
   // where the ring lands, as Claude Code moves it
   const rings: Any[] = []
-  on('ui.focus', (_$: unknown, e: Any) => { rings.push(e); return { value: undefined } })
+  on('ui.focus', { plugin: '*' }, (_$: unknown, e: Any) => { rings.push(e); return { value: undefined } })
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
   const picked = async () => tintedIn(await $.ui.render(PANE))

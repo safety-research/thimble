@@ -8,7 +8,7 @@
 import { expect } from 'claude-code/testing'
 
 import { refusedText } from '../fix/fixer'
-import { carriedLine, fixLineNow } from '../fix/fixes'
+import { carriedLine, carryFixes, fixLineNow } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, registerFix, wordsOfSkill } from '../fix/register'
 import { fixesContext, namedFix } from '../fix/request'
@@ -507,6 +507,23 @@ test("the line after the session's start put back the fixes an update set aside 
   const s = setup()
   await carriedLine(s.$, { to: '1.0.1', back: [1], had: [], aside: [2, 3] })
   expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1 · 1 fix on again · 2 of your fixes are off: they do not fit 1.0.1 · in a shell: thimble reapply')
+})
+
+test("the session start's check of the fixes an update set aside asks for no more time than Claude Code gives a command, so it runs and puts them back", async () => {
+  const s = setup()
+  const base = s.$.process.run
+  const asked: unknown[] = []
+  // as Claude Code checks a run's time: a whole number of ms, 1 to 600000
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (!argv.includes('carry')) return base(argv, o)
+    asked.push(o.timeoutMs)
+    const ms = o.timeoutMs
+    if (!(Number.isInteger(ms) && ms >= 1 && ms <= 600_000)) throw new Error('process.run: init.timeoutMs is a whole number of ms, 1 to 600000 (host check)')
+    return { exitCode: 0, stdout: JSON.stringify({ to: '1.0.1', back: [1], had: [], aside: [] }), stderr: '' }
+  }
+  await carryFixes(s.$, { due: { to: '1.0.1' } } as never)
+  expect(asked).toEqual([600_000])
+  expect((await fixLineNow(s.$))?.said).toContain('1 fix on again')
 })
 
 test("more words for a fix an update set aside: its fixer works in a new copy and reads where the fix's change from before the update is", async () => {
