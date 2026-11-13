@@ -1107,7 +1107,7 @@
 }
 .session-open {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-chip);
   background: var(--surface-selected);
   color: var(--text-accent);
   font: var(--type-ui-sm);
