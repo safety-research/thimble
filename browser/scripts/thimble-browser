@@ -5,10 +5,12 @@
 # as a workspace and prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and
 # thimble's agents itself, on the way to reach Claude chosen at install or in the page: your Claude Code sign-in, an
 # Anthropic API key, or Workload Identity Federation. Ctrl-C stops the server, unless a thimble-browser in another
-# terminal still uses it. Each start is a new session, as in Claude Code: an empty chat, canvas, report and labels, as
-# at the folder's first start. --continue and --resume bring an earlier session back whole.
+# terminal still uses it. In a folder that has a session, the page opens on the folder's session picker: a new session
+# (an empty chat, canvas, report and labels, as at the folder's first start), an earlier one, whole, or one open now; in
+# a folder never opened, a new one starts at once. Sessions of one folder can run side by side, in two shells or tabs.
 #
-#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; starts a new session
+#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given
+#   thimble-browser -n | --new            start a new session, without the picker
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
@@ -32,9 +34,10 @@ if [ -z "${THIMBLE_BROWSER_LIVE:-}" ] && [ -f "$fixes/browser-ready" ] && [ -x "
   exec "$fixes/live/browser/scripts/thimble-browser" "$@"
 fi
 
-folder="" setup=0 setup_args=() session=new
+folder="" setup=0 setup_args=() session=auto
 while [ $# -gt 0 ]; do
   case "$1" in
+    -n | --new) session=new; shift ;;
     -c | --continue) session=continue; shift ;;
     -r | --resume)
       session=pick; shift
@@ -45,7 +48,7 @@ while [ $# -gt 0 ]; do
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
     --setup) setup=1; shift; setup_args=("$@"); break ;;
     --unpair) setup=unpair; shift ;;
-    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac

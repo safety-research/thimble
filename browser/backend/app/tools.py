@@ -1086,7 +1086,7 @@ def _example_ref(c: str | None, item: Any) -> tuple[str, str]:
     if not ref or not quote.strip() or c is None:
         return ref, ""
     try:
-        return refs_mod.span_of_quote(config.corpus_dir(c), ref, quote), ""
+        return refs_mod.span_of_quote(config.corpus_dir(c), ref, quote, c), ""
     except refs_mod.RefError:
         return ref, hint("example-quote-missing", ref=ref, quote=_cut(" ".join(quote.split()), 80))
 
@@ -1120,7 +1120,7 @@ async def _warm_view_refs(c: str | None, args: dict[str, Any]) -> None:
 
     for ref in [r for r in wanted if read_by_view(r)][:WARM_REFS_MAX]:
         try:
-            await asyncio.to_thread(refs_mod.resolve, config.corpus_dir(c), ref)
+            await asyncio.to_thread(refs_mod.resolve, config.corpus_dir(c), ref, c)
         except Exception:  # noqa: BLE001 — _example_ref reports a ref that does not resolve
             continue
 
@@ -1882,7 +1882,7 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
     lines += canvas_comments.lines(ctx.c, cid)
     if "#" in ref or "@out" in ref:
         try:
-            res = refs.resolve(config.corpus_dir(ctx.c), ref)
+            res = refs.resolve(config.corpus_dir(ctx.c), ref, ctx.c)
             span = (res.get("meta") or {}).get("span")
             lines.append(f"span {ref}: {span.get('value', span.get('text'))}" if span else f"span {ref}: not in the current output")
         except refs.RefError as e:
@@ -1896,7 +1896,7 @@ async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
     from . import refs
 
     try:
-        res = await asyncio.to_thread(refs.resolve, config.corpus_dir(ctx.c), ref)
+        res = await asyncio.to_thread(refs.resolve, config.corpus_dir(ctx.c), ref, ctx.c)
     except refs.RefError as e:
         return err(f"read_ref: {ref} does not resolve: {e.detail}")
     meta = res.get("meta") or {}

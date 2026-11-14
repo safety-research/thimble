@@ -488,7 +488,7 @@ def resolve_all(c: str, refs: list[str]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for r in refs:
         try:
-            out[r] = refs_mod.resolve(corpus, r)
+            out[r] = refs_mod.resolve(corpus, r, c)
         except refs_mod.RefError as e:
             out[r] = {"error": str(e.detail), "status": e.status}
         except Exception as e:  # noqa: BLE001 — one bad ref never stops the card's render

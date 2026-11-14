@@ -104,7 +104,7 @@ class Notes:
         quote = ""
         if self.corpus is not None and not jsonl:
             try:
-                res = refs.resolve(self.corpus, ref) or {}
+                res = refs.resolve(self.corpus, ref, self.cites.c) or {}
             except Exception:  # noqa: BLE001 — a ref that no longer resolves keeps its label
                 res = {}
             quote = "" if re.fullmatch(r"card:[0-9a-f]{8}", ref) else _collapse(res.get("excerpt") or "")

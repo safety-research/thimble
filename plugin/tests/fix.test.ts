@@ -8,7 +8,7 @@
 import { expect } from 'claude-code/testing'
 
 import { refusedText } from '../fix/fixer'
-import { carriedLine, fixLineNow } from '../fix/fixes'
+import { carriedLine, carryFixes, fixLineNow } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, registerFix, wordsOfSkill } from '../fix/register'
 import { fixesContext, namedFix } from '../fix/request'
@@ -46,7 +46,7 @@ let now = 0
  *  kernel's check does not use the fixer's first change, with this refusal. `path`: the file the fixer's change is in;
  *  as the kernel does, y and u on a fix to the browser workbench say that a thimble-browser that runs is stale, and y,
  *  while one runs from live (`open`), that its page shows the fix's notice. */
-function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
+function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false, places = false) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
@@ -61,6 +61,9 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
   const spawns: Any[] = []
   const commands: string[] = []
   const notes: { text: string; title?: string }[] = []
+  // the lines the plugin put in the transcript ($.ui.log), not the debug log's, and the rows it placed there
+  const logs: string[] = []
+  const placed: string[] = []
   const agents: { id: string; status: string }[] = []
   // each prompt the plugin gave Claude
   const prompts: Any[] = []
@@ -145,7 +148,9 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
         return { text: a.text }
       },
     },
-    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
+    // `places`: a Claude Code that places rows in the transcript ($.ui.place), where a fixer's end is a box; else the
+    // bar draws its line, as on a Claude Code before 2.1.314
+    ui: { toast: () => undefined, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (text: string, o: Any = {}) => { if (o.to !== 'debug') logs.push(text) }, ...(places ? { place: async (a: Any) => { placed.push(a.id); return { isPlaced: true, requestId: `r-${a.id}` } } } : {}), resolve: () => ELS, open: async () => ({ isPlaced: true }), panes: async () => [], close: async () => ({}), invalidate: () => undefined },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -167,7 +172,9 @@ function setup(refuse: Any = null, path = 'plugin/bar/bar.tsx', open = false) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, ran, spawns, commands, files, notes, verbs, prompts }
+  /** A row placed in the transcript, as the module's hooks draw it, `cols` wide. */
+  const placedRow = async (id: string, cols = 110) => call('ui.render', { plugin: 'thimble', component: 'Placed', surface: 'terminal', requestId: `r-${id}`, viewport: { columns: cols, rows: 40, isFullscreen: true }, props: { id, plugin: 'thimble' } })
+  return { $, call, tick, end, ran, spawns, commands, files, notes, logs, placed, placedRow, verbs, prompts }
 }
 
 /** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
@@ -319,6 +326,109 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(s.commands).toEqual(['reload-plugins', 'reload-plugins'])
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ○ Bar says read for coverage is off · thimble reloaded · thimble fix on, in a shell, turns it on again')
   expect(await fixKey(s.$, 'u')).toBe(null)
+})
+
+test("the fixer's end is a box in the conversation, which draws the fix's line in place of the bar: its keys act at an empty prompt and on a click, d opens what changed in the box, and once the line goes the box keeps its words", async () => {
+  // the person who looks at the conversation, not the bar, still sees that the fix is done and how to use it, once
+  const s = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await requested(s)
+  expect(s.placed.length).toBe(1)
+  expect(s.placed[0]).toMatch(/^fix-end-1-/)
+  expect(s.logs.filter(l => l.includes('Bar says read for coverage'))).toEqual([])
+  const rowsOf = async () => (await s.placedRow(s.placed[0]!)).props.children.map(textOf)
+  const box = await s.placedRow(s.placed[0]!)
+  expect(box.props.borderStyle).toBe('round')
+  expect(await rowsOf()).toEqual(['  ✓ thimble fixed: Bar says read for coverage · tests pass', '    y use it now · d what changed · n later'])
+  // the bar draws no copy of it
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // d at an empty prompt: what changed, in the box
+  await (await fixKey(s.$, 'd'))!.later()
+  expect(await rowsOf()).toContain('    Changed     1 file · tests pass')
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // a click on n in the box does what n does: the box keeps the line's first row, its border dim, and no keys
+  const walk = (n: Any): Any => (!n || typeof n !== 'object' ? null : Array.isArray(n) ? n.map(walk).find(Boolean) ?? null : n.type === 'Button' && n.props?.key === 'fix-key-n' ? n : walk(n.props?.children))
+  await walk(await s.placedRow(s.placed[0]!)).props.onPress()
+  const after = await s.placedRow(s.placed[0]!)
+  expect(after.props.children.map(textOf)).toEqual(['  ✓ thimble fixed: Bar says read for coverage · tests pass'])
+  expect(after.props.borderDimColor).toBe(true)
+  expect(await fixKey(s.$, 'y')).toBe(null)
+  // y at an empty prompt acts on the boxed line as on the bar's
+  const y = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await requested(y)
+  expect(await fixKey(y.$, 'y')).not.toBe(null)
+  // a fixer that cannot do it: the failure, and its keys, in the box
+  const f = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await requested(f, 'Cannot: the bar has no room for it')
+  expect((await f.placedRow(f.placed[0]!)).props.children.map(textOf)).toEqual(['  × make the bar say read did not pass · the bar has no room for it', '    y try again · d ask Claude · n dismiss'])
+  expect(await fixLineRows(f.$, ELS, 110)).toEqual([])
+  // a session that starts again (a reload, a resumed conversation): the bar draws the line again, and the box its words
+  await y.call('session.start', { cwd: '/made-up/data' })
+  await y.tick()
+  expect(textOf((await fixLineRows(y.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
+  expect((await y.placedRow(y.placed[0]!)).props.borderDimColor).toBe(true)
+  // a Claude Code that places no rows: the bar draws the line, and one line in the transcript says it, with the keys
+  const o = setup()
+  await requested(o)
+  expect(o.placed).toEqual([])
+  expect(textOf((await fixLineRows(o.$, ELS, 110))[1])).toBe('    y use it now · d what changed · n later')
+  const ready = o.logs.filter(l => l.includes('Bar says read for coverage'))
+  expect(ready.length).toBe(1)
+  expect(ready[0]).toContain('✓ fixed: Bar says read for coverage · tests pass')
+  expect(ready[0]).toContain('y use it now · d what changed · n later')
+})
+
+test("a fixer that ends while Claude's turn runs gets its box under the answer, once the turn ends; Claude's next turn gives the line back to the bar, and the box keeps its first row", async () => {
+  // the box draws the line only while it is the last thing in the conversation, so the line's keys never act out of
+  // sight: a box placed during Claude's turn would stand above the rest of its answer, and the next answer pushes a box
+  // up and out of view
+  const TURN = { plugin: 'thimble', key: 'mainTurn' }
+  const s = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.$.state.set(TURN, 't-main')
+  await s.end('Done.\n\nTitle: Bar says read for coverage\nWhat it does: The bar says r read 14%.')
+  // while the turn runs: no box yet, and the bar draws the line with its keys
+  const line = ['  ✓ thimble fixed: Bar says read for coverage · tests pass', '    y use it now · d what changed · n later']
+  expect(s.placed).toEqual([])
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual(line)
+  // the turn ends: the box comes under its answer and draws the line, which the bar leaves out
+  await s.$.state.set(TURN, null)
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Two runs.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.placed.length).toBe(1)
+  expect((await s.placedRow(s.placed[0]!)).props.children.map(textOf)).toEqual(line)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.logs.filter(l => l.includes('Bar says read for coverage'))).toEqual([])
+  // Claude's next turn starts: the bar draws the line again, with the keys that act on it, and the box its first row
+  await s.call('turn.start', { turnId: 't-next' })
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual(line)
+  expect(await fixKey(s.$, 'y')).not.toBe(null)
+  const box = await s.placedRow(s.placed[0]!)
+  expect(box.props.borderDimColor).toBe(true)
+  expect(box.props.children.map(textOf)).toEqual([line[0]])
+  // a turn that ends with no fixer's end from its time places no other box
+  await s.call('turn.complete', { turnId: 't-next', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.placed.length).toBe(1)
+})
+
+test("a failed fix's box keeps the rows the line drew: a reason too long for the title's row stands under it, as on the bar", async () => {
+  const why = 'Claude Code draws the prompt box itself, so no change to thimble can give it another border or color.'
+  const s = setup(null, 'plugin/bar/bar.tsx', false, true)
+  await requested(s, `Cannot: ${why}`)
+  const head = ['  × make the bar say read did not pass', `    ${why}`]
+  expect((await s.placedRow(s.placed[0]!, 80)).props.children.map(textOf)).toEqual([...head, '    y try again · d ask Claude · n dismiss'])
+  // n: the line goes, and the box keeps those rows as they were, dim
+  await (await fixKey(s.$, 'n'))!.later()
+  const after = await s.placedRow(s.placed[0]!, 80)
+  expect(after.props.borderDimColor).toBe(true)
+  expect(after.props.children.map(textOf)).toEqual(head)
+})
+
+test("where no row can be placed, a failed fix's end is one line in the transcript: its reason, ended once, then its keys", async () => {
+  const o = setup()
+  await requested(o, 'Cannot: the bar has no room for it.')
+  expect(o.logs.filter(l => l.includes('did not pass'))).toEqual(['× make the bar say read did not pass · the bar has no room for it. At an empty prompt: y try again · d ask Claude · n dismiss.'])
 })
 
 test("y while Claude's turn runs: the line says the fix loads when Claude finishes; after that load, u undoes it until the person's next prompt", async () => {
@@ -507,6 +617,35 @@ test("the line after the session's start put back the fixes an update set aside 
   const s = setup()
   await carriedLine(s.$, { to: '1.0.1', back: [1], had: [], aside: [2, 3] })
   expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1 · 1 fix on again · 2 of your fixes are off: they do not fit 1.0.1 · in a shell: thimble reapply')
+})
+
+test("the session start's check of the fixes an update set aside asks for no more time than Claude Code gives a command, so it runs and puts them back", async () => {
+  const s = setup()
+  const base = s.$.process.run
+  const asked: unknown[] = []
+  // as Claude Code checks a run's time: a whole number of ms, 1 to 600000
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (!argv.includes('carry')) return base(argv, o)
+    asked.push(o.timeoutMs)
+    const ms = o.timeoutMs
+    if (!(Number.isInteger(ms) && ms >= 1 && ms <= 600_000)) throw new Error('process.run: init.timeoutMs is a whole number of ms, 1 to 600000 (host check)')
+    return { exitCode: 0, stdout: JSON.stringify({ to: '1.0.1', back: [1], had: [], aside: [] }), stderr: '' }
+  }
+  await carryFixes(s.$, { due: { to: '1.0.1' } } as never)
+  expect(asked).toEqual([600_000])
+  expect((await fixLineNow(s.$))?.said).toContain('1 fix on again')
+})
+
+test("a check of the fixes an update set aside that Claude Code stops at its time limit says so, and its line names thimble fixes, which checks them in a shell", async () => {
+  const s = setup()
+  const base = s.$.process.run
+  // as Claude Code stops a run past its timeoutMs
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (!argv.includes('carry')) return base(argv, o)
+    throw new Error(`thimble: $.process.run(${argv[0]}) aborted: still running after ${o.timeoutMs}ms`)
+  }
+  await carryFixes(s.$, { due: { to: '1.0.1' } } as never)
+  expect((await fixLineNow(s.$))?.said).toBe('thimble 1.0.1: your fixes stay off, as thimble could not put them back (it ran longer than 10 minutes, the most it may take, and was stopped) · in a shell: thimble fixes')
 })
 
 test("more words for a fix an update set aside: its fixer works in a new copy and reads where the fix's change from before the update is", async () => {

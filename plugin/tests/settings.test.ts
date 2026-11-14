@@ -202,9 +202,10 @@ test('an install updated from 0.10.12 keeps the settings the person set: its ses
 test('↑ and ↓ pick the rows in their order, docked or inline, the Verifier rows too while Citations is on, which ↓ passes over once it is off; the ring onto another choice of the row picked sets it, and onto another row picks that row', async ($, on) => {
   const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'auto', claimsMode: 'off', labels: true, coverage: false }
   const set = settingsWorld(on, rows)
-  // where the ring lands, as Claude Code moves it
+  // where the ring lands, as Claude Code moves it. The hook names thimble, whose elements the ring moves over: from
+  // Claude Code 2.1.323 a hook that names no plugin hears only its own plugin's, and before it '*' is a plugin's name
   const rings: Any[] = []
-  on('ui.focus', (_$: unknown, e: Any) => { rings.push(e); return { value: undefined } })
+  on('ui.focus', { plugin: 'thimble' }, (_$: unknown, e: Any) => { rings.push(e); return { value: undefined } })
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
   const picked = async () => tintedIn(await $.ui.render(PANE))

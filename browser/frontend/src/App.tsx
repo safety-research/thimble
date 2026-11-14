@@ -1,5 +1,6 @@
 // The page shell for the workspace named in the URL. A URL that names no workspace, or one this server does not hold, is
-// thimble's start page (shell/StartPage), which lists the server's workspaces. Before the shell mounts (it reads browser
+// thimble's start page (shell/StartPage), which lists the server's workspaces, or with `?pick=<c>` the session picker
+// of that workspace's folder. Before the shell mounts (it reads browser
 // storage as it does), the workspace's instance is checked, so a workspace made again under an old name does not open
 // on the old one's state (lib/workspace.ts syncInstance); a failure or a slow answer lets the shell mount with the state
 // as it is.
@@ -7,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 import { useTheme } from './lib/theme'
 import { reportTheme } from './lib/themeReport'
-import { syncInstance, workspaceFromUrl } from './lib/workspace'
+import { pickFromUrl, syncInstance, workspaceFromUrl } from './lib/workspace'
 import { Shell } from './shell/Shell'
 import { StartPage } from './shell/StartPage'
 
@@ -16,7 +17,9 @@ const INSTANCE_WAIT = 1500
 
 export default function App() {
   const ws = workspaceFromUrl()
-  // a URL naming a workspace this server does not hold (a tab kept from another run or another server): the start page
+  const pick = ws ? null : pickFromUrl()
+  // a URL naming a workspace this server does not hold (a tab kept from another run or another server, or a picker's
+  // link from one): the start page
   const [missing, setMissing] = useState(false)
   // the instance check has settled (INSTANCE_WAIT caps it)
   const [checked, setChecked] = useState(false)
@@ -51,20 +54,21 @@ export default function App() {
     }
   }, [ws])
   useEffect(() => {
-    if (!ws) return
+    const named = ws ?? pick
+    if (!named) return
     let alive = true
     api
       .corpora()
       .then((cs) => {
-        if (alive) setMissing(!cs.some((c) => c.name === ws))
+        if (alive) setMissing(!cs.some((c) => c.name === named))
       })
       .catch(() => undefined)
     return () => {
       alive = false
     }
-  }, [ws])
-  if (!ws) return <StartPage />
-  if (missing) return <StartPage missing={ws} />
+  }, [ws, pick])
+  if (missing) return <StartPage missing={ws ?? pick} />
+  if (!ws) return <StartPage pick={pick} />
   if (!checked) return null
   return <Shell key={ws} ws={ws} />
 }

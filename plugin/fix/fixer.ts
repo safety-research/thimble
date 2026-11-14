@@ -19,27 +19,35 @@
 //                               through Claude Code's own permission handling in the person's mode
 //   liveFixer($, N)             the fix whose fixer still works, and its agent: more words for it go to that fixer
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
-//                               then the line above the bar asks whether to use it (y; the person's key applies it), and
-//                               Claude Code sends a notification. When the check does not use the change (a file no fix
-//                               may change, a binary file, failing tests), a new fixer gets another round in the same
-//                               copy at once (`thimble fix again`), told why; the person sees a failure only when a fixer
+//                               then a box in the conversation asks whether to use it (y; the person's key applies
+//                               it), and Claude Code sends a notification. The box draws the fix's line in place of the
+//                               bar while it is the last thing in the conversation (showEnd): an end that comes while
+//                               Claude's turn runs gets its box under the answer, once the turn ends (placeDue), and
+//                               Claude's next turn gives the line back to the bar (line.ts lineBack). The bar draws the
+//                               line where no box can show. When the check does not use the change (a file no fix may
+//                               change, a binary file, failing tests), a new fixer gets another round in the same copy
+//                               at once (`thimble fix again`), told why; the person sees a failure only when a fixer
 //                               ends with `Cannot: <why>`. What came of a check that no session waited for is shown the
 //                               same way at the session's start (`checked`), and the kernel told it was shown (`thimble
 //                               fix shown`). An end that comes while another check of the same fix waits (a new round's
 //                               fixer) is kept, and checked once that check returns.
 //
 //   state: fixers (agentId → the fix's id), fixerBox (the sandbox command's start, by the fix's id), fixerDenied (the
-//          files no fix may change whose write the fix's fixer was refused, by the fix's id)
-import type { EngineInterface } from 'claude-code'
+//          files no fix may change whose write the fix's fixer was refused, by the fix's id), fixEnds (the fixers' ends
+//          the conversation shows in a box, by the id of the row placed for each), fixEndDue (an end that came while
+//          Claude's turn ran, whose box waits for the turn's end)
+import { update, type EngineInterface } from 'claude-code'
 
 import { busy, busyWhile } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { spawnFork } from '../core/forks'
+import { drawsHere } from '../core/host'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
+import { mainRuns } from '../core/turn'
 import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
-import { type Fix, type Refusal, askedWords, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { type Fix, type FixLine, type Refusal, askedWords, fixingWord, fixLineNow, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { PROTECTED_KINDS } from './protected.mjs'
 import { screenCopy } from './screen'
 
@@ -470,9 +478,17 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
   }
   // a round of a fix the person has that changed no code: the fix stays as it was
   const kind = done?.unchanged ? 'request' : done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
-  await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}) })
   const title = done?.title || fix?.title || `fix ${id}`
   const changed = !!(done?.prev || (fix && fix.prev))
+  // in the conversation, where the person reads: a box that draws the fix's line, with its keys, in the bar's place;
+  // the bar draws the line where no box could be placed. While Claude's turn runs, a box placed now would stand above
+  // the rest of the answer: the bar draws the line until the turn ends, and the box comes then, under it (placeDue)
+  const end: FixEnd = { id, kind, title, tests: testsWord(done ?? fix), ...endWhy(kind, done ?? fix), ...(changed ? { changed } : {}) }
+  const text = endText(kind, id, title, done ?? fix, changed, drawsHere())
+  const due = drawsHere() && (await mainRuns($))
+  const box = due ? null : await showEnd($, end, text)
+  await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}), ...(box ? { box } : {}) })
+  if (due) await $.state.set(DUE, { end, text } as never)
   if (kind === 'ready') {
     // the person may be in another window: Claude Code's own notification, with the line's words
     try { await $.ui.notify(`thimble ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(done)}`, { title: 'thimble' }) } catch { /* the line says it */ }
@@ -481,6 +497,83 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
       : `thimble's fixer finished the fix "${title}"; it waits for the person's y. Nothing for you to do.`)
   }
   return null
+}
+
+/** What came of a fixer's end, as the box in the conversation draws it (line.ts fixEndRow): the fix, its kind and
+ *  title, what came of its tests, why a failed one did not pass and whether its fixer could not do without the files no
+ *  fix may change (blocked: no y), whether it is a new version of a fix the person has (changed), and whether a round of
+ *  such a fix changed no code (kept). */
+export type FixEnd = { id: number; kind: string; title: string; tests: string; why?: string; blocked?: boolean; changed?: boolean; kept?: boolean }
+
+/** The fixers' ends this conversation shows in a box, by the id of the row placed for each, the newest ENDS_KEPT. */
+const ENDS = { plugin: 'thimble', key: 'fixEnds' } as const
+const ENDS_KEPT = 24
+/** A fixer's end that came while Claude's turn ran, and its line for the conversation where no box can show it: its box
+ *  is placed once the turn ends (placeDue). */
+const DUE = { plugin: 'thimble', key: 'fixEndDue' } as const
+
+/** The fields of FixEnd that only some kinds have. */
+function endWhy(kind: string, f: Pick<Fix, 'error' | 'blocked' | 'unchanged'> | null): Partial<FixEnd> {
+  if (kind === 'failed') return { why: f?.error || 'its tests failed', ...(f?.blocked?.length ? { blocked: true } : {}) }
+  return kind === 'request' && f?.unchanged ? { kept: true } : {}
+}
+
+/** The fixer's end in the conversation: a row placed at the transcript's end ($.ui.place), which line.ts fixEndRow
+ *  draws as a box, as the tour's rows and the tray are drawn, and the row's id, which the fix's line names (box) so
+ *  that the bar does not draw the line too. Where no row can be placed (a Claude Code without $.ui.place, a session
+ *  whose conversation thimble does not draw, a place that failed), one line ($.ui.log, `text`), which a host that shows
+ *  the conversation itself receives too, and null: the bar draws the fix's line. */
+async function showEnd($: Engine, end: FixEnd, text: string): Promise<string | null> {
+  if (drawsHere()) {
+    try {
+      const row = `fix-end-${end.id}-${Math.round(Number(await $.clock.now()))}`
+      await update($, ENDS, cur => Object.fromEntries([...Object.entries(cur ?? {}), [row, end]].slice(-ENDS_KEPT)))
+      if ((await $.ui.place({ id: row })).isPlaced) return row
+    } catch {
+      // the line below says it
+    }
+  }
+  try { $.ui.log(text) } catch { /* the line above the bar says it */ }
+  return null
+}
+
+/** Claude's turn ended: the box of the fixer's end that came while it ran (afterCheck), placed now under its answer,
+ *  while the fix's line still shows that end; where no row can be placed, its one line, as showEnd gives it. */
+export async function placeDue($: Engine): Promise<void> {
+  const due = ((await $.state.get(DUE)).value ?? null) as { end: FixEnd; text: string } | null
+  if (!due) return
+  await $.state.set(DUE, null as never)
+  const same = (l: FixLine | null): l is FixLine => !!l && !l.box && l.id === due.end.id && l.kind === due.end.kind
+  if (!same(await fixLineNow($))) return
+  const box = await showEnd($, due.end, due.text)
+  // read again: a key may have acted on the line while the row was placed
+  const l = await fixLineNow($)
+  if (box && same(l)) await setFixLine($, { ...l, box })
+}
+
+/** A fixer's end that a row placed in the conversation shows (showEnd), or null. */
+export async function fixEndOf($: Engine, row: string): Promise<FixEnd | null> {
+  return (((await $.state.get(ENDS)).value ?? {}) as Record<string, FixEnd>)[row] ?? null
+}
+
+/** What came of a fixer's end, as one line in the conversation ($.ui.log) where no box can show it (showEnd), which
+ *  Claude Code draws after the plugin's name (`thimble: `): the words of the line above the bar (line.ts), then what acts
+ *  on it. Where thimble draws (`drawn`), that is the keys it takes at an empty prompt; a failed fix whose fixer could not
+ *  do without the files no fix may change (blocked) offers no y there. Where it draws nothing (core/host.ts), a key at an
+ *  empty prompt is typed as any key, so the line names what works there: thimble fix apply in a shell, or /thimble-fix N
+ *  for another try. */
+export function endText(kind: string, id: number, title: string, f: Pick<Fix, 'tests' | 'error' | 'blocked' | 'unchanged'> | null, changed: boolean, drawn: boolean): string {
+  if (kind === 'ready') {
+    const how = drawn ? 'At an empty prompt: y use it now · d what changed · n later.' : `In a shell, thimble fix apply ${id} ${changed ? 'puts the new one on' : 'turns it on'}.`
+    return `✓ ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(f)}. ${how}`
+  }
+  if (kind === 'failed') {
+    const blocked = !!f?.blocked?.length
+    const how = drawn ? ` At an empty prompt: ${[...(blocked ? [] : ['y try again']), 'd ask Claude', 'n dismiss'].join(' · ')}.`
+      : blocked ? '' : ` /thimble-fix ${id} tries it again.`
+    return `× ${changed ? 'The change to ' : ''}${title} did not pass · ${(f?.error || 'its tests failed').replace(/[\s.]+$/, '')}.${how}`
+  }
+  return f?.unchanged ? `◇ Claude changed no code: ${title} stays as it was.` : `◇ Saved as a request with no code: ${title} · thimble fix list, in a shell, lists it.`
 }
 
 /** What came of a fix's tests, in the line's words: `tests pass`. */

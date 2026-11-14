@@ -274,12 +274,13 @@ WHY_VALUE = "the value is not at this reference"
 WHY_GONE = heal.WHY_GONE
 
 
-async def _ref_check(corpus: Path, ref: str, display: str | None, *, decrease: bool = False) -> str | None:
+async def _ref_check(corpus: Path, ref: str, display: str | None, *, decrease: bool = False,
+                     c: str | None = None) -> str | None:
     """Verification by execution: None when the ref resolves (and, with a `display`, its excerpt shows the value); else
     why not,
-    in the resolver's words."""
+    in the resolver's words. `c` is the workspace whose cards, labels and views a ref names (refs.resolve)."""
     try:
-        out = await asyncio.to_thread(refs.resolve, corpus, ref)
+        out = await asyncio.to_thread(refs.resolve, corpus, ref, c)
     except refs.RefError as e:
         return f"{'not found' if e.status == 404 else 'malformed'} ({e.status}): {e.detail}"
     except Exception as e:  # noqa: BLE001 — the resolver itself failed
@@ -344,11 +345,11 @@ async def _links_job(c: str, cid: str, version: str) -> None:
     for display, ref, start, end in _value_ref_spans(text):
         if cite.is_card_ref(ref) or (display, ref) in external:
             continue
-        why = await _ref_check(corpus, ref, display, decrease=cite.says_decrease(text, start, end))
+        why = await _ref_check(corpus, ref, display, decrease=cite.says_decrease(text, start, end), c=c)
         if why == WHY_VALUE and not cite.shows_value(display):
             why = None  # the place resolves and the words show no value, so they only name the link: never red
         if why == WHY_VALUE:
-            external[(display, ref)] = {"why": why, "source": await _source_at(corpus, ref)}
+            external[(display, ref)] = {"why": why, "source": await _source_at(corpus, ref, c)}
         else:
             external[(display, ref)] = why
 
@@ -393,7 +394,7 @@ async def _links_job(c: str, cid: str, version: str) -> None:
             # kept where it stands with no home (the analyst's own token): the grey chip, the hover naming the cause
             quiet.append({"value": ch.value, "ref": ch.to, "why": ch.why or heal.WHY_NO_HOME})
     for ref in _bare_refs(text):  # a citation with no value has to resolve, and is grey when it does not
-        why = await _ref_check(corpus, ref, None)
+        why = await _ref_check(corpus, ref, None, c=c)
         if why is not None:
             quiet.append({"value": None, "ref": ref, "why": why})
     # a linked value its card's code types in rather than computes moves to a place the code computed, or is typed
@@ -445,11 +446,11 @@ def _links_status(resolved: list, unresolved: list, broken: list, had_numbers: A
     return "unresolved"
 
 
-async def _source_at(corpus: Path, ref: str) -> str | None:
-    """The number(s) the place `ref` shows, for the hover of a contradicted mark; None when it shows none or does not
-    resolve."""
+async def _source_at(corpus: Path, ref: str, c: str | None = None) -> str | None:
+    """The number(s) the place `ref` shows in workspace `c`, for the hover of a contradicted mark; None when it shows
+    none or does not resolve."""
     try:
-        out = await asyncio.to_thread(refs.resolve, corpus, ref)
+        out = await asyncio.to_thread(refs.resolve, corpus, ref, c)
     except Exception:  # noqa: BLE001
         return None
     span = (out.get("meta") or {}).get("span") if isinstance(out.get("meta"), dict) else None

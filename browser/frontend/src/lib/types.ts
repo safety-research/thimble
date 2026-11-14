@@ -1203,6 +1203,9 @@ export interface CorpusInfo {
   path?: string
   /** the same folder as the analyst named it, through a symlink, which the dashboard shows in place of `path` */
   shown?: string
+  /** which of its folder's sessions this workspace is when it is one open beside the folder's own (backend
+   * config.add_session): 2 for `c.2` …; absent for the folder's own */
+  session?: number
 }
 
 /** One row of `GET /workspaces` (backend start_page.py): a folder's workspace as the start page and the top bar's
@@ -1216,7 +1219,40 @@ export interface WorkspaceRow {
   folder: string
   /** the folder as the analyst opened it */
   path: string
+  /** which of its folder's sessions this workspace is, as CorpusInfo's `session` */
+  session?: number
+  /** its folder's own workspace, which the folder's other sessions open at once share (backend config.session_of) */
+  of?: string
 }
+
+/** One session of a folder in the session picker (`GET /ws/{c}/sessions`, backend folder_sessions.sessions). */
+export interface SessionRow {
+  /** when it was last written (epoch seconds) */
+  at: number
+  /** the first message typed in it, '' for none */
+  first: string
+  turns: number
+  cards: number
+  /** the workspace it is open in, or was moved aside from */
+  slot: string
+  /** the name of its folder in the archive, null for a session open in a workspace */
+  archive: string | null
+  /** a tab shows it or a thimble-browser holds it now */
+  open: boolean
+}
+
+export interface FolderSessions {
+  /** the folder's own workspace */
+  folder: string
+  /** the folder's name */
+  label: string
+  path: string
+  /** the latest first */
+  sessions: SessionRow[]
+}
+
+/** `POST /ws/{c}/sessions/open`: a new session, one moved aside, or the one open in a workspace of the folder. */
+export type OpenSessionBody = { new: true } | { archive: string } | { slot: string }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
 

@@ -388,19 +388,22 @@ FILE_KINDS = ("record", "range", "block", "span", "path", "table", "row", "page"
 RECORD_KINDS = ("record", "row", "page", "pointer", "csvrow")  # the kinds that name one record of a file (records.py)
 
 
-def resolve(corpus_dir: Path, ref: str) -> dict[str, Any]:
+def resolve(corpus_dir: Path, ref: str, c: str | None = None) -> dict[str, Any]:
     """Resolve a ref against a corpus. Raises RefError (400 malformed, 404 unresolvable).
-    A file ref with a fragment that a view accepts carries that view's excerpt and names the view (module note)."""
+    A file ref with a fragment that a view accepts carries that view's excerpt and names the view (module note). `c`
+    is the workspace whose cards, labels, documents and views a ref names, else the one the corpus opens as
+    (config.workspace_for_corpus_dir): a session of a folder that runs beside its own (config.sessions_of) passes its
+    own, since it shares the folder."""
     ref = _unwrap_card_line(ref)
-    out = resolve_base(corpus_dir, ref)
+    out = resolve_base(corpus_dir, ref, c)
     if out.get("kind") in FILE_KINDS and "#" in ref:
         from . import views  # lazy: views imports this module
 
-        views.enrich_file_ref(corpus_dir, ref.strip(), out)
+        views.enrich_file_ref(corpus_dir, ref.strip(), out, c)
     return out
 
 
-def resolve_base(corpus_dir: Path, ref: str) -> dict[str, Any]:
+def resolve_base(corpus_dir: Path, ref: str, c: str | None = None) -> dict[str, Any]:
     """resolve without the view step: a file ref as the file itself reads."""
     ref = _unwrap_card_line(ref)
     try:
@@ -411,15 +414,15 @@ def resolve_base(corpus_dir: Path, ref: str) -> dict[str, Any]:
     if kind == "view":
         from . import views  # lazy: views imports this module
 
-        return views.resolve_view_ref(corpus_dir, p, ref.strip())
+        return views.resolve_view_ref(corpus_dir, p, ref.strip(), c)
     if kind == "cell":
-        return _resolve_cell(corpus_dir, p, ref)
+        return _resolve_cell(corpus_dir, p, ref, c)
     if kind == "concept":
         from . import concepts  # lazy: concepts imports refs
 
-        return concepts.resolve_concept_ref(corpus_dir, ref)
+        return concepts.resolve_concept_ref(c or corpus_dir, ref)
     if kind == "report":
-        return _resolve_report(corpus_dir, p, ref)
+        return _resolve_report(c or corpus_dir, p, ref)
     if kind in ("table", "row"):
         return _resolve_database(corpus_dir, p, ref)
     if kind == "page":
@@ -473,7 +476,7 @@ QUOTE_SCAN_MAX_BYTES = 64 * 1024 * 1024  # of a whole file searched line by line
 QUOTE_LOOSE_MAX_BYTES = 4 * 1024 * 1024  # of a whole file searched with the loose match too, which reads every char
 
 
-def span_of_quote(corpus_dir: Path, ref: str, quote: str) -> str:
+def span_of_quote(corpus_dir: Path, ref: str, quote: str, c: str | None = None) -> str:
     """The span ref (`<path>#L<n>.b<k>:c<a>-<b>`, UTF-16 offsets) of the passage `quote` in the record or lines `ref`
     names, so an example card can show a passage deep inside a long record. A whole file is searched line by line. A ref
     a view reads is kept as it is when the view's excerpt holds the quote (_quote_in_view). Raises RefError: 400 for a
@@ -485,9 +488,9 @@ def span_of_quote(corpus_dir: Path, ref: str, quote: str) -> str:
     if p["kind"] == "span":
         return ref.strip()
     if p["kind"] == "view" and p.get("key"):
-        return _quote_in_view(corpus_dir, ref.strip(), quote)
+        return _quote_in_view(corpus_dir, ref.strip(), quote, c)
     if p["kind"] == "path" and p.get("locator"):
-        return _quote_in_view(corpus_dir, ref.strip(), quote)
+        return _quote_in_view(corpus_dir, ref.strip(), quote, c)
     if p["kind"] == "path":
         return _quote_in_file(corpus_dir, p["path"], ref.strip(), quote)
     if p["kind"] in ("row", "page", "pointer", "csvrow"):
@@ -513,11 +516,11 @@ def span_of_quote(corpus_dir: Path, ref: str, quote: str) -> str:
 QUOTE_UNIT_REFS = 50  # of the file refs a view's unit stands for, searched for a quote its excerpt does not show
 
 
-def _quote_in_view(corpus_dir: Path, ref: str, quote: str) -> str:
+def _quote_in_view(corpus_dir: Path, ref: str, quote: str, c: str | None = None) -> str:
     """`ref` itself when the unit a view reads for it holds `quote`. The view's excerpt is searched first, then (since
     an excerpt is cut at EXCERPT_MAX) the file lines the unit stands for. RefError 400 when no view reads the ref, 404
     when the quote is in neither."""
-    out = resolve(corpus_dir, ref)
+    out = resolve(corpus_dir, ref, c)
     if out.get("kind") != "view" and not out.get("view"):
         raise RefError(f"a quote is looked up in a record or lines of a file, or a unit of a view, not in {ref!r}", 400)
     if _find_quote(str(out.get("excerpt") or ""), quote):
@@ -526,7 +529,7 @@ def _quote_in_view(corpus_dir: Path, ref: str, quote: str) -> str:
     unit = list(out.get("refs") or []) if out.get("kind") == "view" else [str(out.get("path") or "")]
     for r in [u for u in unit if u][:QUOTE_UNIT_REFS]:
         try:
-            span_of_quote(corpus_dir, r, quote)
+            span_of_quote(corpus_dir, r, quote, c)
         except RefError:
             continue
         return ref
@@ -983,12 +986,12 @@ def _td_outputs(ws: Path, cell: dict[str, Any]) -> list | None:
     return cell.get("outputs")
 
 
-def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
+def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str, c: str | None = None) -> dict[str, Any]:
     """Cell ids are random, hence unique across a workspace's notebooks: search them all."""
     from . import notebook  # storage helpers; lazy: no kernel deps at import
 
-    # the workspace is the corpus's registered name, not the directory's basename
-    ws = config.WORKSPACES_DIR / config.workspace_for_corpus_dir(corpus_dir)
+    # the workspace is `c`, else the corpus's registered name, not the directory's basename
+    ws = config.WORKSPACES_DIR / (c or config.workspace_for_corpus_dir(corpus_dir))
     # every notebook, not only the canvas's, since a ref names a card wherever it is
     hit = notebook.find_cell(ws, p["cell_id"]) if ws.is_dir() else None
     if hit is None:

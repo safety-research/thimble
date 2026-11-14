@@ -1,6 +1,7 @@
-// The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
-// workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area (a
-// click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
+// The top bar: at the left the thimble mark and the corpus's folder in mono, with the session's number when it is one
+// open beside the folder's own, which opens the switcher, the server's workspaces as the start page lists them
+// (WorkspaceList), this one marked; the surfaces' tabs over the main area (a click shows the surface, a drag takes it to
+// a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
 // the citations toggle (Hide citations), the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
@@ -18,6 +19,7 @@ import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
+import { SessionPicker } from './SessionPicker'
 import { useCommentItems } from './CommentsList'
 import { listedLabels, type SideSection } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
@@ -78,6 +80,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
   const [prefill, setPrefill] = useState<ProblemPrefill | null>(null)
   const [tools, setTools] = useState<HTMLSpanElement | null>(null)
   const [path, setPath] = useState<string | null>(null)
+  const [session, setSession] = useState<number | null>(null)
   const links = useLinksVisible()
   const history = useUndo(ws)
   useEffect(
@@ -104,7 +107,12 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
     let alive = true
     api
       .corpora()
-      .then((cs) => alive && setPath(shownPath(cs.find((c) => c.name === ws))))
+      .then((cs) => {
+        if (!alive) return
+        const c = cs.find((c) => c.name === ws)
+        setPath(shownPath(c))
+        setSession(c?.session ?? null)
+      })
       .catch(() => undefined)
     return () => {
       alive = false
@@ -115,7 +123,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
       <span className="shell-brand">
         <Icon name="thimble" size={18} className="shell-mark" />
         <span className="shell-word">thimble</span>
-        <WorkspaceSwitcher ws={ws} label={path ? shortPath(path) : ws} />
+        <WorkspaceSwitcher ws={ws} label={`${path ? shortPath(path) : ws}${session ? ` · session ${session}` : ''}`} />
       </span>
       <nav className="tabs shell-tabs" role="tablist" aria-label="Surfaces">
         {tabs.map((t) => (
@@ -171,16 +179,19 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
   )
 }
 
-/** The corpus's folder in the top bar, a button that opens the server's workspaces (WorkspaceList), loaded each time it
- * opens, this one marked; a row opens its workspace in this tab. */
+/** The corpus's folder in the top bar, a button that opens the server's folders (WorkspaceList), loaded each time it
+ * opens, this one's marked; a folder's row shows its session picker (SessionPicker) in place of the list, whose choice
+ * opens in this tab, and Back goes back to the list. */
 export function WorkspaceSwitcher({ ws, label }: { ws: string; label: string }) {
   const [open, setOpen] = useState(false)
+  const [folder, setFolder] = useState<string | null>(null)
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [rows, setRows] = useState<WorkspaceRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     if (!open) return
     let alive = true
+    setFolder(null)
     setError(null)
     api
       .workspaces()
@@ -209,7 +220,21 @@ export function WorkspaceSwitcher({ ws, label }: { ws: string; label: string }) 
         <Icon name="chevron-down" size={12} className="shell-corpus-caret" />
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} label="Workspaces" className="ws-switcher" width={480}>
-        {error ? <p className="ws-switcher-error">{error}</p> : rows == null ? <Spinner size={12} label="Loading" className="ws-switcher-wait" /> : <WorkspaceList rows={rows} current={ws} compact />}
+        {folder ? (
+          <div className="ws-switcher-pick">
+            <button type="button" className="ws-switcher-back" onClick={() => setFolder(null)} data-tel="switcher-back">
+              <Icon name="chevron-left" size={12} />
+              Your folders
+            </button>
+            <SessionPicker ws={folder} current={ws} compact />
+          </div>
+        ) : error ? (
+          <p className="ws-switcher-error">{error}</p>
+        ) : rows == null ? (
+          <Spinner size={12} label="Loading" className="ws-switcher-wait" />
+        ) : (
+          <WorkspaceList rows={rows} current={ws} compact onFolder={setFolder} />
+        )}
       </Popover>
     </>
   )

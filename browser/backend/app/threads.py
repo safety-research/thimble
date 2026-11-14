@@ -226,7 +226,7 @@ def _read(c: str, ref: str) -> str:
         if ref.startswith(("card:", "cell:")):
             res = tools._read_cell(tools.Ctx(c, tools.ANALYST), "card:" + ref.split(":", 1)[1])
             return res.text
-        hit = refs.resolve(config.corpus_dir(c), ref)
+        hit = refs.resolve(config.corpus_dir(c), ref, c)
         return f"{ref} ({hit.get('kind', 'record')})\n{str(hit.get('excerpt') or '').strip()}"
     except Exception as e:  # noqa: BLE001 — a ref that does not resolve still opens the thread
         detail = getattr(e, "detail", None) or f"{type(e).__name__}: {e}"
@@ -262,7 +262,7 @@ async def warm(c: str, meta: dict) -> None:
 
     async def one(ref: str) -> None:
         try:
-            await asyncio.to_thread(refs.resolve, corpus, ref)
+            await asyncio.to_thread(refs.resolve, corpus, ref, c)
         except Exception:  # noqa: BLE001 — _read says why a ref does not resolve
             return
 

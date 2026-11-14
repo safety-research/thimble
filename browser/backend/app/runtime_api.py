@@ -287,7 +287,8 @@ async def turn(conv: Any, text: str) -> Any:
     _save(path, messages)
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
                             write_roots=spec.write_roots, private=spec.private, home=spec.home, temp=spec.temp,
-                            no_write=spec.no_write, corpus_edits=spec.corpus_edits)
+                            no_write=spec.no_write, corpus_edits=spec.corpus_edits,
+                            reads=conv.reads.setdefault(str(path), {}))
     reply = ""
     piece, key = 0, ""
     try:

@@ -91,8 +91,8 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
     """`thimble-browser --continue`, and `--resume` of the session open now, keep that session when it holds a card, a
     label, a document or a side thread but no chat of main with a turn, as a session of an earlier thimble or one with
     a card made by hand does: the page opens a new chat in it. Only a new session moves the open one aside
-    (pick_session, open_session), and it prints nothing then: the start's last line says how to resume it
-    (resume_line). The server's routes are faked."""
+    (pick_session, open_session; the server's folder_sessions.open_session), and it prints nothing then: the start's
+    last line says how to resume it (resume_line). The server's route is faked."""
     from app import config, notebook  # noqa: PLC0415
 
     with cli.server_dirs():
@@ -103,16 +103,15 @@ def test_continue_keeps_the_open_session_when_it_holds_a_card_but_no_chat(home, 
 
     def answer(method, url, body=None, timeout=5.0):
         asked.append((url.split("/api/", 1)[1], body or {}))
-        return 200, ({"archived": "aside"} if url.endswith("/archive") else {"name": "mini"})
+        return 200, {"name": "mini", "open": False}
 
     monkeypatch.setattr(cli, "_request", answer)
     cwd = data / "mini"
-    for how, routes in (("continue", ["corpora/register"]), ("new", ["ws/mini/archive", "corpora/register"])):
+    for how, choice in (("continue", {"slot": "mini", "chat": "new"}), ("new", {"new": True, "chat": "new"})):
         asked.clear()
         with cli.server_dirs():
-            assert cli.open_session("http://127.0.0.1:1", "mini", cwd, cli.pick_session(cwd, data, how))
-        assert [route for route, _ in asked] == routes, how
-        assert asked[-1][1]["chat"] == "new"
+            assert cli.open_session("http://127.0.0.1:1", "mini", cwd, cli.pick_session(cwd, data, how)) == "mini"
+        assert asked == [("ws/mini/sessions", choice)], how
         said = capsys.readouterr().out.splitlines()
         assert said == [], how
 
@@ -135,14 +134,13 @@ def test_a_new_session_ends_its_start_with_how_to_resume_the_latest_earlier_one(
         assert cli.resume_line("mini") is None
 
     def answer(method, url, body=None, timeout=5.0):
-        if url.endswith("/archive"):
-            ws = config.workspace_path("mini")
-            to = ledger.archive_path("mini")
-            to.parent.mkdir(parents=True, exist_ok=True)
-            ws.rename(to)
-            config.workspace_dir("mini")
-            return 200, {"archived": to.name}
-        return 200, {"name": "mini"}
+        assert url.endswith("/ws/mini/sessions") and body["new"]  # the server moves the session aside, as here
+        ws = config.workspace_path("mini")
+        to = ledger.archive_path("mini")
+        to.parent.mkdir(parents=True, exist_ok=True)
+        ws.rename(to)
+        config.workspace_dir("mini")
+        return 200, {"name": "mini", "open": False}
 
     monkeypatch.setattr(cli, "_request", answer)
     cwd = data / "mini"

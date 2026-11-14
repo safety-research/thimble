@@ -448,7 +448,7 @@ def test_thimble_browser_compiles_the_server_s_packages_once_where_an_install_le
     p = start(FAKE_UV_FAILS="1")
     assert p.returncode == 0 and p.stdout.splitlines() == [
         "thimble-browser: compiling the server's packages, once...",
-        f"server: -m app.cli browser --cwd {(w.home / 'data').resolve()} --session new"], text_of(p)
+        f"server: -m app.cli browser --cwd {(w.home / 'data').resolve()} --session auto"], text_of(p)
     assert p.stderr.splitlines() == [
         "error: made-up failure",
         "thimble-browser: the server's packages are not compiled, so each kernel's start compiles them: after you fix "
@@ -471,7 +471,7 @@ def test_thimble_browser_downloads_the_headless_chromium_once_where_an_install_l
     same, and --setup downloads nothing."""
     browser, start = clone_browser(w)
     (browser / "backend" / ".venv" / IN.FX.COMPILED).touch()
-    server = f"server: -m app.cli browser --cwd {(w.home / 'data').resolve()} --session new"
+    server = f"server: -m app.cli browser --cwd {(w.home / 'data').resolve()} --session auto"
     line = "thimble-browser: downloading the headless Chromium the workbench draws cards in, once (about 200 MB)..."
     p = start(FAKE_START=line)
     assert p.returncode == 0 and p.stdout.splitlines() == [line, server] and p.stderr == "", text_of(p)

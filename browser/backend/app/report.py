@@ -512,7 +512,7 @@ async def heal_sentences(c: str, sentences: list[dict[str, Any]], *, unwrap: boo
             if cite.is_card_ref(ref) or (display, ref) in external:
                 continue
             try:
-                out = await asyncio.to_thread(refs.resolve, corpus, ref)
+                out = await asyncio.to_thread(refs.resolve, corpus, ref, c)
             except Exception as e:  # noqa: BLE001
                 external[(display, ref)] = f"does not resolve: {getattr(e, 'detail', None) or e}"
                 continue
@@ -573,7 +573,7 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
 
     async def resolved(r: str) -> dict[str, Any] | None:
         try:
-            return await asyncio.to_thread(refs.resolve, corpus, r)
+            return await asyncio.to_thread(refs.resolve, corpus, r, c)
         except Exception:  # noqa: BLE001
             return None
 

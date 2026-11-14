@@ -1011,6 +1011,157 @@
   margin: 8px;
   color: var(--status-negative);
 }
+/* a folder's session picker (SessionPicker): on the start page (`?pick=`) a card like the workspaces', in the switcher
+   the same rows, denser, after a Back to the folders */
+.session-picker-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 0 12px;
+}
+.session-picker-folder {
+  font: 500 var(--text-sm) / 1.3 var(--font-mono);
+  color: var(--text-primary);
+}
+.session-picker-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font: var(--type-ui-sm);
+}
+.session-rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  column-gap: 16px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--ring-card), var(--shadow-1);
+}
+.session-rows > li {
+  display: contents;
+}
+.session-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-seg);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.session-rows li + li .session-row {
+  box-shadow: 0 -1px 0 var(--border-hairline);
+}
+.session-row:hover:not(:disabled),
+.session-row:focus-visible {
+  background: var(--surface-hover);
+  outline: none;
+}
+.session-row:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.session-row:disabled {
+  cursor: progress;
+}
+.session-row.current {
+  background: var(--surface-selected);
+}
+.session-new {
+  color: var(--text-accent);
+  font-weight: 500;
+}
+.session-new-label {
+  display: inline-flex;
+  grid-column: 1 / 4;
+  align-items: center;
+  gap: 8px;
+}
+.session-when,
+.session-counts {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.session-first {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-end {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 64px;
+}
+.session-open {
+  padding: 1px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--surface-selected);
+  color: var(--text-accent);
+  font: var(--type-ui-sm);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.session-picker-compact .session-picker-head {
+  padding: 0 8px;
+}
+.session-picker-compact .session-rows {
+  column-gap: 12px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.session-picker-compact .session-row {
+  min-height: var(--h-row);
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+}
+.session-picker-compact .session-rows li + li .session-row {
+  box-shadow: none;
+}
+.ws-switcher-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px 4px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+}
+.ws-switcher-back:hover {
+  color: var(--text-primary);
+}
+.ws-row-go {
+  color: var(--text-tertiary);
+}
+/* a phone's width: the first message goes under the time */
+@media (max-width: 560px) {
+  .session-rows {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+  .session-first {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+  .session-counts {
+    display: none;
+  }
+}
 /* a phone's width: the path goes under the name */
 @media (max-width: 560px) {
   .ws-rows {

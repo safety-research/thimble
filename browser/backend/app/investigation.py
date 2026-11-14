@@ -264,6 +264,10 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
     key = (c, inv_id)
     q: asyncio.Queue = asyncio.Queue()
     _subscribers.setdefault(key, set()).add(q)  # subscribe BEFORE reading the file: no event can fall in the gap
+    if inv_id == MAIN:
+        from . import folder_sessions  # noqa: PLC0415
+
+        folder_sessions.arrived(c)  # a session the page's picker opened is this tab's now
     pos = _size(d / "events.jsonl")  # before the read: what lands between the two is read again, and skipped by seq
     stored = _read_jsonl(d / "events.jsonl")
     moved = (after is not None and after > _top(stored)) or bool(log and log != log_id(c, inv_id))
