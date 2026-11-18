@@ -11,7 +11,13 @@
 
 ### Windows
 
-thimble runs in WSL 2, not in WSL 1 or on Windows itself. In the Linux distribution:
+thimble runs in WSL 2, not in WSL 1 or on Windows itself: WSL 1 cannot start the sandbox that cards run in.
+
+- No WSL yet: in PowerShell, `wsl --install` (restart if asked), then open Ubuntu from the Start menu.
+- WSL already: `wsl -l -v` in PowerShell shows each distribution's version. For one on 1, run
+  `wsl --set-version DISTRO 2`.
+
+Then, in the Linux distribution:
 
 - Install everything above there: `command -v node npm python3 claude` should name nothing under `/mnt`.
 - Keep your data in your Linux home folder (`~`), not under `/mnt`.
