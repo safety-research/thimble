@@ -1,9 +1,12 @@
-"""e on words the analyst selected in an answer, as the terminal's key acts on them: POST /explain writes the explainer
-of the words with the terminal's explain-expand text and stores it as an Explainers comment on the sentence that holds
-them (explain.py). The fork is replaced here; the texts, the stores and the records are real."""
+"""e and c on words the analyst selected in an answer, as the terminal's keys act on them: POST /explain writes the
+explainer of the words with the terminal's explain-expand text and stores it as an Explainers comment on the sentence
+that holds them (explain.py), and POST /marks/cite makes them a citation of the answer, checked at once with the
+checker's text and the terminal's note that the analyst opened it (marks.cite). The forks are replaced here; the texts,
+the stores, the validator and the records are real."""
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -84,6 +87,49 @@ def test_e_writes_the_explainer_of_the_selected_words_with_the_terminal_s_text_a
         off = client.post(f"/api/ws/{CORPUS}/explain", json={"chat": "main", "turn": turn, "words": "uploads"})
         assert off.status_code == 409 and "Turn it on under Comments" in off.json()["detail"]
     assert answer_comments._read(CORPUS)[0]["asked"] is True
+
+
+def test_c_makes_the_selected_words_a_citation_of_the_answer_checked_now_with_the_terminal_s_note(_fresh, monkeypatch):
+    """A citation of words of an answer that has none of Claude's: kept as the turn's marks with its row and place, its
+    check one fork of main whose prompt is the checker's text for it, then the terminal's note that the analyst opened
+    it; the validator decides, and the chat's log holds the marks record of each change."""
+    from app.main import app
+
+    folder = config.corpus_dir(CORPUS)
+    rel = next(p for p in sorted(folder.rglob("*.jsonl")) if p.stat().st_size)
+    quoted = rel.read_text(encoding="utf-8").splitlines()[0][:24]
+    path = str(rel.relative_to(folder))
+    text = f'The log opens with "{quoted}" and goes on.'
+    turn = _answered(text)
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        out = [{"mark": 1, "kind": "quote", "evidence": {"file": path, "line": 1, "substring": quoted},
+                "status": "verified", "correction": None, "reason": "the first line says it"}]
+        return {"answer": "```json\n" + json.dumps(out) + "\n```", "calls": [], "error": None}
+
+    monkeypatch.setattr(marks, "run_fork", fork)
+    start = text.index(quoted)
+    body = {"chat": "main", "turn": turn, "row": 1, "start": start, "end": start + len(quoted), "words": quoted,
+            "sentence": f'The log opens with "[{quoted}]" and goes on.'}
+    with TestClient(app) as client:
+        got = client.post(f"/api/ws/{CORPUS}/marks/cite", json=body)
+        assert got.status_code == 200, got.text
+        assert got.json() == {"turn": turn, "n": 1}
+        for _ in range(500):
+            if (marks.stored(CORPUS, turn) or {}).get("items", [{}])[0].get("status") != "checking":
+                break
+            time.sleep(0.01)
+        # the same words again: the citation already on them
+        assert client.post(f"/api/ws/{CORPUS}/marks/cite", json=body).json() == {"turn": turn, "n": 1}
+    (prompt,) = seen
+    assert f'1. [{quoted}] in: The log opens with "[{quoted}]" and goes on.' in prompt
+    assert prompt.endswith("The analyst opened citation 1 to read its evidence. It may stand in an earlier reply than your last.")
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified" and m["asked"] is True and (m["row"], m["start"], m["end"]) == (1, start, start + len(quoted))
+    records = [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r["type"] == "marks"]
+    assert records[0]["items"][0]["status"] == "checking" and records[-1]["items"][0]["status"] == "verified"
 
 
 def test_e_on_a_side_thread_s_answer_keeps_its_explainer_with_that_thread(monkeypatch):

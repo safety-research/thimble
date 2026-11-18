@@ -71,6 +71,15 @@ record names in the thread's chat (answer_ended). The fork of main that checks t
 checker's text says what holds them (THREAD_ANSWER), and the Bash calls of the thread's fork are evidence where main's
 are for a reply. Main hears nothing of that check, nor of a repair of one of its marks.
 
+c on words the analyst selected in an answer, main's or a side thread's (cite, the terminal's citeWords and
+checkOpened): the page finds where they stand in the answer with the terminal's own code (plugin/marks/asked.mjs citeAt:
+words inside a citation open it, else a new one stands on them), and a new one joins its turn's marks, or is the first of
+a turn that has none: `asked`, with the page's text row it stands in (`row`, as `chat:<id>#<row>` names the row), its
+place in that row's text (`start`, `end`, where the page writes it in: plugin/marks/message.js withAsked), its words and
+its sentence. Its check starts at once, one fork of main for it alone, whose checker's text ends with the note that the
+analyst opened it (the terminal's, plugin/marks/notices.mjs openedNote), and the validator decides, as for any check;
+main hears what changed when the reply's marks settle, as after a reply's check, and nothing of a side thread's.
+
 Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`, and an error a mark's reason
 or a notice quotes names each path of this machine in it as the validator names a file (_error_words). A reply's marks
 are kept in
@@ -94,6 +103,7 @@ import stat
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Awaitable, Callable
@@ -769,13 +779,14 @@ def _set_takeaway(c: str, cid: str, text: str, change: Callable[[list[dict[str, 
 async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]],
                        folders: tuple[str, str], fork: Callable[..., Awaitable[dict[str, Any]]],
                        cards: list[dict[str, Any]] | None = None, index: str = "", request: str = "",
-                       auto: bool = False, at: float | None = None, fresh: bool = False) -> None:
+                       auto: bool = False, at: float | None = None, fresh: bool = False, note: str = "") -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
     mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its marks
     ended, unless they are a side thread's. A check that is no repair repairs each mark it found wrong or could not
     confirm, as soon as it ends. `folders`: the check's (cwd, root), check_folders; `at`: when the marks' words were
     written, the time the validator reads a label at (None: now); `fresh`: a repair of stale marks, whose computed
-    evidence is only a call of this check's own (the validator's check_all)."""
+    evidence is only a call of this check's own (the validator's check_all); `note`: what follows the checker's text
+    for a check that is no repair, the analyst's c (cite)."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
     lines = "\n".join(_line(m) for m in share)
@@ -790,7 +801,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         cwd, root = folders
         holds = THREAD_ANSWER.format(about=thread["about"]) if thread else LAST_REPLY
         prompt = checker_prompt(lines, cwd, index, root, holds)
-        got = await fork(c, main, cut, f"{prompt}\n\n{request}" if request else prompt)
+        got = await fork(c, main, cut, "\n\n".join(x for x in (prompt, request, note) if x))
         if got.get("error"):
             error = _error_words(got["error"], folders)
             await give_up(f"the check ended: {error}")
@@ -1479,6 +1490,97 @@ async def repair_route(c: str, body: RepairBody) -> dict[str, Any]:
     if why:
         raise HTTPException(409, why)
     return {"ok": True}
+
+
+# ---- c: a citation of words the analyst selected (the terminal's citeWords, checkOpened)
+
+def _done_at(when: Any) -> float | None:
+    """The time a `done` record names (its ISO `ts`), in seconds; None when it names none."""
+    try:
+        return datetime.fromisoformat(str(when)).timestamp() if when else None
+    except ValueError:
+        return None
+
+
+async def cite(c: str, chat: str, turn: str, row: int, start: int, end: int, words: str, sentence: str,
+               fork: Callable[..., Awaitable[dict[str, Any]]] | None = None) -> int | str:
+    """c on words the analyst selected in the answer of chat `chat`'s run `turn` (module note): a citation of them at
+    `start`..`end` of the page's text row `row`, its words and sentence as the terminal's citeAt gave them, kept with the
+    answer's marks and checked now, in the background. Its number in them (the same words again: the citation already
+    on them), or why there is none."""
+    from . import explain  # noqa: PLC0415 — the run of a chat that a `done` record closes
+
+    words, sentence = " ".join(str(words or "").split()), " ".join(str(sentence or "").split())
+    if not words or not sentence or not 0 <= start < end:
+        return "select words of an answer's text to cite them."
+    got = _main_now(c)
+    if isinstance(got, str):
+        return got
+    main, cut = got
+    run = await asyncio.to_thread(explain._turn, c, chat, turn)
+    if run is None:
+        return "that answer is not in this chat any more."
+    # the analyst's words were written by the end of the answer's turn: a label is read as it was then, as for the
+    # citations Claude wrote in it (the terminal's wroteAt)
+    key = _time_key(turn=turn)
+    at = await asyncio.to_thread(_time_of, c, key) or _done_at(run["at"])
+    thread = None
+    if chat != agents.MAIN_ID:
+        thread = {"chat": chat, "about": f'"{(agents.meta_or_none(c, chat) or {}).get("title") or "thread"}"', "calls": ""}
+    async with _locks.setdefault((c, turn), asyncio.Lock()):
+        reply = stored(c, turn) or {"turn": turn, "items": [], "times": {"reply_end": time.time()},
+                                    **({"thread": thread} if thread else {})}
+        same = next((m for m in reply["items"] if m.get("asked") and m.get("row") == row and m.get("start") == start
+                     and m.get("end") == end), None)
+        if same is not None:
+            return int(same["n"])
+        n = max([0, *(int(m["n"]) for m in reply["items"])]) + 1
+        item = {"n": n, "words": words, "sentence": sentence, "status": "checking", "shown": words, "asked": True,
+                "row": int(row), "start": int(start), "end": int(end)}
+        cited = _cited_by(reply)
+        _save(c, {**reply, "items": [*reply["items"], item]}, cited)
+    if at is not None:
+        await asyncio.to_thread(_keep_time, c, key, at)
+
+    async def check() -> None:
+        try:
+            note = (await asyncio.to_thread(notices, {"kind": "opened", "n": n}))["text"]
+        except (OSError, RuntimeError, ValueError) as e:
+            await _give_up(c, turn, {n}, f"the check did not start: {_error_words(e, check_folders(c, main))}")
+            return
+        cards, index = await _cards_and_index(c, at)
+        try:
+            await _check_share(c, main, turn, cut, [item], check_folders(c, main), fork or run_fork, cards, index,
+                               at=at, note=note)
+        finally:
+            _drop_index(index)
+
+    _spawn(check())
+    return n
+
+
+class CiteBody(BaseModel):
+    chat: str
+    turn: str
+    row: int
+    start: int
+    end: int
+    words: str
+    sentence: str
+
+
+@router.post("/ws/{c}/marks/cite")
+async def cite_route(c: str, body: CiteBody) -> dict[str, Any]:
+    """c on words the analyst selected in an answer: a citation of them, checked now (cite). {turn, n}; a 409 says why
+    there is none."""
+    try:
+        config.workspace_dir(c)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    got = await cite(c, body.chat, body.turn, body.row, body.start, body.end, body.words, body.sentence)
+    if isinstance(got, str):
+        raise HTTPException(409, got)
+    return {"turn": body.turn, "n": got}
 
 
 # ---- the fork: Claude Code

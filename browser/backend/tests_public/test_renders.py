@@ -75,7 +75,8 @@ def _browser() -> dict[str, str]:
     out["plugin:notices (marks.notices)"] = "\n\n".join((
         marks._framed(marks.notices({"kind": "tell", "items": NOTICE_ITEMS})),
         marks._framed(marks.notices({"kind": "repair", "items": NOTICE_ITEMS[3:], "auto": True})),
-        marks.repair_request(NOTICE_ITEMS[3], 4), marks.repair_request(NOTICE_ITEMS[4], 5, auto=True)))
+        marks.repair_request(NOTICE_ITEMS[3], 4), marks.repair_request(NOTICE_ITEMS[4], 5, auto=True),
+        marks.notices({"kind": "opened", "n": 6})["text"]))
     done = subprocess.run(["node", str(LOOK_OF)], input=json.dumps({"prompt": LOOK}).encode(), capture_output=True,
                           check=True)
     out["plugin:observer, lenses (look_of.mjs)"] = json.loads(done.stdout)["prompt"]

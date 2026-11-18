@@ -23,7 +23,7 @@
  "browser plugin:explain-expand (explain_of.mjs)": "7dbf89be22a3063d239ba6cf0220621f6cb23108490939f04c2a7b17f8a9edce",
  "browser plugin:fixer (fixes.first_message)": "c8e19e323f8247dd9338c7ea500efd770a87ae6c1ebdde11968d379c19ac6b1e",
  "browser plugin:labels (concepts.build_classify_prompt, labels_tool)": "3e046557a793fd7a9b0f0abe2e73fb727191f5016b610910229cc43a902dd6db",
- "browser plugin:notices (marks.notices)": "81829ef7b27e3d76cbb1cbf5097f7cb7d1a42fd0ba9a97e261d62dcae043a4e3",
+ "browser plugin:notices (marks.notices)": "0f53266bb4df5b515538d81278ecd2e979e408a96ab16ed24d90bba8eeb151e8",
  "browser plugin:observer, lenses (look_of.mjs)": "6f0347d8612cff28dc44897eace8f2a5c664e1a9170fad26d4c114e40943b1b6",
  "browser plugin:thread, thread (threads.fork_text)": "7ba8867d3242bfee9732c022df89e1a3074542ced664ea42bb2047737d682921",
  "browser preamble.md": "1e40f8b054671b61678cecda826cc3d0a4d8ee2c1cc5d633a52741354db94b72",
