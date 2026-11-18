@@ -22,7 +22,8 @@
 //
 // An explainer the analyst asked for with e (chat/picked.tsx, backend explain.py) is an Explainers comment too, on an
 // answer of main's or of a side thread's (`chat`), whose chat tints it as main's chat does; it opens once its chat draws
-// it (wantComment), and Go to it opens the chat it is in.
+// it (wantComment), and Go to it opens the chat it is in. Its words stand where they were selected: when they stand more
+// than once in its passage, `nth` says which of their places it is about (wordsAt).
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { carrier } from '../../../../plugin/marks/message.js'
 import { checksApi } from '../lib/api'
@@ -44,6 +45,8 @@ export interface AnswerComment {
   quote: string
   /** the words of the passage it is about, as the chat draws them; none for the whole passage */
   words?: string
+  /** which of the passage's places of its words it is about, from 0; none for the first */
+  nth?: number
   text: string
   details?: string
   status: 'open' | 'dismissed'
@@ -66,6 +69,8 @@ export interface AnswerMark {
   quote: string
   /** the words of the passage to tint; none for the whole passage */
   words?: string
+  /** which of the passage's places of the words to tint, from 0 (wordsAt); none for the first */
+  nth?: number
   /** the CSS color of the tint */
   colour: string
   /** the passage's ref, the first piece's anchor */
@@ -130,6 +135,24 @@ export function plainPlaces(raw: string): { text: string; at: number[] } {
   return { text: text.slice(lead, end), at: at.slice(lead, end) }
 }
 
+/** Each place of `words` in a text, [start, end), white space and case aside (backend answer_comments._find). Pure. */
+function placesOf(text: string, words: string): [number, number][] {
+  const tokens = words.trim().split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (!tokens.length) return []
+  return [...text.matchAll(new RegExp(tokens.join('\\s+'), 'gi'))].map((m) => [m.index, m.index + m[0].length])
+}
+
+/** Where `words` stand in a passage's words, [start, end): their first place (lib/quoteFind findQuote), or with `nth` the
+ * nth of their places, case and white space aside, as the backend counts them (answer_comments._find); the first when
+ * the passage holds fewer. Pure. */
+export function wordsAt(passage: string, words: string, nth = 0): [number, number] | null {
+  const first = findQuote(passage, words)
+  return nth > 0 && first ? (placesOf(passage, words)[nth] ?? first) : first
+}
+
+/** How many times `words` stand in a text, white space and case aside (backend answer_comments.times_in). Pure. */
+export const timesIn = (text: string, words: string): number => placesOf(text, words).length
+
 /** Where comment `c` stands on its row's words as the chat draws them, `drawn`, the version of `text` (Claude's words, as
  * the row holds them) the check of the citations made (marks/marks.ts asChecked): its passage carried from Claude's words
  * into the drawn ones as the terminal carries an explainer's (plugin/marks/message.js carrier), and its words found
@@ -145,12 +168,14 @@ export function placedOn(c: AnswerComment, text: string, drawn: string): AnswerC
   const quote = drawn.slice(p.start, p.end)
   const words = plainQuote(c.words ?? '')
   const was = plainPlaces(c.quote)
-  const w = words ? findQuote(was.text, words) : null
+  const w = words ? wordsAt(was.text, words, c.nth) : null
   if (!w || findQuote(plainQuote(quote), words)) return { ...c, quote }
   const to = carry(at + was.at[w[0]], at + was.at[w[1] - 1] + 1)
   const now = plainPlaces(quote)
   const kept = to ? now.at.flatMap((i, k) => (p.start + i >= to.start && p.start + i < to.end ? [k] : [])) : []
-  return kept.length ? { ...c, quote, words: now.text.slice(kept[0], kept[kept.length - 1] + 1) } : { ...c, gone: true }
+  if (!kept.length) return { ...c, gone: true }
+  const moved = now.text.slice(kept[0], kept[kept.length - 1] + 1)
+  return { ...c, quote, words: moved, nth: timesIn(now.text.slice(0, kept[0]), moved) }
 }
 
 /** The open comments of one text row: those on its turn whose passage its text holds. Pure. */
@@ -168,11 +193,11 @@ export function commentsOfRow(row: { text: string; turn?: string }, comments: re
  * answer_comments.APART). */
 const APART: Readonly<Record<string, string>> = { 'heads-up': 'explainers', explainers: 'heads-up' }
 
-/** Where a comment's words stand in its passage as the chat draws it, [start, end): their first place, else the whole
- * passage (backend answer_comments._span). Pure. */
-function spanOf(c: Pick<AnswerComment, 'quote' | 'words'>): [number, number] {
+/** Where a comment's words stand in its passage as the chat draws it, [start, end): the place of them it is about
+ * (wordsAt), else the whole passage (backend answer_comments._span). Pure. */
+function spanOf(c: Pick<AnswerComment, 'quote' | 'words' | 'nth'>): [number, number] {
   const passage = plainQuote(c.quote)
-  return (c.words && findQuote(passage, plainQuote(c.words))) || [0, passage.length]
+  return (c.words && wordsAt(passage, plainQuote(c.words), c.nth)) || [0, passage.length]
 }
 
 /** Whether two comments' words meet: on one passage, their spans overlap. Pure. */
@@ -189,7 +214,7 @@ export function marksOf(comments: readonly AnswerComment[], active: string | nul
   const drawn: AnswerComment[] = []
   for (const c of [...comments].sort((a, b) => Number(b.id === active) - Number(a.id === active)))
     if (!drawn.some((d) => APART[d.check] === c.check && meet(d, c))) drawn.push(c)
-  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, colour: tintOf(c), ref: c.ref, active: c.id === active }))
+  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, nth: c.nth, colour: tintOf(c), ref: c.ref, active: c.id === active }))
 }
 
 /** Which of the marks over clicked words a click opens. `count` marks stand on the words, from the innermost out (the

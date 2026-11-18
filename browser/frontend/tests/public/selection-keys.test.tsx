@@ -4,7 +4,8 @@
 // chat draws as a mark with its label open, checking; e writes their explainer, the words tinted while it is written and
 // its comment open on them once written; a opens the ask box on them, whose question starts a side thread about them.
 // Escape drops the selection, a key typed into a field is the field's, and with Explainers off for the chat e is not
-// shown. A side thread's answers draw the explainers asked for there.
+// shown. A side thread's answers draw the explainers asked for there. c and e act on the words where they were selected:
+// in the answer, not in a line of the turn before it that holds them too, and at their second place in one sentence.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { chatOfComment } from '../../src/chat/answerComments.ts'
@@ -120,7 +121,8 @@ test('e writes the explainer of the selected words: they are tinted while it is 
   await select(el)
   await press('e')
   await later()
-  expect(posts.map((p) => [p.url, p.body])).toEqual([['/api/ws/mini/explain', { chat: 'main', turn: TURN, words: WORDS }]])
+  const at = ANSWER.indexOf(WORDS)
+  expect(posts.map((p) => [p.url, p.body])).toEqual([['/api/ws/mini/explain', { chat: 'main', turn: TURN, words: WORDS, row: 1, start: at, end: at + WORDS.length }]])
   expect([...el.querySelectorAll('mark.answer-tint-pending')].map((m) => m.textContent)).toEqual([WORDS])
   // written: the server keeps it as an Explainers comment, and the chat reads the comments again
   comments = [COMMENT]
@@ -175,6 +177,79 @@ test('Escape drops the selection; a key typed in a field is the field’s; with 
   await later()
   expect(keys()).toEqual([])
   expect(document.getSelection()!.isCollapsed).toBe(true)
+})
+
+// a turn whose line before its tool call holds the words, and whose answer holds them twice in one sentence
+const PLAN = 'I will check the retry budget first.'
+const TWICE = 'Uploads fail after the retry budget runs out, and the retry budget is five tries.'
+const turnRecords: ChatRecord[] = [
+  { type: 'user', text: 'Why do uploads fail?' },
+  { type: 'text', delta: PLAN },
+  { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: 'client/upload.py' } },
+  { type: 'tool_result', id: 'tu1', summary: 'read 40 lines' },
+  { type: 'text', delta: TWICE },
+  { type: 'done', result: null, turn: TURN },
+]
+
+/** The words selected at their `nth` place (from 0) in the text row `row`, as a drag over them leaves them. */
+async function selectAt(el: HTMLElement, row: number, words: string, nth: number) {
+  const box = el.querySelector(`.chat-text[data-anchor="chat:main#${row}"]`)!
+  const nodes: Text[] = []
+  const walk = document.createTreeWalker(box, NodeFilter.SHOW_TEXT)
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) nodes.push(n as Text)
+  const all = nodes.map((n) => n.data).join('')
+  let at = -1
+  for (let k = 0; k <= nth; k++) at = all.indexOf(words, at + 1)
+  // the node a place falls in: a start at a node's end begins the next node
+  const point = (i: number, end: boolean): [Text, number] => {
+    for (const n of nodes) {
+      if (i < n.data.length || (end && i === n.data.length)) return [n, i]
+      i -= n.data.length
+    }
+    throw new Error('no such place')
+  }
+  const range = document.createRange()
+  range.setStart(...point(at, false))
+  range.setEnd(...point(at + words.length, true))
+  document.getSelection()!.removeAllRanges()
+  document.getSelection()!.addRange(range)
+  await act(async () => void document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
+  await later()
+}
+
+test('e acts on the words where they were selected: the explainer stands on them in the answer, not in the line before it that holds them too, and at their second place in one sentence', async () => {
+  let written: (v: unknown) => void = () => undefined
+  let comments: object[] = []
+  const posts = serve({ comments: () => comments, answer: (u) => (u.endsWith('/explain') ? new Promise((r) => (written = r)) : {}) })
+  const el = await mount(<Chat />)
+  await act(async () => setRecords(turnRecords))
+  await later()
+  await selectAt(el, 4, WORDS, 1)
+  await press('e')
+  await later()
+  const at = TWICE.lastIndexOf(WORDS)
+  expect(posts.map((p) => p.body)).toEqual([{ chat: 'main', turn: TURN, words: WORDS, row: 4, start: at, end: at + WORDS.length }])
+  // tinted where they were selected while the explainer is written
+  const pending = [...el.querySelectorAll<HTMLElement>('mark.answer-tint-pending')]
+  expect(pending.map((m) => [m.closest<HTMLElement>('.chat-text')?.dataset.anchor, m.previousSibling?.textContent])).toEqual([['chat:main#4', 'Uploads fail after the retry budget runs out, and the ']])
+  comments = [{ ...COMMENT, ref: `answer:${TURN}#s2`, row: '1', start: 0, end: TWICE.length, quote: TWICE, nth: 1 }]
+  await act(async () => written({ id: 'ae1', ref: `answer:${TURN}#s2`, turn: TURN, check: 'explainers' }))
+  await act(async () => bus.emit('answerComments', {}))
+  await later()
+  const tint = el.querySelector<HTMLElement>('mark.answer-tint[data-answer-comment="ae1"]')!
+  expect([tint.closest<HTMLElement>('.chat-text')?.dataset.anchor, tint.textContent, tint.previousSibling?.textContent]).toEqual(['chat:main#4', WORDS, 'Uploads fail after the retry budget runs out, and the '])
+})
+
+test('c cites the words where they were selected: their second place in one sentence of the answer, not their first, nor the line before it', async () => {
+  const posts = serve({ answer: (u) => (u.endsWith('/marks/cite') ? { turn: TURN, n: 1 } : {}) })
+  const el = await mount(<Chat />)
+  await act(async () => setRecords(turnRecords))
+  await later()
+  await selectAt(el, 4, WORDS, 1)
+  await press('c')
+  await later()
+  const at = TWICE.lastIndexOf(WORDS)
+  expect(posts.map((p) => p.body)).toEqual([{ chat: 'main', turn: TURN, row: 4, start: at, end: at + WORDS.length, words: WORDS, sentence: 'Uploads fail after the retry budget runs out, and the [retry budget] is five tries.' }])
 })
 
 test("a side thread's answer draws the explainer asked for there, as main's chat draws one, and Go to it opens that thread", async () => {

@@ -195,6 +195,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   const [opened, setOpened] = useState<string | null>(null)
   const [asked, setAsked] = useState<AnswerAsk | null>(() => (commented ? askedAnswer() : null))
   // the words of this chat whose explainer is being written (chat/picked.tsx), tinted in the Explainers check's color
+  // where they were selected: in their sentence, at their place among its places of them
   const asking = useAsking()
   // each text row's comments, each where the row's words are drawn (placedOn), and the marks of those that have words
   // there, again when the comments, the row's checks or the open one change
@@ -205,7 +206,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
     for (const r of shown) {
       if (r.kind !== 'text') continue
       const mine = commentsOfRow(r, answers.comments)
-      const pending = writing.filter((a) => a.row === r.index).map((a): AnswerMark => ({ id: `asking:${a.words}`, quote: a.words, colour: a.colour, ref: '', active: false, pending: true }))
+      const pending = writing.filter((a) => a.row === r.index).map((a): AnswerMark => ({ id: `asking:${a.words}`, quote: a.quote, words: a.words, nth: a.nth, colour: a.colour, ref: '', active: false, pending: true }))
       if (!mine.length && !pending.length) continue
       // the words as ChatMarkdown draws them: as the check of the citations left them, once the row no longer streams;
       // the words the analyst cited are marks in both, so a check's change is all that tells them apart

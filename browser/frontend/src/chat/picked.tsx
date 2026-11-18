@@ -16,11 +16,16 @@
 //   a   the ⌘ pointer's ask box opens on the words, as a ⌘-drag over them opens it (pointer/CmdPointer.tsx, bus
 //       askSelection), and Enter there starts the side thread
 //
+// c and e act on the words where they were selected: words may stand more than once in a row, so the keys take which
+// of their places the selection lies on (rankIn, asked.mjs rankOf). c places its citation there, and e sends the place
+// in the row's text, where the server keeps the explainer, on the sentence that holds it.
+//
 // Each text row a chat draws notes itself here (noteRow) by its anchor, `chat:<id>#<index>`, with its turn, its text
 // and its marks, which the keys read; a row of an answer still being written takes no key.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import { CITE_WHY, citeAt, pickedWords } from '../../../../plugin/marks/asked.mjs'
+import { CITE_WHY, citeAt, pickedPlace, pickedWords, rankOf } from '../../../../plugin/marks/asked.mjs'
+import { sentenceSpan } from '../../../../plugin/marks/message.js'
 import { api, marksApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -29,7 +34,7 @@ import { wantMark } from '../marks/marks'
 import { useChecks } from '../report/Checks'
 import { checkColour, coversOf } from '../report/checkComments'
 import { typingIn } from '../shell/undo'
-import { wantComment } from './answerComments'
+import { plainQuote, timesIn, wantComment, wordsAt } from './answerComments'
 
 /** A text row as a chat draws it (chat/Rows), which the keys read. */
 export interface PickedRow {
@@ -50,11 +55,16 @@ export function noteRow(row: PickedRow): void {
   rows.set(`chat:${row.chat}#${row.index}`, row)
 }
 
-/** Words whose explainer is being written: the chat and the row they stand in, and the Explainers check's color. */
+/** Words whose explainer is being written: the chat and the row they stand in, the sentence that holds them as the row
+ * draws it with which of its places of them they are, and the Explainers check's color. */
 export interface Asking {
   chat: string
   row: number
   words: string
+  /** the sentence that holds them; the words alone when the page found no place for them */
+  quote: string
+  /** which of the sentence's places of the words they are, from 0 (answerComments.ts wordsAt) */
+  nth: number
   colour: string
 }
 
@@ -78,18 +88,42 @@ export function useAsking(): readonly Asking[] {
 
 /** The signs the page draws after a citation, which a selection may hold: × after a failed one, ↻ after a stale one. */
 const SIGNS = '×↻'
+/** What a row draws that its text does not hold as words: a chip (its name or value), the sign after a citation and its
+ * spinner (rankIn). */
+const NOT_WORDS = '.refchip, .mark-glyph, .mark-spin'
 /** The explainers' check (backend explain.py CHECK). */
 const EXPLAINERS = 'explainers'
 /** The strip's distance (px) from the selection, and from the window's edges. */
 const GAP = 6
 const MARGIN = 8
 
-/** A selection the keys take: words of one text row of an answer that is done, with the row's element and the range. */
+/** A selection the keys take: words of one text row of an answer that is done, with the row's element and the range,
+ * and which of the row's places of the words it lies on (rankIn; none when the page cannot tell). */
 export interface Picked {
   el: HTMLElement
   row: PickedRow
   words: string
   range: Range
+  nth?: number
+}
+
+/** Which of the places of `words` in the row `el` draws the selection `range` lies on (asked.mjs rankOf): the row's
+ * words as drawn, without NOT_WORDS, and where the selection starts in them. */
+function rankIn(el: HTMLElement, range: Range, words: string): number | undefined {
+  const before = document.createRange()
+  before.setStart(el, 0)
+  before.setEnd(range.startContainer, range.startOffset)
+  let drawn = ''
+  let at = 0
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (n.parentElement?.closest(NOT_WORDS)) continue
+    const text = n.nodeValue ?? ''
+    if (n === range.startContainer) at = drawn.length + range.startOffset
+    else if (before.intersectsNode(n)) at = drawn.length + text.length
+    drawn += text
+  }
+  return rankOf(drawn, words, at, SIGNS)
 }
 
 /** The selection as the keys take it (module note): null for none, for one that crosses rows or leaves the answers,
@@ -105,17 +139,20 @@ export function pickedNow(): Picked | null {
   const row = rows.get(el.dataset.anchor ?? '')
   if (!row || row.streaming || !row.turn) return null
   const { words } = pickedWords(sel.toString())
-  return words ? { el, row, words, range } : null
+  return words ? { el, row, words, range, nth: rankIn(el, range, words) } : null
 }
 
 /** An error's words without the status the server's answer opens with (lib/api). */
 const why = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/^\d{3}\s+/, '')
 const toast = (text: string) => bus.emit('toast', { text, kind: 'error' })
 
-/** c: the words cited (module note). */
+/** The citations of a row the keys read: Claude's by their order in its text, then those asked about with c. */
+const itemsOf = (row: PickedRow) => [...(row.checks ?? []), ...(row.asked ?? [])]
+
+/** c: the words cited where they were selected (module note). */
 async function cite(ws: string, p: Picked): Promise<void> {
   const turn = p.row.turn!
-  const got = citeAt(p.row.text, [...(p.row.checks ?? []), ...(p.row.asked ?? [])], p.words, SIGNS)
+  const got = citeAt(p.row.text, itemsOf(p.row), p.words, SIGNS, p.nth)
   // a citation of Claude's that no check holds yet: its check starts as its turn ends
   if (got.why === 'unchecked') return toast('Could not cite: those words are in a citation still being checked; try again in a moment.')
   if (got.why) return toast(`Could not cite: ${got.why === 'code' ? CITE_WHY.code : CITE_WHY.missing(p.words)}`)
@@ -128,12 +165,26 @@ async function cite(ws: string, p: Picked): Promise<void> {
   }
 }
 
-/** e: the words explained (module note), tinted in `colour` while their explainer is written. */
+/** Where e's tint stands while the explainer is written: the sentence that holds the words' place as the row draws it
+ * (plugin/marks/message.js sentenceSpan), and which of its places of them they are; the words alone with no place. */
+function tintWhileWritten(place: ReturnType<typeof pickedPlace>, words: string): Pick<Asking, 'quote' | 'nth'> {
+  if (!place) return { quote: words, nth: 0 }
+  const [a, b] = sentenceSpan(place.shown, place.at)
+  const sentence = place.shown.slice(a, b)
+  if (!wordsAt(plainQuote(sentence), words)) return { quote: words, nth: 0 }
+  return { quote: sentence, nth: timesIn(plainQuote(place.shown.slice(a, place.at.start)), words) }
+}
+
+/** e: the words explained where they were selected (module note), tinted in `colour` while their explainer is written:
+ * the server takes their row and their place in its text, and the tint stands on them in their sentence as the row
+ * draws it. */
 async function explain(ws: string, p: Picked, colour: string): Promise<void> {
-  const mine: Asking = { chat: p.row.chat, row: p.row.index, words: p.words, colour }
+  const place = pickedPlace(p.row.text, itemsOf(p.row), p.words, SIGNS, p.nth)
+  const mine: Asking = { chat: p.row.chat, row: p.row.index, words: p.words, ...tintWhileWritten(place, p.words), colour }
   setAsking([...asking, mine])
   try {
-    const got = await api.explain(ws, { chat: p.row.chat, turn: p.row.turn!, words: p.words })
+    const at = place?.written ? { start: place.written.start, end: place.written.end } : {}
+    const got = await api.explain(ws, { chat: p.row.chat, turn: p.row.turn!, words: p.words, row: p.row.index, ...at })
     wantComment(got.id)
   } catch (e) {
     toast(`Could not explain: ${why(e)}`)

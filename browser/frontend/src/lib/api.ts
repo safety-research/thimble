@@ -411,9 +411,10 @@ export const api = {
   openSession: (c: string, body: OpenSessionBody) => j<{ name: string; open: boolean }>(`${ws(c)}/sessions/open`, { method: 'POST', body: JSON.stringify(body) }),
   chat: (c: string, id: string) => j<ChatDetail>(`${ws(c)}/chats/${enc(id)}`),
   createThread: (c: string, body: NewThreadBody) => j<ChatMeta>(`${ws(c)}/chats`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `POST /ws/{c}/explain`: e on words selected in an answer of a chat's run (backend explain.py): their explainer,
-   * new or standing, as an answer comment; a 409 or 502 says why there is none. */
-  explain: (c: string, body: { chat: string; turn: string; words: string }) => j<{ id: string; ref: string; turn: string; check: string }>(`${ws(c)}/explain`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `POST /ws/{c}/explain`: e on words selected in an answer of a chat's run, at their place in the page's text row
+   * when the page found it (backend explain.py): their explainer, new or standing, as an answer comment; a 409 or 502
+   * says why there is none. */
+  explain: (c: string, body: { chat: string; turn: string; words: string; row?: number; start?: number; end?: number }) => j<{ id: string; ref: string; turn: string; check: string }>(`${ws(c)}/explain`, { method: 'POST', body: JSON.stringify(body) }),
   updateChat: (c: string, id: string, patch: ChatPatch) => j<ChatMeta>(`${ws(c)}/chats/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteChat: (c: string, id: string) => j<{ deleted: string }>(`${ws(c)}/chats/${enc(id)}`, { method: 'DELETE' }),
   /** Stop (agents.interrupt_route): one of thimble's agents through thimble's plugin, a click (403 without the

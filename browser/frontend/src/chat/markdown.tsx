@@ -11,7 +11,7 @@ import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, RootContent, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
 import { findQuote } from '../lib/quoteFind'
-import { nextMark, plainQuote, type AnswerMark } from './answerComments'
+import { nextMark, plainQuote, wordsAt, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
@@ -218,8 +218,8 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
 }
 
 /** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block has
- * its words, or all of it when the mark names none, wrapped in <mark class="answer-tint"> in its check's color; a
- * passage not found draws nothing. */
+ * its words (the place of them the mark names, answerComments.ts wordsAt), or all of it when the mark names none,
+ * wrapped in <mark class="answer-tint"> in its check's color; a passage not found draws nothing. */
 export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {}) {
   return (tree: Root) => {
     const marks = options.marks ?? []
@@ -232,7 +232,7 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
         const text = pieces.map((p) => p.text).join('')
         const at = findQuote(text, q)
         if (!at) continue
-        const words = m.words ? findQuote(text.slice(at[0], at[1]), plainQuote(m.words)) : null
+        const words = m.words ? wordsAt(text.slice(at[0], at[1]), plainQuote(m.words), m.nth) : null
         wrapPieces(pieces, at[0] + (words?.[0] ?? 0), words ? at[0] + words[1] : at[1], m)
         break
       }
