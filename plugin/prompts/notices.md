@@ -79,6 +79,9 @@ Citation {{N}} stands in the same sentence, and {{FILES}} changed after its firs
 <!-- request stale value -->
 When a value the sentence states changed, correct the sentence to the value as it is now. Say what it was before in `reason`, not in the sentence.
 
+<!-- request opened -->
+The analyst opened citation {{N}} to read its evidence.
+
 <!-- request where -->
 It may stand in an earlier reply than your last.
 
