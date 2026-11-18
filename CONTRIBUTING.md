@@ -131,7 +131,7 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | label classifier | `prompts/labels.md` | `labels/labels.ts` | each model call of a `--prompt` label |
 | observer | `prompts/observer.md`, `prompts/observer-turn.md` | `observer/observer.ts` | the prompt of the look after each answer: its frame, then the messages to read and what thimble already gave |
 | lenses | `prompts/lens-explain.md`, `prompts/lens-heads.md`, `prompts/lens-claims.md` | `observer/observer.ts` | the sections of the look's prompt, one per switch that is on |
-| explainer on demand | `prompts/explain-expand.md` | `explain/expand.ts` | one model call when the person asks what words of an answer mean |
+| explainer on demand | `prompts/explain-expand.md` | `explain/expand.ts`, `browser/backend/app/explain_of.mjs` | one model call when the person asks what words of an answer mean, in both modes |
 | what an explainer is | `prompts/explainer.md` | the texts that include it | the definition in the Explainers lens and the explainer on demand, and in the workbench's Explainers comments agent over a document |
 | what a heads-up is | `prompts/heads-up.md` | the texts that include it | the definition in the Heads-ups lens, and in the workbench's Heads up comments agent over a document |
 | squeeze | `prompts/squeeze.md` | `squeeze/term.ts` | one model call per change of an answer's chips |
@@ -160,9 +160,9 @@ When the model does something you do not want, change the cause, not the symptom
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
 The browser workbench (`browser/`) keeps its own texts in `browser/prompts/`. Of these it
-reads the texts of what it runs as the terminal does, the citation checker, the look, the fixer, a side thread's fork
-and the label classifier (`checker.md`, `observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`,
-`fixer.md`, `thread.md`, `labels.md`), the card check's criterion for a card that does not fit (`card-criteria.md`),
+reads the texts of what it runs as the terminal does, the citation checker, the look, the explainer on demand, the
+fixer, a side thread's fork and the label classifier (`checker.md`, `observer.md`, `observer-turn.md`, `lens-explain.md`,
+`lens-heads.md`, `explain-expand.md`, `fixer.md`, `thread.md`, `labels.md`), the card check's criterion for a card that does not fit (`card-criteria.md`),
 and main's text (`main.md`, with `communicating.md`, `citing.md`, `guidance-cards.md` and `guidance-labels.md` in it)
 before main's own sections. Both modes
 read a text the same way: it may hold another text, `{{include:NAME}}`, and where the modes need different words it

@@ -159,7 +159,8 @@ export const TEXTS = {
   'explain-expand': {
     about: 'an explainer of words the analyst picked, over the conversation, the words, the answer and the files it cites',
     terminal: 'explain/expand.ts',
-    use: 'one fork of the conversation when the person asks what words of an answer mean (e on selected words, a press on cited words in a pane)',
+    browser: 'browser/backend/app/explain_of.mjs',
+    use: 'one fork of the conversation when the person asks what words of an answer mean (e on selected words, a press on cited words in a pane), and in the workbench one fork of main when the analyst presses e on words selected in an answer (browser/backend/app/explain.py)',
   },
   squeeze: {
     about: 'a simpler version of an answer, rewritten at the levels the person picked under it, or a catch-up of the replies they missed',

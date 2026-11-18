@@ -13,6 +13,8 @@ and no coverage, which the workbench does not have, so the turn leaves that sect
 
     LENS_OF            the checks that are the terminal's lenses, each with its lens
     run(c, lenses, cover) -> {items: [{lens, passage, words, text, details}]} or {error}
+    explainer_comment(term, body, here) -> (text, details) of an explainer's comment, which the explainer the analyst
+                       asks for takes too (explain.py)
 """
 from __future__ import annotations
 
@@ -50,6 +52,12 @@ def _cite(text: str) -> str:
             return m.group(0)
         return f"{m.group(1)} [[{re.sub(r'#L(\d+)-(\d+)$', r'#L\1-L\2', ref)}]]"
     return _LINK_RE.sub(one, str(text or ""))
+
+
+def explainer_comment(term: str, body: str, here: str) -> tuple[str, str]:
+    """An explainer as its comment says it: its words, then what they mean, and in the details where they mattered,
+    each with the terminal's links as the workbench's citations (_cite)."""
+    return _cite(f"{term}: {body}"), _cite(here)
 
 
 def _msgs(c: str, answers: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -119,8 +127,8 @@ async def run(c: str, lenses: list[str], cover: list[dict[str, Any]]) -> dict[st
         if p is None or words is None:
             continue
         if it["kind"] == "heads":
-            text, details = it["title"] or it["term"], " ".join(_cite(b) for b in it["bullets"])
+            text, details = _cite(it["title"] or it["term"]), " ".join(_cite(b) for b in it["bullets"])
         else:
-            text, details = f"{it['term']}: {it['body']}", _cite(it["here"])
-        items.append({"lens": it["kind"], "passage": p, "words": words, "text": _cite(text), "details": details})
+            text, details = explainer_comment(it["term"], it["body"], it["here"])
+        items.append({"lens": it["kind"], "passage": p, "words": words, "text": text, "details": details})
     return {"items": items}

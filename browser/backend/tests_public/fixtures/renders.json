@@ -20,6 +20,7 @@
  "browser labels.md": "a62fa92c8911dbd0c85034d33f508278b3069e73b97fa632c846b6d29da8d62e",
  "browser main.md": "38f6551fb8fc82bdbffde186eb39aaff02a1aa9d3aa63d77376a3123a97d3ce5",
  "browser plugin:checker (marks.checker_prompt)": "173b198bae22723655e8a7becbb3d02a45a2ad090d75b3562e5944b54210286f",
+ "browser plugin:explain-expand (explain_of.mjs)": "7dbf89be22a3063d239ba6cf0220621f6cb23108490939f04c2a7b17f8a9edce",
  "browser plugin:fixer (fixes.first_message)": "c8e19e323f8247dd9338c7ea500efd770a87ae6c1ebdde11968d379c19ac6b1e",
  "browser plugin:labels (concepts.build_classify_prompt, labels_tool)": "3e046557a793fd7a9b0f0abe2e73fb727191f5016b610910229cc43a902dd6db",
  "browser plugin:notices (marks.notices)": "81829ef7b27e3d76cbb1cbf5097f7cb7d1a42fd0ba9a97e261d62dcae043a4e3",
