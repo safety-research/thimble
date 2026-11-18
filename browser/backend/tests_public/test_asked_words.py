@@ -1,8 +1,8 @@
 """e and c on words the analyst selected in an answer, as the terminal's keys act on them: POST /explain writes the
 explainer of the words with the terminal's explain-expand text and stores it as an Explainers comment on the sentence
-that holds them (explain.py), and POST /marks/cite makes them a citation of the answer, checked at once with the
-checker's text and the terminal's note that the analyst opened it (marks.cite). The forks are replaced here; the texts,
-the stores, the validator and the records are real."""
+that holds them where they were selected (explain.py), and POST /marks/cite makes them a citation of the answer,
+checked at once with the checker's text and the terminal's note that the analyst opened it (marks.cite). The forks are
+replaced here; the texts, the stores, the validator and the records are real."""
 from __future__ import annotations
 
 import json
@@ -152,3 +152,50 @@ def test_e_on_a_side_thread_s_answer_keeps_its_explainer_with_that_thread(monkey
         assert f"The analyst's question: {QUESTION}" in seen[0] and "The retry budget is five tries" in seen[0]
         (shown,) = client.get(f"/api/ws/{CORPUS}/answer-comments").json()["comments"]
         assert shown["chat"] == meta["id"] and shown["turn"] == turn and shown["words"] == "five tries"
+
+
+def test_e_keeps_the_explainer_where_the_words_were_selected_not_where_the_turn_first_says_them(monkeypatch):
+    """The turn's line before its tool call holds the words, and its answer holds them twice in one sentence: e on
+    their second place in the answer, with the page's row and the place in its text, keeps the explainer on that
+    sentence and on that place of the words. The same place again opens it; their first place in the sentence is
+    another place, which takes its words with no second call; e in the line before the tool call stands there."""
+    from app.main import app
+
+    plan = "I will check the retry budget first."
+    twice = "Uploads fail after the retry budget runs out, and the retry budget is five tries."
+    turn = marks.new_turn()
+    for rec in ({"type": "user", "by": "browser", "text": QUESTION}, {"type": "text", "delta": plan},
+                {"type": "tool_use", "id": "tu1", "name": "Read", "input": {"file_path": "client/upload.py"}},
+                {"type": "tool_result", "id": "tu1", "summary": "read 40 lines"}, {"type": "text", "delta": twice},
+                {"type": "done", "turn": turn}):
+        agents.mirror(CORPUS, rec.pop("type"), **rec)
+    # the page's row of each text: its record's index in the log
+    first, last = [i for i, r in enumerate(agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]))
+                   if r["type"] == "text"]
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        return {"answer": json.dumps({"body": "How many times the client tries again.", "here": ""}), "calls": [],
+                "error": None}
+
+    monkeypatch.setattr(marks, "run_fork", fork)
+    at = twice.rindex("retry budget")
+    with TestClient(app) as client:
+        def ask(row: int, start: int) -> dict:
+            got = client.post(f"/api/ws/{CORPUS}/explain", json={"chat": "main", "turn": turn, "words": "retry budget",
+                                                                  "row": row, "start": start, "end": start + 12})
+            assert got.status_code == 200, got.text
+            return got.json()
+
+        cm = ask(last, at)
+        assert cm["ref"] == f"answer:{turn}#s2" and len(seen) == 1
+        listed = {x["id"]: x for x in client.get(f"/api/ws/{CORPUS}/answer-comments").json()["comments"]}
+        assert (listed[cm["id"]]["quote"], listed[cm["id"]]["words"], listed[cm["id"]]["nth"]) == (twice, "retry budget", 1)
+        assert ask(last, at)["id"] == cm["id"]
+        again = ask(last, twice.index("retry budget"))
+        assert again["id"] != cm["id"] and again["ref"] == f"answer:{turn}#s2" and len(seen) == 1
+        planned = ask(first, plan.index("retry budget"))
+        assert planned["ref"] == f"answer:{turn}#s1"
+    kept = {x["id"]: x for x in answer_comments._read(CORPUS)}
+    assert kept[again["id"]].get("nth", 0) == 0 and kept[planned["id"]]["quote"] == plan
