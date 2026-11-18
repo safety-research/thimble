@@ -28,6 +28,7 @@ import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } 
 import { refFromUrl, teleport } from '../lib/teleport'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { CmdPointer } from '../pointer/CmdPointer'
+import { SelectionKeys } from '../chat/picked'
 import { ReportTab } from '../report/ReportTab'
 import { tabSignals, useTabDots, writing } from './dots'
 import { NewVersion } from './NewVersion'
@@ -378,6 +379,7 @@ export function Shell({ ws }: { ws: string }) {
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />
+      <SelectionKeys ws={ws} />
       <LabelEditorHost ws={ws} />
       <ClaudeAccessHost />
       <Toasts />

@@ -6,6 +6,8 @@
 // fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
 // chat a check's comments on an answer tint their passages; a click on one, or Go to it on `answer:<turn>#s<n>`, opens
 // the comment as the canvas's comment card in a popover beside the passage (chat/answerComments.ts, AnswerComment.tsx).
+// A side thread's answers take the explainers the analyst asks for there in the same way. Each text row notes itself
+// for the keys at a selection in it (chat/picked.tsx), whose explainer being written tints its words meanwhile.
 // Each of the analyst's messages in main's current chat has Rewind in its left margin, which asks first under the message
 // (chat/rewind.ts); `/rewind` lists the same messages to pick from (RewindPicker).
 import { useContext, useEffect, useMemo, useState } from 'react'
@@ -28,8 +30,9 @@ import type { ChatMeta } from '../lib/types'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
 import { AnswerCommentPop } from './AnswerComment'
-import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
-import { asChecked } from '../marks/marks'
+import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, takeComment, useAnswerComments, useWantedComment, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
+import { asCited, asDrawn } from '../marks/marks'
+import { noteRow, useAsking } from './picked'
 import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, REWIND_CHIP, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
@@ -186,44 +189,66 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
     for (const r of shown) if (r.kind === 'agent' && r.role === 'fixer') out.set(r.chat, r.index)
     return out
   }, [shown])
-  const answers = useAnswerComments(ws, chat === 'main' && !nested)
+  // the answers of main's chat and of a side thread's hold the checks' comments; another chat's rows hold none
+  const commented = !!chat && !nested
+  const answers = useAnswerComments(ws, commented)
   const [opened, setOpened] = useState<string | null>(null)
-  const [asked, setAsked] = useState<AnswerAsk | null>(() => (chat === 'main' && !nested ? askedAnswer() : null))
+  const [asked, setAsked] = useState<AnswerAsk | null>(() => (commented ? askedAnswer() : null))
+  // the words of this chat whose explainer is being written (chat/picked.tsx), tinted in the Explainers check's color
+  const asking = useAsking()
   // each text row's comments, each where the row's words are drawn (placedOn), and the marks of those that have words
   // there, again when the comments, the row's checks or the open one change
   const rowMarks = useMemo(() => {
     const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[] }>()
-    if (!answers.comments.length) return out
+    const writing = asking.filter((a) => a.chat === chat)
+    if (!answers.comments.length && !writing.length) return out
     for (const r of shown) {
       if (r.kind !== 'text') continue
       const mine = commentsOfRow(r, answers.comments)
-      if (!mine.length) continue
-      // the words as ChatMarkdown draws them: as the check of the citations left them, once the row no longer streams
-      const drawn = r.checks && r !== lastText ? asChecked(r.text, r.checks).text : r.text
-      const placed = mine.map((c) => placedOn(c, r.text, drawn))
-      out.set(r.index, { comments: placed, marks: marksOf(placed.filter((c) => !c.gone), opened) })
+      const pending = writing.filter((a) => a.row === r.index).map((a): AnswerMark => ({ id: `asking:${a.words}`, quote: a.words, colour: a.colour, ref: '', active: false, pending: true }))
+      if (!mine.length && !pending.length) continue
+      // the words as ChatMarkdown draws them: as the check of the citations left them, once the row no longer streams;
+      // the words the analyst cited are marks in both, so a check's change is all that tells them apart
+      const checked = !!r.checks && r !== lastText
+      const cited = checked ? asCited(r.text, r.checks!, r.asked).text : r.text
+      const drawn = checked ? asDrawn(r.text, r.checks!, r.asked).text : r.text
+      const placed = mine.map((c) => placedOn(c, cited, drawn))
+      out.set(r.index, { comments: placed, marks: [...marksOf(placed.filter((c) => !c.gone), opened), ...pending] })
     }
     return out
-  }, [shown, answers.comments, opened, lastText])
+  }, [shown, answers.comments, opened, lastText, asking, chat])
   useEffect(() => noteDrawn([...rowMarks.values()].flatMap((m) => m.comments)), [rowMarks])
   const marksCtx = useMemo(() => ({ opened, show: setOpened }), [opened])
-  // Go to it on `answer:<turn>#s<n>`: the comment it names opens once it is read, and its passage comes into view
+  // each text row, for the keys at a selection in it (chat/picked.tsx)
   useEffect(() => {
-    if (chat !== 'main' || nested) return
+    if (!chat) return
+    for (const r of shown) if (r.kind === 'text') noteRow({ chat, index: r.index, turn: r.turn, text: r.text, checks: r.checks, asked: r.asked, streaming: r === lastText })
+  }, [shown, chat, lastText])
+  // the comment e asked to open, once this chat draws it (answerComments.ts wantComment)
+  const wanted = useWantedComment()
+  useEffect(() => {
+    if (!wanted || ![...rowMarks.values()].some((m) => m.comments.some((c) => c.id === wanted))) return
+    takeComment(wanted)
+    setOpened(wanted)
+  }, [wanted, rowMarks])
+  // Go to it on `answer:<turn>#s<n>`: the comment it names opens once it is read, in the chat that draws it, and its
+  // passage comes into view
+  useEffect(() => {
+    if (!commented) return
     return bus.on('openRef', (e) => {
       if (e.ref.startsWith('answer:')) setAsked({ ref: e.ref, comment: e.comment })
     })
-  }, [chat, nested])
+  }, [commented])
   useEffect(() => {
     if (!asked) return
     const hit = commentAsked(answers.comments, asked)
-    if (!hit) return
+    // its words, else the answer they stood in, when the check of the citations took them away
+    const row = hit ? [...rowMarks].find(([, m]) => m.comments.some((c) => c.id === hit.id))?.[0] : undefined
+    if (!hit || row == null) return
     setOpened(hit.id)
     setAsked(null)
     answeredAsk(asked)
-    // its words, else the answer they stood in, when the check of the citations took them away
-    const row = [...rowMarks].find(([, m]) => m.comments.some((c) => c.id === hit.id))?.[0]
-    window.setTimeout(() => revealAnchor(asked.ref) || (row != null && revealAnchor(anchorOf(row) ?? '')), 0)
+    window.setTimeout(() => revealAnchor(asked.ref) || revealAnchor(anchorOf(row) ?? ''), 0)
   }, [asked, answers.comments, rowMarks])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
@@ -253,7 +278,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} marks={own?.marks} />
+                  <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} asked={r.asked} marks={own?.marks} />
                 </div>
                 {open && <AnswerCommentPop key={open.id} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
               </div>

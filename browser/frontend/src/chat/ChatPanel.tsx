@@ -36,6 +36,7 @@ import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { chatOfComment } from './answerComments'
 import { Composer } from './Composer'
 import { chooseMain, type MainChoice } from './mainChoice'
 import { mainEffort, mainFast, mainModel } from './ModelLine'
@@ -362,11 +363,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     if (current !== 'main' && other.error && /no such chat/.test(other.error)) setCurrent('main')
   }, [current, other.error])
 
-  // Go to it on a check's comment on Claude's answer, `answer:<turn>#s<n>`: main's chat opens, where Rows opens the comment
+  // Go to it on a check's comment on Claude's answer, `answer:<turn>#s<n>`: the chat whose answer holds it opens (main's,
+  // or a side thread's for an explainer asked for there), where Rows opens the comment
   useEffect(
     () =>
       bus.on('openRef', (e) => {
-        if (e.ref.startsWith('answer:')) setCurrent('main')
+        if (e.ref.startsWith('answer:')) setCurrent(chatOfComment(e.comment))
       }),
     [],
   )

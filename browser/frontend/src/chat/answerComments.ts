@@ -19,6 +19,10 @@
 // a comment's passage and words are carried from Claude's words into those, as the terminal carries an explainer's
 // (placedOn); the Comments sidebar quotes the passage as the chat draws it (noteDrawn). A comment whose words the check
 // took away (a sentence it rewrote) has no tint, and its card says so beside the answer.
+//
+// An explainer the analyst asked for with e (chat/picked.tsx, backend explain.py) is an Explainers comment too, on an
+// answer of main's or of a side thread's (`chat`), whose chat tints it as main's chat does; it opens once its chat draws
+// it (wantComment), and Go to it opens the chat it is in.
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { carrier } from '../../../../plugin/marks/message.js'
 import { checksApi } from '../lib/api'
@@ -46,6 +50,8 @@ export interface AnswerComment {
   at?: string
   /** the check of the citations took its words away (placedOn): it has no tint, and its card says so */
   gone?: boolean
+  /** the chat whose answer it is on: main, or a side thread (an explainer asked for there) */
+  chat?: string
 }
 
 /** What GET /ws/{c}/answer-comments answers. */
@@ -66,6 +72,8 @@ export interface AnswerMark {
   ref: string
   /** its comment is open beside it */
   active: boolean
+  /** words whose explainer is being written (chat/picked.tsx): tinted alone, with no comment to open yet */
+  pending?: boolean
 }
 
 /** A comment's tint color: its check's palette place, as checkColour draws a check's. Pure. */
@@ -215,6 +223,38 @@ export function answeredAsk(ask: AnswerAsk): void {
   if (wanted?.ref === ask.ref && wanted.comment === ask.comment) wanted = null
 }
 
+// the chat of each comment the page read last (useAnswerComments), which Go to it opens (ChatPanel)
+const chats = new Map<string, string>()
+
+/** The chat whose answer comment `id` is on, as the page read it last; main for one it has not read. */
+export const chatOfComment = (id: string | undefined): string => (id && chats.get(id)) || 'main'
+
+// the comment e asked to open (chat/picked.tsx): the chat that draws it opens it (Rows), wherever it is
+let wantedComment: string | null = null
+const wantedSubs = new Set<() => void>()
+
+/** Open comment `id` once a chat draws it: now when one does, else when the comments are read again. */
+export function wantComment(id: string): void {
+  wantedComment = id
+  wantedSubs.forEach((f) => f())
+}
+
+/** The comment e asked to open, which the chat that draws it takes (takeComment). */
+export function useWantedComment(): string | null {
+  return useSyncExternalStore(
+    (f) => {
+      wantedSubs.add(f)
+      return () => void wantedSubs.delete(f)
+    },
+    () => wantedComment,
+  )
+}
+
+/** The comment e asked to open is open now: no chat opens it again. */
+export function takeComment(id: string): void {
+  if (wantedComment === id) wantedComment = null
+}
+
 /** The open comment an ask opens: the one it names, else the first on its passage. Pure. */
 export function commentAsked(comments: readonly AnswerComment[], ask: AnswerAsk): AnswerComment | null {
   const open = comments.filter((c) => c.ref === ask.ref && c.status === 'open')
@@ -262,7 +302,11 @@ export function useAnswerComments(ws: string, enabled = true): { comments: Answe
     const load = () =>
       checksApi
         .answerComments(ws)
-        .then((got) => alive && setComments(Array.isArray(got?.comments) ? got.comments : []))
+        .then((got) => {
+          const list = Array.isArray(got?.comments) ? got.comments : []
+          for (const c of list) chats.set(c.id, c.chat || 'main')
+          if (alive) setComments(list)
+        })
         .catch(() => undefined)
     void load()
     const offs = [bus.on('answerComments', () => void load()), bus.on('checks', () => void load()), bus.on('wsStream', (e) => e.connected && void load())]

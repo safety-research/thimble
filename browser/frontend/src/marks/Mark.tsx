@@ -41,6 +41,9 @@
 // a pair) cite a place for each: their cells are marked in one table, their lines in one output. Escape, a press
 // outside, or a second click closes it.
 //
+// A mark the analyst's c asked for (marks.ts wantMark: words they cited, or a citation their words stand in) opens its
+// label pinned as soon as it draws, its check's state at its upper right as it runs.
+//
 // Where the chips of its text carry the ⌘ pointer's anchor (chat/markdown ChipContext), the words carry it as a card's
 // citation does (components/RefChip): the card place the mark cites, else the ref of the text it stands in (a reply, a
 // takeaway's card), with the words it shows as the anchor's text. A ⌘-click on them asks about the citation, as the
@@ -68,7 +71,7 @@ import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
 import { printIndex } from '../../../../plugin/tray/printed.mjs'
 import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL, versionNote } from '../../../../plugin/tray/tray.mjs'
-import { canRepair, failedWhy, lookOf, stateOf, type Evidence, type MarkItem, type MarkLook } from './marks'
+import { canRepair, failedWhy, lookOf, stateOf, takeWanted, useWantedMark, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
 export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[]; streaming: boolean }>({ items: [], streaming: false })
@@ -181,6 +184,11 @@ export function Mark({ k, item: given, unchecked = false, anchor, children }: { 
   }
   const pinned = !!pop?.pinned
   const toggle = () => (pinned ? close() : pin())
+  // the mark c asked for opens once it draws (module note)
+  const want = useWantedMark()
+  useEffect(() => {
+    if (want && !streaming && takeWanted(item)) pin()
+  }, [want, item, streaming])
   const cite = useMemo<CiteWords>(() => ({ pinned: () => pinned, pin, close }), [pinned])
 
   const openPlace = (ref: string) => {

@@ -28,6 +28,9 @@ export interface TextRow {
   apiError?: string
   /** the check of this row's marks, by their order in its text (backend marks.py) */
   checks?: (MarkItem | undefined)[]
+  /** the words the analyst cited in it with c, with their checks (backend marks.cite), which the chat writes in as
+   * marks (marks/marks.ts asDrawn) */
+  asked?: MarkItem[]
   /** the id of main's turn this row answers, which its `done` record names: the checks' comments on the answer name it
    * (chat/answerComments.ts) */
   turn?: string
@@ -298,17 +301,21 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
   return rows
 }
 
-/** Each turn's marks on its text rows: the marks are numbered in the order they stand in the turn's texts (backend
- * marks.py), so a row's checks are the next as many items as its text has marks. */
+/** Each turn's marks on its text rows: Claude's are numbered in the order they stand in the turn's texts (backend
+ * marks.py), so a row's checks are the next as many items as its text has marks; the words the analyst cited (`asked`)
+ * name the row they stand in. */
 function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<string, MarkItem[]>): void {
   for (const [turn, items] of marks) {
     const texts = turns.get(turn)
     if (!texts?.length || !items.length) continue
     const byN = [...items].sort((a, b) => a.n - b.n).map((m) => ({ ...m, turn }))
+    const own = byN.filter((m) => !m.asked)
     let at = 0
     for (const row of texts) {
       const n = marksIn(row.text).length
-      if (n) row.checks = byN.slice(at, at + n)
+      const asked = byN.filter((m) => m.asked && m.row === row.index)
+      if (n || asked.length) row.checks = own.slice(at, at + n)
+      if (asked.length) row.asked = asked
       at += n
     }
   }

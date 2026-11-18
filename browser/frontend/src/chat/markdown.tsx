@@ -17,7 +17,7 @@ import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { parseRef, refPaths, shownValue, splitValueRef } from '../lib/refs'
 import { CiteWordsContext, Mark, MarkItems } from '../marks/Mark'
-import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
+import { asDrawn, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
   workspace: string
@@ -202,8 +202,11 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
     if (!p.node || offset <= at || from >= end) continue
     const s = Math.max(0, at - from)
     const e = Math.min(p.text.length, end - from)
-    const props: Properties = { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, style: `--tint: ${m.colour}` }
-    if (first) props.dataAnchor = m.ref
+    // words whose explainer is being written are tinted alone: no comment to open yet, no anchor (chat/picked.tsx)
+    const props: Properties = m.pending
+      ? { className: ['answer-tint', 'answer-tint-pending'], style: `--tint: ${m.colour}` }
+      : { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, style: `--tint: ${m.colour}` }
+    if (first && !m.pending) props.dataAnchor = m.ref
     first = false
     const parts: (Element | Text)[] = []
     if (s > 0) parts.push({ type: 'text', value: p.text.slice(0, s) })
@@ -345,16 +348,18 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 })
 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
- * `checks`: what the check found of each of its marks, by their order in the text. `marks`: the passages the checks
+ * `checks`: what the check found of each of its marks, by their order in the text; `asked`: the words the analyst cited
+ * in it with c, each written in as a mark at its place (marks/marks.ts asDrawn). `marks`: the passages the checks
  * commented on, tinted (rehypeAnswerMarks). `linked`: the text is a card's takeaway, whose link pass checked its old
  * citations of a card's values (LinkedCites). A bare citation in it is its target's glyph alone, its name in the hover,
  * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). Its file chips are told
  * apart from each other and from `among`, the records shown with it (an example card's, under its takeaway). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks, among, linked = false }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[]; among?: readonly unknown[]; linked?: boolean }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, asked, marks, among, linked = false }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; asked?: readonly MarkItem[]; marks?: readonly AnswerMark[]; among?: readonly unknown[]; linked?: boolean }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
-  // once checked, the text reads as the check left it: its rewritten sentences and corrected words in place
-  const read = useMemo(() => (checks && !streaming ? asChecked(text, checks) : { text, checks: checks ?? [] }), [text, checks, streaming])
+  // once checked, the text reads as the check left it: the words the analyst cited as marks, its rewritten sentences
+  // and corrected words in place
+  const read = useMemo(() => (checks && !streaming ? asDrawn(text, checks, asked) : { text, checks: checks ?? [] }), [text, checks, asked, streaming])
   // the files shown together, one per line (no path holds a line break), so the chips change only when they do
   const shown = refPaths([...(among ?? []), ...tokenRefs(read.text)]).join('\n')
   const together = useMemo(() => (shown ? shown.split('\n') : []), [shown])
