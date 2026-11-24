@@ -13,8 +13,7 @@
 // to another tab, a collapsed frame, a pan or a scroll that takes it out of its pane, or a popover over the page hides
 // it, its text kept, and it comes back beside the element when the element is back (onScreen). Its field takes the
 // focus when the box opens; coming back, only when it had the focus as it went and the focus has gone nowhere since, so
-// it never takes the focus from a field the analyst went on in. A send under way goes on. The a key at a selection in an
-// answer (chat/picked.tsx) opens the box on the selected words as a ⌘-drag over them does. ⌘ here stands for the ask key
+// it never takes the focus from a field the analyst went on in. A send under way goes on. ⌘ here stands for the ask key
 // Settings picks (lib/platform pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘
 // does, and lets go at a key pressed with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
 import { useEffect, useRef, useState } from 'react'
@@ -296,24 +295,6 @@ export function CmdPointer({ ws }: { ws: string }) {
       document.body.removeAttribute('data-cmd-press')
       document.body.removeAttribute('data-cmd-drag')
     }
-    // the box on the words selected now, in the panel `root`: the anchors the selection touches there, its words quoted,
-    // its lines held as the highlight; `via` names what asked, when not a ⌘-drag
-    const openOnSelection = (root: ParentNode, via?: string) => {
-      const sel = document.getSelection()
-      const anchors: Anchor[] = anchorsInSelection(sel, root)
-      if (!anchors.length) return
-      const anchor = joinAnchors(anchors)
-      const text = rangeContext(anchors, selectionTextWithin(sel, root as Node))
-      const rect = (sel && sel.rangeCount ? lastLine(sel.getRangeAt(sel.rangeCount - 1)) : null) ?? anchors[anchors.length - 1].el.getBoundingClientRect()
-      // the selection's lines hold as the highlight: the box takes the focus and the native selection with it
-      const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : undefined
-      highlight.retarget()
-      if (range) highlight.text(range)
-      highlight.hold()
-      track('pointer-open', { target: anchor, detail: { range: anchors.length, ...(via ? { via } : {}) } })
-      const held = commonElement(anchors.map((a) => a.el)) ?? anchors[0].el
-      openBox({ anchor, anchors: anchors.map((a) => a.anchor), text, rect, span: true, ...pointAt(held), el: held, mark: 'region', range })
-    }
     const onMouseUp = (e: MouseEvent) => {
       const p = press.current
       if (!p) return
@@ -323,7 +304,20 @@ export function CmdPointer({ ws }: { ws: string }) {
       swallowClick.current = true
       window.setTimeout(() => (swallowClick.current = false), 0)
       // the range stays inside the panel the press started in: a sweep never gathers another surface's anchors
-      openOnSelection(p.root)
+      const sel = document.getSelection()
+      const anchors: Anchor[] = anchorsInSelection(sel, p.root)
+      if (!anchors.length) return
+      const anchor = joinAnchors(anchors)
+      const text = rangeContext(anchors, selectionTextWithin(sel, p.root as Node))
+      const rect = (sel && sel.rangeCount ? lastLine(sel.getRangeAt(sel.rangeCount - 1)) : null) ?? anchors[anchors.length - 1].el.getBoundingClientRect()
+      // the selection's lines hold as the highlight: the box takes the focus and the native selection with it
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : undefined
+      highlight.retarget()
+      if (range) highlight.text(range)
+      highlight.hold()
+      track('pointer-open', { target: anchor, detail: { range: anchors.length } })
+      const held = commonElement(anchors.map((a) => a.el)) ?? anchors[0].el
+      openBox({ anchor, anchors: anchors.map((a) => a.anchor), text, rect, span: true, ...pointAt(held), el: held, mark: 'region', range })
     }
     const onClick = (e: MouseEvent) => {
       if (swallowClick.current) {
@@ -404,12 +398,6 @@ export function CmdPointer({ ws }: { ws: string }) {
             // so the thread can reach that view's ticket
       openBox({ anchor, anchors: [anchor], text: element ? `${element}\n${text}`.trim() : text, rect, span: false, info: info ?? { surface: 'files', element: view ? `view:${view}` : 'view', selector: '' }, image: Promise.resolve(null), el: frame, mark: 'box' })
     })
-    // the a key at the selection (chat/picked.tsx): the box opens on the selected words as a ⌘-drag over them opens it,
-    // in the panel the selection starts in
-    const offSelection = bus.on('askSelection', () => {
-      const sel = document.getSelection()
-      if (sel && sel.rangeCount && !sel.isCollapsed) openOnSelection(pressRoot(sel.getRangeAt(0).startContainer), 'keys')
-    })
     // a control that asks about its element (a card's Ask about this): the box opens as a ⌘-click on the element opens it
     const offAsk = bus.on('askAbout', ({ el }) => {
       const a = nearestAnchor(el)
@@ -431,7 +419,6 @@ export function CmdPointer({ ws }: { ws: string }) {
     return () => {
       offHover()
       offPoint()
-      offSelection()
       offAsk()
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)

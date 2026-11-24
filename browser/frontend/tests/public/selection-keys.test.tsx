@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // The keys at a selection in an answer (src/chat/picked.tsx), as the terminal's bar shows them: words selected in an
-// answer of main's chat show `c cite · e explain · a ask` beside them. c makes them a citation of the answer, which the
-// chat draws as a mark with its label open, checking; e writes their explainer, the words tinted while it is written and
-// its comment open on them once written; a opens the ask box on them, whose question starts a side thread about them.
-// Escape drops the selection, a key typed into a field is the field's, and with Explainers off for the chat e is not
-// shown. A side thread's answers draw the explainers asked for there. c and e act on the words where they were selected:
-// in the answer, not in a line of the turn before it that holds them too, and at their second place in one sentence.
+// answer of main's chat show `c cite · e explain` beside them. c makes them a citation of the answer, which the chat
+// draws as a mark with its label open, checking; e writes their explainer, the words tinted while it is written and its
+// comment open on them once written. Asking stays with the ⌘ pointer: a ⌘-click on the answer opens the ask box, whose
+// question starts a side thread about it, and a at the selection opens nothing. Escape drops the selection, a key typed
+// into a field is the field's, and with Explainers off for the chat e is not shown. A side thread's answers draw the
+// explainers asked for there. c and e act on the words where they were selected: in the answer, not in a line of the
+// turn before it that holds them too, and at their second place in one sentence.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { chatOfComment } from '../../src/chat/answerComments.ts'
@@ -89,7 +90,7 @@ async function select(el: HTMLElement, words = WORDS) {
 const keys = () => [...document.querySelectorAll('.pick-keys .pick-key')].map((k) => k.textContent)
 const press = (key: string) => act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
 
-test('words selected in an answer show c cite · e explain · a ask; c cites them, and the chat draws the citation with its label open, checking, the comments on the answer kept on their words', async () => {
+test('words selected in an answer show c cite · e explain; c cites them, and the chat draws the citation with its label open, checking, the comments on the answer kept on their words', async () => {
   // a heads-up on the sentence the words stand in, and an explainer on the next one
   const heads = { ...COMMENT, id: 'ah1', check: 'heads-up', check_name: 'Heads up', color: 1, words: 'Uploads fail', text: 'Only one network.' }
   const next = { ...COMMENT, id: 'ae2', ref: `answer:${TURN}#s2`, start: 46, end: ANSWER.length, quote: 'The client gives up then.', words: 'gives up' }
@@ -97,7 +98,7 @@ test('words selected in an answer show c cite · e explain · a ask; c cites the
   const el = await mount(<Chat />)
   await later()
   await select(el)
-  expect(keys()).toEqual(['c cite', 'e explain', 'a ask'])
+  expect(keys()).toEqual(['c cite', 'e explain'])
   await press('c')
   await later()
   const at = ANSWER.indexOf(WORDS)
@@ -134,9 +135,9 @@ test('e writes the explainer of the selected words: they are tinted while it is 
   expect(document.querySelector('.answer-cm-pop .wu-cm-statement')?.textContent).toBe('retry budget: How many times the client tries again.')
 })
 
-test('a opens the ask box on the selected words, and its question starts a side thread about them, as a ⌘-drag does', async () => {
+test('a at the selection opens nothing; a ⌘-click on the answer opens the ask box, and its question starts a side thread about it', async () => {
   const posts = serve({ answer: (u) => (u.endsWith('/chats') ? { id: 't7' } : {}) })
-  // the answer's text shows on screen, where the box looks for what the selection touches
+  // the answer's text shows on screen, where the box shows beside it
   vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [new DOMRect(10, 100, 390, 20)] as unknown as DOMRectList)
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(10, 100, 390, 20))
   const opened: string[] = []
@@ -146,6 +147,13 @@ test('a opens the ask box on the selected words, and its question starts a side 
   await select(el)
   await press('a')
   await settle()
+  expect(document.querySelector('.pointer-box')).toBeNull()
+  // the ask key is Ctrl off a Mac, as jsdom is
+  const words = el.querySelector('.chat-text[data-anchor="chat:main#1"] p')!
+  await act(async () => {
+    for (const type of ['mousedown', 'mouseup', 'click']) words.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ctrlKey: true }))
+  })
+  await later()
   const field = document.querySelector<HTMLTextAreaElement>('.pointer-box textarea')!
   expect(field).not.toBeNull()
   expect(keys()).toEqual([])
@@ -157,7 +165,7 @@ test('a opens the ask box on the selected words, and its question starts a side 
   await later()
   off()
   expect(posts.map((p) => p.url)).toEqual(['/api/ws/mini/chats'])
-  expect(posts[0].body).toMatchObject({ anchor: 'chat:main#1', anchor_text: WORDS, text: 'Why five tries?' })
+  expect(posts[0].body).toMatchObject({ anchor: 'chat:main#1', text: 'Why five tries?' })
   expect(opened).toEqual(['t7'])
 })
 
@@ -166,7 +174,7 @@ test('Escape drops the selection; a key typed in a field is the field’s; with 
   const el = await mount(<Chat />)
   await later()
   await select(el)
-  expect(keys()).toEqual(['c cite', 'a ask'])
+  expect(keys()).toEqual(['c cite'])
   await press('e')
   const field = document.body.appendChild(document.createElement('textarea'))
   field.focus()

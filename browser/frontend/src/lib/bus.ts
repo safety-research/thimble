@@ -93,9 +93,6 @@ export type Events = {
   pointAt: { anchor: string; text: string; element: string; rect: DOMRect; frame: HTMLIFrameElement; view?: string; info?: { surface?: string; element: string; selector: string } }
   /** open the ⌘ pointer's box on an anchored element, as a ⌘-click on it does (a card's Ask about this) */
   askAbout: { el: HTMLElement }
-  /** open the ⌘ pointer's box on the words selected now, as a ⌘-drag over them does (the a key at the selection,
-   * chat/picked.tsx) */
-  askSelection: Record<string, never>
   /** the anchorable element under the pointer inside a view's frame while ⌘ is held; null when it left */
   pointHover: { rect: DOMRect | null }
   /** a box of a frame's page to bring into view (a frame's `reveal`): the canvas pans to it when the frame is on it */

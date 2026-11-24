@@ -1,11 +1,12 @@
 // The keys at the selection: words selected with the mouse in one of Claude's answers, in main's chat or a side
-// thread's, take the terminal's three keys that act on selected words (plugin/marks/cite.ts, plugin/explain/seam.ts,
-// plugin/threads/seam.ts). They show at the selection as the terminal's bar shows them, in its order, `c cite · e
-// explain · a ask`, each key and its word in the color of what it gives: the citations' purple, the Explainers check's
-// color, the accent of the ask box. A key acts while such a selection stands and the focus is in no text field, and a
-// click on it acts too; Escape, or a click elsewhere, drops the selection. e shows only while the chat shows the
-// Explainers check's comments (on, with Chat in its Show in), as the terminal leaves e out while Explainers is off; the
-// workbench has no switch for c or a. The words a key takes are the terminal's (plugin/marks/asked.mjs pickedWords).
+// thread's, take two of the terminal's keys that act on selected words (plugin/marks/cite.ts, plugin/explain/seam.ts).
+// They show at the selection as the terminal's bar shows them, in its order, `c cite · e explain`, each key and its word
+// in the color of what it gives: the citations' purple, the Explainers check's color. A key acts while such a selection
+// stands and the focus is in no text field, and a click on it acts too; Escape, or a click elsewhere, drops the
+// selection. e shows only while the chat shows the Explainers check's comments (on, with Chat in its Show in), as the
+// terminal leaves e out while Explainers is off; the workbench has no switch for c. Asking about words stays with the ⌘
+// pointer: a ⌘-click or a ⌘-drag over them opens its ask box (pointer/CmdPointer.tsx). The words a key takes are the
+// terminal's (plugin/marks/asked.mjs pickedWords).
 //
 //   c   the words become a citation of their answer (backend marks.cite), placed with the terminal's own code
 //       (asked.mjs citeAt), or the citation they stand in opens; the citation's label opens on it at once
@@ -13,8 +14,6 @@
 //   e   the words take an explainer (backend explain.py), tinted in the Explainers color while it is written (useAsking,
 //       which the chat draws), and its comment opens on them once written (answerComments.ts wantComment); words an
 //       explainer or a heads-up stands on open that one
-//   a   the ⌘ pointer's ask box opens on the words, as a ⌘-drag over them opens it (pointer/CmdPointer.tsx, bus
-//       askSelection), and Enter there starts the side thread
 //
 // c and e act on the words where they were selected: words may stand more than once in a row, so the keys take which
 // of their places the selection lies on (rankIn, asked.mjs rankOf). c places its citation there, and e sends the place
@@ -193,14 +192,12 @@ async function explain(ws: string, p: Picked, colour: string): Promise<void> {
   }
 }
 
-/** A key at the selection: its letter and word, the color of what it gives, and what it does with the words; `keep`:
- * the selection stays for what it opens. */
+/** A key at the selection: its letter and word, the color of what it gives, and what it does with the words. */
 interface Key {
   key: string
   word: string
   colour: string
   run: (p: Picked) => void
-  keep?: boolean
 }
 
 /** The keys at the selection, over the page (module note). */
@@ -246,18 +243,15 @@ export function SelectionKeys({ ws }: { ws: string }) {
     document.getSelection()?.removeAllRanges()
     setPicked(null)
   }
-  // c and e act on the words they took, which the selection leaves; a leaves the selection to the ⌘ pointer, whose box
-  // takes it
+  // c and e act on the words they took, which the selection leaves
   const keys: Key[] = [
     { key: 'c', word: 'cite', colour: 'var(--cite-line)', run: (p) => void cite(ws, p) },
     ...(explainOn ? [{ key: 'e', word: 'explain', colour: checkColour(explainers), run: (p: Picked) => void explain(ws, p, checkColour(explainers)) }] : []),
-    { key: 'a', word: 'ask', colour: 'var(--accent-ink)', run: () => bus.emit('askSelection', {}), keep: true },
   ]
   const act = (k: Key, via: 'key' | 'click') => {
     if (!picked) return
     track('ui-click', { target: `key:${k.key}`, detail: { via, chat: picked.row.chat } })
-    if (k.keep) setPicked(null)
-    else drop()
+    drop()
     k.run(picked)
   }
 
