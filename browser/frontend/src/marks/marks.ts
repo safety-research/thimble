@@ -13,10 +13,10 @@
 // (`pending`: the reply still streams, or no check has begun on it) its underline is dotted: not checked, so it never
 // reads as a checked mark. Its label says which in one word at its upper right (stateOf), as the terminal's card does.
 //
-// Words the analyst cited with c (chat/picked.tsx, backend marks.cite) are a mark of their answer too (`asked`), kept
-// with the turn's others: the page writes it into the text of the row it stands in at its place (asDrawn, with the
-// terminal's plugin/marks/message.js withAsked), so it draws, checks and opens as Claude's own. The label of the one c
-// asked for opens once a Mark draws it (wantMark).
+// Words the analyst cited with Cite (chat/picked.tsx, backend marks.cite) are a mark of their answer too (`asked`),
+// kept with the turn's others: the page writes it into the text of the row it stands in at its place (asDrawn, with
+// the terminal's plugin/marks/message.js withAsked), so it draws, checks and opens as Claude's own. The label of the
+// one Cite asked for opens once a Mark draws it (wantMark).
 import { useSyncExternalStore } from 'react'
 import { marksIn, rewritesIn, withAsked, withCorrections } from '../../../../plugin/marks/message.js'
 import { checkStatus, staleOf } from '../../../../plugin/tray/tray.mjs'
@@ -94,7 +94,7 @@ export interface MarkItem {
   /** where the mark is kept, which Repair names: a reply's turn, or the card whose takeaway holds it */
   turn?: string
   card?: string
-  /** words the analyst cited with c: the page's text row they stand in (its record's index in the chat's log), and
+  /** words the analyst cited with Cite: the page's text row they stand in (its record's index in the chat's log), and
    * their place in that row's text, where the page writes the mark in (asDrawn) */
   asked?: boolean
   row?: number
@@ -143,7 +143,7 @@ export function asDrawn(text: string, checks: readonly (MarkItem | undefined)[],
   return asChecked(cited.text, cited.checks)
 }
 
-// the mark c asked to open (chat/picked.tsx): its turn and number, until a Mark that draws it opens its label
+// the mark Cite asked to open (chat/picked.tsx): its turn and number, until a Mark that draws it opens its label
 let wanted: { turn: string; n: number } | null = null
 const wantedSubs = new Set<() => void>()
 
@@ -153,14 +153,14 @@ export function wantMark(turn: string, n: number): void {
   wantedSubs.forEach((f) => f())
 }
 
-/** Whether `item` is the mark c asked to open; once true, it is no longer asked for. */
+/** Whether `item` is the mark Cite asked to open; once true, it is no longer asked for. */
 export function takeWanted(item: MarkItem | undefined): boolean {
   if (!wanted || !item || item.turn !== wanted.turn || item.n !== wanted.n) return false
   wanted = null
   return true
 }
 
-/** The mark c asked to open, which a Mark reads as it draws. */
+/** The mark Cite asked to open, which a Mark reads as it draws. */
 export function useWantedMark(): { turn: string; n: number } | null {
   return useSyncExternalStore(
     (f) => {

@@ -411,9 +411,9 @@ export const api = {
   openSession: (c: string, body: OpenSessionBody) => j<{ name: string; open: boolean }>(`${ws(c)}/sessions/open`, { method: 'POST', body: JSON.stringify(body) }),
   chat: (c: string, id: string) => j<ChatDetail>(`${ws(c)}/chats/${enc(id)}`),
   createThread: (c: string, body: NewThreadBody) => j<ChatMeta>(`${ws(c)}/chats`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `POST /ws/{c}/explain`: e on words selected in an answer of a chat's run, at their place in the page's text row
-   * when the page found it (backend explain.py): their explainer, new or standing, as an answer comment; a 409 or 502
-   * says why there is none. */
+  /** `POST /ws/{c}/explain`: Explain on words selected in an answer of a chat's run, at their place in the page's text
+   * row when the page found it (backend explain.py): their explainer, new or standing, as an answer comment; a 409 or
+   * 502 says why there is none. */
   explain: (c: string, body: { chat: string; turn: string; words: string; row?: number; start?: number; end?: number }) => j<{ id: string; ref: string; turn: string; check: string }>(`${ws(c)}/explain`, { method: 'POST', body: JSON.stringify(body) }),
   updateChat: (c: string, id: string, patch: ChatPatch) => j<ChatMeta>(`${ws(c)}/chats/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteChat: (c: string, id: string) => j<{ deleted: string }>(`${ws(c)}/chats/${enc(id)}`, { method: 'DELETE' }),
@@ -845,8 +845,8 @@ export const marksApi = {
   /** `POST /marks/repair`: check a failed citation again and make it correct (backend marks.repair); a 409 says why
    * it cannot start. */
   repair: (c: string, body: { turn: string; n: number } | { card: string; k: number }) => j<{ ok: boolean }>(`${ws(c)}/marks/repair`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `POST /marks/cite`: c on words selected in an answer, at their place in the page's text row (backend marks.cite):
-   * their citation, checked now; the turn and its number. A 409 says why there is none. */
+  /** `POST /marks/cite`: Cite on words selected in an answer, at their place in the page's text row (backend
+   * marks.cite): their citation, checked now; the turn and its number. A 409 says why there is none. */
   cite: (c: string, body: { chat: string; turn: string; row: number; start: number; end: number; words: string; sentence: string }) => j<{ turn: string; n: number }>(`${ws(c)}/marks/cite`, { method: 'POST', body: JSON.stringify(body) }),
 }
 

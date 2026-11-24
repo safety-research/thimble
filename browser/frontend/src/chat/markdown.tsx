@@ -349,7 +349,7 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
  * `checks`: what the check found of each of its marks, by their order in the text; `asked`: the words the analyst cited
- * in it with c, each written in as a mark at its place (marks/marks.ts asDrawn). `marks`: the passages the checks
+ * in it with Cite, each written in as a mark at its place (marks/marks.ts asDrawn). `marks`: the passages the checks
  * commented on, tinted (rehypeAnswerMarks). `linked`: the text is a card's takeaway, whose link pass checked its old
  * citations of a card's values (LinkedCites). A bare citation in it is its target's glyph alone, its name in the hover,
  * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). Its file chips are told

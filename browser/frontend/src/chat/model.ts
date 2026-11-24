@@ -28,7 +28,7 @@ export interface TextRow {
   apiError?: string
   /** the check of this row's marks, by their order in its text (backend marks.py) */
   checks?: (MarkItem | undefined)[]
-  /** the words the analyst cited in it with c, with their checks (backend marks.cite), which the chat writes in as
+  /** the words the analyst cited in it with Cite, with their checks (backend marks.cite), which the chat writes in as
    * marks (marks/marks.ts asDrawn) */
   asked?: MarkItem[]
   /** the id of main's turn this row answers, which its `done` record names: the checks' comments on the answer name it

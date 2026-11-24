@@ -254,7 +254,7 @@ const chats = new Map<string, string>()
 /** The chat whose answer comment `id` is on, as the page read it last; main for one it has not read. */
 export const chatOfComment = (id: string | undefined): string => (id && chats.get(id)) || 'main'
 
-// the comment e asked to open (chat/picked.tsx): the chat that draws it opens it (Rows), wherever it is
+// the comment Explain asked to open (chat/picked.tsx): the chat that draws it opens it (Rows), wherever it is
 let wantedComment: string | null = null
 const wantedSubs = new Set<() => void>()
 
@@ -264,7 +264,7 @@ export function wantComment(id: string): void {
   wantedSubs.forEach((f) => f())
 }
 
-/** The comment e asked to open, which the chat that draws it takes (takeComment). */
+/** The comment Explain asked to open, which the chat that draws it takes (takeComment). */
 export function useWantedComment(): string | null {
   return useSyncExternalStore(
     (f) => {
@@ -275,7 +275,7 @@ export function useWantedComment(): string | null {
   )
 }
 
-/** The comment e asked to open is open now: no chat opens it again. */
+/** The comment Explain asked to open is open now: no chat opens it again. */
 export function takeComment(id: string): void {
   if (wantedComment === id) wantedComment = null
 }
