@@ -20,6 +20,11 @@
 // takes which of their places the selection lies on (rankIn, asked.mjs rankOf). Cite places its citation there, and
 // Explain sends the place in the row's text, where the server keeps the explainer, on the sentence that holds it.
 //
+// The toolbar stands over the line above the words, where a citation or a card's chip opens its box on hover. After a
+// click with the pointer, the toolbar stays where it was, unseen and with no buttons, until the pointer moves, presses
+// or turns the wheel, so a pointer that did not move hovers nothing under it. A click from the keyboard takes the
+// toolbar away at once.
+//
 // Each text row a chat draws notes itself here (noteRow) by its anchor, `chat:<id>#<index>`, with its turn, its text
 // and its marks, which the toolbar reads; a row of an answer still being written shows no toolbar.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -219,6 +224,8 @@ export function barPlace(first: Line, last: Line, w: number, h: number, view: { 
 /** The toolbar at the selection, over the page (module note). */
 export function SelectionBar({ ws }: { ws: string }) {
   const [picked, setPicked] = useState<Picked | null>(null)
+  /** after a click with the pointer, the toolbar's size, kept where it was until the pointer moves (module note) */
+  const [gone, setGone] = useState<{ width: number; height: number } | null>(null)
   const bar = useRef<HTMLDivElement>(null)
   const checks = useChecks(ws)
   const explainers = checks.list.find((c) => c.id === EXPLAINERS)
@@ -258,17 +265,38 @@ export function SelectionBar({ ws }: { ws: string }) {
   const drop = () => {
     document.getSelection()?.removeAllRanges()
     setPicked(null)
+    setGone(null)
   }
   // the buttons of the features that are on, in this order; each acts on the words it took, which the selection leaves
   const cites: Action = { id: 'cite', label: 'Cite', icon: 'cite', run: (p) => void cite(ws, p) }
   const explains: Action = { id: 'explain', label: 'Explain', icon: 'circle-help', run: (p) => void explain(ws, p, checkColour(explainers)) }
   const actions = explainOn ? [explains, cites] : [cites]
-  const act = (a: Action) => {
+  // `pointer`: a click with the pointer, which counts its clicks; a key's click counts none
+  const act = (a: Action, pointer: boolean) => {
     if (!picked) return
     track('ui-click', { target: picked.el.dataset.anchor ?? '', detail: { action: a.id, from: 'selection' } })
     drop()
+    if (pointer && bar.current) setGone({ width: bar.current.offsetWidth, height: bar.current.offsetHeight })
     a.run(picked)
   }
+
+  // the toolbar's place after a click with the pointer, kept until the pointer moves (a move with no movement, which
+  // some browsers send while the pointer stays still, is not one), presses or turns the wheel
+  useEffect(() => {
+    if (!gone) return
+    const end = () => setGone(null)
+    const move = (e: PointerEvent) => {
+      if (e.movementX || e.movementY) end()
+    }
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerdown', end, true)
+    window.addEventListener('wheel', end, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerdown', end, true)
+      window.removeEventListener('wheel', end, true)
+    }
+  }, [gone])
 
   // Escape drops the selection, while the focus is in no text field
   useEffect(() => {
@@ -306,14 +334,26 @@ export function SelectionBar({ ws }: { ws: string }) {
     }
   }, [picked, actions.length])
 
-  if (!picked) return null
+  // after a click with the pointer the same element stays, unseen and empty, where the toolbar was (module note)
+  const cover = picked ? null : gone
+  if (!picked && !cover) return null
   return createPortal(
-    <div ref={bar} className="pick-bar overlay" role="toolbar" aria-label="Selected words" data-panel="pick" style={{ left: MARGIN, top: 0 }} onMouseDown={(e) => e.preventDefault()}>
-      {actions.map((a) => (
-        <Button key={a.id} icon={a.icon} data-action={a.id} onClick={() => act(a)}>
-          {a.label}
-        </Button>
-      ))}
+    <div
+      ref={bar}
+      className={cover ? 'pick-bar is-gone' : 'pick-bar overlay'}
+      role={cover ? undefined : 'toolbar'}
+      aria-label={cover ? undefined : 'Selected words'}
+      aria-hidden={cover ? true : undefined}
+      data-panel="pick"
+      style={{ left: MARGIN, top: 0, ...cover }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      {!cover &&
+        actions.map((a) => (
+          <Button key={a.id} icon={a.icon} data-action={a.id} onClick={(e) => act(a, e.detail > 0)}>
+            {a.label}
+          </Button>
+        ))}
     </div>,
     document.body,
   )

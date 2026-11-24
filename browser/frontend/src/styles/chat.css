@@ -2345,6 +2345,10 @@ button.view-chip-values[aria-expanded='true'] {
 .pick-bar .btn:focus-visible {
   color: var(--text-primary);
 }
+/* after a click with the pointer: the toolbar's place, unseen and empty, until the pointer moves */
+.pick-bar.is-gone {
+  cursor: default;
+}
 /* the comment beside its passage (chat/AnswerComment.tsx AnswerCommentPop) is the canvas's comment card (report.css
    .wu-cm) in a popover placed right of the chat's column, over the canvas, as wide as a comment on the canvas. It
    arrives as a citation's label does (refchip.css), with the popover's shadow, which grows while it is active */

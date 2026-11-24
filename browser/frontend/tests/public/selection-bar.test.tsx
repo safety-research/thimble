@@ -6,6 +6,8 @@
 // nothing at the selection, and asking stays with the ⌘ pointer: a ⌘-click on the answer opens the ask box, whose
 // question starts a side thread about it. Escape drops the selection, and with Explainers off for the chat Explain is
 // not shown. The toolbar stands just above the words, centered on where they end, else under them, inside the window.
+// After a click with the pointer it keeps its place, unseen and with no buttons, until the pointer moves, presses or
+// turns the wheel; a move with no movement keeps it, and a click from the keyboard takes it away at once.
 // A side thread's answers draw the explainers asked for there. Explain and Cite act on the words where they were
 // selected: in the answer, not in a line of the turn before it that holds them too, and at their second place in one
 // sentence.
@@ -93,12 +95,12 @@ async function select(root: Element, words = WORDS) {
 }
 /** The toolbar's buttons by their words, in order. */
 const buttons = () => [...document.querySelectorAll('.pick-bar button')].map((b) => b.textContent)
-/** A click on the toolbar's button `label`, as the mouse gives it: its press and release, then the click. */
+/** A click on the toolbar's button `label`, as the mouse gives it: its press and release, then the click, each counting
+ * one click. */
 const click = (label: string) =>
   act(async () => {
     const b = [...document.querySelectorAll<HTMLButtonElement>('.pick-bar button')].find((x) => x.textContent === label)!
-    for (const type of ['mousedown', 'mouseup']) b.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }))
-    b.click()
+    for (const type of ['mousedown', 'mouseup', 'click']) b.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: 1 }))
   })
 const press = (key: string) => act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
 
@@ -234,6 +236,49 @@ test('the toolbar stands just above the words, centered on where they end; under
   await select(el)
   const bar = document.querySelector<HTMLElement>('.pick-bar')!
   expect([bar.style.left, bar.style.top]).toEqual(['190px', '294px'])
+})
+
+test('after a click with the pointer the toolbar keeps its place, unseen and with no buttons, until the pointer moves, presses or turns the wheel; a click from the keyboard takes it away at once', async () => {
+  serve({ answer: (u) => (u.endsWith('/marks/cite') ? { turn: TURN, n: 1 } : {}) })
+  // the toolbar, 150 by 32, over the line above the words
+  vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(() => [new DOMRect(100, 300, 90, 20)] as unknown as DOMRectList)
+  const size = (px: number) =>
+    function (this: HTMLElement) {
+      return this.classList.contains('pick-bar') ? px : 0
+    }
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(size(150))
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(size(32))
+  const el = await mount(<Chat />)
+  await later()
+  const bar = () => document.querySelector<HTMLElement>('.pick-bar')
+  const place = () => [bar()?.style.left, bar()?.style.top, bar()?.style.width, bar()?.style.height, bar()?.getAttribute('aria-hidden')]
+  const covered = ['115px', '262px', '150px', '32px', 'true']
+  const send = (e: Event) => act(async () => void bar()!.dispatchEvent(e))
+  await select(el)
+  expect(place()).toEqual(['115px', '262px', '', '', null])
+  await click('Explain')
+  await later()
+  expect(buttons()).toEqual([])
+  expect(place()).toEqual(covered)
+  // a move with no movement, which the pointer did not make, keeps it; a move with movement takes it away
+  await send(new PointerEvent('pointermove', { bubbles: true }))
+  expect(place()).toEqual(covered)
+  await send(new PointerEvent('pointermove', { bubbles: true, movementX: 2, movementY: -1 }))
+  expect(bar()).toBeNull()
+  // as do a press and the wheel
+  for (const e of [new PointerEvent('pointerdown', { bubbles: true }), new WheelEvent('wheel', { bubbles: true, deltaY: 120 })]) {
+    await select(el)
+    await click('Cite')
+    await later()
+    expect(place()).toEqual(covered)
+    await send(e)
+    expect(bar()).toBeNull()
+  }
+  // Enter or Space on a focused button clicks it with no count of clicks
+  await select(el)
+  await act(async () => [...bar()!.querySelectorAll('button')].find((b) => b.textContent === 'Cite')!.click())
+  await later()
+  expect(bar()).toBeNull()
 })
 
 // a turn whose line before its tool call holds the words, and whose answer holds them twice in one sentence
