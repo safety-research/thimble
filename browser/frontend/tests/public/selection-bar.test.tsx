@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
-// The keys at a selection in an answer (src/chat/picked.tsx), as the terminal's bar shows them: words selected in an
-// answer of main's chat show `c cite · e explain` beside them. c makes them a citation of the answer, which the chat
-// draws as a mark with its label open, checking; e writes their explainer, the words tinted while it is written and its
-// comment open on them once written. Asking stays with the ⌘ pointer: a ⌘-click on the answer opens the ask box, whose
-// question starts a side thread about it, and a at the selection opens nothing. Escape drops the selection, a key typed
-// into a field is the field's, and with Explainers off for the chat e is not shown. A side thread's answers draw the
-// explainers asked for there. c and e act on the words where they were selected: in the answer, not in a line of the
-// turn before it that holds them too, and at their second place in one sentence.
+// The toolbar at a selection in an answer (src/chat/picked.tsx): words selected in an answer of main's chat show a
+// toolbar with Explain and Cite, in that order, and no Ask; words selected anywhere else show none. Explain writes
+// their explainer, the words tinted while it is written and its comment open on them once written; Cite makes them a
+// citation of the answer, which the chat draws as a mark with its label open, checking. The letters c, e and a do
+// nothing at the selection, and asking stays with the ⌘ pointer: a ⌘-click on the answer opens the ask box, whose
+// question starts a side thread about it. Escape drops the selection, and with Explainers off for the chat Explain is
+// not shown. The toolbar stands just above the words, centered on where they end, else under them, inside the window.
+// A side thread's answers draw the explainers asked for there. Explain and Cite act on the words where they were
+// selected: in the answer, not in a line of the turn before it that holds them too, and at their second place in one
+// sentence.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { chatOfComment } from '../../src/chat/answerComments.ts'
 import { foldRecords } from '../../src/chat/model.ts'
-import { SelectionKeys } from '../../src/chat/picked.tsx'
+import { barPlace, SelectionBar } from '../../src/chat/picked.tsx'
 import { Rows } from '../../src/chat/Rows.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
@@ -67,7 +69,7 @@ function Chat() {
       <div className="chat-list">
         <Rows rows={foldRecords(recs)} ws="mini" chat="main" />
       </div>
-      <SelectionKeys ws="mini" />
+      <SelectionBar ws="mini" />
       <CmdPointer ws="mini" />
     </section>
   )
@@ -76,21 +78,48 @@ function Chat() {
 /** A while for the page to read the selection (its frame) and the server's answers. */
 const later = () => act(async () => void (await new Promise((r) => setTimeout(r, 40))))
 
-/** The words selected in the answer's text, as a drag over them leaves them. */
-async function select(el: HTMLElement, words = WORDS) {
-  const node = [...el.querySelectorAll('.chat-text p')].flatMap((p) => [...p.childNodes]).find((n) => n.textContent?.includes(words))!
+/** The words selected in the first text under `root` that holds them, as a drag over them leaves them. */
+async function select(root: Element, words = WORDS) {
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node = walk.nextNode()
+  while (node && !node.textContent?.includes(words)) node = walk.nextNode()
   const range = document.createRange()
-  range.setStart(node, node.textContent!.indexOf(words))
-  range.setEnd(node, node.textContent!.indexOf(words) + words.length)
+  range.setStart(node!, node!.textContent!.indexOf(words))
+  range.setEnd(node!, node!.textContent!.indexOf(words) + words.length)
   document.getSelection()!.removeAllRanges()
   document.getSelection()!.addRange(range)
   await act(async () => void document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
   await later()
 }
-const keys = () => [...document.querySelectorAll('.pick-keys .pick-key')].map((k) => k.textContent)
+/** The toolbar's buttons by their words, in order. */
+const buttons = () => [...document.querySelectorAll('.pick-bar button')].map((b) => b.textContent)
+/** A click on the toolbar's button `label`, as the mouse gives it: its press and release, then the click. */
+const click = (label: string) =>
+  act(async () => {
+    const b = [...document.querySelectorAll<HTMLButtonElement>('.pick-bar button')].find((x) => x.textContent === label)!
+    for (const type of ['mousedown', 'mouseup']) b.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 }))
+    b.click()
+  })
 const press = (key: string) => act(async () => void window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
 
-test('words selected in an answer show c cite · e explain; c cites them, and the chat draws the citation with its label open, checking, the comments on the answer kept on their words', async () => {
+test('words selected in an answer show a toolbar with Explain and Cite, in that order, and no Ask; words selected anywhere else show none', async () => {
+  serve()
+  const el = await mount(<Chat />)
+  await later()
+  // the analyst's question, and a paragraph outside the chat
+  await select(el, 'uploads fail')
+  expect(buttons()).toEqual([])
+  const outside = document.body.appendChild(document.createElement('p'))
+  outside.textContent = 'Notes on the retry budget.'
+  await select(outside)
+  expect(buttons()).toEqual([])
+  await select(el.querySelector('.chat-text')!)
+  expect(document.querySelector('.pick-bar')?.getAttribute('role')).toBe('toolbar')
+  expect(buttons()).toEqual(['Explain', 'Cite'])
+  expect(document.querySelectorAll('.pick-bar button .icon')).toHaveLength(2)
+})
+
+test('Cite cites the selected words, and the chat draws the citation with its label open, checking, the comments on the answer kept on their words', async () => {
   // a heads-up on the sentence the words stand in, and an explainer on the next one
   const heads = { ...COMMENT, id: 'ah1', check: 'heads-up', check_name: 'Heads up', color: 1, words: 'Uploads fail', text: 'Only one network.' }
   const next = { ...COMMENT, id: 'ae2', ref: `answer:${TURN}#s2`, start: 46, end: ANSWER.length, quote: 'The client gives up then.', words: 'gives up' }
@@ -98,12 +127,11 @@ test('words selected in an answer show c cite · e explain; c cites them, and th
   const el = await mount(<Chat />)
   await later()
   await select(el)
-  expect(keys()).toEqual(['c cite', 'e explain'])
-  await press('c')
+  await click('Cite')
   await later()
   const at = ANSWER.indexOf(WORDS)
   expect(posts).toEqual([{ url: '/api/ws/mini/marks/cite', body: { chat: 'main', turn: TURN, row: 1, start: at, end: at + WORDS.length, words: WORDS, sentence: 'Uploads fail after the [retry budget] runs out.' } }])
-  expect(keys()).toEqual([])
+  expect(buttons()).toEqual([])
   expect(document.getSelection()!.isCollapsed).toBe(true)
   // the turn's marks record: the citation, checking, on its words, its label open
   await act(async () => setRecords([...records, { type: 'marks', turn: TURN, items: [{ n: 1, words: WORDS, sentence: 'Uploads fail after the [retry budget] runs out.', status: 'checking', shown: WORDS, asked: true, row: 1, start: at, end: at + WORDS.length }] } as ChatRecord]))
@@ -113,17 +141,18 @@ test('words selected in an answer show c cite · e explain; c cites them, and th
   expect([...el.querySelectorAll('mark.answer-tint')].map((m) => m.textContent)).toEqual(['Uploads fail', 'gives up'])
 })
 
-test('e writes the explainer of the selected words: they are tinted while it is written, and its comment opens on them once written', async () => {
+test('Explain writes the explainer of the selected words: they are tinted while it is written, and its comment opens on them once written', async () => {
   let written: (v: unknown) => void = () => undefined
   let comments: object[] = []
   const posts = serve({ comments: () => comments, answer: (u) => (u.endsWith('/explain') ? new Promise((r) => (written = r)) : {}) })
   const el = await mount(<Chat />)
   await later()
   await select(el)
-  await press('e')
+  await click('Explain')
   await later()
   const at = ANSWER.indexOf(WORDS)
   expect(posts.map((p) => [p.url, p.body])).toEqual([['/api/ws/mini/explain', { chat: 'main', turn: TURN, words: WORDS, row: 1, start: at, end: at + WORDS.length }]])
+  expect(buttons()).toEqual([])
   expect([...el.querySelectorAll('mark.answer-tint-pending')].map((m) => m.textContent)).toEqual([WORDS])
   // written: the server keeps it as an Explainers comment, and the chat reads the comments again
   comments = [COMMENT]
@@ -135,7 +164,7 @@ test('e writes the explainer of the selected words: they are tinted while it is 
   expect(document.querySelector('.answer-cm-pop .wu-cm-statement')?.textContent).toBe('retry budget: How many times the client tries again.')
 })
 
-test('a at the selection opens nothing; a ⌘-click on the answer opens the ask box, and its question starts a side thread about it', async () => {
+test('c, e and a do nothing at the selection; a ⌘-click on the answer opens the ask box, and its question starts a side thread about it', async () => {
   const posts = serve({ answer: (u) => (u.endsWith('/chats') ? { id: 't7' } : {}) })
   // the answer's text shows on screen, where the box shows beside it
   vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [new DOMRect(10, 100, 390, 20)] as unknown as DOMRectList)
@@ -145,9 +174,13 @@ test('a at the selection opens nothing; a ⌘-click on the answer opens the ask 
   const el = await mount(<Chat />)
   await later()
   await select(el)
-  await press('a')
+  for (const key of ['c', 'e', 'a']) await press(key)
   await settle()
+  expect(posts).toEqual([])
   expect(document.querySelector('.pointer-box')).toBeNull()
+  expect(el.querySelector('mark.answer-tint-pending')).toBeNull()
+  expect(buttons()).toEqual(['Explain', 'Cite'])
+  expect(document.getSelection()!.toString()).toBe(WORDS)
   // the ask key is Ctrl off a Mac, as jsdom is
   const words = el.querySelector('.chat-text[data-anchor="chat:main#1"] p')!
   await act(async () => {
@@ -156,7 +189,7 @@ test('a at the selection opens nothing; a ⌘-click on the answer opens the ask 
   await later()
   const field = document.querySelector<HTMLTextAreaElement>('.pointer-box textarea')!
   expect(field).not.toBeNull()
-  expect(keys()).toEqual([])
+  expect(buttons()).toEqual([])
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Why five tries?')
     field.dispatchEvent(new Event('input', { bubbles: true }))
@@ -169,22 +202,38 @@ test('a at the selection opens nothing; a ⌘-click on the answer opens the ask 
   expect(opened).toEqual(['t7'])
 })
 
-test('Escape drops the selection; a key typed in a field is the field’s; with Explainers off for the chat, e is not shown', async () => {
+test('Escape drops the selection and the toolbar; with Explainers off for the chat, Explain is not shown', async () => {
   const posts = serve({ checks: [{ ...CHECKS[0], shown: false }] })
   const el = await mount(<Chat />)
   await later()
   await select(el)
-  expect(keys()).toEqual(['c cite'])
-  await press('e')
-  const field = document.body.appendChild(document.createElement('textarea'))
-  field.focus()
-  await press('c')
-  expect(posts).toEqual([])
-  field.blur()
+  expect(buttons()).toEqual(['Cite'])
   await press('Escape')
   await later()
-  expect(keys()).toEqual([])
+  expect(buttons()).toEqual([])
   expect(document.getSelection()!.isCollapsed).toBe(true)
+  expect(posts).toEqual([])
+})
+
+test('the toolbar stands just above the words, centered on where they end; under them when there is no room above; inside the window', async () => {
+  const line = (top: number, right: number) => ({ top, right, bottom: top + 20 })
+  const view = { width: 1440, height: 900 }
+  expect(barPlace(line(300, 260), line(300, 260), 150, 32, view)).toEqual({ left: 185, top: 262 })
+  // words over two lines: above the first, centered on the end of the last
+  expect(barPlace(line(300, 600), line(320, 120), 150, 32, view)).toEqual({ left: 45, top: 262 })
+  // no room above: under the last line
+  expect(barPlace(line(30, 260), line(30, 260), 150, 32, view)).toEqual({ left: 185, top: 56 })
+  // near the window's right and left edges
+  expect(barPlace(line(300, 1430), line(300, 1430), 150, 32, view).left).toBe(1282)
+  expect(barPlace(line(300, 20), line(300, 20), 150, 32, view).left).toBe(8)
+  // on the page, from the lines of the selection (jsdom gives the toolbar no size)
+  serve()
+  vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(() => [new DOMRect(100, 300, 90, 20)] as unknown as DOMRectList)
+  const el = await mount(<Chat />)
+  await later()
+  await select(el)
+  const bar = document.querySelector<HTMLElement>('.pick-bar')!
+  expect([bar.style.left, bar.style.top]).toEqual(['190px', '294px'])
 })
 
 // a turn whose line before its tool call holds the words, and whose answer holds them twice in one sentence
@@ -225,7 +274,7 @@ async function selectAt(el: HTMLElement, row: number, words: string, nth: number
   await later()
 }
 
-test('e acts on the words where they were selected: the explainer stands on them in the answer, not in the line before it that holds them too, and at their second place in one sentence', async () => {
+test('Explain acts on the words where they were selected: the explainer stands on them in the answer, not in the line before it that holds them too, and at their second place in one sentence', async () => {
   let written: (v: unknown) => void = () => undefined
   let comments: object[] = []
   const posts = serve({ comments: () => comments, answer: (u) => (u.endsWith('/explain') ? new Promise((r) => (written = r)) : {}) })
@@ -233,7 +282,7 @@ test('e acts on the words where they were selected: the explainer stands on them
   await act(async () => setRecords(turnRecords))
   await later()
   await selectAt(el, 4, WORDS, 1)
-  await press('e')
+  await click('Explain')
   await later()
   const at = TWICE.lastIndexOf(WORDS)
   expect(posts.map((p) => p.body)).toEqual([{ chat: 'main', turn: TURN, words: WORDS, row: 4, start: at, end: at + WORDS.length }])
@@ -248,13 +297,13 @@ test('e acts on the words where they were selected: the explainer stands on them
   expect([tint.closest<HTMLElement>('.chat-text')?.dataset.anchor, tint.textContent, tint.previousSibling?.textContent]).toEqual(['chat:main#4', WORDS, 'Uploads fail after the retry budget runs out, and the '])
 })
 
-test('c cites the words where they were selected: their second place in one sentence of the answer, not their first, nor the line before it', async () => {
+test('Cite cites the words where they were selected: their second place in one sentence of the answer, not their first, nor the line before it', async () => {
   const posts = serve({ answer: (u) => (u.endsWith('/marks/cite') ? { turn: TURN, n: 1 } : {}) })
   const el = await mount(<Chat />)
   await act(async () => setRecords(turnRecords))
   await later()
   await selectAt(el, 4, WORDS, 1)
-  await press('c')
+  await click('Cite')
   await later()
   const at = TWICE.lastIndexOf(WORDS)
   expect(posts.map((p) => p.body)).toEqual([{ chat: 'main', turn: TURN, row: 4, start: at, end: at + WORDS.length, words: WORDS, sentence: 'Uploads fail after the retry budget runs out, and the [retry budget] is five tries.' }])

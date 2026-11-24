@@ -7,7 +7,7 @@
 // chat a check's comments on an answer tint their passages; a click on one, or Go to it on `answer:<turn>#s<n>`, opens
 // the comment as the canvas's comment card in a popover beside the passage (chat/answerComments.ts, AnswerComment.tsx).
 // A side thread's answers take the explainers the analyst asks for there in the same way. Each text row notes itself
-// for the keys at a selection in it (chat/picked.tsx), whose explainer being written tints its words meanwhile.
+// for the toolbar at a selection in it (chat/picked.tsx), whose explainer being written tints its words meanwhile.
 // Each of the analyst's messages in main's current chat has Rewind in its left margin, which asks first under the message
 // (chat/rewind.ts); `/rewind` lists the same messages to pick from (RewindPicker).
 import { useContext, useEffect, useMemo, useState } from 'react'
@@ -220,12 +220,12 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   }, [shown, answers.comments, opened, lastText, asking, chat])
   useEffect(() => noteDrawn([...rowMarks.values()].flatMap((m) => m.comments)), [rowMarks])
   const marksCtx = useMemo(() => ({ opened, show: setOpened }), [opened])
-  // each text row, for the keys at a selection in it (chat/picked.tsx)
+  // each text row, for the toolbar at a selection in it (chat/picked.tsx)
   useEffect(() => {
     if (!chat) return
     for (const r of shown) if (r.kind === 'text') noteRow({ chat, index: r.index, turn: r.turn, text: r.text, checks: r.checks, asked: r.asked, streaming: r === lastText })
   }, [shown, chat, lastText])
-  // the comment e asked to open, once this chat draws it (answerComments.ts wantComment)
+  // the comment Explain asked to open, once this chat draws it (answerComments.ts wantComment)
   const wanted = useWantedComment()
   useEffect(() => {
     if (!wanted || ![...rowMarks.values()].some((m) => m.comments.some((c) => c.id === wanted))) return

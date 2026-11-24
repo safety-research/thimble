@@ -2324,40 +2324,26 @@ button.view-chip-values[aria-expanded='true'] {
     background: color-mix(in oklab, var(--tint) 30%, transparent);
   }
 }
-/* the keys at a selection in an answer (chat/picked.tsx): the terminal's bar at the words, one line of keys, each key
-   and its word in the color of what it gives, the key bold */
-.pick-keys {
+/* the toolbar at a selection in an answer (chat/picked.tsx): Explain and Cite on the overlay's paper just above the
+   words, each a ghost button with its icon and its word, in the text's secondary ink until the pointer or the focus is
+   on it */
+.pick-bar {
   position: fixed;
   z-index: calc(var(--z-popover) + 1);
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 3px 8px;
-  border: 1px solid var(--border-subtle);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
   border-radius: 2px;
-  background: var(--overlay-bg);
-  box-shadow: var(--shadow-float);
-  font: var(--type-ui-sm);
-  white-space: nowrap;
   user-select: none;
   animation: refchip-pop-in var(--dur-fast) var(--ease-out);
 }
-.pick-key {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: pointer;
+.pick-bar .btn {
+  border-radius: 2px;
+  color: var(--text-secondary);
 }
-.pick-key:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.pick-key-letter {
-  font-weight: 600;
-}
-.pick-keys-dot {
-  color: var(--text-tertiary);
+.pick-bar .btn:hover,
+.pick-bar .btn:focus-visible {
+  color: var(--text-primary);
 }
 /* the comment beside its passage (chat/AnswerComment.tsx AnswerCommentPop) is the canvas's comment card (report.css
    .wu-cm) in a popover placed right of the chat's column, over the canvas, as wide as a comment on the canvas. It
