@@ -188,10 +188,10 @@ async def explain(c: str, chat: str, turn: str, words: str, fork: Any = None, *,
             return 502, f"The explanation of “{_short(term)}” was not written: {type(e).__name__}."
         ran = await (fork or marks.run_fork)(c, main[0], main[1], prompt)
         if ran.get("error") and not ran.get("answer"):
-            return 502, f"The explanation of “{_short(term)}” was not written: {ran['error']}. Select the words and press e again."
+            return 502, f"The explanation of “{_short(term)}” was not written: {ran['error']}. Select the words and click Explain again."
         explainer = (await _node({"reply": str(ran.get("answer") or "")}))["explainer"]
         if not explainer:
-            return 502, f"The explanation of “{_short(term)}” came back empty. Select the words and press e again."
+            return 502, f"The explanation of “{_short(term)}” came back empty. Select the words and click Explain again."
         text, details = look.explainer_comment(said, explainer["body"], explainer["here"])
     cm, _new = answer_comments.add(c, passage=passage, text=text, details=details, author=checks.AUTHOR, check=CHECK,
                                    words=said, nth=nth, asked=True, chat="" if chat == agents.MAIN_ID else chat)
