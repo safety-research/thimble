@@ -2310,6 +2310,45 @@ button.view-chip-values[aria-expanded='true'] {
 .chat-text mark.answer-tint:focus-visible {
   outline: 1px solid var(--tint);
 }
+/* words whose explainer is being written (chat/picked.tsx): their tint, not yet a press, breathing slowly until the
+   comment stands on them */
+.chat-text mark.answer-tint-pending {
+  cursor: default;
+  animation: answer-tint-pending 1.6s var(--ease-out) infinite alternate;
+}
+@keyframes answer-tint-pending {
+  from {
+    background: color-mix(in oklab, var(--tint) 10%, transparent);
+  }
+  to {
+    background: color-mix(in oklab, var(--tint) 30%, transparent);
+  }
+}
+/* the toolbar at a selection in an answer (chat/picked.tsx): Explain and Cite on the overlay's paper just above the
+   words, each a ghost button with its icon and its word, in the text's secondary ink until the pointer or the focus is
+   on it */
+.pick-bar {
+  position: fixed;
+  z-index: calc(var(--z-popover) + 1);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 2px;
+  user-select: none;
+  animation: refchip-pop-in var(--dur-fast) var(--ease-out);
+}
+.pick-bar .btn {
+  border-radius: 2px;
+  color: var(--text-secondary);
+}
+.pick-bar .btn:hover,
+.pick-bar .btn:focus-visible {
+  color: var(--text-primary);
+}
+/* after a click with the pointer: the toolbar's place, unseen and empty, until the pointer moves */
+.pick-bar.is-gone {
+  cursor: default;
+}
 /* the comment beside its passage (chat/AnswerComment.tsx AnswerCommentPop) is the canvas's comment card (report.css
    .wu-cm) in a popover placed right of the chat's column, over the canvas, as wide as a comment on the canvas. It
    arrives as a citation's label does (refchip.css), with the popover's shadow, which grows while it is active */
@@ -2335,4 +2374,13 @@ body[data-cmd] .answer-cm-pop {
 .wu-cm.answer-cm.wu-cm-active {
   left: auto;
   box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), 0 14px 32px -12px rgba(0, 0, 0, 0.3);
+}
+/* an explainer that was not written says why in its card, in full, in the error color (chat/AnswerComment.tsx) */
+.wu-cm.answer-cm .wu-cm-statement:has(.answer-cm-failed) {
+  display: block;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+}
+.answer-cm-failed {
+  color: var(--status-negative);
 }

@@ -10,7 +10,8 @@
 // for it (tour/tour.ts tourFiles). The writer reads no file itself: Claude Code refuses each tool call of a fork. So it
 // reads the lines given here, and the records in the conversation. placeLines reads the lines an explainer's link
 // points to, for the tray. A relative path is read in the folder the session started in, then the folder holding the
-// labels, then, after a tour, the tour's sample data (readRoots).
+// labels, then, after a tour, the tour's sample data (readRoots). What the call reads after its text, and what its
+// reply gives, are ask.mjs's, which the workbench's e reads too.
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf, questionOf, setPart } from '../core/answers'
@@ -18,10 +19,10 @@ import { textView } from '../core/answerview'
 import { rootHere, startDir } from '../core/env'
 import { modelWhy } from '../core/why.js'
 import { rowMarks } from '../marks/store'
-import { jsonIn } from '../observer/reply.mjs'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
 import { tourData, tourFiles } from '../tour/tour'
+import { askText, citedFiles, evidencePlaces, explainerOf } from './ask.mjs'
 import type { ExplainPart } from './seam'
 import { filePlaces } from './place.mjs'
 
@@ -29,37 +30,17 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-const FILES_BUDGET = 14000 // characters of cited files the call reads
-const AROUND = 12 // lines read on each side of a cited span
-
-const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '')
-
 type Place = { path: string; from: number | null; to: number | null }
 
-/** The lines of the files at `places`, numbered, as the call reads them; at most FILES_BUDGET; '' when none. */
-async function citedFiles($: Engine, places: Place[], roots: string[]): Promise<string> {
-  const out: string[] = []
-  let used = 0
-  const seen = new Set<string>()
-  for (const p of places) {
-    const key = `${p.path}#${p.from ?? ''}-${p.to ?? ''}`
-    if (!p.path || seen.has(key)) continue
-    seen.add(key)
-    let text: string | null = null
-    for (const root of p.path.startsWith('/') ? [''] : roots) {
-      try { text = String(await $.fs.read(root ? `${root}/${p.path}` : p.path)); break } catch { /* the next root */ }
+/** The lines of the files at `places`, numbered, as the call reads them (ask.mjs citedFiles): a relative path read in
+ *  the folders of readRoots, in turn. */
+async function filesAt($: Engine, places: Place[], roots: string[]): Promise<string> {
+  return citedFiles(places, async (path: string) => {
+    for (const root of path.startsWith('/') ? [''] : roots) {
+      try { return String(await $.fs.read(root ? `${root}/${path}` : path)) } catch { /* the next root */ }
     }
-    if (text == null) continue
-    const all = text.split('\n')
-    const a = p.from ? Math.max(1, p.from - AROUND) : 1
-    const b = p.from ? Math.min(all.length, (p.to ?? p.from) + AROUND) : Math.min(all.length, 60)
-    const body = all.slice(a - 1, b).map((l, i) => `${String(a + i).padStart(5)}  ${l.slice(0, 240)}`).join('\n')
-    const piece = `--- ${p.path} (lines ${a}–${b} of ${all.length})\n${body}`
-    if (used + piece.length > FILES_BUDGET) break
-    out.push(piece)
-    used += piece.length
-  }
-  return out.join('\n\n')
+    return null
+  })
 }
 
 const PLACE_LINES = 12 // lines the tray shows of a place an explainer cites
@@ -94,42 +75,24 @@ export async function placeLines($: Engine, path: string, from: number | null, t
 }
 
 /** The places the checker found for the row's citations: each evidence's file and cited lines. */
-async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
-  const out: Place[] = []
-  for (const it of (await rowMarks($, row).catch(() => null))?.items ?? []) {
-    const ev = it.evidence as Any
-    if (!ev || ev.kind === 'computed' || ev.kind === 'card') continue
-    for (const pl of [ev, ...(Array.isArray(ev.more) ? ev.more : [])]) {
-      if (typeof pl?.file !== 'string') continue
-      const m = /^(\d+)(?:\D+(\d+))?/.exec(String(pl.line ?? ''))
-      out.push({ path: pl.file, from: m ? Number(m[1]) : null, to: m ? Number(m[2] || m[1]) : null })
-    }
-  }
-  return out
+async function placesOf($: Engine, row: string): Promise<Place[]> {
+  return evidencePlaces((await rowMarks($, row).catch(() => null))?.items ?? [])
 }
 
 /** The `explain-expand` prompt over the conversation (a fork), else in a side call: the words, the question, the answer
- *  they stand in and the files it cites. Its reply's JSON once written, else a sentence that says why not. */
-async function writeAbout($: Engine, row: string, term: string): Promise<Any> {
+ *  they stand in and the files it cites. The explainer its reply gives once written (null for none), else a sentence
+ *  that says why not. */
+async function writeAbout($: Engine, row: string, term: string): Promise<{ body: string; here: string } | null | string> {
   const msg = await messageOf($, row)
   if (!msg) return 'That answer is not in this session any more.'
   const roots = await readRoots($)
   const answer = (await textView($, row, msg.text)).text
   // the tour's sample answer names its data file, and links nothing: the file is read whole
   const tour = (await tourFiles($, row).catch(() => [] as string[])).map(path => ({ path, from: null, to: null }))
-  const places = [...(await evidencePlaces($, row)), ...filePlaces(answer), ...tour]
+  const places = [...(await placesOf($, row)), ...filePlaces(answer), ...tour]
   const question = await questionOf($, row).catch(() => '')
   const system = await promptText($, 'explain-expand')
-  const files = await citedFiles($, places, roots)
-  const prompt = [
-    `The term: ${term}`,
-    '',
-    `The analyst's question: ${String(question || '(not known)').slice(0, 2000)}`,
-    '',
-    'The answer the term stands in:',
-    '<answer>', answer.slice(0, 12000), '</answer>',
-    ...(files ? ['', 'The files the answer cites, with their line numbers:', files] : []),
-  ].join('\n')
+  const prompt = askText({ term, question, answer, files: await filesAt($, places, roots) })
   const req = { model: 'opus', maxTokens: 6000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
   const short = term.length > 40 ? `${term.slice(0, 39)}…` : term
   let r: Any
@@ -143,7 +106,7 @@ async function writeAbout($: Engine, row: string, term: string): Promise<Any> {
     r = { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
   }
   if (!r?.isAnswered) return `The explanation of “${term}” was not written: ${modelWhy(r) || 'the call gave no answer'}.`
-  return jsonIn(r.text) ?? {}
+  return explainerOf(r.text)
 }
 
 /**
@@ -152,11 +115,9 @@ async function writeAbout($: Engine, row: string, term: string): Promise<Any> {
  * written, else a sentence that says why not.
  */
 export async function askGloss($: Engine, row: string, term: string): Promise<{ id: string } | string> {
-  const d = await writeAbout($, row, term)
-  if (typeof d === 'string') return d
-  const body = str(d?.body, 2400)
-  if (!body) return `The explanation of “${term}” came back empty.`
-  const got = { body, here: str(d?.here, 800) }
+  const got = await writeAbout($, row, term)
+  if (typeof got === 'string') return got
+  if (!got) return `The explanation of “${term}” came back empty.`
   let id = ''
   await setPart<ExplainPart>($, row, 'explain', cur => {
     const items = { ...(cur?.items ?? {}) }

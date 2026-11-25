@@ -1047,13 +1047,13 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
 # the page's sources, by their paths in a checkout of thimble: browser/frontend, and each file outside it the page
 # bundles, those browser/frontend/src imports and those they import: the modules of the terminal plugin (vite.config.ts
 # lets it read ../../plugin) and the server's label colours, which the page reads as the server does
-PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js",
-                "plugin/tray/printed.mjs", "plugin/tray/tray.mjs", "browser/backend/app/label_order.json",
-                "browser/backend/app/label_wheel.json")
+PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/explain/place.mjs", "plugin/fix/command.mjs",
+                "plugin/marks/asked.mjs", "plugin/marks/message.js", "plugin/tray/printed.mjs", "plugin/tray/tray.mjs",
+                "browser/backend/app/label_order.json", "browser/backend/app/label_wheel.json")
 # the terminal plugin's files the server itself holds from its start: the validator it imports once (marks.py evidence)
 # and the list it reads once (changeable). What it reads or starts anew at each use is as live has it at once, with no
 # restart, and is not here: the texts in plugin/prompts, the kernel, and the modules its node helpers import
-# (look_of.mjs, marks_of.mjs, notices_of.mjs, each a node process of its own for each call).
+# (look_of.mjs, explain_of.mjs, marks_of.mjs, notices_of.mjs, each a node process of its own for each call).
 SERVER_KEEPS = ("plugin/engine/kernel/evidence.py", "plugin/fix/changeable.mjs")
 # the terminal plugin's files a server that runs keeps as they were at its start: those its page bundles and those it
 # holds itself. The kernel names the restart for a fix that changes one by the same list (BROWSER_RUNS in

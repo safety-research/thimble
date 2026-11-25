@@ -1,7 +1,7 @@
 """What each mode's models read, fingerprinted: every text the terminal plugin's prompt registry gives its readers
 (plugin/prompts), and every prompt the workbench renders (browser/prompts) with the plugin's texts it reads as the
-terminal does (the checker, the look, the fixer, a side thread's instructions, the label classifier and the notices
-after a check), each by the sha256 of its words, in fixtures/renders.json.
+terminal does (the checker, the look, the explainer on demand, the fixer, a side thread's instructions, the label
+classifier and the notices after a check), each by the sha256 of its words, in fixtures/renders.json.
 
 A change to what a model reads changes a fingerprint, so the commit that makes it names the texts it changes in each
 mode; a change that only moves words, such as a text that both modes come to share, changes none. When a change to the
@@ -18,6 +18,7 @@ from app import concepts, fixes, marks, prompts, threads
 REPO = Path(__file__).resolve().parents[3]
 PLUGIN_PROMPTS = REPO / "plugin" / "prompts"
 LOOK_OF = REPO / "browser" / "backend" / "app" / "look_of.mjs"
+EXPLAIN_OF = REPO / "browser" / "backend" / "app" / "explain_of.mjs"
 FINGERPRINTS = Path(__file__).resolve().parent / "fixtures" / "renders.json"
 
 # made-up values for the calls whose prompts are fingerprinted as a call sends them
@@ -29,6 +30,9 @@ LOOK = {"lenses": ["explain", "heads"],
                   "turnNo": 2, "prompt": {"text": "what does the clean stage drop?", "by": "composer"}}],
         "coverage": "The session's calls above show what it read.",
         "state": {"glossed": ["docking test"], "headsGiven": ["The 400 counts every rule together"]}}
+# made-up words the analyst asked to have explained, in a made-up answer (no file is read: the folders are none)
+ASKED = {"term": "retry budget", "question": "Why do uploads fail?", "items": [], "roots": [],
+         "answer": "Uploads fail after the [retry budget](client/upload.py#L40-52) runs out."}
 LABEL = {"id": "k1", "name": "Curt reply", "unit": "record", "kind": "prompt", "spec": "The reply is short and unfriendly.",
          "description": "", "labels": ["curt", "not curt"], "marks": "span",
          "examples": [{"ref": "runs/b.jsonl#L4", "text": "No.", "value": "curt", "note": "too short"}]}
@@ -71,10 +75,14 @@ def _browser() -> dict[str, str]:
     out["plugin:notices (marks.notices)"] = "\n\n".join((
         marks._framed(marks.notices({"kind": "tell", "items": NOTICE_ITEMS})),
         marks._framed(marks.notices({"kind": "repair", "items": NOTICE_ITEMS[3:], "auto": True})),
-        marks.repair_request(NOTICE_ITEMS[3], 4), marks.repair_request(NOTICE_ITEMS[4], 5, auto=True)))
+        marks.repair_request(NOTICE_ITEMS[3], 4), marks.repair_request(NOTICE_ITEMS[4], 5, auto=True),
+        marks.notices({"kind": "opened", "n": 6})["text"]))
     done = subprocess.run(["node", str(LOOK_OF)], input=json.dumps({"prompt": LOOK}).encode(), capture_output=True,
                           check=True)
     out["plugin:observer, lenses (look_of.mjs)"] = json.loads(done.stdout)["prompt"]
+    done = subprocess.run(["node", str(EXPLAIN_OF)], input=json.dumps({"prompt": ASKED}).encode(), capture_output=True,
+                          check=True)
+    out["plugin:explain-expand (explain_of.mjs)"] = json.loads(done.stdout)["prompt"]
     inp = concepts.label_input(LABEL, LABEL_ITEMS)
     system, user = concepts.build_classify_prompt(inp)
     tool = concepts.labels_tool(inp["label"])

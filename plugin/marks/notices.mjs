@@ -12,6 +12,8 @@
 //                                  first check found (for a stale mark, which files changed after it, each card that
 //                                  ran again since, each other stale mark of its sentence that the repair checks with
 //                                  it, and that a changed value is corrected in the sentence), and the task
+//   openedNote(parts, n)           what follows the checker's text for the check of a citation the analyst opened before
+//                                  any check of it: the citation c made of the words they selected, in both modes
 //
 // The check's own words (its reason, its note) are quoted, since they may quote the records.
 import { fenced } from '../core/text.js'
@@ -127,4 +129,11 @@ export function repairRequest(p, m, n, auto = false, also = [], ran = []) {
   const found = m.failedBy === 'evidence' ? p['found not confirmed'] : p['found wrong']
   const who = fill(auto ? p['request auto'] : p.request, { N: String(n) })
   return [`${who} ${p['request where']} ${found}${m.reason ? `: ${q(m.reason)}` : '.'}`, p['request task']].join('\n')
+}
+
+/** What follows the checker's text for the check of citation `n`, which the analyst opened before any check of it ran
+ *  (a citation c made of the words they selected): that they opened it, and that it may stand in an earlier reply than
+ *  main's last (marks/checker.ts checkOpened; the workbench's c, browser/backend/app/marks.py cite). */
+export function openedNote(p, n) {
+  return `${fill(p['request opened'], { N: String(n) })} ${p['request where']}`
 }

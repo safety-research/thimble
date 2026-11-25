@@ -19,6 +19,12 @@
 // a comment's passage and words are carried from Claude's words into those, as the terminal carries an explainer's
 // (placedOn); the Comments sidebar quotes the passage as the chat draws it (noteDrawn). A comment whose words the check
 // took away (a sentence it rewrote) has no tint, and its card says so beside the answer.
+//
+// An explainer the analyst asked for with Explain (chat/picked.tsx, backend explain.py) is an Explainers comment too, on
+// an answer of main's or of a side thread's (`chat`), whose chat tints it as main's chat does, and Go to it opens the
+// chat it is in. While it is written, its chat draws its words' tint and its card (`writing`) as soon as asked
+// (wantComment), and the written comment takes that card's place. Its words stand where they were selected: when they
+// stand more than once in its passage, `nth` says which of their places it is about (wordsAt).
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { carrier } from '../../../../plugin/marks/message.js'
 import { checksApi } from '../lib/api'
@@ -40,12 +46,20 @@ export interface AnswerComment {
   quote: string
   /** the words of the passage it is about, as the chat draws them; none for the whole passage */
   words?: string
+  /** which of the passage's places of its words it is about, from 0; none for the first */
+  nth?: number
   text: string
   details?: string
   status: 'open' | 'dismissed'
   at?: string
   /** the check of the citations took its words away (placedOn): it has no tint, and its card says so */
   gone?: boolean
+  /** the chat whose answer it is on: main, or a side thread (an explainer asked for there) */
+  chat?: string
+  /** an explainer being written (chat/picked.tsx), which has no text yet: its card shows a spinner in its place */
+  writing?: boolean
+  /** why that explainer was not written, which its card says in place of the spinner */
+  failed?: string
 }
 
 /** What GET /ws/{c}/answer-comments answers. */
@@ -60,12 +74,18 @@ export interface AnswerMark {
   quote: string
   /** the words of the passage to tint; none for the whole passage */
   words?: string
+  /** which of the passage's places of the words to tint, from 0 (wordsAt); none for the first */
+  nth?: number
   /** the CSS color of the tint */
   colour: string
   /** the passage's ref, the first piece's anchor */
   ref: string
   /** its comment is open beside it */
   active: boolean
+  /** words whose explainer is being written (chat/picked.tsx): tinted alone, with no comment to open yet */
+  pending?: boolean
+  /** its comment's check, which Explain reads off the tint (chat/picked.tsx) */
+  check?: string
 }
 
 /** A comment's tint color: its check's palette place, as checkColour draws a check's. Pure. */
@@ -122,6 +142,24 @@ export function plainPlaces(raw: string): { text: string; at: number[] } {
   return { text: text.slice(lead, end), at: at.slice(lead, end) }
 }
 
+/** Each place of `words` in a text, [start, end), white space and case aside (backend answer_comments._find). Pure. */
+function placesOf(text: string, words: string): [number, number][] {
+  const tokens = words.trim().split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (!tokens.length) return []
+  return [...text.matchAll(new RegExp(tokens.join('\\s+'), 'gi'))].map((m) => [m.index, m.index + m[0].length])
+}
+
+/** Where `words` stand in a passage's words, [start, end): their first place (lib/quoteFind findQuote), or with `nth` the
+ * nth of their places, case and white space aside, as the backend counts them (answer_comments._find); the first when
+ * the passage holds fewer. Pure. */
+export function wordsAt(passage: string, words: string, nth = 0): [number, number] | null {
+  const first = findQuote(passage, words)
+  return nth > 0 && first ? (placesOf(passage, words)[nth] ?? first) : first
+}
+
+/** How many times `words` stand in a text, white space and case aside (backend answer_comments.times_in). Pure. */
+export const timesIn = (text: string, words: string): number => placesOf(text, words).length
+
 /** Where comment `c` stands on its row's words as the chat draws them, `drawn`, the version of `text` (Claude's words, as
  * the row holds them) the check of the citations made (marks/marks.ts asChecked): its passage carried from Claude's words
  * into the drawn ones as the terminal carries an explainer's (plugin/marks/message.js carrier), and its words found
@@ -137,12 +175,14 @@ export function placedOn(c: AnswerComment, text: string, drawn: string): AnswerC
   const quote = drawn.slice(p.start, p.end)
   const words = plainQuote(c.words ?? '')
   const was = plainPlaces(c.quote)
-  const w = words ? findQuote(was.text, words) : null
+  const w = words ? wordsAt(was.text, words, c.nth) : null
   if (!w || findQuote(plainQuote(quote), words)) return { ...c, quote }
   const to = carry(at + was.at[w[0]], at + was.at[w[1] - 1] + 1)
   const now = plainPlaces(quote)
   const kept = to ? now.at.flatMap((i, k) => (p.start + i >= to.start && p.start + i < to.end ? [k] : [])) : []
-  return kept.length ? { ...c, quote, words: now.text.slice(kept[0], kept[kept.length - 1] + 1) } : { ...c, gone: true }
+  if (!kept.length) return { ...c, gone: true }
+  const moved = now.text.slice(kept[0], kept[kept.length - 1] + 1)
+  return { ...c, quote, words: moved, nth: timesIn(now.text.slice(0, kept[0]), moved) }
 }
 
 /** The open comments of one text row: those on its turn whose passage its text holds. Pure. */
@@ -160,11 +200,11 @@ export function commentsOfRow(row: { text: string; turn?: string }, comments: re
  * answer_comments.APART). */
 const APART: Readonly<Record<string, string>> = { 'heads-up': 'explainers', explainers: 'heads-up' }
 
-/** Where a comment's words stand in its passage as the chat draws it, [start, end): their first place, else the whole
- * passage (backend answer_comments._span). Pure. */
-function spanOf(c: Pick<AnswerComment, 'quote' | 'words'>): [number, number] {
+/** Where a comment's words stand in its passage as the chat draws it, [start, end): the place of them it is about
+ * (wordsAt), else the whole passage (backend answer_comments._span). Pure. */
+function spanOf(c: Pick<AnswerComment, 'quote' | 'words' | 'nth'>): [number, number] {
   const passage = plainQuote(c.quote)
-  return (c.words && findQuote(passage, plainQuote(c.words))) || [0, passage.length]
+  return (c.words && wordsAt(passage, plainQuote(c.words), c.nth)) || [0, passage.length]
 }
 
 /** Whether two comments' words meet: on one passage, their spans overlap. Pure. */
@@ -181,7 +221,7 @@ export function marksOf(comments: readonly AnswerComment[], active: string | nul
   const drawn: AnswerComment[] = []
   for (const c of [...comments].sort((a, b) => Number(b.id === active) - Number(a.id === active)))
     if (!drawn.some((d) => APART[d.check] === c.check && meet(d, c))) drawn.push(c)
-  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, colour: tintOf(c), ref: c.ref, active: c.id === active }))
+  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, nth: c.nth, colour: tintOf(c), ref: c.ref, active: c.id === active, check: c.check }))
 }
 
 /** Which of the marks over clicked words a click opens. `count` marks stand on the words, from the innermost out (the
@@ -213,6 +253,38 @@ export const askedAnswer = (): AnswerAsk | null => wanted
 /** The ask was answered: its comment opened. */
 export function answeredAsk(ask: AnswerAsk): void {
   if (wanted?.ref === ask.ref && wanted.comment === ask.comment) wanted = null
+}
+
+// the chat of each comment the page read last (useAnswerComments), which Go to it opens (ChatPanel)
+const chats = new Map<string, string>()
+
+/** The chat whose answer comment `id` is on, as the page read it last; main for one it has not read. */
+export const chatOfComment = (id: string | undefined): string => (id && chats.get(id)) || 'main'
+
+// the comment Explain asked to open (chat/picked.tsx): the chat that draws it opens it (Rows), wherever it is
+let wantedComment: string | null = null
+const wantedSubs = new Set<() => void>()
+
+/** Open comment `id` once a chat draws it: now when one does, else when the comments are read again. */
+export function wantComment(id: string): void {
+  wantedComment = id
+  wantedSubs.forEach((f) => f())
+}
+
+/** The comment Explain asked to open, which the chat that draws it takes (takeComment). */
+export function useWantedComment(): string | null {
+  return useSyncExternalStore(
+    (f) => {
+      wantedSubs.add(f)
+      return () => void wantedSubs.delete(f)
+    },
+    () => wantedComment,
+  )
+}
+
+/** The comment Explain asked to open is open now: no chat opens it again. */
+export function takeComment(id: string): void {
+  if (wantedComment === id) wantedComment = null
 }
 
 /** The open comment an ask opens: the one it names, else the first on its passage. Pure. */
@@ -262,7 +334,11 @@ export function useAnswerComments(ws: string, enabled = true): { comments: Answe
     const load = () =>
       checksApi
         .answerComments(ws)
-        .then((got) => alive && setComments(Array.isArray(got?.comments) ? got.comments : []))
+        .then((got) => {
+          const list = Array.isArray(got?.comments) ? got.comments : []
+          for (const c of list) chats.set(c.id, c.chat || 'main')
+          if (alive) setComments(list)
+        })
         .catch(() => undefined)
     void load()
     const offs = [bus.on('answerComments', () => void load()), bus.on('checks', () => void load()), bus.on('wsStream', (e) => e.connected && void load())]

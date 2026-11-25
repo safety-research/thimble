@@ -24,7 +24,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-204 routes, 112 of them writes: 10 token, 1 code, 101 cookie, 89 cookie or token, 1 media key, 2 none.
+206 routes, 114 of them writes: 10 token, 1 code, 103 cookie, 89 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -140,6 +140,7 @@ knows the key.
 | GET | `/api/ws/{c}/concepts/{concept_id}/rows` | concepts | cookie or token |
 | GET | `/api/ws/{c}/events` | investigation | cookie or token |
 | POST | `/api/ws/{c}/events` | events | cookie |
+| POST | `/api/ws/{c}/explain` | explain | cookie |
 | GET | `/api/ws/{c}/export` | export | cookie or token |
 | POST | `/api/ws/{c}/feedback` | feedback_routes | cookie |
 | GET | `/api/ws/{c}/filters` | concepts | cookie or token |
@@ -175,6 +176,7 @@ knows the key.
 | GET | `/api/ws/{c}/labels/presence` | concepts | cookie or token |
 | POST | `/api/ws/{c}/labels/refs` | concepts | cookie |
 | GET | `/api/ws/{c}/labels/ruler` | concepts | cookie or token |
+| POST | `/api/ws/{c}/marks/cite` | marks | cookie |
 | POST | `/api/ws/{c}/marks/repair` | marks | cookie |
 | GET | `/api/ws/{c}/media` | views | cookie or token |
 | POST | `/api/ws/{c}/notebooks` | notebook | cookie |

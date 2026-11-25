@@ -155,7 +155,7 @@ import { choiceOf, claudeCites } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { staleOf } from '../tray/tray.mjs'
 import { marksIn, sentenceOf } from './message.js'
-import { repairRequest, repairTellText, tellText } from './notices.mjs'
+import { openedNote, repairRequest, repairTellText, tellText } from './notices.mjs'
 import { counts, editReply, type MarkItem, type MarkStatus, newReply, notRun, type OneRead, type Reply, replyKeyOf, replyOf, type Unread } from './store'
 
 type Engine = EngineInterface
@@ -978,7 +978,9 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
     const cwd = String(await $.session.cwd())
     const root = await startDir($)
     const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
-    const note = `The analyst opened citation ${n} to read its evidence. It may stand in an earlier reply than your last.`
+    // that the analyst opened it, in the words the workbench's c gives its check too (notices.mjs openedNote)
+    let note = ''
+    try { note = openedNote(await noticeParts($), n) } catch { return }
     const prompt = `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${note}`
     const fork = await spawnFork($, { kind: 'checker', prompt, description: OPENED_DESCRIPTION })
     if (!fork.agentId) {

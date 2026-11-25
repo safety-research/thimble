@@ -7,8 +7,10 @@
 //           {"kind": "repair", "items": [...], "auto": bool} after a repair (repairTellText)
 //           {"kind": "request", "mark": {...}, "n": N, "auto": bool, "also": [...], "ran": ["card:<id>", ...]}
 //                                                            a repair's request (repairRequest)
+//           {"kind": "opened", "n": N}                       what follows the checker's text for the check of a
+//                                                            citation c made of words the analyst selected (openedNote)
 //   stdout  {"text": "…", "frame": "…"}: the text ('' for nothing to tell), and the frame that heads thimble's reports
-import { partsOf, repairRequest, repairTellText, tellText } from '../../../plugin/marks/notices.mjs'
+import { openedNote, partsOf, repairRequest, repairTellText, tellText } from '../../../plugin/marks/notices.mjs'
 import { textOf } from '../../../plugin/prompts/node.mjs'
 
 let input = ''
@@ -20,6 +22,7 @@ process.stdin.on('end', async () => {
   const text = a.kind === 'tell' ? tellText(p, a.items ?? [])
     : a.kind === 'repair' ? repairTellText(p, a.items ?? [], !!a.auto)
       : a.kind === 'request' ? repairRequest(p, a.mark ?? {}, a.n ?? 1, !!a.auto, a.also ?? [], a.ran ?? [])
-        : ''
+        : a.kind === 'opened' ? openedNote(p, a.n ?? 1)
+          : ''
   process.stdout.write(JSON.stringify({ text, frame: p.frame }))
 })

@@ -5,7 +5,7 @@
 // chips, and Show less folds them. A click makes it active, which opens its details and a field whose text asks Thimble
 // about it in a thread anchored to the comment's passage or card, with the comment's id and words. The canvas
 // hears when the pointer or the keyboard's focus comes onto a card, to show where its comment points (CommentLayer.tsx).
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ChatMarkdown, ChipContext } from '../chat/markdown'
 import { TextArea } from '../components/Field'
 import { RefChip } from '../components/RefChip'
@@ -53,6 +53,8 @@ export interface CommentCardProps {
   /** ✓ (Done) */
   onResolve: () => Promise<void>
   thread: CommentThread
+  /** what stands in the statement's place: an explainer's words while it is written (chat/AnswerComment.tsx) */
+  statement?: ReactNode
   /** a line under the statement on where the comment stands: a comment on Claude's answer whose words are gone */
   note?: string
   cardRef?: (el: HTMLDivElement | null) => void
@@ -84,7 +86,7 @@ export function threadText(c: CommentView, name: string, thread: CommentThread):
   return `${thread.passage ? `${thread.passage}\n\n` : ''}${who}: ${said}`
 }
 
-export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, note, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {
+export function CommentCard({ ws, comment, look, active, onActivate, onResolve, thread, statement, note, cardRef, className, style, attrs, onMouseDown, onHover, onFocusIn }: CommentCardProps) {
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const name = commentName(comment, look)
@@ -131,7 +133,7 @@ export function CommentCard({ ws, comment, look, active, onActivate, onResolve, 
           </IconButton>
         )}
       </div>
-      <div className="wu-cm-text wu-cm-statement">{noteText(comment.text)}</div>
+      <div className="wu-cm-text wu-cm-statement">{statement ?? noteText(comment.text)}</div>
       {note && <div className="wu-cm-text">{note}</div>}
       {open && more && (
         <div className="wu-cm-details">

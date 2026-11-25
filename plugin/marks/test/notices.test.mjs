@@ -8,12 +8,12 @@ import test from 'node:test'
 
 import { textOf } from '../../prompts/node.mjs'
 import { NOTICES } from '../../tests/stubs.ts'
-import { partsOf, repairRequest } from '../notices.mjs'
+import { openedNote, partsOf, repairRequest } from '../notices.mjs'
 
 const PARTS = ['frame', 'check', 'check asked', 'seen', 'unseen', 'check end', 'repair', 'repair auto', 'repair end',
   'corrected', 'narrowed', 'rewritten', 'not confirmed', 'wrong', 'verified', 'still not confirmed', 'still wrong',
   'not checked', 'not checked again', 'why', 'request', 'request auto', 'request not run', 'request stale',
-  'request card ran', 'request stale also', 'request stale value', 'request where', 'found not confirmed', 'found wrong',
+  'request card ran', 'request stale also', 'request stale value', 'request opened', 'request where', 'found not confirmed', 'found wrong',
   'request task']
 
 const parts = async mode => partsOf(await textOf('notices', mode))
@@ -22,6 +22,12 @@ test('the text holds every part the notices are built from, each with words', as
   for (const mode of ['terminal', 'browser']) {
     const p = await parts(mode)
     for (const name of PARTS) assert.ok(p[name], `notices.md has the part ${name} (${mode})`)
+  }
+})
+
+test('the note on a citation the analyst opened before any check of it, as c makes one, is the same in both modes', async () => {
+  for (const mode of ['terminal', 'browser']) {
+    assert.equal(openedNote(await parts(mode), 3), 'The analyst opened citation 3 to read its evidence. It may stand in an earlier reply than your last.')
   }
 })
 

@@ -35,7 +35,8 @@
 //   selectionWaits($, by, raw), waitsNow($, by)   whether words of the answers stand selected that a key has not taken
 //                        yet: worked out, and kept for the selection; a key's hook reads what was kept while the
 //                        selection is the same
-//   pickedWords(text)    the words of a selection a key acts on: one line, at most PICK_MAX characters
+//   pickedWords(text)    the words of a selection a key acts on: one line, at most PICK_MAX characters (marks/asked.mjs,
+//                        which the workbench's keys at the selection read too)
 //   shownWords(row, raw, text)   the words a row of Claude's draws now in place of the ones it holds (`raw`;
 //                        marks/register.ts), kept in memory
 //   controlWords(at, words, o) the words of thimble's own controls drawn now `at` the bar, a card's header, the chips
@@ -48,10 +49,12 @@
 // plugin's loads, since a change in the settings loads it again while the same selection stands
 import type { EngineInterface } from 'claude-code'
 
-import { termOf } from '../explain/place.mjs'
+import { pickedWords } from '../marks/asked.mjs'
 import { rewritesIn, withAsked, withCorrections, withoutLinks } from '../marks/message.js'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageOf, textRows } from './answers'
+
+export { pickedWords }
 
 type Engine = EngineInterface
 export type Sel = { text: string; requestId?: string }
@@ -236,20 +239,6 @@ export async function selectionUsed($: Engine, by: By, sel: Sel | undefined): Pr
 
 export async function usedBy($: Engine, by: By, sel: Sel | undefined): Promise<boolean> {
   return !!sel && (await doneNow($))[by] === selKey(sel)
-}
-
-/** The most of a selection a key acts on: as long a term as an explainer can stand on (explain/place.mjs anchorTerm). */
-const PICK_MAX = 120
-
-/** The words of a selection a key acts on: on one line, without the space and quotes around them, at most PICK_MAX
- *  characters, cut after a whole word (`cut`). */
-export function pickedWords(text: string): { words: string; cut: boolean } {
-  const quotes = /^[\s"“”'‘’`]+|[\s"“”'‘’`]+$/g
-  const all = termOf(String(text ?? '')).replace(/\s+/g, ' ').replace(quotes, '')
-  if (all.length <= PICK_MAX) return { words: all, cut: false }
-  const head = all.slice(0, PICK_MAX + 1)
-  const at = head.lastIndexOf(' ')
-  return { words: (at > PICK_MAX / 2 ? head.slice(0, at) : head.slice(0, PICK_MAX)).replace(quotes, '').replace(/[,;:]$/, ''), cut: true }
 }
 
 // whether words wait for each key, as last worked out for the selection then (`sel`, its key; `words`, the answers'

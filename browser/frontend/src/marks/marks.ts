@@ -12,7 +12,13 @@
 // While its check runs (`checking`) it has the plain look and a spinner. Before any check said anything of it
 // (`pending`: the reply still streams, or no check has begun on it) its underline is dotted: not checked, so it never
 // reads as a checked mark. Its label says which in one word at its upper right (stateOf), as the terminal's card does.
-import { marksIn, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
+//
+// Words the analyst cited with Cite (chat/picked.tsx, backend marks.cite) are a mark of their answer too (`asked`),
+// kept with the turn's others: the page writes it into the text of the row it stands in at its place (asDrawn, with
+// the terminal's plugin/marks/message.js withAsked), so it draws, checks and opens as Claude's own. The label of the
+// one Cite asked for opens once a Mark draws it (wantMark).
+import { useSyncExternalStore } from 'react'
+import { marksIn, rewritesIn, withAsked, withCorrections } from '../../../../plugin/marks/message.js'
 import { checkStatus, staleOf } from '../../../../plugin/tray/tray.mjs'
 
 /** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them
@@ -88,6 +94,12 @@ export interface MarkItem {
   /** where the mark is kept, which Repair names: a reply's turn, or the card whose takeaway holds it */
   turn?: string
   card?: string
+  /** words the analyst cited with Cite: the page's text row they stand in (its record's index in the chat's log), and
+   * their place in that row's text, where the page writes the mark in (asDrawn) */
+  asked?: boolean
+  row?: number
+  start?: number
+  end?: number
 }
 
 export type MarkLook = 'pending' | 'checking' | 'verified' | 'stale' | 'failed'
@@ -113,6 +125,50 @@ export function asChecked(text: string, checks: readonly (MarkItem | undefined)[
     m?.status === 'corrected' && m.rewrite && !placed.has(k) ? { ...m, status: 'failed' as const, failedBy: 'evidence' as const, shown: m.words, reason: m.reason || 'The check rewrote this sentence, but its new sentence does not fit the reply.' } : m,
   )
   return { text: withCorrections(rewritten, out), checks: out }
+}
+
+/** A row's text with the words the analyst cited (`asked`) written in as marks at their places (the terminal's
+ * withAsked, which leaves out one whose words no longer stand there), and its marks' checks by their order in it;
+ * `checks` are its own marks' by their order in `text`. Pure. */
+export function asCited(text: string, checks: readonly (MarkItem | undefined)[], asked?: readonly MarkItem[]): { text: string; checks: (MarkItem | undefined)[] } {
+  if (!asked?.length) return { text, checks: [...checks] }
+  const cited = withAsked(text, [...checks, ...asked]) as { text: string; items: (MarkItem | undefined)[] }
+  return { text: cited.text, checks: cited.items }
+}
+
+/** A row's text as the chat draws it: with the words the analyst cited (asCited), as the check of its citations left
+ * it (asChecked). Pure. */
+export function asDrawn(text: string, checks: readonly (MarkItem | undefined)[], asked?: readonly MarkItem[]): { text: string; checks: (MarkItem | undefined)[] } {
+  const cited = asCited(text, checks, asked)
+  return asChecked(cited.text, cited.checks)
+}
+
+// the mark Cite asked to open (chat/picked.tsx): its turn and number, until a Mark that draws it opens its label
+let wanted: { turn: string; n: number } | null = null
+const wantedSubs = new Set<() => void>()
+
+/** Open the label of mark `n` of turn `turn` once a Mark draws it: now when one does, else when its record arrives. */
+export function wantMark(turn: string, n: number): void {
+  wanted = { turn, n }
+  wantedSubs.forEach((f) => f())
+}
+
+/** Whether `item` is the mark Cite asked to open; once true, it is no longer asked for. */
+export function takeWanted(item: MarkItem | undefined): boolean {
+  if (!wanted || !item || item.turn !== wanted.turn || item.n !== wanted.n) return false
+  wanted = null
+  return true
+}
+
+/** The mark Cite asked to open, which a Mark reads as it draws. */
+export function useWantedMark(): { turn: string; n: number } | null {
+  return useSyncExternalStore(
+    (f) => {
+      wantedSubs.add(f)
+      return () => void wantedSubs.delete(f)
+    },
+    () => wanted,
+  )
 }
 
 /** Whether Repair can check a mark again: it failed (or no check ran) or it is stale, no check of it runs, and its

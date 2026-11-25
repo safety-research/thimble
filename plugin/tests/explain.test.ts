@@ -2,7 +2,8 @@
 // press, on a faint version of the theme's teal and orange, and on the full one while the tray shows it; e explains the words selected in an answer, and with Citations manual, c makes
 // them a citation. While the tour waits for its selection step, the explainer shown is that step done. Until the tour's
 // cite step, an explainer's links are words and c cites nothing. After a tour, a link to its orders.csv opens the
-// plugin's copy of the file, and e in its sample answer gives the explainer's writer the lines of that copy.
+// plugin's copy of the file, and e in its sample answer gives the explainer's writer the lines of that copy. e and c act
+// on the row the selection lies in, where a line of the turn before the answer holds the words too.
 // All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
@@ -309,6 +310,36 @@ test('with Citations manual, c makes the selected words a citation of their answ
     setOptions({ citations: 'off' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+  } finally {
+    setOptions({})
+  }
+})
+
+test("e and c act on the row the selection lies in: words the turn's line before its answer holds too are explained and cited in the answer; Claude Code's selection names the row, not a place in it, so they stand at their first place there", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK], { complete: reply({ body: 'How many times the client tries again.', here: '' }) })
+    const plan = 'I will check the retry budget first.'
+    const text = 'Uploads fail after the retry budget runs out, and the retry budget is five tries.'
+    await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+    await s.call('prompt.submit', { text: 'Why do uploads fail?', origin: { kind: 'composer' } })
+    await s.call('turn.start', { text: 'Why do uploads fail?', turnId: 't1' })
+    await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text: plan }] } }, async () => ({ uuid: 't1-plan' }))
+    await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text }] } }, async () => ({ uuid: 't1-row' }))
+    await s.call('turn.complete', { turnId: 't1', reason: 'answer', answer: text }, async () => ({ text: '' }))
+    await settle()
+    await drainNow(s.$)
+    await settle()
+    await pressE(s, { text: 'retry budget', requestId: 't1-row' })
+    const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
+    const id = part.order.find(x => part.items[x]!.term === 'retry budget')!
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id })
+    expect(Object.values((await partOf<ExplainPart>(s.$, 't1-plan', 'explain'))?.items ?? {}).map(g => g.term)).toEqual([])
+    s.$.ui.selection = async () => ({ text: 'retry budget', requestId: 't1-row' })
+    await (await citeKey(s.$, 'c', 0))!.later!()
+    await settle()
+    expect((await rowMarks(s.$, 't1-row'))!.items[0]).toMatchObject({ row: 't1-row', words: 'retry budget', start: text.indexOf('retry budget'), asked: true })
+    expect(await rowMarks(s.$, 't1-plan').catch(() => null)).toBe(null)
   } finally {
     setOptions({})
   }

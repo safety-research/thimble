@@ -11,13 +11,13 @@ import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, RootContent, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
 import { findQuote } from '../lib/quoteFind'
-import { nextMark, plainQuote, type AnswerMark } from './answerComments'
+import { nextMark, plainQuote, wordsAt, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { parseRef, refPaths, shownValue, splitValueRef } from '../lib/refs'
 import { CiteWordsContext, Mark, MarkItems } from '../marks/Mark'
-import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
+import { asDrawn, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
   workspace: string
@@ -202,8 +202,12 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
     if (!p.node || offset <= at || from >= end) continue
     const s = Math.max(0, at - from)
     const e = Math.min(p.text.length, end - from)
-    const props: Properties = { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, style: `--tint: ${m.colour}` }
-    if (first) props.dataAnchor = m.ref
+    // words whose explainer is being written are tinted alone: no comment to open yet, no anchor (chat/picked.tsx), and
+    // the card that waits for it stands beside them (chat/AnswerComment.tsx)
+    const props: Properties = m.pending
+      ? { className: ['answer-tint', 'answer-tint-pending'], dataAnswerWriting: m.id, dataCheck: m.check, style: `--tint: ${m.colour}` }
+      : { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, dataCheck: m.check, style: `--tint: ${m.colour}` }
+    if (first && !m.pending) props.dataAnchor = m.ref
     first = false
     const parts: (Element | Text)[] = []
     if (s > 0) parts.push({ type: 'text', value: p.text.slice(0, s) })
@@ -215,8 +219,8 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
 }
 
 /** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block has
- * its words, or all of it when the mark names none, wrapped in <mark class="answer-tint"> in its check's color; a
- * passage not found draws nothing. */
+ * its words (the place of them the mark names, answerComments.ts wordsAt), or all of it when the mark names none,
+ * wrapped in <mark class="answer-tint"> in its check's color; a passage not found draws nothing. */
 export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {}) {
   return (tree: Root) => {
     const marks = options.marks ?? []
@@ -229,7 +233,7 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
         const text = pieces.map((p) => p.text).join('')
         const at = findQuote(text, q)
         if (!at) continue
-        const words = m.words ? findQuote(text.slice(at[0], at[1]), plainQuote(m.words)) : null
+        const words = m.words ? wordsAt(text.slice(at[0], at[1]), plainQuote(m.words), m.nth) : null
         wrapPieces(pieces, at[0] + (words?.[0] ?? 0), words ? at[0] + words[1] : at[1], m)
         break
       }
@@ -345,16 +349,18 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 })
 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
- * `checks`: what the check found of each of its marks, by their order in the text. `marks`: the passages the checks
+ * `checks`: what the check found of each of its marks, by their order in the text; `asked`: the words the analyst cited
+ * in it with Cite, each written in as a mark at its place (marks/marks.ts asDrawn). `marks`: the passages the checks
  * commented on, tinted (rehypeAnswerMarks). `linked`: the text is a card's takeaway, whose link pass checked its old
  * citations of a card's values (LinkedCites). A bare citation in it is its target's glyph alone, its name in the hover,
  * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). Its file chips are told
  * apart from each other and from `among`, the records shown with it (an example card's, under its takeaway). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks, among, linked = false }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[]; among?: readonly unknown[]; linked?: boolean }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, asked, marks, among, linked = false }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; asked?: readonly MarkItem[]; marks?: readonly AnswerMark[]; among?: readonly unknown[]; linked?: boolean }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
-  // once checked, the text reads as the check left it: its rewritten sentences and corrected words in place
-  const read = useMemo(() => (checks && !streaming ? asChecked(text, checks) : { text, checks: checks ?? [] }), [text, checks, streaming])
+  // once checked, the text reads as the check left it: the words the analyst cited as marks, its rewritten sentences
+  // and corrected words in place
+  const read = useMemo(() => (checks && !streaming ? asDrawn(text, checks, asked) : { text, checks: checks ?? [] }), [text, checks, asked, streaming])
   // the files shown together, one per line (no path holds a line break), so the chips change only when they do
   const shown = refPaths([...(among ?? []), ...tokenRefs(read.text)]).join('\n')
   const together = useMemo(() => (shown ? shown.split('\n') : []), [shown])
