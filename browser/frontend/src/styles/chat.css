@@ -2375,3 +2375,12 @@ body[data-cmd] .answer-cm-pop {
   left: auto;
   box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), 0 14px 32px -12px rgba(0, 0, 0, 0.3);
 }
+/* an explainer that was not written says why in its card, in full, in the error color (chat/AnswerComment.tsx) */
+.wu-cm.answer-cm .wu-cm-statement:has(.answer-cm-failed) {
+  display: block;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+}
+.answer-cm-failed {
+  color: var(--status-negative);
+}

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 // The toolbar at a selection in an answer (src/chat/picked.tsx): words selected in an answer of main's chat show a
 // toolbar with Explain and Cite, in that order, and no Ask; words selected anywhere else show none. Explain writes
-// their explainer, the words tinted while it is written and its comment open on them once written; Cite makes them a
+// their explainer: the words are tinted while it is written, and its card opens beside them at once, a spinner where
+// its text will stand, which the written text takes in the same card. Closed before that, the card does not open
+// again by itself, and the words then open it as any explainer's do; words an explainer stands on open it at once. A
+// failure says why in the card, or in a toast once the card is closed. Cite makes them a
 // citation of the answer, which the chat draws as a mark with its label open, checking. The letters c, e and a do
 // nothing at the selection, and asking stays with the ⌘ pointer: a ⌘-click on the answer opens the ask box, whose
 // question starts a side thread about it. Escape drops the selection, and with Explainers off for the chat Explain is
@@ -45,7 +48,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-/** The server: the checks, the comments on the answers, and each POST recorded, answered by `answer`. */
+/** The server: the checks, the comments on the answers, and each POST recorded, answered by `answer` (a Response as
+ * it is, such as a refusal). */
 function serve(o: { checks?: object[]; comments?: () => object[]; answer?: (url: string, body: unknown) => unknown } = {}) {
   const posts: { url: string; body: unknown }[] = []
   vi.stubGlobal('fetch', async (url: unknown, init: RequestInit = {}) => {
@@ -55,6 +59,7 @@ function serve(o: { checks?: object[]; comments?: () => object[]; answer?: (url:
       const sent = JSON.parse(String(init.body ?? '{}'))
       posts.push({ url: u, body: sent })
       body = await o.answer?.(u, sent)
+      if (body instanceof Response) return body
     }
     return new Response(JSON.stringify(body ?? {}), { status: 200, headers: { 'content-type': 'application/json' } })
   })
@@ -143,10 +148,29 @@ test('Cite cites the selected words, and the chat draws the citation with its la
   expect([...el.querySelectorAll('mark.answer-tint')].map((m) => m.textContent)).toEqual(['Uploads fail', 'gives up'])
 })
 
-test('Explain writes the explainer of the selected words: they are tinted while it is written, and its comment opens on them once written', async () => {
+/** The words' tint and the chat as the window lays them out: each tint on the line at 300 px, the answer's column, and
+ * the chat's list; the comment's card stands beside the words, its top 2 px above their line (RefChip placeBeside). */
+function layOut() {
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this.matches('mark.answer-tint')) return new DOMRect(120, 300, 80, 20)
+    if (this.matches('.chat-text')) return new DOMRect(10, 100, 390, 400)
+    if (this.matches('.chat-list')) return new DOMRect(0, 0, 400, 700)
+    return new DOMRect()
+  })
+}
+const card = () => document.querySelector<HTMLElement>('.answer-cm-pop')
+const statement = () => card()?.querySelector('.wu-cm-statement')
+/** A press of `key` where the page hears it, with the focus in no field. */
+const pressOnPage = (key: string) => act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+/** The server's refusal, as explain.py gives one. */
+const refusal = (status: number, detail: string) => new Response(JSON.stringify({ detail }), { status, headers: { 'content-type': 'application/json' } })
+const OFF = 'Explainers is off for the chat. Turn it on under Comments in the top bar, with Chat in its Show in.'
+
+test("Explain opens the explainer's card beside the words at once, a spinner where its text will stand; once written, the text takes the spinner's place in the same card", async () => {
   let written: (v: unknown) => void = () => undefined
   let comments: object[] = []
   const posts = serve({ comments: () => comments, answer: (u) => (u.endsWith('/explain') ? new Promise((r) => (written = r)) : {}) })
+  layOut()
   const el = await mount(<Chat />)
   await later()
   await select(el)
@@ -156,14 +180,100 @@ test('Explain writes the explainer of the selected words: they are tinted while 
   expect(posts.map((p) => [p.url, p.body])).toEqual([['/api/ws/mini/explain', { chat: 'main', turn: TURN, words: WORDS, row: 1, start: at, end: at + WORDS.length }]])
   expect(buttons()).toEqual([])
   expect([...el.querySelectorAll('mark.answer-tint-pending')].map((m) => m.textContent)).toEqual([WORDS])
+  // the Explainers card beside the words: its head, the words, and a spinner but no words of state; nothing to resolve
+  const pop = card()!
+  expect(pop.querySelector('.wu-cm-name')?.textContent).toBe('Explainers')
+  expect(statement()?.textContent).toBe('retry budget: ')
+  expect(statement()?.querySelector('.spinner')?.getAttribute('aria-label')).toBe('writing')
+  expect(pop.querySelector('.wu-cm-resolve')).toBeNull()
+  const place = [pop.style.left, pop.style.top]
+  expect(place[1]).toBe('298px')
   // written: the server keeps it as an Explainers comment, and the chat reads the comments again
   comments = [COMMENT]
   await act(async () => written({ id: 'ae1', ref: COMMENT.ref, turn: TURN, check: 'explainers' }))
   await act(async () => bus.emit('answerComments', {}))
   await later()
   expect(el.querySelector('mark.answer-tint-pending')).toBeNull()
-  expect(el.querySelector('mark.answer-tint[data-answer-comment="ae1"]')?.textContent).toBe(WORDS)
-  expect(document.querySelector('.answer-cm-pop .wu-cm-statement')?.textContent).toBe('retry budget: How many times the client tries again.')
+  expect(el.querySelector('mark.answer-tint-open[data-answer-comment="ae1"]')?.textContent).toBe(WORDS)
+  expect(document.querySelectorAll('.answer-cm-pop')).toHaveLength(1)
+  expect(card()).toBe(pop)
+  expect([pop.style.left, pop.style.top]).toEqual(place)
+  expect(statement()?.textContent).toBe('retry budget: How many times the client tries again.')
+  expect(pop.querySelector('.spinner')).toBeNull()
+  expect(pop.querySelector('.wu-cm-resolve')).not.toBeNull()
+})
+
+test('closed before its explainer is written, the card does not open again by itself: the words then show its tint, which opens it; Explain on words an explainer stands on, or one being written, opens that one at once, with no call', async () => {
+  let written: (v: unknown) => void = () => undefined
+  let comments: object[] = []
+  const posts = serve({ comments: () => comments, answer: (u) => (u.endsWith('/explain') ? new Promise((r) => (written = r)) : {}) })
+  const el = await mount(<Chat />)
+  await later()
+  await select(el)
+  await click('Explain')
+  await later()
+  expect(statement()?.querySelector('.spinner')).not.toBeNull()
+  await pressOnPage('Escape')
+  expect(card()).toBeNull()
+  // the words keep their tint while it is written, and Explain on them opens its card again
+  expect([...el.querySelectorAll('mark.answer-tint-pending')].map((m) => m.textContent)).toEqual([WORDS])
+  await select(el)
+  await click('Explain')
+  await later()
+  expect(posts).toHaveLength(1)
+  expect(statement()?.querySelector('.spinner')).not.toBeNull()
+  await pressOnPage('Escape')
+  comments = [COMMENT]
+  await act(async () => written({ id: 'ae1', ref: COMMENT.ref, turn: TURN, check: 'explainers' }))
+  await act(async () => bus.emit('answerComments', {}))
+  await later()
+  expect(card()).toBeNull()
+  expect(el.querySelector('mark.answer-tint-pending')).toBeNull()
+  const tint = el.querySelector<HTMLElement>('mark.answer-tint[data-answer-comment="ae1"]')!
+  expect([tint.textContent, tint.classList.contains('answer-tint-open')]).toEqual([WORDS, false])
+  await act(async () => void tint.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  expect(statement()?.textContent).toBe(COMMENT.text)
+  await pressOnPage('Escape')
+  // the same words again: the explainer on them opens at once
+  await select(el)
+  await click('Explain')
+  await later()
+  expect(posts).toHaveLength(1)
+  expect(statement()?.textContent).toBe(COMMENT.text)
+  expect(document.querySelector('.spinner')).toBeNull()
+})
+
+test('a failure says why in the card, in place of the spinner, and is no toast; once the card is closed, a toast says it', async () => {
+  const replies: ((v: unknown) => void)[] = []
+  serve({ answer: (u) => (u.endsWith('/explain') ? new Promise((r) => replies.push(r)) : {}) })
+  const toasts: string[] = []
+  const off = bus.on('toast', (t) => void toasts.push(t.text))
+  const el = await mount(<Chat />)
+  await later()
+  await select(el, 'client gives up')
+  await click('Explain')
+  await later()
+  await act(async () => replies[0](refusal(409, OFF)))
+  await later()
+  expect(statement()?.textContent).toBe(`client gives up: Could not explain: ${OFF}`)
+  expect(statement()?.querySelector('.answer-cm-failed')?.textContent).toBe(`Could not explain: ${OFF}`)
+  expect(statement()?.querySelector('.spinner')).toBeNull()
+  expect(toasts).toEqual([])
+  // closed, the card takes the words' tint with it
+  await pressOnPage('Escape')
+  expect(card()).toBeNull()
+  expect(el.querySelector('mark.answer-tint-pending')).toBeNull()
+  // closed while it is written: the failure is a toast
+  await select(el, 'client gives up')
+  await click('Explain')
+  await later()
+  await pressOnPage('Escape')
+  await act(async () => replies[1](refusal(409, OFF)))
+  await later()
+  off()
+  expect(card()).toBeNull()
+  expect(el.querySelector('mark.answer-tint-pending')).toBeNull()
+  expect(toasts).toEqual([`Could not explain: ${OFF}`])
 })
 
 test('c, e and a do nothing at the selection; a ⌘-click on the answer opens the ask box, and its question starts a side thread about it', async () => {

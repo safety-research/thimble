@@ -20,10 +20,11 @@
 // (placedOn); the Comments sidebar quotes the passage as the chat draws it (noteDrawn). A comment whose words the check
 // took away (a sentence it rewrote) has no tint, and its card says so beside the answer.
 //
-// An explainer the analyst asked for with e (chat/picked.tsx, backend explain.py) is an Explainers comment too, on an
-// answer of main's or of a side thread's (`chat`), whose chat tints it as main's chat does; it opens once its chat draws
-// it (wantComment), and Go to it opens the chat it is in. Its words stand where they were selected: when they stand more
-// than once in its passage, `nth` says which of their places it is about (wordsAt).
+// An explainer the analyst asked for with Explain (chat/picked.tsx, backend explain.py) is an Explainers comment too, on
+// an answer of main's or of a side thread's (`chat`), whose chat tints it as main's chat does, and Go to it opens the
+// chat it is in. While it is written, its chat draws its words' tint and its card (`writing`) as soon as asked
+// (wantComment), and the written comment takes that card's place. Its words stand where they were selected: when they
+// stand more than once in its passage, `nth` says which of their places it is about (wordsAt).
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { carrier } from '../../../../plugin/marks/message.js'
 import { checksApi } from '../lib/api'
@@ -55,6 +56,10 @@ export interface AnswerComment {
   gone?: boolean
   /** the chat whose answer it is on: main, or a side thread (an explainer asked for there) */
   chat?: string
+  /** an explainer being written (chat/picked.tsx), which has no text yet: its card shows a spinner in its place */
+  writing?: boolean
+  /** why that explainer was not written, which its card says in place of the spinner */
+  failed?: string
 }
 
 /** What GET /ws/{c}/answer-comments answers. */
@@ -79,6 +84,8 @@ export interface AnswerMark {
   active: boolean
   /** words whose explainer is being written (chat/picked.tsx): tinted alone, with no comment to open yet */
   pending?: boolean
+  /** its comment's check, which Explain reads off the tint (chat/picked.tsx) */
+  check?: string
 }
 
 /** A comment's tint color: its check's palette place, as checkColour draws a check's. Pure. */
@@ -214,7 +221,7 @@ export function marksOf(comments: readonly AnswerComment[], active: string | nul
   const drawn: AnswerComment[] = []
   for (const c of [...comments].sort((a, b) => Number(b.id === active) - Number(a.id === active)))
     if (!drawn.some((d) => APART[d.check] === c.check && meet(d, c))) drawn.push(c)
-  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, nth: c.nth, colour: tintOf(c), ref: c.ref, active: c.id === active }))
+  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, nth: c.nth, colour: tintOf(c), ref: c.ref, active: c.id === active, check: c.check }))
 }
 
 /** Which of the marks over clicked words a click opens. `count` marks stand on the words, from the innermost out (the

@@ -30,9 +30,9 @@ import type { ChatMeta } from '../lib/types'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
 import { AnswerCommentPop } from './AnswerComment'
-import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, takeComment, useAnswerComments, useWantedComment, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
+import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, noteDrawn, placedOn, takeComment, tintOf, useAnswerComments, useWantedComment, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
 import { asCited, asDrawn } from '../marks/marks'
-import { noteRow, useAsking } from './picked'
+import { cardShown, noteRow, useAsking } from './picked'
 import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, REWIND_CHIP, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
@@ -195,40 +195,47 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
   const [opened, setOpened] = useState<string | null>(null)
   const [asked, setAsked] = useState<AnswerAsk | null>(() => (commented ? askedAnswer() : null))
   // the words of this chat whose explainer is being written (chat/picked.tsx), tinted in the Explainers check's color
-  // where they were selected: in their sentence, at their place among its places of them
+  // where they were selected: in their sentence, at their place among its places of them; each with its card, until
+  // its written comment is read. One written while its card stands open shows in that card (`shownId`), which stays
   const asking = useAsking()
+  const writing = useMemo(() => asking.filter((a) => a.chat === chat && !(a.written && answers.comments.some((c) => c.id === a.written))), [asking, chat, answers.comments])
+  const shownId = asking.find((a) => a.chat === chat && a.id === opened && a.written && !writing.includes(a))?.written ?? opened
   // each text row's comments, each where the row's words are drawn (placedOn), and the marks of those that have words
   // there, again when the comments, the row's checks or the open one change
   const rowMarks = useMemo(() => {
-    const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[] }>()
-    const writing = asking.filter((a) => a.chat === chat)
+    const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[]; writing: AnswerComment[] }>()
     if (!answers.comments.length && !writing.length) return out
     for (const r of shown) {
       if (r.kind !== 'text') continue
       const mine = commentsOfRow(r, answers.comments)
-      const pending = writing.filter((a) => a.row === r.index).map((a): AnswerMark => ({ id: `asking:${a.words}`, quote: a.quote, words: a.words, nth: a.nth, colour: a.colour, ref: '', active: false, pending: true }))
-      if (!mine.length && !pending.length) continue
+      const waits = writing.filter((a) => a.row === r.index)
+      if (!mine.length && !waits.length) continue
       // the words as ChatMarkdown draws them: as the check of the citations left them, once the row no longer streams;
       // the words the analyst cited are marks in both, so a check's change is all that tells them apart
       const checked = !!r.checks && r !== lastText
       const cited = checked ? asCited(r.text, r.checks!, r.asked).text : r.text
       const drawn = checked ? asDrawn(r.text, r.checks!, r.asked).text : r.text
       const placed = mine.map((c) => placedOn(c, cited, drawn))
-      out.set(r.index, { comments: placed, marks: [...marksOf(placed.filter((c) => !c.gone), opened), ...pending] })
+      const pending = waits.map((a): AnswerMark => ({ id: a.id, quote: a.quote, words: a.words, nth: a.nth, colour: tintOf(a), ref: '', active: false, pending: true, check: a.check }))
+      const cards = waits.map((a): AnswerComment => ({ id: a.id, check: a.check, check_name: a.check_name, color: a.color, turn: r.turn ?? '', row: '', ref: '', start: 0, end: 0, quote: a.quote, words: a.words, nth: a.nth, text: '', status: 'open', chat, writing: true, failed: a.failed }))
+      out.set(r.index, { comments: placed, marks: [...marksOf(placed.filter((c) => !c.gone), shownId), ...pending], writing: cards })
     }
     return out
-  }, [shown, answers.comments, opened, lastText, asking, chat])
+  }, [shown, answers.comments, shownId, lastText, writing, chat])
   useEffect(() => noteDrawn([...rowMarks.values()].flatMap((m) => m.comments)), [rowMarks])
-  const marksCtx = useMemo(() => ({ opened, show: setOpened }), [opened])
+  const marksCtx = useMemo(() => ({ opened: shownId, show: setOpened }), [shownId])
+  // the card of words being explained notes while it stands open (chat/picked.tsx cardShown)
+  useEffect(() => (opened ? cardShown(opened) : undefined), [opened])
   // each text row, for the toolbar at a selection in it (chat/picked.tsx)
   useEffect(() => {
     if (!chat) return
     for (const r of shown) if (r.kind === 'text') noteRow({ chat, index: r.index, turn: r.turn, text: r.text, checks: r.checks, asked: r.asked, streaming: r === lastText })
   }, [shown, chat, lastText])
-  // the comment Explain asked to open, once this chat draws it (answerComments.ts wantComment)
+  // the comment Explain asked to open, or the card of words it explains, once this chat draws it (answerComments.ts
+  // wantComment)
   const wanted = useWantedComment()
   useEffect(() => {
-    if (!wanted || ![...rowMarks.values()].some((m) => m.comments.some((c) => c.id === wanted))) return
+    if (!wanted || ![...rowMarks.values()].some((m) => [...m.comments, ...m.writing].some((c) => c.id === wanted))) return
     takeComment(wanted)
     setOpened(wanted)
   }, [wanted, rowMarks])
@@ -275,13 +282,14 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, live =
           }
           case 'text': {
             const own = rowMarks.get(r.index)
-            const open = own?.comments.find((c) => c.id === opened)
+            const open = own?.comments.find((c) => c.id === shownId) ?? own?.writing.find((c) => c.id === shownId)
+            // the card goes by what was opened: an explainer written while its card stood open shows in that card
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
                   <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} asked={r.asked} marks={own?.marks} />
                 </div>
-                {open && <AnswerCommentPop key={open.id} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
+                {open && <AnswerCommentPop key={opened} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
               </div>
             )
           }

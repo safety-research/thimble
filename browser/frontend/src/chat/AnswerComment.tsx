@@ -11,10 +11,16 @@
 // own click, which opens the next mark over the words (chat/markdown MdMark). A citation's label pinned open outside it
 // closes it. A comment whose words the check of the citations took away opens beside the answer they stood in, and says
 // so under its statement, as the terminal's line under the reply says it.
+//
+// The card of an explainer being written (chat/picked.tsx) opens beside its words at once: its check's head, its words
+// as the written one names them, and where its text will stand the spinner a citation being checked shows, or why it
+// was not written, in the error color. It has nothing to resolve or ask about yet. The written comment takes its place in
+// the same popover, with the written comment's own parts.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { WORDS_CHANGED } from '../../../../plugin/marks/message.js'
 import { placeBeside } from '../components/RefChip'
+import { Spinner } from '../components/Spinner'
 import { bus } from '../lib/bus'
 import { anchorEl } from '../lib/teleport'
 import { CommentCard, type CommentView } from '../report/CommentCard'
@@ -40,7 +46,13 @@ export function AnswerCommentCard({ comment, ws, anchor, onDone, onClose }: Card
     return () => document.removeEventListener('mousedown', onDown)
   }, [active])
   const look = useMemo(() => ({ colour: () => tintOf(comment), name: () => comment.check_name || comment.check }), [comment])
-  const view = useMemo<CommentView>(() => ({ id: comment.id, check: comment.check, author: '', text: comment.text, details: comment.details ?? '', evidence: [] }), [comment])
+  // an explainer being written has nothing to resolve yet (`fixed`)
+  const view = useMemo<CommentView>(() => ({ id: comment.id, check: comment.check, author: '', text: comment.text, details: comment.details ?? '', evidence: [], fixed: comment.writing }), [comment])
+  const writing = comment.writing ? (
+    <>
+      {comment.words}: {comment.failed ? <span className="answer-cm-failed">{comment.failed}</span> : <Spinner size={10} label="writing" />}
+    </>
+  ) : undefined
   const resolve = async () => {
     try {
       await onDone(comment.id)
@@ -55,9 +67,10 @@ export function AnswerCommentCard({ comment, ws, anchor, onDone, onClose }: Card
       comment={view}
       look={look}
       active={active}
-      onActivate={() => setActive(true)}
+      onActivate={() => setActive(!comment.writing)}
       onResolve={resolve}
       thread={{ anchor, passage: plainQuote(comment.quote), surface: 'chat' }}
+      statement={writing}
       note={comment.gone ? `“${plainQuote(comment.words || comment.quote)}” · ${WORDS_CHANGED}` : undefined}
       className="answer-cm"
       cardRef={(node) => void (el.current = node)}
@@ -66,9 +79,10 @@ export function AnswerCommentCard({ comment, ws, anchor, onDone, onClose }: Card
   )
 }
 
-/** The tinted pieces of comment `id`'s passage in the chat, in order (the first carries its anchor). */
+/** The tinted pieces of comment `id`'s passage in the chat, in order (the first carries its anchor), or of the words of
+ * an explainer being written. */
 function piecesOf(id: string): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>('mark.answer-tint[data-answer-comment]')].filter((m) => m.dataset.answerComment === id)
+  return [...document.querySelectorAll<HTMLElement>('mark.answer-tint[data-answer-comment], mark.answer-tint[data-answer-writing]')].filter((m) => (m.dataset.answerComment ?? m.dataset.answerWriting) === id)
 }
 
 /** The comment card as a popover beside its passage, portaled to the body. */
@@ -141,7 +155,7 @@ export function AnswerCommentPop(props: CardProps) {
 
   return createPortal(
     <div ref={popEl} className="answer-cm-pop" role="dialog" aria-label="Comment" data-answer-comment-pop={comment.id} style={{ position: 'fixed', left: 0, top: 0 }}>
-      <AnswerCommentCard {...props} />
+      <AnswerCommentCard key={comment.id} {...props} />
     </div>,
     document.body,
   )

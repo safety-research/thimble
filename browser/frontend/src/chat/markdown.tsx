@@ -202,10 +202,11 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
     if (!p.node || offset <= at || from >= end) continue
     const s = Math.max(0, at - from)
     const e = Math.min(p.text.length, end - from)
-    // words whose explainer is being written are tinted alone: no comment to open yet, no anchor (chat/picked.tsx)
+    // words whose explainer is being written are tinted alone: no comment to open yet, no anchor (chat/picked.tsx), and
+    // the card that waits for it stands beside them (chat/AnswerComment.tsx)
     const props: Properties = m.pending
-      ? { className: ['answer-tint', 'answer-tint-pending'], style: `--tint: ${m.colour}` }
-      : { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, style: `--tint: ${m.colour}` }
+      ? { className: ['answer-tint', 'answer-tint-pending'], dataAnswerWriting: m.id, dataCheck: m.check, style: `--tint: ${m.colour}` }
+      : { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, dataCheck: m.check, style: `--tint: ${m.colour}` }
     if (first && !m.pending) props.dataAnchor = m.ref
     first = false
     const parts: (Element | Text)[] = []

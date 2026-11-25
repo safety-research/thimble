@@ -10,8 +10,9 @@
 // pickedWords).
 //
 //   Explain   the words take an explainer (backend explain.py), tinted in the Explainers color while it is written
-//             (useAsking, which the chat draws), and its comment opens on them once written (answerComments.ts
-//             wantComment); words an explainer or a heads-up stands on open that one
+//             (useAsking, which the chat draws), and its comment card opens beside them at once, a spinner where its
+//             text will stand (chat/Rows, AnswerComment.tsx); once written, the text takes the spinner's place in that
+//             card, and a failure says why there. Words an explainer or a heads-up stands on open that one at once
 //   Cite      the words become a citation of their answer (backend marks.cite), placed with the terminal's own code
 //             (asked.mjs citeAt), or the citation they stand in opens; the citation's label opens on it at once
 //             (marks/marks.ts wantMark), checking, then verified or failed with its evidence, as any citation's
@@ -19,6 +20,10 @@
 // Explain and Cite act on the words where they were selected: words may stand more than once in a row, so the toolbar
 // takes which of their places the selection lies on (rankIn, asked.mjs rankOf). Cite places its citation there, and
 // Explain sends the place in the row's text, where the server keeps the explainer, on the sentence that holds it.
+//
+// The card of an explainer being written is the chat's, which notes here while it stands open (cardShown). Closed
+// before the explainer is written, by Escape, a click elsewhere or another comment, it does not open again by itself:
+// the written explainer's words show its tint, as any explainer's, and a failure is a toast.
 //
 // The toolbar stands over the line above the words, where a citation or a card's chip opens its box on hover. After a
 // click with the pointer, the toolbar stays where it was, unseen and with no buttons, until the pointer moves, presses
@@ -36,10 +41,11 @@ import type { IconName } from '../components/Icon'
 import { api, marksApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
+import type { Check } from '../lib/types'
 import type { MarkItem } from '../marks/marks'
 import { wantMark } from '../marks/marks'
 import { useChecks } from '../report/Checks'
-import { checkColour, coversOf } from '../report/checkComments'
+import { coversOf } from '../report/checkComments'
 import { typingIn } from '../shell/undo'
 import { plainQuote, timesIn, wantComment, wordsAt } from './answerComments'
 
@@ -63,8 +69,11 @@ export function noteRow(row: PickedRow): void {
 }
 
 /** Words whose explainer is being written: the chat and the row they stand in, the sentence that holds them as the row
- * draws it with which of its places of them they are, and the Explainers check's color. */
+ * draws it with which of its places of them they are, and the Explainers check (its id, name and palette place), which
+ * their tint and their card take. */
 export interface Asking {
+  /** what its tint and its card go by until the explainer is written */
+  id: string
   chat: string
   row: number
   words: string
@@ -72,7 +81,13 @@ export interface Asking {
   quote: string
   /** which of the sentence's places of the words they are, from 0 (answerComments.ts wordsAt) */
   nth: number
-  colour: string
+  check: string
+  check_name: string
+  color: number
+  /** the explainer's comment, written while its card stands open: that card shows it */
+  written?: string
+  /** why it was not written, which its card says */
+  failed?: string
 }
 
 let asking: readonly Asking[] = []
@@ -80,6 +95,24 @@ const askingSubs = new Set<() => void>()
 const setAsking = (next: readonly Asking[]) => {
   asking = next
   askingSubs.forEach((f) => f())
+}
+const changeAsking = (id: string, change: Partial<Asking>) => setAsking(asking.map((a) => (a.id === id ? { ...a, ...change } : a)))
+const dropAsking = (id: string) => setAsking(asking.filter((a) => a.id !== id))
+let askingSeq = 0
+
+// the cards of words being explained that stand open now (cardShown)
+const openCards = new Set<string>()
+
+/** The chat opened comment `id`'s card. For the card of words being explained, it notes that the card stands open, and
+ * gives what notes that it closed: its words then keep their tint only while the explainer is written (module note). */
+export function cardShown(id: string): (() => void) | undefined {
+  if (!asking.some((a) => a.id === id)) return undefined
+  openCards.add(id)
+  return () => {
+    openCards.delete(id)
+    const a = asking.find((x) => x.id === id)
+    if (a && (a.written || a.failed)) dropAsking(id)
+  }
 }
 
 /** The words whose explainer is being written, which the chat tints (chat/Rows). */
@@ -98,8 +131,9 @@ const SIGNS = '×↻'
 /** What a row draws that its text does not hold as words: a chip (its name or value), the sign after a citation and its
  * spinner (rankIn). */
 const NOT_WORDS = '.refchip, .mark-glyph, .mark-spin'
-/** The explainers' check (backend explain.py CHECK). */
+/** The explainers' check (backend explain.py CHECK), and the heads-ups', whose words an explainer never shares. */
 const EXPLAINERS = 'explainers'
+const HEADS = 'heads-up'
 /** The toolbar's distance (px) from the selection, and from the window's edges. */
 const GAP = 6
 const MARGIN = 8
@@ -183,21 +217,52 @@ function tintWhileWritten(place: ReturnType<typeof pickedPlace>, words: string):
   return { quote: sentence, nth: timesIn(plainQuote(place.shown.slice(a, place.at.start)), words) }
 }
 
-/** Explain: the words explained where they were selected (module note), tinted in `colour` while their explainer is
- * written: the server takes their row and their place in its text, and the tint stands on them in their sentence as
- * the row draws it. */
-async function explain(ws: string, p: Picked, colour: string): Promise<void> {
+/** The comments of the tints over a text the chat draws (chat/markdown.tsx), from the innermost out, each with its
+ * check; the tint of words whose explainer is being written goes by its card. */
+function tintsOn(node: Node): { id: string; check: string }[] {
+  const out: { id: string; check: string }[] = []
+  const up = (el: Element | null | undefined) => el?.closest<HTMLElement>('mark.answer-tint[data-answer-comment], mark.answer-tint[data-answer-writing]')
+  for (let t = up(node.parentElement); t; t = up(t.parentElement)) out.push({ id: t.dataset.answerComment ?? t.dataset.answerWriting ?? '', check: t.dataset.check ?? '' })
+  return out
+}
+
+/** The explainer or heads-up that the selected words stand on, which Explain opens as it is, as the server answers
+ * (backend explain.py _standing): an explainer whose tint holds all of the words, one being written too, else a
+ * heads-up whose tint meets them; null for none. The words are the selected texts that hold more than white space and
+ * quotes. */
+function standingAt(p: Picked): string | null {
+  const over: { id: string; check: string }[][] = []
+  const walk = document.createTreeWalker(p.el, NodeFilter.SHOW_TEXT)
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (!p.range.intersectsNode(n) || n.parentElement?.closest(NOT_WORDS)) continue
+    const text = n.nodeValue ?? ''
+    const part = text.slice(n === p.range.startContainer ? p.range.startOffset : 0, n === p.range.endContainer ? p.range.endOffset : text.length)
+    if (/[^\s"“”'‘’`]/.test(part)) over.push(tintsOn(n))
+  }
+  const holds = (over[0] ?? []).find((t) => t.check === EXPLAINERS && over.every((o) => o.some((x) => x.id === t.id)))
+  return holds?.id ?? over.flat().find((t) => t.check === HEADS)?.id ?? null
+}
+
+/** Explain: the words explained where they were selected (module note), tinted in the Explainers check's color while
+ * their explainer is written, its card open beside them: the server takes their row and their place in its text, and
+ * the tint stands on them in their sentence as the row draws it. */
+async function explain(ws: string, p: Picked, check: Pick<Check, 'id' | 'name' | 'colour'>): Promise<void> {
+  const standing = standingAt(p)
+  if (standing) return wantComment(standing)
   const place = pickedPlace(p.row.text, itemsOf(p.row), p.words, SIGNS, p.nth)
-  const mine: Asking = { chat: p.row.chat, row: p.row.index, words: p.words, ...tintWhileWritten(place, p.words), colour }
+  const mine: Asking = { id: `writing:${++askingSeq}`, chat: p.row.chat, row: p.row.index, words: p.words, ...tintWhileWritten(place, p.words), check: check.id, check_name: check.name, color: check.colour }
   setAsking([...asking, mine])
+  wantComment(mine.id)
   try {
     const at = place?.written ? { start: place.written.start, end: place.written.end } : {}
     const got = await api.explain(ws, { chat: p.row.chat, turn: p.row.turn!, words: p.words, row: p.row.index, ...at })
-    wantComment(got.id)
+    if (openCards.has(mine.id)) changeAsking(mine.id, { written: got.id })
+    else dropAsking(mine.id)
   } catch (e) {
-    toast(`Could not explain: ${why(e)}`)
-  } finally {
-    setAsking(asking.filter((a) => a !== mine))
+    const failed = `Could not explain: ${why(e)}`
+    if (openCards.has(mine.id)) return changeAsking(mine.id, { failed })
+    dropAsking(mine.id)
+    toast(failed)
   }
 }
 
@@ -269,7 +334,7 @@ export function SelectionBar({ ws }: { ws: string }) {
   }
   // the buttons of the features that are on, in this order; each acts on the words it took, which the selection leaves
   const cites: Action = { id: 'cite', label: 'Cite', icon: 'cite', run: (p) => void cite(ws, p) }
-  const explains: Action = { id: 'explain', label: 'Explain', icon: 'circle-help', run: (p) => void explain(ws, p, checkColour(explainers)) }
+  const explains: Action = { id: 'explain', label: 'Explain', icon: 'circle-help', run: (p) => void (explainers && explain(ws, p, explainers)) }
   const actions = explainOn ? [explains, cites] : [cites]
   // `pointer`: a click with the pointer, which counts its clicks; a key's click counts none
   const act = (a: Action, pointer: boolean) => {
